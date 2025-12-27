@@ -28,6 +28,48 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+
+# ============================================================================
+# Error Handlers - Return JSON instead of HTML for all errors
+# ============================================================================
+
+
+@app.errorhandler(400)
+def bad_request(e):
+    """Handle 400 Bad Request errors."""
+    return jsonify(
+        {"error": str(e.description) if hasattr(e, "description") else "Bad request"}
+    ), 400
+
+
+@app.errorhandler(404)
+def not_found(e):
+    """Handle 404 Not Found errors."""
+    return jsonify({"error": f"Endpoint not found: {request.path}"}), 404
+
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    """Handle 405 Method Not Allowed errors."""
+    return jsonify(
+        {"error": f"Method {request.method} not allowed for {request.path}"}
+    ), 405
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    """Handle 500 Internal Server errors."""
+    logger.exception("Internal server error")
+    return jsonify({"error": "Internal server error"}), 500
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Handle any unhandled exceptions."""
+    logger.exception(f"Unhandled exception: {e}")
+    return jsonify({"error": str(e)}), 500
+
+
 # Model mappings: Ollama model name -> Anthropic model ID
 # Organised by model family for clarity
 MODEL_MAPPINGS = {
