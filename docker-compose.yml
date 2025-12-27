@@ -1,0 +1,70 @@
+version: "3.8"
+
+# Ollama API Proxy for Anthropic Claude
+# Presents Claude models via the Ollama API interface
+#
+# Supported models:
+#   - claude-opus, claude-4.5-opus    -> Claude Opus 4.5 (best for OCR, complex analysis)
+#   - claude-sonnet, claude-4.5-sonnet -> Claude Sonnet 4.5 (balanced)
+#   - claude-haiku, claude-4.5-haiku   -> Claude Haiku 4.5 (fast, ideal for tagging)
+#
+# Usage with Paperless-GPT:
+#   Set OLLAMA_HOST=http://ollama-claude-proxy:11434
+#   Use model names like "claude-opus" or "claude-haiku"
+
+services:
+  ollama-claude-proxy:
+    image: ollama-claude-proxy:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - PORT=11434
+      - HOST=0.0.0.0
+    networks:
+      - internal
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+      labels:
+        # Traefik labels for external access (optional)
+        - "traefik.enable=true"
+        - "traefik.http.routers.ollama-claude.rule=Host(`ollama-claude.littleseed.uk`)"
+        - "traefik.http.routers.ollama-claude.entrypoints=https"
+        - "traefik.http.routers.ollama-claude.tls=true"
+        - "traefik.http.routers.ollama-claude.tls.certresolver=letsencrypt"
+        - "traefik.http.services.ollama-claude.loadbalancer.server.port=11434"
+        # Basic auth for external access (generate with htpasswd)
+        # - "traefik.http.routers.ollama-claude.middlewares=ollama-auth"
+        # - "traefik.http.middlewares.ollama-auth.basicauth.users=${BASIC_AUTH_USERS}"
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:11434/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  internal:
+    external: true
+    name: internal
