@@ -267,7 +267,6 @@ def stream_response(
         "model": model,
         "messages": messages,
         "max_tokens": options.get("num_predict", options.get("max_tokens", 4096)),
-        "stream": True,
     }
 
     if system:
@@ -725,7 +724,6 @@ def stream_openai_response(
         "model": model,
         "messages": messages,
         "max_tokens": options.get("max_tokens", 4096),
-        "stream": True,
     }
 
     if system:
@@ -997,7 +995,6 @@ def openai_completions():
                     "model": anthropic_model,
                     "messages": messages,
                     "max_tokens": options.get("max_tokens", 4096),
-                    "stream": True,
                 }
 
                 if "temperature" in options:
