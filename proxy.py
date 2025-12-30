@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """
-Ollama API Proxy for Anthropic Claude
+Multi-Provider LLM Proxy
 
-Presents Claude models via the Ollama API interface, allowing any Ollama-compatible
-application to use Claude models seamlessly.
+Presents multiple LLM providers (Anthropic, OpenAI, Google Gemini, Perplexity, etc.)
+via both Ollama and OpenAI-compatible API interfaces.
 
-Supports Claude 4.5, Claude 4, and Claude 3.5 model families.
+This allows any Ollama or OpenAI-compatible application to use models from
+multiple providers seamlessly.
 """
 
 import json
 import logging
-import os
 import random
 import string
 import time
 from datetime import datetime, timezone
 from typing import Generator
 
-import anthropic
 from flask import Flask, Response, jsonify, request
+
+# Import the provider registry
+from providers import registry
 
 # Configure logging
 logging.basicConfig(
@@ -70,257 +72,148 @@ def handle_exception(e):
     return jsonify({"error": str(e)}), 500
 
 
-# Model mappings: Ollama model name -> Anthropic model ID
-# Organised by model family for clarity
-MODEL_MAPPINGS = {
-    # Claude 4.5 family (latest)
-    "claude-4.5-opus": "claude-opus-4-5-20251101",
-    "claude-4.5-opus:latest": "claude-opus-4-5-20251101",
-    "claude-opus-4.5": "claude-opus-4-5-20251101",
-    "claude-4.5-sonnet": "claude-sonnet-4-5-20250929",
-    "claude-4.5-sonnet:latest": "claude-sonnet-4-5-20250929",
-    "claude-sonnet-4.5": "claude-sonnet-4-5-20250929",
-    "claude-4.5-haiku": "claude-haiku-4-5-20251001",
-    "claude-4.5-haiku:latest": "claude-haiku-4-5-20251001",
-    "claude-haiku-4.5": "claude-haiku-4-5-20251001",
-    # Claude 4 family
-    "claude-4-opus": "claude-opus-4-20250514",
-    "claude-4-opus:latest": "claude-opus-4-20250514",
-    "claude-opus-4": "claude-opus-4-20250514",
-    "claude-4-sonnet": "claude-sonnet-4-20250514",
-    "claude-4-sonnet:latest": "claude-sonnet-4-20250514",
-    "claude-sonnet-4": "claude-sonnet-4-20250514",
-    # Claude 3.5 family (for compatibility)
-    "claude-3.5-sonnet": "claude-3-5-sonnet-20241022",
-    "claude-3.5-sonnet:latest": "claude-3-5-sonnet-20241022",
-    "claude-sonnet-3.5": "claude-3-5-sonnet-20241022",
-    "claude-3.5-haiku": "claude-3-5-haiku-20241022",
-    "claude-3.5-haiku:latest": "claude-3-5-haiku-20241022",
-    "claude-haiku-3.5": "claude-3-5-haiku-20241022",
-    # Convenience aliases (maps to recommended models)
-    "claude-opus": "claude-opus-4-5-20251101",
-    "claude-opus:latest": "claude-opus-4-5-20251101",
-    "claude-sonnet": "claude-sonnet-4-5-20250929",
-    "claude-sonnet:latest": "claude-sonnet-4-5-20250929",
-    "claude-haiku": "claude-haiku-4-5-20251001",
-    "claude-haiku:latest": "claude-haiku-4-5-20251001",
-    # Generic aliases for apps that use simple names
-    "claude": "claude-sonnet-4-5-20250929",
-    "claude:latest": "claude-sonnet-4-5-20250929",
-}
-
-# Model metadata for /api/tags and /api/show endpoints
-MODEL_INFO = {
-    "claude-opus-4-5-20251101": {
-        "family": "claude-4.5",
-        "parameter_size": "?B",  # Not publicly disclosed
-        "quantization_level": "none",
-        "description": "Claude Opus 4.5 - Most capable model, best for complex analysis and OCR",
-        "context_length": 200000,
-        "capabilities": ["vision", "analysis", "coding", "writing", "ocr"],
-    },
-    "claude-sonnet-4-5-20250929": {
-        "family": "claude-4.5",
-        "parameter_size": "?B",
-        "quantization_level": "none",
-        "description": "Claude Sonnet 4.5 - Balanced performance and speed",
-        "context_length": 200000,
-        "capabilities": ["vision", "analysis", "coding", "writing"],
-    },
-    "claude-haiku-4-5-20251001": {
-        "family": "claude-4.5",
-        "parameter_size": "?B",
-        "quantization_level": "none",
-        "description": "Claude Haiku 4.5 - Fastest model, ideal for tagging and quick tasks",
-        "context_length": 200000,
-        "capabilities": ["vision", "analysis", "coding", "writing", "fast"],
-    },
-    "claude-opus-4-20250514": {
-        "family": "claude-4",
-        "parameter_size": "?B",
-        "quantization_level": "none",
-        "description": "Claude Opus 4 - Previous generation flagship",
-        "context_length": 200000,
-        "capabilities": ["vision", "analysis", "coding", "writing"],
-    },
-    "claude-sonnet-4-20250514": {
-        "family": "claude-4",
-        "parameter_size": "?B",
-        "quantization_level": "none",
-        "description": "Claude Sonnet 4 - Previous generation balanced model",
-        "context_length": 200000,
-        "capabilities": ["vision", "analysis", "coding", "writing"],
-    },
-    "claude-3-5-sonnet-20241022": {
-        "family": "claude-3.5",
-        "parameter_size": "?B",
-        "quantization_level": "none",
-        "description": "Claude 3.5 Sonnet - Legacy model",
-        "context_length": 200000,
-        "capabilities": ["vision", "analysis", "coding", "writing"],
-    },
-    "claude-3-5-haiku-20241022": {
-        "family": "claude-3.5",
-        "parameter_size": "?B",
-        "quantization_level": "none",
-        "description": "Claude 3.5 Haiku - Legacy fast model",
-        "context_length": 200000,
-        "capabilities": ["vision", "analysis", "coding", "writing", "fast"],
-    },
-}
+# ============================================================================
+# Message Conversion Utilities
+# ============================================================================
 
 
-# Initialise Anthropic client
-def get_api_key() -> str:
-    """Get API key from environment variable or file (for Docker secrets)."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if api_key:
-        return api_key
-
-    # Check for file-based secret (Docker Swarm secrets)
-    api_key_file = os.environ.get("ANTHROPIC_API_KEY_FILE")
-    if api_key_file and os.path.exists(api_key_file):
-        with open(api_key_file, "r") as f:
-            return f.read().strip()
-
-    raise ValueError(
-        "ANTHROPIC_API_KEY environment variable or ANTHROPIC_API_KEY_FILE is required"
-    )
-
-
-def get_client() -> anthropic.Anthropic:
-    api_key = get_api_key()
-    return anthropic.Anthropic(api_key=api_key)
-
-
-def resolve_model(ollama_model: str) -> str:
-    """Resolve an Ollama model name to an Anthropic model ID."""
-    model = ollama_model.lower().strip()
-
-    if model in MODEL_MAPPINGS:
-        return MODEL_MAPPINGS[model]
-
-    # Check if it's already a valid Anthropic model ID
-    if model in MODEL_INFO:
-        return model
-
-    # Try without :latest suffix
-    if model.endswith(":latest"):
-        base_model = model[:-7]
-        if base_model in MODEL_MAPPINGS:
-            return MODEL_MAPPINGS[base_model]
-
-    logger.warning(f'Unknown model "{ollama_model}", defaulting to claude-sonnet-4.5')
-    return "claude-sonnet-4-5-20250929"
-
-
-def convert_messages(ollama_messages: list) -> tuple[str | None, list]:
+def convert_ollama_messages(ollama_messages: list) -> tuple[str | None, list]:
     """
-    Convert Ollama message format to Anthropic format.
+    Convert Ollama message format to provider-agnostic format.
 
     Returns (system_prompt, messages) tuple.
     """
     system_prompt = None
-    anthropic_messages = []
+    messages = []
 
     for msg in ollama_messages:
         role = msg.get("role", "user")
         content = msg.get("content", "")
 
         if role == "system":
-            # Anthropic handles system prompts separately
             system_prompt = content
         elif role in ("user", "assistant"):
             # Handle images if present
             if "images" in msg and msg["images"]:
                 content_blocks = []
                 for img in msg["images"]:
-                    # Ollama sends base64 images
                     content_blocks.append(
                         {
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": "image/jpeg",  # Default, could be detected
+                                "media_type": "image/jpeg",
                                 "data": img,
                             },
                         }
                     )
-                content_blocks.append(
-                    {
-                        "type": "text",
-                        "text": content,
-                    }
-                )
-                anthropic_messages.append(
-                    {
-                        "role": role,
-                        "content": content_blocks,
-                    }
-                )
+                content_blocks.append({"type": "text", "text": content})
+                messages.append({"role": role, "content": content_blocks})
             else:
-                anthropic_messages.append(
-                    {
-                        "role": role,
-                        "content": content,
-                    }
+                messages.append({"role": role, "content": content})
+
+    return system_prompt, messages
+
+
+def convert_openai_messages(openai_messages: list) -> tuple[str | None, list]:
+    """
+    Convert OpenAI message format to provider-agnostic format.
+
+    Returns (system_prompt, messages) tuple.
+    """
+    system_prompt = None
+    messages = []
+
+    for msg in openai_messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        if role == "system":
+            if isinstance(content, str):
+                system_prompt = content
+            elif isinstance(content, list):
+                system_prompt = " ".join(
+                    part.get("text", "")
+                    for part in content
+                    if part.get("type") == "text"
                 )
+        elif role in ("user", "assistant"):
+            if isinstance(content, str):
+                messages.append({"role": role, "content": content})
+            elif isinstance(content, list):
+                content_blocks = []
+                for part in content:
+                    part_type = part.get("type", "text")
+                    if part_type == "text":
+                        content_blocks.append(
+                            {"type": "text", "text": part.get("text", "")}
+                        )
+                    elif part_type == "image_url":
+                        image_url = part.get("image_url", {})
+                        url = (
+                            image_url.get("url", "")
+                            if isinstance(image_url, dict)
+                            else image_url
+                        )
 
-    return system_prompt, anthropic_messages
+                        if url.startswith("data:"):
+                            try:
+                                header, data = url.split(",", 1)
+                                media_type = header.split(":")[1].split(";")[0]
+                                content_blocks.append(
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": data,
+                                        },
+                                    }
+                                )
+                            except (ValueError, IndexError):
+                                logger.warning("Failed to parse image data URL")
+                        else:
+                            content_blocks.append(
+                                {"type": "image", "source": {"type": "url", "url": url}}
+                            )
+
+                if content_blocks:
+                    messages.append({"role": role, "content": content_blocks})
+
+    return system_prompt, messages
 
 
-def stream_response(
-    client: anthropic.Anthropic,
-    model: str,
-    messages: list,
-    system: str | None,
-    options: dict,
+def generate_openai_id(prefix: str = "chatcmpl") -> str:
+    """Generate an OpenAI-style ID."""
+    chars = string.ascii_letters + string.digits
+    suffix = "".join(random.choices(chars, k=24))
+    return f"{prefix}-{suffix}"
+
+
+# ============================================================================
+# Response Formatters
+# ============================================================================
+
+
+def stream_ollama_response(
+    provider, model: str, messages: list, system: str | None, options: dict
 ) -> Generator[str, None, None]:
-    """Stream response from Claude in Ollama format."""
-
-    kwargs = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": options.get("num_predict", options.get("max_tokens", 4096)),
-    }
-
-    if system:
-        kwargs["system"] = system
-
-    if "temperature" in options:
-        kwargs["temperature"] = options["temperature"]
-    if "top_p" in options:
-        kwargs["top_p"] = options["top_p"]
-    if "top_k" in options:
-        kwargs["top_k"] = options["top_k"]
-    if "stop" in options:
-        kwargs["stop_sequences"] = (
-            options["stop"] if isinstance(options["stop"], list) else [options["stop"]]
-        )
-
+    """Stream response in Ollama NDJSON format."""
     try:
-        with client.messages.stream(**kwargs) as stream:
-            for text in stream.text_stream:
-                # Ollama streaming format
-                chunk = {
-                    "model": model,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "message": {
-                        "role": "assistant",
-                        "content": text,
-                    },
-                    "done": False,
-                }
-                yield json.dumps(chunk) + "\n"
+        for text in provider.chat_completion_stream(model, messages, system, options):
+            chunk = {
+                "model": model,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "message": {"role": "assistant", "content": text},
+                "done": False,
+            }
+            yield json.dumps(chunk) + "\n"
 
         # Final message
         final = {
             "model": model,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "message": {
-                "role": "assistant",
-                "content": "",
-            },
+            "message": {"role": "assistant", "content": ""},
             "done": True,
             "total_duration": 0,
             "load_duration": 0,
@@ -330,65 +223,52 @@ def stream_response(
         }
         yield json.dumps(final) + "\n"
 
-    except anthropic.APIError as e:
-        logger.error(f"Anthropic API error: {e}")
-        error_response = {
-            "error": str(e),
-            "done": True,
-        }
+    except Exception as e:
+        logger.error(f"Provider error during streaming: {e}")
+        error_response = {"error": str(e), "done": True}
         yield json.dumps(error_response) + "\n"
 
 
-def non_streaming_response(
-    client: anthropic.Anthropic,
+def stream_openai_response(
+    provider,
     model: str,
     messages: list,
     system: str | None,
     options: dict,
-) -> dict:
-    """Get non-streaming response from Claude in Ollama format."""
+    request_model: str,
+) -> Generator[str, None, None]:
+    """Stream response in OpenAI SSE format."""
+    response_id = generate_openai_id()
+    created = int(time.time())
 
-    kwargs = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": options.get("num_predict", options.get("max_tokens", 4096)),
-    }
+    try:
+        for text in provider.chat_completion_stream(model, messages, system, options):
+            chunk = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": request_model,
+                "choices": [
+                    {"index": 0, "delta": {"content": text}, "finish_reason": None}
+                ],
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
 
-    if system:
-        kwargs["system"] = system
+        # Final chunk
+        final_chunk = {
+            "id": response_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": request_model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        yield f"data: {json.dumps(final_chunk)}\n\n"
+        yield "data: [DONE]\n\n"
 
-    if "temperature" in options:
-        kwargs["temperature"] = options["temperature"]
-    if "top_p" in options:
-        kwargs["top_p"] = options["top_p"]
-    if "top_k" in options:
-        kwargs["top_k"] = options["top_k"]
-    if "stop" in options:
-        kwargs["stop_sequences"] = (
-            options["stop"] if isinstance(options["stop"], list) else [options["stop"]]
-        )
-
-    response = client.messages.create(**kwargs)
-
-    content = ""
-    for block in response.content:
-        if hasattr(block, "text"):
-            content += block.text
-
-    return {
-        "model": model,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "message": {
-            "role": "assistant",
-            "content": content,
-        },
-        "done": True,
-        "total_duration": 0,
-        "load_duration": 0,
-        "prompt_eval_count": response.usage.input_tokens,
-        "eval_count": response.usage.output_tokens,
-        "eval_duration": 0,
-    }
+    except Exception as e:
+        logger.error(f"Provider error during streaming: {e}")
+        error_chunk = {"error": {"message": str(e), "type": "api_error"}}
+        yield f"data: {json.dumps(error_chunk)}\n\n"
 
 
 # ============================================================================
@@ -405,33 +285,24 @@ def health_check():
 @app.route("/api/tags", methods=["GET"])
 def list_models():
     """List available models in Ollama format."""
+    all_models = registry.list_all_models()
+
     models = []
-
-    # Create unique model entries (avoid duplicates from aliases)
-    seen_models = set()
-    for ollama_name, anthropic_id in MODEL_MAPPINGS.items():
-        if anthropic_id in seen_models:
-            continue
-        if ":" in ollama_name:  # Skip :latest variants for cleaner list
-            continue
-
-        seen_models.add(anthropic_id)
-        info = MODEL_INFO.get(anthropic_id, {})
-
+    for model in all_models:
         models.append(
             {
-                "name": ollama_name,
-                "model": ollama_name,
+                "name": model["name"],
+                "model": model["model"],
                 "modified_at": datetime.now(timezone.utc).isoformat(),
-                "size": 0,  # Not applicable for API models
-                "digest": anthropic_id,
+                "size": 0,
+                "digest": model.get("alias_for", model["name"]),
                 "details": {
                     "parent_model": "",
                     "format": "api",
-                    "family": info.get("family", "claude"),
-                    "families": [info.get("family", "claude")],
-                    "parameter_size": info.get("parameter_size", "?B"),
-                    "quantization_level": info.get("quantization_level", "none"),
+                    "family": model["details"]["family"],
+                    "families": [model["details"]["family"]],
+                    "parameter_size": model["details"]["parameter_size"],
+                    "quantization_level": model["details"]["quantization_level"],
                 },
             }
         )
@@ -445,30 +316,37 @@ def show_model():
     data = request.get_json() or {}
     model_name = data.get("name", data.get("model", ""))
 
-    anthropic_id = resolve_model(model_name)
-    info = MODEL_INFO.get(anthropic_id, {})
+    try:
+        provider, model_id = registry.resolve_model(model_name)
+        info = provider.get_models().get(model_id)
 
-    return jsonify(
-        {
-            "modelfile": f"# Anthropic Claude Model: {anthropic_id}",
-            "parameters": f"temperature 0.7\nnum_ctx {info.get('context_length', 200000)}",
-            "template": "{{ .System }}\n\n{{ .Prompt }}",
-            "details": {
-                "parent_model": "",
-                "format": "api",
-                "family": info.get("family", "claude"),
-                "families": [info.get("family", "claude")],
-                "parameter_size": info.get("parameter_size", "?B"),
-                "quantization_level": info.get("quantization_level", "none"),
-            },
-            "model_info": {
-                "anthropic.model_id": anthropic_id,
-                "anthropic.context_length": info.get("context_length", 200000),
-                "anthropic.description": info.get("description", ""),
-                "anthropic.capabilities": info.get("capabilities", []),
-            },
-        }
-    )
+        if info:
+            return jsonify(
+                {
+                    "modelfile": f"# {provider.name} Model: {model_id}",
+                    "parameters": f"temperature 0.7\nnum_ctx {info.context_length}",
+                    "template": "{{ .System }}\n\n{{ .Prompt }}",
+                    "details": {
+                        "parent_model": "",
+                        "format": "api",
+                        "family": info.family,
+                        "families": [info.family],
+                        "parameter_size": info.parameter_size,
+                        "quantization_level": info.quantization_level,
+                    },
+                    "model_info": {
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "context_length": info.context_length,
+                        "description": info.description,
+                        "capabilities": info.capabilities,
+                    },
+                }
+            )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+    return jsonify({"error": "Model not found"}), 404
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -477,59 +355,70 @@ def chat():
     data = request.get_json() or {}
 
     model_name = data.get("model", "claude-sonnet")
-    anthropic_model = resolve_model(model_name)
+
+    try:
+        provider, model_id = registry.resolve_model(model_name)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     ollama_messages = data.get("messages", [])
-    system_prompt, messages = convert_messages(ollama_messages)
+    system_prompt, messages = convert_ollama_messages(ollama_messages)
 
     options = data.get("options", {})
     stream = data.get("stream", True)
 
     logger.info(
-        f"Chat request: model={anthropic_model}, messages={len(messages)}, stream={stream}"
+        f"Chat request: provider={provider.name}, model={model_id}, "
+        f"messages={len(messages)}, stream={stream}"
     )
 
     try:
-        client = get_client()
-
         if stream:
             return Response(
-                stream_response(
-                    client, anthropic_model, messages, system_prompt, options
+                stream_ollama_response(
+                    provider, model_id, messages, system_prompt, options
                 ),
                 mimetype="application/x-ndjson",
             )
         else:
-            response = non_streaming_response(
-                client, anthropic_model, messages, system_prompt, options
+            result = provider.chat_completion(
+                model_id, messages, system_prompt, options
             )
-            return jsonify(response)
+            return jsonify(
+                {
+                    "model": model_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "message": {"role": "assistant", "content": result["content"]},
+                    "done": True,
+                    "total_duration": 0,
+                    "load_duration": 0,
+                    "prompt_eval_count": result.get("input_tokens", 0),
+                    "eval_count": result.get("output_tokens", 0),
+                    "eval_duration": 0,
+                }
+            )
 
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        return jsonify({"error": str(e)}), 500
-    except anthropic.APIError as e:
-        logger.error(f"Anthropic API error: {e}")
+    except Exception as e:
+        logger.error(f"Provider error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/generate", methods=["POST"])
 def generate():
-    """
-    Generate endpoint for compatibility.
-    Converts to chat format internally.
-    """
+    """Generate endpoint for compatibility. Converts to chat format internally."""
     data = request.get_json() or {}
 
     model_name = data.get("model", "claude-sonnet")
-    anthropic_model = resolve_model(model_name)
+
+    try:
+        provider, model_id = registry.resolve_model(model_name)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     prompt = data.get("prompt", "")
     system = data.get("system", None)
 
-    messages = [{"role": "user", "content": prompt}]
-
-    # Handle images
+    # Build messages
     if "images" in data and data["images"]:
         content_blocks = []
         for img in data["images"]:
@@ -545,59 +434,59 @@ def generate():
             )
         content_blocks.append({"type": "text", "text": prompt})
         messages = [{"role": "user", "content": content_blocks}]
+    else:
+        messages = [{"role": "user", "content": prompt}]
 
     options = data.get("options", {})
     stream = data.get("stream", True)
 
-    logger.info(f"Generate request: model={anthropic_model}, stream={stream}")
+    logger.info(
+        f"Generate request: provider={provider.name}, model={model_id}, stream={stream}"
+    )
 
     try:
-        client = get_client()
-
         if stream:
             return Response(
-                stream_response(client, anthropic_model, messages, system, options),
+                stream_ollama_response(provider, model_id, messages, system, options),
                 mimetype="application/x-ndjson",
             )
         else:
-            response = non_streaming_response(
-                client, anthropic_model, messages, system, options
+            result = provider.chat_completion(model_id, messages, system, options)
+            return jsonify(
+                {
+                    "model": model_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "response": result["content"],
+                    "done": True,
+                    "total_duration": 0,
+                    "load_duration": 0,
+                    "prompt_eval_count": result.get("input_tokens", 0),
+                    "eval_count": result.get("output_tokens", 0),
+                    "eval_duration": 0,
+                }
             )
-            # Generate format uses 'response' instead of 'message'
-            response["response"] = response.pop("message", {}).get("content", "")
-            return jsonify(response)
 
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        return jsonify({"error": str(e)}), 500
-    except anthropic.APIError as e:
-        logger.error(f"Anthropic API error: {e}")
+    except Exception as e:
+        logger.error(f"Provider error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/embeddings", methods=["POST"])
 def embeddings():
-    """
-    Embeddings endpoint - not supported by Claude.
-    Returns an error directing users to use a local embedding model.
-    """
+    """Embeddings endpoint - not supported by most providers."""
     return jsonify(
         {
-            "error": "Embeddings are not supported by Claude. Use a local embedding model like nomic-embed-text with Ollama."
+            "error": "Embeddings are not supported. Use a dedicated embedding service or local model."
         }
     ), 501
 
 
 @app.route("/api/pull", methods=["POST"])
 def pull_model():
-    """
-    Pull endpoint - not applicable for API models.
-    Returns success to satisfy clients that check for model availability.
-    """
+    """Pull endpoint - not applicable for API models."""
     data = request.get_json() or {}
-    model = data.get("name", "claude")
+    model = data.get("name", "")
 
-    # Return a fake successful pull response
     return Response(
         json.dumps(
             {"status": f"success: {model} is an API model and requires no download"}
@@ -610,7 +499,7 @@ def pull_model():
 @app.route("/api/version", methods=["GET"])
 def version():
     """Return version information."""
-    return jsonify({"version": "0.1.0-claude-proxy"})
+    return jsonify({"version": "1.1.0-multi-provider"})
 
 
 # ============================================================================
@@ -618,221 +507,17 @@ def version():
 # ============================================================================
 
 
-def convert_openai_messages(openai_messages: list) -> tuple[str | None, list]:
-    """
-    Convert OpenAI message format to Anthropic format.
-
-    OpenAI format supports:
-    - role: system, user, assistant
-    - content: string or array of content parts (text, image_url)
-
-    Returns (system_prompt, messages) tuple.
-    """
-    system_prompt = None
-    anthropic_messages = []
-
-    for msg in openai_messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-
-        if role == "system":
-            # Anthropic handles system prompts separately
-            if isinstance(content, str):
-                system_prompt = content
-            elif isinstance(content, list):
-                # Extract text from content array
-                system_prompt = " ".join(
-                    part.get("text", "")
-                    for part in content
-                    if part.get("type") == "text"
-                )
-        elif role in ("user", "assistant"):
-            if isinstance(content, str):
-                anthropic_messages.append(
-                    {
-                        "role": role,
-                        "content": content,
-                    }
-                )
-            elif isinstance(content, list):
-                # Handle content array with text and images
-                content_blocks = []
-                for part in content:
-                    part_type = part.get("type", "text")
-                    if part_type == "text":
-                        content_blocks.append(
-                            {
-                                "type": "text",
-                                "text": part.get("text", ""),
-                            }
-                        )
-                    elif part_type == "image_url":
-                        image_url = part.get("image_url", {})
-                        url = (
-                            image_url.get("url", "")
-                            if isinstance(image_url, dict)
-                            else image_url
-                        )
-
-                        # Handle base64 data URLs
-                        if url.startswith("data:"):
-                            # Parse data URL: data:image/jpeg;base64,<data>
-                            try:
-                                header, data = url.split(",", 1)
-                                media_type = header.split(":")[1].split(";")[0]
-                                content_blocks.append(
-                                    {
-                                        "type": "image",
-                                        "source": {
-                                            "type": "base64",
-                                            "media_type": media_type,
-                                            "data": data,
-                                        },
-                                    }
-                                )
-                            except (ValueError, IndexError):
-                                logger.warning(f"Failed to parse image data URL")
-                        else:
-                            # URL-based image - Anthropic supports this directly
-                            content_blocks.append(
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "url",
-                                        "url": url,
-                                    },
-                                }
-                            )
-
-                if content_blocks:
-                    anthropic_messages.append(
-                        {
-                            "role": role,
-                            "content": content_blocks,
-                        }
-                    )
-
-    return system_prompt, anthropic_messages
-
-
-def generate_openai_id(prefix: str = "chatcmpl") -> str:
-    """Generate an OpenAI-style ID."""
-    chars = string.ascii_letters + string.digits
-    suffix = "".join(random.choices(chars, k=24))
-    return f"{prefix}-{suffix}"
-
-
-def stream_openai_response(
-    client: anthropic.Anthropic,
-    model: str,
-    messages: list,
-    system: str | None,
-    options: dict,
-    request_model: str,
-) -> Generator[str, None, None]:
-    """Stream response from Claude in OpenAI SSE format."""
-
-    response_id = generate_openai_id()
-    created = int(time.time())
-
-    kwargs = {
-        "model": model,
-        "messages": messages,
-        "max_tokens": options.get("max_tokens", 4096),
-    }
-
-    if system:
-        kwargs["system"] = system
-
-    if "temperature" in options:
-        kwargs["temperature"] = options["temperature"]
-    if "top_p" in options:
-        kwargs["top_p"] = options["top_p"]
-    if "top_k" in options:
-        kwargs["top_k"] = options["top_k"]
-    if "stop" in options:
-        stop = options["stop"]
-        kwargs["stop_sequences"] = stop if isinstance(stop, list) else [stop]
-
-    try:
-        with client.messages.stream(**kwargs) as stream:
-            for text in stream.text_stream:
-                chunk = {
-                    "id": response_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": request_model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {
-                                "content": text,
-                            },
-                            "finish_reason": None,
-                        }
-                    ],
-                }
-                yield f"data: {json.dumps(chunk)}\n\n"
-
-        # Final chunk with finish_reason
-        final_chunk = {
-            "id": response_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": request_model,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop",
-                }
-            ],
-        }
-        yield f"data: {json.dumps(final_chunk)}\n\n"
-        yield "data: [DONE]\n\n"
-
-    except anthropic.APIError as e:
-        logger.error(f"Anthropic API error during streaming: {e}")
-        error_chunk = {
-            "error": {
-                "message": str(e),
-                "type": "api_error",
-            }
-        }
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-
-
 @app.route("/v1/models", methods=["GET"])
 def openai_list_models():
     """List available models in OpenAI format."""
-    models = []
+    models = registry.list_openai_models()
 
-    # Create unique model entries
-    seen_models = set()
-    for ollama_name, anthropic_id in MODEL_MAPPINGS.items():
-        if anthropic_id in seen_models:
-            continue
-        if ":" in ollama_name:  # Skip :latest variants
-            continue
+    # Add created timestamp
+    created = int(time.time())
+    for model in models:
+        model["created"] = created
 
-        seen_models.add(anthropic_id)
-        info = MODEL_INFO.get(anthropic_id, {})
-
-        models.append(
-            {
-                "id": ollama_name,
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": "anthropic",
-            }
-        )
-
-    return jsonify(
-        {
-            "object": "list",
-            "data": models,
-        }
-    )
+    return jsonify({"object": "list", "data": models})
 
 
 @app.route("/v1/chat/completions", methods=["POST"])
@@ -841,12 +526,24 @@ def openai_chat_completions():
     data = request.get_json() or {}
 
     model_name = data.get("model", "claude-sonnet")
-    anthropic_model = resolve_model(model_name)
+
+    try:
+        provider, model_id = registry.resolve_model(model_name)
+    except ValueError as e:
+        return jsonify(
+            {
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                    "code": "model_not_found",
+                }
+            }
+        ), 400
 
     openai_messages = data.get("messages", [])
     system_prompt, messages = convert_openai_messages(openai_messages)
 
-    # Build options from OpenAI parameters
+    # Build options
     options = {}
     if "max_tokens" in data:
         options["max_tokens"] = data["max_tokens"]
@@ -865,21 +562,15 @@ def openai_chat_completions():
     stream = data.get("stream", False)
 
     logger.info(
-        f"OpenAI chat request: model={anthropic_model}, messages={len(messages)}, stream={stream}"
+        f"OpenAI chat request: provider={provider.name}, model={model_id}, "
+        f"messages={len(messages)}, stream={stream}"
     )
 
     try:
-        client = get_client()
-
         if stream:
             return Response(
                 stream_openai_response(
-                    client,
-                    anthropic_model,
-                    messages,
-                    system_prompt,
-                    options,
-                    model_name,
+                    provider, model_id, messages, system_prompt, options, model_name
                 ),
                 mimetype="text/event-stream",
                 headers={
@@ -889,30 +580,9 @@ def openai_chat_completions():
                 },
             )
         else:
-            # Non-streaming response
-            kwargs = {
-                "model": anthropic_model,
-                "messages": messages,
-                "max_tokens": options.get("max_tokens", 4096),
-            }
-
-            if system_prompt:
-                kwargs["system"] = system_prompt
-
-            if "temperature" in options:
-                kwargs["temperature"] = options["temperature"]
-            if "top_p" in options:
-                kwargs["top_p"] = options["top_p"]
-            if "stop" in options:
-                stop = options["stop"]
-                kwargs["stop_sequences"] = stop if isinstance(stop, list) else [stop]
-
-            response = client.messages.create(**kwargs)
-
-            content = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    content += block.text
+            result = provider.chat_completion(
+                model_id, messages, system_prompt, options
+            )
 
             return jsonify(
                 {
@@ -925,39 +595,28 @@ def openai_chat_completions():
                             "index": 0,
                             "message": {
                                 "role": "assistant",
-                                "content": content,
+                                "content": result["content"],
                             },
                             "finish_reason": "stop",
                         }
                     ],
                     "usage": {
-                        "prompt_tokens": response.usage.input_tokens,
-                        "completion_tokens": response.usage.output_tokens,
-                        "total_tokens": response.usage.input_tokens
-                        + response.usage.output_tokens,
+                        "prompt_tokens": result.get("input_tokens", 0),
+                        "completion_tokens": result.get("output_tokens", 0),
+                        "total_tokens": result.get("input_tokens", 0)
+                        + result.get("output_tokens", 0),
                     },
                 }
             )
 
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        return jsonify(
-            {
-                "error": {
-                    "message": str(e),
-                    "type": "invalid_request_error",
-                    "code": "configuration_error",
-                }
-            }
-        ), 500
-    except anthropic.APIError as e:
-        logger.error(f"Anthropic API error: {e}")
+    except Exception as e:
+        logger.error(f"Provider error: {e}")
         return jsonify(
             {
                 "error": {
                     "message": str(e),
                     "type": "api_error",
-                    "code": "anthropic_error",
+                    "code": "provider_error",
                 }
             }
         ), 500
@@ -969,23 +628,28 @@ def openai_completions():
     data = request.get_json() or {}
 
     model_name = data.get("model", "claude-sonnet")
-    anthropic_model = resolve_model(model_name)
+
+    try:
+        provider, model_id = registry.resolve_model(model_name)
+    except ValueError as e:
+        return jsonify(
+            {
+                "error": {
+                    "message": str(e),
+                    "type": "invalid_request_error",
+                    "code": "model_not_found",
+                }
+            }
+        ), 400
 
     prompt = data.get("prompt", "")
-
-    # Handle prompt as string or array
     if isinstance(prompt, list):
         prompt = prompt[0] if prompt else ""
 
     messages = [{"role": "user", "content": prompt}]
 
-    # Build options from OpenAI parameters
-    options = {}
-    if "max_tokens" in data:
-        options["max_tokens"] = data["max_tokens"]
-    else:
-        options["max_tokens"] = 4096
-
+    # Build options
+    options = {"max_tokens": data.get("max_tokens", 4096)}
     if "temperature" in data:
         options["temperature"] = data["temperature"]
     if "top_p" in data:
@@ -995,70 +659,44 @@ def openai_completions():
 
     stream = data.get("stream", False)
 
-    logger.info(f"OpenAI completions request: model={anthropic_model}, stream={stream}")
+    logger.info(
+        f"OpenAI completions request: provider={provider.name}, model={model_id}, stream={stream}"
+    )
 
     try:
-        client = get_client()
-
         if stream:
-            # Streaming completions
+
             def stream_completions():
                 response_id = generate_openai_id("cmpl")
                 created = int(time.time())
 
-                kwargs = {
-                    "model": anthropic_model,
-                    "messages": messages,
-                    "max_tokens": options.get("max_tokens", 4096),
-                }
-
-                if "temperature" in options:
-                    kwargs["temperature"] = options["temperature"]
-                if "top_p" in options:
-                    kwargs["top_p"] = options["top_p"]
-                if "stop" in options:
-                    stop = options["stop"]
-                    kwargs["stop_sequences"] = (
-                        stop if isinstance(stop, list) else [stop]
-                    )
-
                 try:
-                    with client.messages.stream(**kwargs) as stream_obj:
-                        for text in stream_obj.text_stream:
-                            chunk = {
-                                "id": response_id,
-                                "object": "text_completion",
-                                "created": created,
-                                "model": model_name,
-                                "choices": [
-                                    {
-                                        "index": 0,
-                                        "text": text,
-                                        "finish_reason": None,
-                                    }
-                                ],
-                            }
-                            yield f"data: {json.dumps(chunk)}\n\n"
+                    for text in provider.chat_completion_stream(
+                        model_id, messages, None, options
+                    ):
+                        chunk = {
+                            "id": response_id,
+                            "object": "text_completion",
+                            "created": created,
+                            "model": model_name,
+                            "choices": [
+                                {"index": 0, "text": text, "finish_reason": None}
+                            ],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
 
-                    # Final chunk
                     final_chunk = {
                         "id": response_id,
                         "object": "text_completion",
                         "created": created,
                         "model": model_name,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "text": "",
-                                "finish_reason": "stop",
-                            }
-                        ],
+                        "choices": [{"index": 0, "text": "", "finish_reason": "stop"}],
                     }
                     yield f"data: {json.dumps(final_chunk)}\n\n"
                     yield "data: [DONE]\n\n"
 
-                except anthropic.APIError as e:
-                    logger.error(f"Anthropic API error during streaming: {e}")
+                except Exception as e:
+                    logger.error(f"Provider error during streaming: {e}")
                     error_chunk = {"error": {"message": str(e), "type": "api_error"}}
                     yield f"data: {json.dumps(error_chunk)}\n\n"
 
@@ -1072,27 +710,7 @@ def openai_completions():
                 },
             )
         else:
-            # Non-streaming response
-            kwargs = {
-                "model": anthropic_model,
-                "messages": messages,
-                "max_tokens": options.get("max_tokens", 4096),
-            }
-
-            if "temperature" in options:
-                kwargs["temperature"] = options["temperature"]
-            if "top_p" in options:
-                kwargs["top_p"] = options["top_p"]
-            if "stop" in options:
-                stop = options["stop"]
-                kwargs["stop_sequences"] = stop if isinstance(stop, list) else [stop]
-
-            response = client.messages.create(**kwargs)
-
-            content = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    content += block.text
+            result = provider.chat_completion(model_id, messages, None, options)
 
             return jsonify(
                 {
@@ -1101,40 +719,25 @@ def openai_completions():
                     "created": int(time.time()),
                     "model": model_name,
                     "choices": [
-                        {
-                            "index": 0,
-                            "text": content,
-                            "finish_reason": "stop",
-                        }
+                        {"index": 0, "text": result["content"], "finish_reason": "stop"}
                     ],
                     "usage": {
-                        "prompt_tokens": response.usage.input_tokens,
-                        "completion_tokens": response.usage.output_tokens,
-                        "total_tokens": response.usage.input_tokens
-                        + response.usage.output_tokens,
+                        "prompt_tokens": result.get("input_tokens", 0),
+                        "completion_tokens": result.get("output_tokens", 0),
+                        "total_tokens": result.get("input_tokens", 0)
+                        + result.get("output_tokens", 0),
                     },
                 }
             )
 
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
-        return jsonify(
-            {
-                "error": {
-                    "message": str(e),
-                    "type": "invalid_request_error",
-                    "code": "configuration_error",
-                }
-            }
-        ), 500
-    except anthropic.APIError as e:
-        logger.error(f"Anthropic API error: {e}")
+    except Exception as e:
+        logger.error(f"Provider error: {e}")
         return jsonify(
             {
                 "error": {
                     "message": str(e),
                     "type": "api_error",
-                    "code": "anthropic_error",
+                    "code": "provider_error",
                 }
             }
         ), 500
@@ -1142,14 +745,11 @@ def openai_completions():
 
 @app.route("/v1/embeddings", methods=["POST"])
 def openai_embeddings():
-    """
-    OpenAI-compatible embeddings endpoint - not supported by Claude.
-    Returns an error directing users to use a different embedding service.
-    """
+    """OpenAI-compatible embeddings endpoint - not supported."""
     return jsonify(
         {
             "error": {
-                "message": "Embeddings are not supported by Claude. Use a dedicated embedding service or local model.",
+                "message": "Embeddings are not supported. Use a dedicated embedding service.",
                 "type": "invalid_request_error",
                 "code": "unsupported_operation",
             }
@@ -1162,18 +762,29 @@ def openai_embeddings():
 # ============================================================================
 
 if __name__ == "__main__":
+    import os
+
     port = int(os.environ.get("PORT", os.environ.get("FLASK_PORT", 11434)))
     host = os.environ.get("HOST", "0.0.0.0")
     debug = os.environ.get("DEBUG", "false").lower() == "true"
 
-    # Validate API key on startup
-    try:
-        get_api_key()
-    except ValueError as e:
-        logger.error(str(e))
+    # Check that at least one provider is configured
+    configured = registry.get_configured_providers()
+    if not configured:
+        logger.error(
+            "No LLM providers configured. Set at least one of: "
+            "ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, PERPLEXITY_API_KEY"
+        )
         exit(1)
 
-    logger.info(f"Starting Ollama-Claude proxy on {host}:{port}")
-    logger.info(f"Available models: {list(set(MODEL_MAPPINGS.values()))}")
+    provider_names = [p.name for p in configured]
+    logger.info(f"Starting Multi-Provider LLM Proxy on {host}:{port}")
+    logger.info(f"Configured providers: {provider_names}")
+
+    # Log available models count per provider
+    for provider in configured:
+        model_count = len(provider.get_models())
+        alias_count = len(provider.get_aliases())
+        logger.info(f"  - {provider.name}: {model_count} models, {alias_count} aliases")
 
     app.run(host=host, port=port, debug=debug, threaded=True)

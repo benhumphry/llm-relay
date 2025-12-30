@@ -1,31 +1,41 @@
-# Ollama API Proxy for Anthropic Claude
+# Multi-Provider LLM Proxy
 # Docker Swarm configuration
 #
-# Supported models:
-#   - claude-opus, claude-4.5-opus    -> Claude Opus 4.5 (best for OCR, complex analysis)
-#   - claude-sonnet, claude-4.5-sonnet -> Claude Sonnet 4.5 (balanced)
-#   - claude-haiku, claude-4.5-haiku   -> Claude Haiku 4.5 (fast, ideal for tagging)
+# Supported providers (set at least one API key secret):
+#   - Anthropic Claude: claude-opus, claude-sonnet, claude-haiku
+#   - OpenAI GPT: gpt-4o, gpt-4o-mini, gpt-4-turbo, o1
+#   - Google Gemini: gemini, gemini-pro, gemini-flash
+#   - Perplexity: sonar, sonar-pro, sonar-reasoning
 #
 # Usage:
-#   # Create secret for API key
+#   # Create secrets for API keys (at least one required)
 #   echo "sk-ant-..." | docker secret create anthropic_api_key -
+#   echo "sk-..." | docker secret create openai_api_key -
+#   echo "AIza..." | docker secret create google_api_key -
+#   echo "pplx-..." | docker secret create perplexity_api_key -
 #
 #   # Deploy stack
-#   docker stack deploy -c docker-compose.swarm.yml ollama-claude
+#   docker stack deploy -c docker-compose.swarm.yml llm-proxy
 #
 # For standalone Docker Compose, use docker-compose.yml instead.
 
 version: "3.8"
 
 services:
-  ollama-claude-proxy:
+  llm-proxy:
     image: ghcr.io/benhumphry/ollama-claude-proxy:latest
     environment:
       - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
+      - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+      - GOOGLE_API_KEY_FILE=/run/secrets/google_api_key
+      - PERPLEXITY_API_KEY_FILE=/run/secrets/perplexity_api_key
       - PORT=11434
       - HOST=0.0.0.0
     secrets:
       - anthropic_api_key
+      - openai_api_key
+      - google_api_key
+      - perplexity_api_key
     networks:
       - internal
     deploy:
@@ -36,20 +46,20 @@ services:
           - node.role == worker
       resources:
         limits:
-          cpus: '1.0'
+          cpus: "1.0"
           memory: 256M
         reservations:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 128M
       labels:
         # Traefik labels for external access (optional)
         # Uncomment and configure for your domain
         # - "traefik.enable=true"
-        # - "traefik.http.routers.ollama-claude.rule=Host(`ollama-claude.example.com`)"
-        # - "traefik.http.routers.ollama-claude.entrypoints=https"
-        # - "traefik.http.routers.ollama-claude.tls=true"
-        # - "traefik.http.routers.ollama-claude.tls.certresolver=letsencrypt"
-        # - "traefik.http.services.ollama-claude.loadbalancer.server.port=11434"
+        # - "traefik.http.routers.llm-proxy.rule=Host(`llm-proxy.example.com`)"
+        # - "traefik.http.routers.llm-proxy.entrypoints=https"
+        # - "traefik.http.routers.llm-proxy.tls=true"
+        # - "traefik.http.routers.llm-proxy.tls.certresolver=letsencrypt"
+        # - "traefik.http.services.llm-proxy.loadbalancer.server.port=11434"
         - "traefik.enable=false"
       update_config:
         parallelism: 1
@@ -61,14 +71,28 @@ services:
         max_attempts: 3
         window: 120s
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:11434/')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:11434/')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
 
+# Secrets - create only the ones you need
+# Missing secrets are handled gracefully (provider just won't be available)
 secrets:
   anthropic_api_key:
+    external: true
+  openai_api_key:
+    external: true
+  google_api_key:
+    external: true
+  perplexity_api_key:
     external: true
 
 networks:

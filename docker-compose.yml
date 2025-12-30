@@ -1,19 +1,23 @@
-# Ollama API Proxy for Anthropic Claude
+# Multi-Provider LLM Proxy
 # Standalone Docker Compose configuration
 #
-# Supported models:
-#   - claude-opus, claude-4.5-opus    -> Claude Opus 4.5 (best for OCR, complex analysis)
-#   - claude-sonnet, claude-4.5-sonnet -> Claude Sonnet 4.5 (balanced)
-#   - claude-haiku, claude-4.5-haiku   -> Claude Haiku 4.5 (fast, ideal for tagging)
+# Supported providers (set at least one API key):
+#   - Anthropic Claude: claude-opus, claude-sonnet, claude-haiku
+#   - OpenAI GPT: gpt-4o, gpt-4o-mini, gpt-4-turbo, o1
+#   - Google Gemini: gemini, gemini-pro, gemini-flash
+#   - Perplexity: sonar, sonar-pro, sonar-reasoning
 #
 # Usage:
 #   export ANTHROPIC_API_KEY="sk-ant-..."
+#   export OPENAI_API_KEY="sk-..."        # optional
+#   export GOOGLE_API_KEY="AIza..."       # optional
+#   export PERPLEXITY_API_KEY="pplx-..."  # optional
 #   docker compose up -d
 #
 # For Docker Swarm deployments, use docker-compose.swarm.yml instead.
 
 services:
-  ollama-claude-proxy:
+  llm-proxy:
     image: ghcr.io/benhumphry/ollama-claude-proxy:latest
     build:
       context: .
@@ -21,7 +25,10 @@ services:
     ports:
       - "11434:11434"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY:-}
       - PORT=11434
       - HOST=0.0.0.0
     restart: unless-stopped

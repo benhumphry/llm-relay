@@ -1,57 +1,71 @@
-# Ollama API Proxy for Anthropic Claude
+# Multi-Provider LLM Proxy
 
-A self-hosted proxy that presents Anthropic Claude models via the Ollama API interface. This allows any Ollama-compatible application to use Claude models seamlessly.
+A self-hosted proxy that presents multiple LLM providers (Anthropic Claude, OpenAI GPT, Google Gemini, Perplexity) via both Ollama and OpenAI-compatible API interfaces. This allows any Ollama or OpenAI-compatible application to use models from multiple providers seamlessly.
 
 ## Features
 
+- **Multi-provider support** - Anthropic Claude, OpenAI GPT, Google Gemini, Perplexity (and easily extensible)
 - **Full Ollama API compatibility** - Works with any application that supports Ollama
 - **OpenAI API compatibility** - Also exposes `/v1/*` endpoints for OpenAI SDK compatibility
-- **All Claude model families** - Supports Claude 4.5, 4, and 3.5 models
 - **Vision support** - Pass images via base64 encoding (Ollama and OpenAI formats)
 - **Streaming responses** - Real-time streaming (NDJSON for Ollama, SSE for OpenAI)
 - **Docker Swarm ready** - Production-ready containerisation
-- **Lightweight** - Minimal resource footprint (~128MB RAM)
+- **Extensible architecture** - Add new providers with ~50 lines of code
 
-## Supported Models
+## Supported Providers & Models
 
-### Claude 4.5 Family (Latest - Recommended)
+### Anthropic Claude
 
-| Ollama Model Name | Anthropic Model | Use Case |
-|-------------------|-----------------|----------|
+| Model Name | Model ID | Use Case |
+|------------|----------|----------|
 | `claude-opus`, `claude-4.5-opus` | claude-opus-4-5-20251101 | Complex analysis, OCR, detailed reasoning |
 | `claude-sonnet`, `claude-4.5-sonnet` | claude-sonnet-4-5-20250929 | Balanced performance |
 | `claude-haiku`, `claude-4.5-haiku` | claude-haiku-4-5-20251001 | Fast tasks, tagging, classification |
+| `claude-4-opus`, `claude-4-sonnet` | claude-opus-4-*, claude-sonnet-4-* | Previous generation |
+| `claude-3.5-sonnet`, `claude-3.5-haiku` | claude-3-5-* | Legacy models |
 
-### Claude 4 Family
+### OpenAI GPT
 
-| Ollama Model Name | Anthropic Model |
-|-------------------|-----------------|
-| `claude-4-opus` | claude-opus-4-20250514 |
-| `claude-4-sonnet` | claude-sonnet-4-20250514 |
+| Model Name | Model ID | Use Case |
+|------------|----------|----------|
+| `gpt-4o`, `openai-gpt-4o` | gpt-4o | Most capable multimodal |
+| `gpt-4o-mini` | gpt-4o-mini | Fast and affordable |
+| `gpt-4-turbo`, `gpt-4` | gpt-4-turbo, gpt-4 | High capability |
+| `gpt-3.5-turbo`, `chatgpt` | gpt-3.5-turbo | Fast and cost-effective |
+| `o1`, `o1-mini`, `o1-pro` | o1, o1-mini, o1-pro | Advanced reasoning |
 
-### Claude 3.5 Family (Legacy)
+### Google Gemini
 
-| Ollama Model Name | Anthropic Model |
-|-------------------|-----------------|
-| `claude-3.5-sonnet` | claude-3-5-sonnet-20241022 |
-| `claude-3.5-haiku` | claude-3-5-haiku-20241022 |
+| Model Name | Model ID | Use Case |
+|------------|----------|----------|
+| `gemini`, `gemini-flash` | gemini-2.5-flash | Fast and versatile |
+| `gemini-pro` | gemini-2.5-pro | Most capable Gemini |
+| `gemini-2.0-flash` | gemini-2.0-flash | Previous generation |
+| `gemini-1.5-pro`, `gemini-1.5-flash` | gemini-1.5-* | Legacy models |
+
+### Perplexity
+
+| Model Name | Model ID | Use Case |
+|------------|----------|----------|
+| `perplexity`, `pplx`, `sonar` | sonar | Search-augmented |
+| `sonar-pro` | sonar-pro | Advanced search |
+| `sonar-reasoning` | sonar-reasoning | Search with chain-of-thought |
 
 ## Quick Start
 
 ### Using Docker Compose
 
-1. Set your Anthropic API key:
+1. Set your API keys (at least one required):
    ```bash
    export ANTHROPIC_API_KEY="sk-ant-..."
+   export OPENAI_API_KEY="sk-..."
+   export GOOGLE_API_KEY="AIza..."
+   export PERPLEXITY_API_KEY="pplx-..."
    ```
 
 2. Run with Docker Compose:
    ```bash
-   # Using pre-built image from GitHub Container Registry
    docker compose up -d
-   
-   # Or build locally
-   docker compose up -d --build
    ```
 
 3. Test:
@@ -61,255 +75,161 @@ A self-hosted proxy that presents Anthropic Claude models via the Ollama API int
 
 ### Docker Swarm Deployment
 
-For Docker Swarm, use the separate `docker-compose.swarm.yml` file which includes:
-- Docker secrets support for secure API key storage
-- Resource limits and reservations
-- Rolling update configuration
-- Traefik labels (commented out, configure for your domain)
+For Docker Swarm, use `docker-compose.swarm.yml` which includes Docker secrets support, resource limits, and Traefik labels.
 
-1. Create a Docker secret for the API key:
+1. Create Docker secrets:
    ```bash
    echo "sk-ant-..." | docker secret create anthropic_api_key -
+   echo "sk-..." | docker secret create openai_api_key -
    ```
 
-2. Deploy the stack:
+2. Deploy:
    ```bash
-   docker stack deploy -c docker-compose.swarm.yml ollama-claude
-   ```
-
-3. Check the service:
-   ```bash
-   docker service logs ollama-claude_ollama-claude-proxy
+   docker stack deploy -c docker-compose.swarm.yml llm-proxy
    ```
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes* | - | Your Anthropic API key |
-| `ANTHROPIC_API_KEY_FILE` | Yes* | - | Path to file containing API key (for Docker secrets) |
-| `PORT` | No | 11434 | Server port |
-| `HOST` | No | 0.0.0.0 | Bind address |
-| `DEBUG` | No | false | Enable debug logging |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | At least one | Anthropic API key for Claude models |
+| `OPENAI_API_KEY` | provider | OpenAI API key for GPT models |
+| `GOOGLE_API_KEY` | required | Google API key for Gemini models |
+| `PERPLEXITY_API_KEY` | | Perplexity API key for Sonar models |
+| `PORT` | No | Server port (default: 11434) |
+| `HOST` | No | Bind address (default: 0.0.0.0) |
+| `DEBUG` | No | Enable debug logging (default: false) |
 
-*Either `ANTHROPIC_API_KEY` or `ANTHROPIC_API_KEY_FILE` must be set.
+All API keys also support `_FILE` suffix for Docker secrets (e.g., `ANTHROPIC_API_KEY_FILE`).
 
 ## API Endpoints
 
 ### Ollama API
 
-The proxy implements the following Ollama API endpoints:
-
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Health check |
-| `/api/tags` | GET | List available models |
+| `/api/tags` | GET | List available models from all providers |
 | `/api/show` | POST | Get model details |
 | `/api/chat` | POST | Chat completion (main endpoint) |
 | `/api/generate` | POST | Text generation |
 | `/api/pull` | POST | Returns success (no download needed) |
 | `/api/version` | GET | Version information |
-| `/api/embeddings` | POST | Returns error (not supported by Claude) |
 
 ### OpenAI-Compatible API
-
-The proxy also provides OpenAI-compatible endpoints at `/v1/*`, allowing applications that use the OpenAI SDK to connect directly:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/v1/models` | GET | List available models |
 | `/v1/chat/completions` | POST | Chat completions (streaming and non-streaming) |
 | `/v1/completions` | POST | Text completions |
-| `/v1/embeddings` | POST | Returns error (not supported by Claude) |
-
-#### OpenAI API Features
-
-- **SSE Streaming**: Server-Sent Events format with `data: [DONE]` terminator
-- **Vision support**: Base64 data URLs and remote image URLs via `image_url` content type
-- **Parameters**: `max_tokens`, `temperature`, `top_p`, `stop`
-- **Usage stats**: Returns `prompt_tokens`, `completion_tokens`, `total_tokens`
 
 ## Usage Examples
 
 ### Ollama API
 
-#### Basic Chat Request
-
 ```bash
+# Use Claude
 curl -X POST http://localhost:11434/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-haiku",
-    "messages": [
-      {"role": "user", "content": "Hello!"}
-    ]
-  }'
+  -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello!"}]}'
+
+# Use GPT-4o
+curl -X POST http://localhost:11434/api/chat \
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello!"}]}'
+
+# Use Gemini
+curl -X POST http://localhost:11434/api/chat \
+  -d '{"model": "gemini", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-#### With System Prompt
-
-```bash
-curl -X POST http://localhost:11434/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-opus",
-    "messages": [
-      {"role": "system", "content": "You are an expert document analyst."},
-      {"role": "user", "content": "Analyze this document for key themes."}
-    ],
-    "stream": false
-  }'
-```
-
-#### With Image (Vision)
-
-```bash
-# Base64 encode your image first
-IMAGE_BASE64=$(base64 -w0 document.jpg)
-
-curl -X POST http://localhost:11434/api/chat \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"model\": \"claude-opus\",
-    \"messages\": [
-      {
-        \"role\": \"user\",
-        \"content\": \"What text is in this image?\",
-        \"images\": [\"$IMAGE_BASE64\"]
-      }
-    ],
-    \"stream\": false
-  }"
-```
-
-### OpenAI-Compatible API
-
-#### Python with OpenAI SDK
+### OpenAI SDK (Python)
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:11434/v1",
-    api_key="not-needed"  # Required by SDK but ignored by proxy
+    api_key="not-needed"
 )
 
-# Non-streaming
+# Use any provider's model
 response = client.chat.completions.create(
-    model="claude-sonnet",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Hello!"}
-    ]
+    model="claude-sonnet",  # or "gpt-4o", "gemini", etc.
+    messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
-
-# Streaming
-stream = client.chat.completions.create(
-    model="claude-haiku",
-    messages=[{"role": "user", "content": "Write a haiku about coding."}],
-    stream=True
-)
-for chunk in stream:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
 ```
 
-#### cURL
+### Model Naming
 
-```bash
-curl -X POST http://localhost:11434/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer not-needed" \
-  -d '{
-    "model": "claude-sonnet",
-    "messages": [
-      {"role": "user", "content": "Hello!"}
-    ]
-  }'
+Models can be referenced in multiple ways:
+
+1. **Simple alias**: `claude-sonnet`, `gpt-4o`, `gemini`
+2. **Provider-prefixed**: `anthropic-claude-sonnet`, `openai-gpt-4o`, `gemini-gemini-2.5-flash`
+3. **Full model ID**: `claude-sonnet-4-5-20250929`, `gpt-4o`
+
+## Adding New Providers
+
+The proxy uses an extensible provider architecture. To add a new provider:
+
+1. Create `providers/newprovider_provider.py`:
+
+```python
+from .base import OpenAICompatibleProvider, ModelInfo
+
+class NewProvider(OpenAICompatibleProvider):
+    name = "newprovider"
+    base_url = "https://api.newprovider.com/v1"
+    api_key_env = "NEWPROVIDER_API_KEY"
+    
+    models = {
+        "model-name": ModelInfo(
+            family="model-family",
+            description="Model description",
+            context_length=128000,
+            capabilities=["vision", "coding"],
+        ),
+    }
+    
+    aliases = {
+        "newprovider": "model-name",
+    }
 ```
 
-#### With Vision (OpenAI Format)
+2. Register in `providers/__init__.py`:
 
-```bash
-curl -X POST http://localhost:11434/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-opus",
-    "messages": [
-      {
-        "role": "user",
-        "content": [
-          {"type": "text", "text": "What is in this image?"},
-          {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ..."}}
-        ]
-      }
-    ]
-  }'
+```python
+from .newprovider_provider import NewProvider
+registry.register(NewProvider())
 ```
 
-## Integration with Paperless-GPT
+## Integration Examples
 
-Set the following environment variables in your Paperless-GPT configuration:
+### Paperless-GPT
 
 ```yaml
 environment:
-  - OLLAMA_HOST=http://ollama-claude-proxy:11434
-  # For OCR tasks (high accuracy)
+  - OLLAMA_HOST=http://llm-proxy:11434
   - PAPERLESS_GPT_OCR_MODEL=claude-opus
-  # For tagging tasks (fast)
   - PAPERLESS_GPT_TAGGING_MODEL=claude-haiku
 ```
 
-## Integration with Open WebUI
-
-Point Open WebUI to use the proxy as its Ollama backend:
+### Open WebUI
 
 ```yaml
 environment:
-  - OLLAMA_BASE_URL=http://ollama-claude-proxy:11434
+  - OLLAMA_BASE_URL=http://llm-proxy:11434
 ```
 
 ## Limitations
 
-1. **No embeddings** - Claude doesn't provide embedding vectors. Use a local model like `nomic-embed-text` with actual Ollama for embeddings.
-
-2. **API costs** - Unlike local models, Claude API usage incurs costs. Monitor your usage at console.anthropic.com.
-
-3. **Rate limits** - Subject to Anthropic API rate limits. The proxy doesn't implement its own rate limiting.
-
-4. **No model downloading** - The `/api/pull` endpoint always returns success as there's nothing to download.
-
-## Troubleshooting
-
-### "ANTHROPIC_API_KEY environment variable is required"
-
-Ensure the API key is set:
-```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-### Connection refused
-
-Check the service is running:
-```bash
-docker logs ollama-claude-proxy
-curl http://localhost:11434/
-```
-
-### Model not found
-
-The proxy will default to `claude-sonnet-4.5` for unknown model names. Check the supported models list above.
-
-### Timeout errors
-
-For long-running requests (like OCR on large documents), you may need to increase timeouts in your client application.
+1. **No embeddings** - Use a dedicated embedding service
+2. **API costs** - Monitor usage at each provider's console
+3. **Rate limits** - Subject to each provider's rate limits
 
 ## Development
-
-### Running locally
 
 ```bash
 python -m venv venv
@@ -319,22 +239,10 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 python proxy.py
 ```
 
-### Adding new models
-
-Edit the `MODEL_MAPPINGS` dictionary in `proxy.py`:
-
-```python
-MODEL_MAPPINGS = {
-    # Add your new model alias
-    'my-custom-alias': 'claude-sonnet-4-5-20250929',
-    ...
-}
-```
-
 ## Credits
 
 This project is forked from [psenger/ollama-claude-proxy](https://github.com/psenger/ollama-claude-proxy).
 
 ## Licence
 
-MIT License - Use freely, but note that Anthropic API usage is subject to their terms of service.
+MIT License
