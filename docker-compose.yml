@@ -18,7 +18,7 @@
 
 services:
   llm-proxy:
-    image: ghcr.io/benhumphry/ollama-claude-proxy:latest
+    image: ghcr.io/benhumphry/ollama-llm-proxy:latest
     build:
       context: .
       dockerfile: Dockerfile
