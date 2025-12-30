@@ -19,7 +19,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
     api_key_env = "OPENAI_API_KEY"
 
     models: dict[str, ModelInfo] = {
-        # GPT-5 family (reasoning models - no temperature/top_p/etc)
+        # GPT-5 family (reasoning models - no temperature/top_p/etc, uses max_completion_tokens)
         "gpt-5": ModelInfo(
             family="gpt-5",
             description="GPT-5 - Latest flagship reasoning model",
@@ -27,6 +27,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
             capabilities=["vision", "analysis", "coding", "writing", "reasoning"],
             unsupported_params=REASONING_MODEL_UNSUPPORTED_PARAMS,
             supports_system_prompt=False,
+            use_max_completion_tokens=True,
         ),
         "gpt-5-mini": ModelInfo(
             family="gpt-5",
@@ -42,6 +43,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
             ],
             unsupported_params=REASONING_MODEL_UNSUPPORTED_PARAMS,
             supports_system_prompt=False,
+            use_max_completion_tokens=True,
         ),
         # GPT-4o family (latest multimodal)
         "gpt-4o": ModelInfo(
@@ -77,7 +79,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
             context_length=16385,
             capabilities=["analysis", "coding", "writing", "fast"],
         ),
-        # O3 reasoning models (latest reasoning - no temperature/top_p/etc)
+        # O3 reasoning models (latest reasoning - no temperature/top_p/etc, uses max_completion_tokens)
         "o3": ModelInfo(
             family="o3",
             description="O3 - Most advanced reasoning model",
@@ -85,6 +87,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
             capabilities=["analysis", "coding", "reasoning"],
             unsupported_params=REASONING_MODEL_UNSUPPORTED_PARAMS,
             supports_system_prompt=False,
+            use_max_completion_tokens=True,
         ),
         "o3-mini": ModelInfo(
             family="o3",
@@ -93,8 +96,9 @@ class OpenAIProvider(OpenAICompatibleProvider):
             capabilities=["analysis", "coding", "reasoning", "fast"],
             unsupported_params=REASONING_MODEL_UNSUPPORTED_PARAMS,
             supports_system_prompt=False,
+            use_max_completion_tokens=True,
         ),
-        # O1 reasoning models (no temperature/top_p/etc)
+        # O1 reasoning models (no temperature/top_p/etc, uses max_completion_tokens)
         "o1": ModelInfo(
             family="o1",
             description="O1 - Advanced reasoning model",
@@ -102,6 +106,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
             capabilities=["analysis", "coding", "reasoning"],
             unsupported_params=REASONING_MODEL_UNSUPPORTED_PARAMS,
             supports_system_prompt=False,
+            use_max_completion_tokens=True,
         ),
         "o1-mini": ModelInfo(
             family="o1",
@@ -110,6 +115,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
             capabilities=["analysis", "coding", "reasoning", "fast"],
             unsupported_params=REASONING_MODEL_UNSUPPORTED_PARAMS,
             supports_system_prompt=False,
+            use_max_completion_tokens=True,
         ),
         "o1-pro": ModelInfo(
             family="o1",
@@ -118,6 +124,7 @@ class OpenAIProvider(OpenAICompatibleProvider):
             capabilities=["analysis", "coding", "reasoning"],
             unsupported_params=REASONING_MODEL_UNSUPPORTED_PARAMS,
             supports_system_prompt=False,
+            use_max_completion_tokens=True,
         ),
     }
 

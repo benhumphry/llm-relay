@@ -43,6 +43,8 @@ class ModelInfo:
     unsupported_params: set[str] = field(default_factory=set)
     # Whether the model supports system prompts
     supports_system_prompt: bool = True
+    # Whether to use max_completion_tokens instead of max_tokens (for reasoning models)
+    use_max_completion_tokens: bool = False
 
 
 class LLMProvider(ABC):
@@ -252,14 +254,20 @@ class OpenAICompatibleProvider(LLMProvider):
         """Build kwargs for OpenAI API call, filtering unsupported params."""
         model_info = self._get_model_info(model)
         unsupported = model_info.unsupported_params if model_info else set()
+        use_max_completion_tokens = (
+            model_info.use_max_completion_tokens if model_info else False
+        )
 
         kwargs = {
             "model": model,
         }
 
-        # Handle max_tokens - some models use max_completion_tokens
-        if "max_tokens" not in unsupported:
-            kwargs["max_tokens"] = options.get("max_tokens", 4096)
+        # Handle max_tokens - reasoning models use max_completion_tokens instead
+        max_tokens_value = options.get("max_tokens", 4096)
+        if use_max_completion_tokens:
+            kwargs["max_completion_tokens"] = max_tokens_value
+        elif "max_tokens" not in unsupported:
+            kwargs["max_tokens"] = max_tokens_value
 
         # Only add parameters if the model supports them
         if "temperature" in options and "temperature" not in unsupported:
