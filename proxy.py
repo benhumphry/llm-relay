@@ -107,6 +107,37 @@ def handle_exception(e):
 # ============================================================================
 
 
+def provider_supports_vision(provider, model_id: str) -> bool:
+    """Check if a provider/model supports vision (image inputs)."""
+    models = provider.get_models()
+    model_info = models.get(model_id)
+    if model_info and hasattr(model_info, "capabilities"):
+        return "vision" in model_info.capabilities
+    return False
+
+
+def filter_images_from_messages(messages: list) -> list:
+    """Remove image content from messages, keeping only text."""
+    filtered = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        if isinstance(content, list):
+            # Filter out image blocks, keep only text
+            text_parts = []
+            for part in content:
+                if part.get("type") == "text":
+                    text_parts.append(part.get("text", ""))
+                # Skip image types
+            # Combine text parts
+            filtered.append({"role": role, "content": " ".join(text_parts)})
+        else:
+            filtered.append(msg)
+
+    return filtered
+
+
 def convert_ollama_messages(ollama_messages: list) -> tuple[str | None, list]:
     """
     Convert Ollama message format to provider-agnostic format.
@@ -404,6 +435,20 @@ def chat():
     ollama_messages = data.get("messages", [])
     system_prompt, messages = convert_ollama_messages(ollama_messages)
 
+    # Filter out images if provider doesn't support vision
+    if not provider_supports_vision(provider, model_id):
+        original_count = len(messages)
+        messages = filter_images_from_messages(messages)
+        # Check if any messages had images
+        has_images = any(
+            isinstance(m.get("content"), list)
+            for m in convert_ollama_messages(ollama_messages)[1]
+        )
+        if has_images:
+            logger.warning(
+                f"Model {model_id} doesn't support vision - images removed from request"
+            )
+
     options = data.get("options", {})
     stream = data.get("stream", True)
 
@@ -460,20 +505,28 @@ def generate():
 
     # Build messages
     if "images" in data and data["images"]:
-        content_blocks = []
-        for img in data["images"]:
-            content_blocks.append(
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": img,
-                    },
-                }
+        # Check if provider supports vision
+        if provider_supports_vision(provider, model_id):
+            content_blocks = []
+            for img in data["images"]:
+                content_blocks.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img,
+                        },
+                    }
+                )
+            content_blocks.append({"type": "text", "text": prompt})
+            messages = [{"role": "user", "content": content_blocks}]
+        else:
+            # Provider doesn't support vision - ignore images
+            logger.warning(
+                f"Model {model_id} doesn't support vision - images removed from request"
             )
-        content_blocks.append({"type": "text", "text": prompt})
-        messages = [{"role": "user", "content": content_blocks}]
+            messages = [{"role": "user", "content": prompt}]
     else:
         messages = [{"role": "user", "content": prompt}]
 
@@ -613,6 +666,15 @@ def openai_chat_completions():
 
     openai_messages = data.get("messages", [])
     system_prompt, messages = convert_openai_messages(openai_messages)
+
+    # Filter out images if provider doesn't support vision
+    if not provider_supports_vision(provider, model_id):
+        has_images = any(isinstance(m.get("content"), list) for m in messages)
+        if has_images:
+            messages = filter_images_from_messages(messages)
+            logger.warning(
+                f"Model {model_id} doesn't support vision - images removed from request"
+            )
 
     # Build options
     options = {}
