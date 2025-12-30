@@ -331,6 +331,10 @@ MODEL_MAPPINGS = {
 }
 ```
 
+## Credits
+
+This project is forked from [psenger/ollama-claude-proxy](https://github.com/psenger/ollama-claude-proxy).
+
 ## Licence
 
 MIT License - Use freely, but note that Anthropic API usage is subject to their terms of service.
