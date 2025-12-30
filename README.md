@@ -5,9 +5,10 @@ A self-hosted proxy that presents Anthropic Claude models via the Ollama API int
 ## Features
 
 - **Full Ollama API compatibility** - Works with any application that supports Ollama
+- **OpenAI API compatibility** - Also exposes `/v1/*` endpoints for OpenAI SDK compatibility
 - **All Claude model families** - Supports Claude 4.5, 4, and 3.5 models
-- **Vision support** - Pass images via base64 encoding (same as Ollama)
-- **Streaming responses** - Real-time streaming just like local Ollama
+- **Vision support** - Pass images via base64 encoding (Ollama and OpenAI formats)
+- **Streaming responses** - Real-time streaming (NDJSON for Ollama, SSE for OpenAI)
 - **Docker Swarm ready** - Production-ready containerisation
 - **Lightweight** - Minimal resource footprint (~128MB RAM)
 
