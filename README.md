@@ -32,17 +32,18 @@ A self-hosted proxy that presents multiple LLM providers via both Ollama and Ope
 
 | Model Name | Model ID | Use Case |
 |------------|----------|----------|
-| `openai`, `gpt-5.2` | gpt-5.2 | Latest flagship (Dec 2025)* |
+| `openai`, `gpt-5.2` | gpt-5.2 | Latest flagship (Dec 2025) |
 | `gpt-5.2-pro` | gpt-5.2-pro | Research-grade, slower but smarter* |
-| `gpt-5.2-mini` | gpt-5.2-mini | Fast GPT-5.2 variant |
-| `gpt-5.1` | gpt-5.1 | Previous flagship* |
-| `gpt-5`, `gpt-5-mini` | gpt-5, gpt-5-mini | Original GPT-5* |
+| `gpt-5.1`, `gpt-5.1-codex` | gpt-5.1, gpt-5.1-codex | Previous flagship, codex variants |
+| `gpt-5`, `gpt-5-mini`, `gpt-5-nano` | gpt-5-* | Original GPT-5 family |
+| `gpt-5-pro` | gpt-5-pro | Research-grade GPT-5* |
 | `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano` | gpt-4.1-* | 1M context, great for coding |
 | `gpt-4o`, `gpt-4o-mini` | gpt-4o, gpt-4o-mini | Multimodal with vision |
-| `o3`, `o3-mini` | o3, o3-mini | Latest reasoning models* |
-| `o1`, `o1-mini`, `o1-pro` | o1, o1-mini, o1-pro | Advanced reasoning* |
+| `o4-mini` | o4-mini | Latest compact reasoning* |
+| `o3`, `o3-pro`, `o3-mini` | o3, o3-pro, o3-mini | Advanced reasoning* |
+| `o1`, `o1-pro`, `o1-mini` | o1, o1-pro, o1-mini | Reasoning models* |
 
-*\*Reasoning models (GPT-5.x, o1, o3) don't support temperature, top_p, or system prompts. The proxy automatically handles this.*
+*\*Pro/reasoning models don't support temperature, top_p, or system prompts. The proxy automatically handles this.*
 
 ### Google Gemini
 
