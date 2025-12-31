@@ -2,7 +2,7 @@
 #
 # https://platform.openai.com/docs/models
 #
-# Reasoning models (GPT-5.x thinking/pro, o1, o3) have special parameter handling.
+# Reasoning models (GPT-5.x pro, o1, o3, o4) have special parameter handling.
 # They don't support temperature, top_p, etc. and use max_completion_tokens.
 
 # Common unsupported parameters for reasoning models
@@ -24,9 +24,6 @@ models:
     description: "GPT-5.2 - Latest flagship model for coding and agentic tasks"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
-    unsupported_params: *reasoning_unsupported
-    supports_system_prompt: false
-    use_max_completion_tokens: true
 
   gpt-5.2-pro:
     family: gpt-5.2
@@ -37,36 +34,57 @@ models:
     supports_system_prompt: false
     use_max_completion_tokens: true
 
-  gpt-5.2-mini:
+  gpt-5.2-chat-latest:
     family: gpt-5.2
-    description: "GPT-5.2 Mini - Fast and efficient"
+    description: "GPT-5.2 Chat - The model powering ChatGPT"
     context_length: 128000
-    capabilities: [vision, analysis, coding, writing, fast]
+    capabilities: [vision, analysis, coding, writing, reasoning]
 
   # ==========================================================================
-  # GPT-5.1 family (Previous flagship)
+  # GPT-5.1 family
   # ==========================================================================
   gpt-5.1:
     family: gpt-5.1
     description: "GPT-5.1 - Previous flagship, optimized for steerability"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
-    unsupported_params: *reasoning_unsupported
-    supports_system_prompt: false
-    use_max_completion_tokens: true
 
-  gpt-5.1-mini:
+  gpt-5.1-chat-latest:
     family: gpt-5.1
-    description: "GPT-5.1 Mini - Fast GPT-5.1 variant"
+    description: "GPT-5.1 Chat - ChatGPT version"
     context_length: 128000
-    capabilities: [vision, analysis, coding, writing, fast]
+    capabilities: [vision, analysis, coding, writing, reasoning]
+
+  gpt-5.1-codex:
+    family: gpt-5.1
+    description: "GPT-5.1 Codex - Optimized for coding"
+    context_length: 128000
+    capabilities: [coding, analysis, tools]
+
+  gpt-5.1-codex-max:
+    family: gpt-5.1
+    description: "GPT-5.1 Codex Max - Powers Codex and Codex CLI"
+    context_length: 128000
+    capabilities: [coding, analysis, tools]
+
+  gpt-5.1-codex-mini:
+    family: gpt-5.1
+    description: "GPT-5.1 Codex Mini - Fast coding model"
+    context_length: 128000
+    capabilities: [coding, analysis, tools, fast]
 
   # ==========================================================================
   # GPT-5 family (Original GPT-5)
   # ==========================================================================
   gpt-5:
     family: gpt-5
-    description: "GPT-5 - Original GPT-5 reasoning model"
+    description: "GPT-5 - Original GPT-5 model"
+    context_length: 128000
+    capabilities: [vision, analysis, coding, writing, reasoning]
+
+  gpt-5-pro:
+    family: gpt-5
+    description: "GPT-5 Pro - Research-grade GPT-5"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
     unsupported_params: *reasoning_unsupported
@@ -75,12 +93,27 @@ models:
 
   gpt-5-mini:
     family: gpt-5
-    description: "GPT-5 Mini - Fast reasoning model"
+    description: "GPT-5 Mini - Fast and affordable"
     context_length: 128000
-    capabilities: [vision, analysis, coding, writing, reasoning, fast]
-    unsupported_params: *reasoning_unsupported
-    supports_system_prompt: false
-    use_max_completion_tokens: true
+    capabilities: [vision, analysis, coding, writing, fast]
+
+  gpt-5-nano:
+    family: gpt-5
+    description: "GPT-5 Nano - Ultra-fast, lightweight"
+    context_length: 128000
+    capabilities: [vision, analysis, coding, writing, fast]
+
+  gpt-5-chat-latest:
+    family: gpt-5
+    description: "GPT-5 Chat - ChatGPT version"
+    context_length: 128000
+    capabilities: [vision, analysis, coding, writing, reasoning]
+
+  gpt-5-codex:
+    family: gpt-5
+    description: "GPT-5 Codex - Optimized for coding"
+    context_length: 128000
+    capabilities: [coding, analysis, tools]
 
   # ==========================================================================
   # GPT-4.1 family (April 2025 - improved coding & long context)
@@ -119,35 +152,41 @@ models:
     capabilities: [vision, analysis, coding, writing, fast]
 
   # ==========================================================================
-  # GPT-4 family (Legacy)
+  # O4 reasoning models (Latest)
   # ==========================================================================
-  gpt-4-turbo:
-    family: gpt-4
-    description: "GPT-4 Turbo - High capability with vision"
-    context_length: 128000
-    capabilities: [vision, analysis, coding, writing]
+  o4-mini:
+    family: o4
+    description: "O4 Mini - Latest compact reasoning model"
+    context_length: 200000
+    capabilities: [analysis, coding, reasoning, fast]
+    unsupported_params: *reasoning_unsupported
+    supports_system_prompt: false
+    use_max_completion_tokens: true
 
-  gpt-4:
-    family: gpt-4
-    description: "GPT-4 - Original GPT-4 model"
-    context_length: 8192
-    capabilities: [analysis, coding, writing]
-
-  # ==========================================================================
-  # GPT-3.5 family (Legacy)
-  # ==========================================================================
-  gpt-3.5-turbo:
-    family: gpt-3.5
-    description: "GPT-3.5 Turbo - Fast and cost-effective"
-    context_length: 16385
-    capabilities: [analysis, coding, writing, fast]
+  o4-mini-deep-research:
+    family: o4
+    description: "O4 Mini Deep Research - Extended reasoning for research"
+    context_length: 200000
+    capabilities: [analysis, coding, reasoning, search]
+    unsupported_params: *reasoning_unsupported
+    supports_system_prompt: false
+    use_max_completion_tokens: true
 
   # ==========================================================================
-  # O3 reasoning models (Latest reasoning)
+  # O3 reasoning models
   # ==========================================================================
   o3:
     family: o3
-    description: "O3 - Most advanced reasoning model"
+    description: "O3 - Advanced reasoning model"
+    context_length: 200000
+    capabilities: [analysis, coding, reasoning]
+    unsupported_params: *reasoning_unsupported
+    supports_system_prompt: false
+    use_max_completion_tokens: true
+
+  o3-pro:
+    family: o3
+    description: "O3 Pro - Most capable O3 model"
     context_length: 200000
     capabilities: [analysis, coding, reasoning]
     unsupported_params: *reasoning_unsupported
@@ -156,9 +195,18 @@ models:
 
   o3-mini:
     family: o3
-    description: "O3 Mini - Fast advanced reasoning"
+    description: "O3 Mini - Fast reasoning model"
     context_length: 200000
     capabilities: [analysis, coding, reasoning, fast]
+    unsupported_params: *reasoning_unsupported
+    supports_system_prompt: false
+    use_max_completion_tokens: true
+
+  o3-deep-research:
+    family: o3
+    description: "O3 Deep Research - Extended reasoning for research"
+    context_length: 200000
+    capabilities: [analysis, coding, reasoning, search]
     unsupported_params: *reasoning_unsupported
     supports_system_prompt: false
     use_max_completion_tokens: true
@@ -193,6 +241,15 @@ models:
     supports_system_prompt: false
     use_max_completion_tokens: true
 
+  # ==========================================================================
+  # Codex models
+  # ==========================================================================
+  codex-mini-latest:
+    family: codex
+    description: "Codex Mini - Latest compact coding model"
+    context_length: 128000
+    capabilities: [coding, tools]
+
 aliases:
   # GPT-5.2 aliases (latest)
   gpt-5.2-latest: gpt-5.2
@@ -202,11 +259,14 @@ aliases:
   # GPT-5.1 aliases
   gpt-5.1-latest: gpt-5.1
   gpt51: gpt-5.1
+  gpt51-codex: gpt-5.1-codex
 
   # GPT-5 aliases
   gpt5: gpt-5
   gpt-5-latest: gpt-5
   gpt5-mini: gpt-5-mini
+  gpt5-nano: gpt-5-nano
+  gpt5-pro: gpt-5-pro
 
   # GPT-4.1 aliases
   gpt-4.1-latest: gpt-4.1
@@ -219,21 +279,18 @@ aliases:
   gpt-4o-latest: gpt-4o
   gpt4o-mini: gpt-4o-mini
 
-  # GPT-4 aliases
-  gpt4: gpt-4
-  gpt4-turbo: gpt-4-turbo
-
-  # GPT-3.5 aliases
-  gpt35: gpt-3.5-turbo
-  gpt-35-turbo: gpt-3.5-turbo
-  chatgpt: gpt-3.5-turbo
+  # O4 aliases
+  o4: o4-mini
 
   # O3 aliases
   o3-latest: o3
 
   # O1 aliases
-  o1-preview: o1
   o1-latest: o1
+
+  # Codex aliases
+  codex: codex-mini-latest
+  codex-mini: codex-mini-latest
 
   # Generic alias - point to latest flagship
   openai: gpt-5.2
