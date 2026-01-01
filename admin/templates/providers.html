@@ -1,18 +1,30 @@
-{% extends "base.html" %}
-
-{% block title %}Providers{% endblock %}
-
-{% block content %}
+{% extends "base.html" %} {% block title %}Providers{% endblock %} {% block
+content %}
 <div x-data="providersPage()" x-init="loadProviders()">
     <!-- Header -->
-    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
         <div>
             <h1 class="text-2xl font-bold">Providers</h1>
-            <p class="text-base-content/60">Manage LLM provider configurations</p>
+            <p class="text-base-content/60">
+                Manage LLM provider configurations
+            </p>
         </div>
         <button @click="openAddModal()" class="btn btn-primary btn-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                />
             </svg>
             Add Provider
         </button>
@@ -25,33 +37,83 @@
                 <div class="card-body">
                     <div class="flex justify-between items-start">
                         <div>
-                            <h3 class="card-title text-lg" x-text="provider.id"></h3>
-                            <p class="text-sm text-base-content/60" x-text="provider.type"></p>
+                            <h3
+                                class="card-title text-lg"
+                                x-text="provider.id"
+                            ></h3>
+                            <p
+                                class="text-sm text-base-content/60"
+                                x-text="provider.type"
+                            ></p>
                         </div>
                         <div class="dropdown dropdown-end">
-                            <label tabindex="0" class="btn btn-ghost btn-sm btn-circle">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                            <label
+                                tabindex="0"
+                                class="btn btn-ghost btn-sm btn-circle"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+                                    />
                                 </svg>
                             </label>
-                            <ul tabindex="0" class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-52 z-10">
-                                <li><a @click="openEditModal(provider)">Edit</a></li>
-                                <li><a @click="testProvider(provider.id)">Test Connection</a></li>
-                                <li><a @click="toggleProvider(provider)" x-text="provider.enabled ? 'Disable' : 'Enable'"></a></li>
-                                <li><a @click="deleteProvider(provider.id)" class="text-error">Delete</a></li>
+                            <ul
+                                tabindex="0"
+                                class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-52 z-10"
+                            >
+                                <li>
+                                    <a @click="openEditModal(provider)">Edit</a>
+                                </li>
+                                <li>
+                                    <a @click="testProvider(provider.id)"
+                                        >Test Connection</a
+                                    >
+                                </li>
+                                <li>
+                                    <a
+                                        @click="toggleProvider(provider)"
+                                        x-text="provider.enabled ? 'Disable' : 'Enable'"
+                                    ></a>
+                                </li>
+                                <li>
+                                    <a
+                                        @click="deleteProvider(provider.id)"
+                                        class="text-error"
+                                        >Delete</a
+                                    >
+                                </li>
                             </ul>
                         </div>
                     </div>
 
                     <div class="mt-4 space-y-2 text-sm">
                         <div class="flex justify-between">
-                            <span class="text-base-content/60">API Key Env:</span>
-                            <code class="text-xs bg-base-200 px-2 py-1 rounded" x-text="provider.api_key_env || 'N/A'"></code>
+                            <span class="text-base-content/60"
+                                >API Key Env:</span
+                            >
+                            <code
+                                class="text-xs bg-base-200 px-2 py-1 rounded"
+                                x-text="provider.api_key_env || 'N/A'"
+                            ></code>
                         </div>
                         <template x-if="provider.base_url">
                             <div class="flex justify-between">
-                                <span class="text-base-content/60">Base URL:</span>
-                                <span class="text-xs truncate max-w-[150px]" x-text="provider.base_url"></span>
+                                <span class="text-base-content/60"
+                                    >Base URL:</span
+                                >
+                                <span
+                                    class="text-xs truncate max-w-[150px]"
+                                    x-text="provider.base_url"
+                                ></span>
                             </div>
                         </template>
                         <div class="flex justify-between">
@@ -83,19 +145,41 @@
     <!-- Empty state -->
     <template x-if="providers.length === 0 && !loading">
         <div class="text-center py-12">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-16 w-16 mx-auto text-base-content/30"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                />
             </svg>
             <h3 class="mt-4 text-lg font-medium">No providers configured</h3>
-            <p class="mt-2 text-base-content/60">Get started by adding your first provider.</p>
-            <button @click="openAddModal()" class="btn btn-primary mt-4">Add Provider</button>
+            <p class="mt-2 text-base-content/60">
+                Get started by adding your first provider.
+            </p>
+            <button @click="openAddModal()" class="btn btn-primary mt-4">
+                Add Provider
+            </button>
         </div>
     </template>
 
     <!-- Add/Edit Modal -->
-    <dialog id="provider_modal" class="modal" :class="{ 'modal-open': showModal }">
+    <dialog
+        id="provider_modal"
+        class="modal"
+        :class="{ 'modal-open': showModal }"
+    >
         <div class="modal-box">
-            <h3 class="font-bold text-lg" x-text="editing ? 'Edit Provider' : 'Add Provider'"></h3>
+            <h3
+                class="font-bold text-lg"
+                x-text="editing ? 'Edit Provider' : 'Add Provider'"
+            ></h3>
 
             <form @submit.prevent="saveProvider()" class="mt-4 space-y-4">
                 <div class="form-control">
@@ -116,13 +200,22 @@
                     <label class="label">
                         <span class="label-text">Type</span>
                     </label>
-                    <select x-model="form.type" class="select select-bordered" required>
-                        <option value="openai-compatible">OpenAI Compatible</option>
+                    <select
+                        x-model="form.type"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="openai-compatible">
+                            OpenAI Compatible
+                        </option>
                         <option value="anthropic">Anthropic</option>
                     </select>
                 </div>
 
-                <div class="form-control" x-show="form.type === 'openai-compatible'">
+                <div
+                    class="form-control"
+                    x-show="form.type === 'openai-compatible'"
+                >
                     <label class="label">
                         <span class="label-text">Base URL</span>
                     </label>
@@ -136,7 +229,9 @@
 
                 <div class="form-control">
                     <label class="label">
-                        <span class="label-text">API Key Environment Variable</span>
+                        <span class="label-text"
+                            >API Key Environment Variable</span
+                        >
                     </label>
                     <input
                         type="text"
@@ -145,21 +240,36 @@
                         placeholder="e.g., OPENAI_API_KEY"
                     />
                     <label class="label">
-                        <span class="label-text-alt text-base-content/60">Name of the environment variable containing the API key</span>
+                        <span class="label-text-alt text-base-content/60"
+                            >Name of the environment variable containing the API
+                            key</span
+                        >
                     </label>
                 </div>
 
                 <div class="form-control">
                     <label class="label cursor-pointer justify-start gap-3">
-                        <input type="checkbox" x-model="form.enabled" class="checkbox" />
+                        <input
+                            type="checkbox"
+                            x-model="form.enabled"
+                            class="checkbox"
+                        />
                         <span class="label-text">Enabled</span>
                     </label>
                 </div>
 
                 <div class="modal-action">
-                    <button type="button" @click="closeModal()" class="btn">Cancel</button>
-                    <button type="submit" class="btn btn-primary" :class="{ 'loading': saving }">
-                        <span x-text="editing ? 'Save Changes' : 'Add Provider'"></span>
+                    <button type="button" @click="closeModal()" class="btn">
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                    >
+                        <span
+                            x-text="editing ? 'Save Changes' : 'Add Provider'"
+                        ></span>
                     </button>
                 </div>
             </form>
@@ -172,7 +282,10 @@
     <!-- Toast notifications -->
     <div class="toast toast-end">
         <template x-for="toast in toasts" :key="toast.id">
-            <div class="alert" :class="toast.type === 'error' ? 'alert-error' : 'alert-success'">
+            <div
+                class="alert"
+                :class="toast.type === 'error' ? 'alert-error' : 'alert-success'"
+            >
                 <span x-text="toast.message"></span>
             </div>
         </template>
@@ -180,141 +293,154 @@
 </div>
 
 <script>
-function providersPage() {
-    return {
-        providers: [],
-        loading: true,
-        showModal: false,
-        editing: false,
-        saving: false,
-        toasts: [],
-        form: {
-            id: '',
-            type: 'openai-compatible',
-            base_url: '',
-            api_key_env: '',
-            enabled: true
-        },
+    function providersPage() {
+        return {
+            providers: [],
+            loading: true,
+            showModal: false,
+            editing: false,
+            saving: false,
+            toasts: [],
+            form: {
+                id: "",
+                type: "openai-compatible",
+                base_url: "",
+                api_key_env: "",
+                enabled: true,
+            },
 
-        async loadProviders() {
-            this.loading = true;
-            try {
-                const res = await fetch('/admin/api/providers');
-                if (res.ok) {
-                    this.providers = await res.json();
+            async loadProviders() {
+                this.loading = true;
+                try {
+                    const res = await fetch("/api/providers");
+                    if (res.ok) {
+                        this.providers = await res.json();
+                    }
+                } catch (err) {
+                    this.showToast("Failed to load providers", "error");
+                } finally {
+                    this.loading = false;
                 }
-            } catch (err) {
-                this.showToast('Failed to load providers', 'error');
-            } finally {
-                this.loading = false;
-            }
-        },
+            },
 
-        openAddModal() {
-            this.editing = false;
-            this.form = {
-                id: '',
-                type: 'openai-compatible',
-                base_url: '',
-                api_key_env: '',
-                enabled: true
-            };
-            this.showModal = true;
-        },
+            openAddModal() {
+                this.editing = false;
+                this.form = {
+                    id: "",
+                    type: "openai-compatible",
+                    base_url: "",
+                    api_key_env: "",
+                    enabled: true,
+                };
+                this.showModal = true;
+            },
 
-        openEditModal(provider) {
-            this.editing = true;
-            this.form = { ...provider };
-            this.showModal = true;
-        },
+            openEditModal(provider) {
+                this.editing = true;
+                this.form = { ...provider };
+                this.showModal = true;
+            },
 
-        closeModal() {
-            this.showModal = false;
-        },
+            closeModal() {
+                this.showModal = false;
+            },
 
-        async saveProvider() {
-            this.saving = true;
-            try {
-                const url = this.editing
-                    ? `/admin/api/providers/${this.form.id}`
-                    : '/admin/api/providers';
-                const method = this.editing ? 'PUT' : 'POST';
+            async saveProvider() {
+                this.saving = true;
+                try {
+                    const url = this.editing
+                        ? `/api/providers/${this.form.id}`
+                        : "/api/providers";
+                    const method = this.editing ? "PUT" : "POST";
 
-                const res = await fetch(url, {
-                    method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.form)
-                });
+                    const res = await fetch(url, {
+                        method,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(this.form),
+                    });
 
-                if (res.ok) {
-                    this.showToast(this.editing ? 'Provider updated' : 'Provider added');
-                    this.closeModal();
-                    await this.loadProviders();
-                } else {
+                    if (res.ok) {
+                        this.showToast(
+                            this.editing
+                                ? "Provider updated"
+                                : "Provider added",
+                        );
+                        this.closeModal();
+                        await this.loadProviders();
+                    } else {
+                        const data = await res.json();
+                        this.showToast(data.error || "Failed to save", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to save provider", "error");
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            async deleteProvider(id) {
+                if (
+                    !confirm(
+                        `Delete provider "${id}" and all its models/aliases?`,
+                    )
+                )
+                    return;
+
+                try {
+                    const res = await fetch(`/api/providers/${id}`, {
+                        method: "DELETE",
+                    });
+                    if (res.ok) {
+                        this.showToast("Provider deleted");
+                        await this.loadProviders();
+                    } else {
+                        this.showToast("Failed to delete", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to delete provider", "error");
+                }
+            },
+
+            async toggleProvider(provider) {
+                try {
+                    const res = await fetch(`/api/providers/${provider.id}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ enabled: !provider.enabled }),
+                    });
+                    if (res.ok) {
+                        await this.loadProviders();
+                    }
+                } catch (err) {
+                    this.showToast("Failed to update provider", "error");
+                }
+            },
+
+            async testProvider(id) {
+                try {
+                    const res = await fetch(`/api/providers/${id}/test`, {
+                        method: "POST",
+                    });
                     const data = await res.json();
-                    this.showToast(data.error || 'Failed to save', 'error');
+
+                    if (data.success) {
+                        this.showToast(data.message || "Connection OK");
+                    } else {
+                        this.showToast(data.error || "Test failed", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Test failed", "error");
                 }
-            } catch (err) {
-                this.showToast('Failed to save provider', 'error');
-            } finally {
-                this.saving = false;
-            }
-        },
+            },
 
-        async deleteProvider(id) {
-            if (!confirm(`Delete provider "${id}" and all its models/aliases?`)) return;
-
-            try {
-                const res = await fetch(`/admin/api/providers/${id}`, { method: 'DELETE' });
-                if (res.ok) {
-                    this.showToast('Provider deleted');
-                    await this.loadProviders();
-                } else {
-                    this.showToast('Failed to delete', 'error');
-                }
-            } catch (err) {
-                this.showToast('Failed to delete provider', 'error');
-            }
-        },
-
-        async toggleProvider(provider) {
-            try {
-                const res = await fetch(`/admin/api/providers/${provider.id}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled: !provider.enabled })
-                });
-                if (res.ok) {
-                    await this.loadProviders();
-                }
-            } catch (err) {
-                this.showToast('Failed to update provider', 'error');
-            }
-        },
-
-        async testProvider(id) {
-            try {
-                const res = await fetch(`/admin/api/providers/${id}/test`, { method: 'POST' });
-                const data = await res.json();
-
-                if (data.success) {
-                    this.showToast(data.message || 'Connection OK');
-                } else {
-                    this.showToast(data.error || 'Test failed', 'error');
-                }
-            } catch (err) {
-                this.showToast('Test failed', 'error');
-            }
-        },
-
-        showToast(message, type = 'success') {
-            const id = Date.now();
-            this.toasts.push({ id, message, type });
-            setTimeout(() => {
-                this.toasts = this.toasts.filter(t => t.id !== id);
-            }, 3000);
-        }
-    };
-}
+            showToast(message, type = "success") {
+                const id = Date.now();
+                this.toasts.push({ id, message, type });
+                setTimeout(() => {
+                    this.toasts = this.toasts.filter((t) => t.id !== id);
+                }, 3000);
+            },
+        };
+    }
 </script>
 {% endblock %}

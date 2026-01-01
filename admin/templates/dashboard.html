@@ -1,19 +1,35 @@
-{% extends "base.html" %}
-
-{% block title %}Dashboard{% endblock %}
-
-{% block content %}
+{% extends "base.html" %} {% block title %}Dashboard{% endblock %} {% block
+content %}
 <div x-data="dashboard()" x-init="loadStats()">
     <!-- Header -->
-    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
         <div>
             <h1 class="text-2xl font-bold">Dashboard</h1>
-            <p class="text-base-content/60">Overview of your LLM proxy configuration</p>
+            <p class="text-base-content/60">
+                Overview of your LLM proxy configuration
+            </p>
         </div>
         <div class="flex gap-2">
-            <button @click="reloadConfig()" class="btn btn-outline btn-sm" :class="{ 'loading': reloading }">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            <button
+                @click="reloadConfig()"
+                class="btn btn-outline btn-sm"
+                :class="{ 'loading': reloading }"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4 mr-1"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
                 </svg>
                 Reload Config
             </button>
@@ -28,22 +44,40 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-base-content/60 text-sm">Providers</p>
-                        <p class="text-3xl font-bold" x-text="stats.providers?.total || '-'"></p>
+                        <p
+                            class="text-3xl font-bold"
+                            x-text="stats.providers?.total || '-'"
+                        ></p>
                     </div>
                     <div class="bg-primary/10 p-3 rounded-lg">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-8 w-8 text-primary"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                            />
                         </svg>
                     </div>
                 </div>
                 <div class="mt-4 flex gap-4 text-sm">
                     <div class="flex items-center gap-1">
                         <span class="badge badge-success badge-xs"></span>
-                        <span x-text="stats.providers?.configured || 0"></span> configured
+                        <span x-text="stats.providers?.configured || 0"></span>
+                        configured
                     </div>
                     <div class="flex items-center gap-1">
                         <span class="badge badge-warning badge-xs"></span>
-                        <span x-text="(stats.providers?.enabled || 0) - (stats.providers?.configured || 0)"></span> unconfigured
+                        <span
+                            x-text="(stats.providers?.enabled || 0) - (stats.providers?.configured || 0)"
+                        ></span>
+                        unconfigured
                     </div>
                 </div>
             </div>
@@ -55,22 +89,40 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-base-content/60 text-sm">Models</p>
-                        <p class="text-3xl font-bold" x-text="stats.models?.total || '-'"></p>
+                        <p
+                            class="text-3xl font-bold"
+                            x-text="stats.models?.total || '-'"
+                        ></p>
                     </div>
                     <div class="bg-secondary/10 p-3 rounded-lg">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-8 w-8 text-secondary"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                            />
                         </svg>
                     </div>
                 </div>
                 <div class="mt-4 flex gap-4 text-sm">
                     <div class="flex items-center gap-1">
                         <span class="badge badge-success badge-xs"></span>
-                        <span x-text="stats.models?.enabled || 0"></span> enabled
+                        <span x-text="stats.models?.enabled || 0"></span>
+                        enabled
                     </div>
                     <div class="flex items-center gap-1">
                         <span class="badge badge-neutral badge-xs"></span>
-                        <span x-text="(stats.models?.total || 0) - (stats.models?.enabled || 0)"></span> disabled
+                        <span
+                            x-text="(stats.models?.total || 0) - (stats.models?.enabled || 0)"
+                        ></span>
+                        disabled
                     </div>
                 </div>
             </div>
@@ -82,11 +134,25 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-base-content/60 text-sm">Aliases</p>
-                        <p class="text-3xl font-bold" x-text="stats.aliases?.total || '-'"></p>
+                        <p
+                            class="text-3xl font-bold"
+                            x-text="stats.aliases?.total || '-'"
+                        ></p>
                     </div>
                     <div class="bg-accent/10 p-3 rounded-lg">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-8 w-8 text-accent"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                            />
                         </svg>
                     </div>
                 </div>
@@ -115,34 +181,72 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <template x-for="provider in providers" :key="provider.id">
+                        <template
+                            x-for="provider in providers"
+                            :key="provider.id"
+                        >
                             <tr>
-                                <td class="font-medium" x-text="provider.id"></td>
+                                <td
+                                    class="font-medium"
+                                    x-text="provider.id"
+                                ></td>
                                 <td>
-                                    <span class="badge badge-ghost" x-text="provider.type"></span>
+                                    <span
+                                        class="badge badge-ghost"
+                                        x-text="provider.type"
+                                    ></span>
                                 </td>
                                 <td x-text="provider.model_count"></td>
                                 <td x-text="provider.alias_count"></td>
                                 <td>
-                                    <template x-if="provider.has_api_key || provider.type === 'anthropic'">
+                                    <template
+                                        x-if="provider.has_api_key || provider.type === 'anthropic'"
+                                    >
                                         <span class="badge badge-success gap-1">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-3 w-3"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M5 13l4 4L19 7"
+                                                />
                                             </svg>
                                             Configured
                                         </span>
                                     </template>
-                                    <template x-if="!provider.has_api_key && provider.type !== 'anthropic'">
+                                    <template
+                                        x-if="!provider.has_api_key && provider.type !== 'anthropic'"
+                                    >
                                         <span class="badge badge-warning gap-1">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-3 w-3"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                                />
                                             </svg>
                                             No API Key
                                         </span>
                                     </template>
                                 </td>
                                 <td>
-                                    <button @click="testProvider(provider.id)" class="btn btn-ghost btn-xs">
+                                    <button
+                                        @click="testProvider(provider.id)"
+                                        class="btn btn-ghost btn-xs"
+                                    >
                                         Test
                                     </button>
                                 </td>
@@ -157,7 +261,10 @@
     <!-- Toast notifications -->
     <div class="toast toast-end">
         <template x-for="toast in toasts" :key="toast.id">
-            <div class="alert" :class="toast.type === 'error' ? 'alert-error' : 'alert-success'">
+            <div
+                class="alert"
+                :class="toast.type === 'error' ? 'alert-error' : 'alert-success'"
+            >
                 <span x-text="toast.message"></span>
             </div>
         </template>
@@ -165,67 +272,73 @@
 </div>
 
 <script>
-function dashboard() {
-    return {
-        stats: {},
-        providers: [],
-        reloading: false,
-        toasts: [],
+    function dashboard() {
+        return {
+            stats: {},
+            providers: [],
+            reloading: false,
+            toasts: [],
 
-        async loadStats() {
-            try {
-                const [statsRes, providersRes] = await Promise.all([
-                    fetch('/admin/api/stats'),
-                    fetch('/admin/api/providers')
-                ]);
+            async loadStats() {
+                try {
+                    const [statsRes, providersRes] = await Promise.all([
+                        fetch("/api/stats"),
+                        fetch("/api/providers"),
+                    ]);
 
-                if (statsRes.ok) this.stats = await statsRes.json();
-                if (providersRes.ok) this.providers = await providersRes.json();
-            } catch (err) {
-                this.showToast('Failed to load data', 'error');
-            }
-        },
-
-        async reloadConfig() {
-            this.reloading = true;
-            try {
-                const res = await fetch('/admin/api/config/reload', { method: 'POST' });
-                if (res.ok) {
-                    this.showToast('Configuration reloaded');
-                    await this.loadStats();
-                } else {
-                    this.showToast('Failed to reload config', 'error');
+                    if (statsRes.ok) this.stats = await statsRes.json();
+                    if (providersRes.ok)
+                        this.providers = await providersRes.json();
+                } catch (err) {
+                    this.showToast("Failed to load data", "error");
                 }
-            } catch (err) {
-                this.showToast('Failed to reload config', 'error');
-            } finally {
-                this.reloading = false;
-            }
-        },
+            },
 
-        async testProvider(providerId) {
-            try {
-                const res = await fetch(`/admin/api/providers/${providerId}/test`, { method: 'POST' });
-                const data = await res.json();
-
-                if (data.success) {
-                    this.showToast(data.message || 'Provider OK');
-                } else {
-                    this.showToast(data.error || 'Test failed', 'error');
+            async reloadConfig() {
+                this.reloading = true;
+                try {
+                    const res = await fetch("/api/config/reload", {
+                        method: "POST",
+                    });
+                    if (res.ok) {
+                        this.showToast("Configuration reloaded");
+                        await this.loadStats();
+                    } else {
+                        this.showToast("Failed to reload config", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to reload config", "error");
+                } finally {
+                    this.reloading = false;
                 }
-            } catch (err) {
-                this.showToast('Test failed', 'error');
-            }
-        },
+            },
 
-        showToast(message, type = 'success') {
-            const id = Date.now();
-            this.toasts.push({ id, message, type });
-            setTimeout(() => {
-                this.toasts = this.toasts.filter(t => t.id !== id);
-            }, 3000);
-        }
-    };
-}
+            async testProvider(providerId) {
+                try {
+                    const res = await fetch(
+                        `/api/providers/${providerId}/test`,
+                        { method: "POST" },
+                    );
+                    const data = await res.json();
+
+                    if (data.success) {
+                        this.showToast(data.message || "Provider OK");
+                    } else {
+                        this.showToast(data.error || "Test failed", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Test failed", "error");
+                }
+            },
+
+            showToast(message, type = "success") {
+                const id = Date.now();
+                this.toasts.push({ id, message, type });
+                setTimeout(() => {
+                    this.toasts = this.toasts.filter((t) => t.id !== id);
+                }, 3000);
+            },
+        };
+    }
 </script>
 {% endblock %}

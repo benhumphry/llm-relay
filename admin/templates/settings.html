@@ -1,13 +1,12 @@
-{% extends "base.html" %}
-
-{% block title %}Settings{% endblock %}
-
-{% block content %}
+{% extends "base.html" %} {% block title %}Settings{% endblock %} {% block
+content %}
 <div x-data="settingsPage()" x-init="loadSettings()">
     <!-- Header -->
     <div class="mb-6">
         <h1 class="text-2xl font-bold">Settings</h1>
-        <p class="text-base-content/60">Configure proxy settings and defaults</p>
+        <p class="text-base-content/60">
+            Configure proxy settings and defaults
+        </p>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -40,7 +39,10 @@
                         <label class="label">
                             <span class="label-text">Model</span>
                         </label>
-                        <select x-model="settings.default_model" class="select select-bordered">
+                        <select
+                            x-model="settings.default_model"
+                            class="select select-bordered"
+                        >
                             <option value="">Select model</option>
                             <template x-for="m in providerModels" :key="m.id">
                                 <option :value="m.id" x-text="m.id"></option>
@@ -48,7 +50,11 @@
                         </select>
                     </div>
 
-                    <button @click="saveSettings()" class="btn btn-primary" :class="{ 'loading': saving }">
+                    <button
+                        @click="saveSettings()"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                    >
                         Save Default
                     </button>
                 </div>
@@ -91,7 +97,11 @@
                         />
                     </div>
 
-                    <button type="submit" class="btn btn-primary" :class="{ 'loading': changingPassword }">
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': changingPassword }"
+                    >
                         Change Password
                     </button>
                 </form>
@@ -109,22 +119,58 @@
                 <div class="space-y-4">
                     <div class="form-control">
                         <label class="label cursor-pointer justify-start gap-3">
-                            <input type="checkbox" x-model="importOverwrite" class="checkbox" />
-                            <span class="label-text">Overwrite existing entries</span>
+                            <input
+                                type="checkbox"
+                                x-model="importOverwrite"
+                                class="checkbox"
+                            />
+                            <span class="label-text"
+                                >Overwrite existing entries</span
+                            >
                         </label>
                     </div>
 
                     <div class="flex gap-2">
-                        <button @click="importConfig()" class="btn btn-outline" :class="{ 'loading': importing }">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        <button
+                            @click="importConfig()"
+                            class="btn btn-outline"
+                            :class="{ 'loading': importing }"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 mr-1"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                                />
                             </svg>
                             Import from YAML
                         </button>
 
-                        <button @click="reloadConfig()" class="btn btn-outline" :class="{ 'loading': reloading }">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        <button
+                            @click="reloadConfig()"
+                            class="btn btn-outline"
+                            :class="{ 'loading': reloading }"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 mr-1"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                />
                             </svg>
                             Reload Config
                         </button>
@@ -159,8 +205,12 @@
                         <span x-text="stats.aliases?.total || '-'"></span>
                     </div>
                     <div class="flex justify-between">
-                        <span class="text-base-content/60">Configured Providers:</span>
-                        <span x-text="stats.providers?.configured || '-'"></span>
+                        <span class="text-base-content/60"
+                            >Configured Providers:</span
+                        >
+                        <span
+                            x-text="stats.providers?.configured || '-'"
+                        ></span>
                     </div>
                 </div>
             </div>
@@ -170,7 +220,10 @@
     <!-- Toast notifications -->
     <div class="toast toast-end">
         <template x-for="toast in toasts" :key="toast.id">
-            <div class="alert" :class="toast.type === 'error' ? 'alert-error' : 'alert-success'">
+            <div
+                class="alert"
+                :class="toast.type === 'error' ? 'alert-error' : 'alert-success'"
+            >
                 <span x-text="toast.message"></span>
             </div>
         </template>
@@ -178,170 +231,191 @@
 </div>
 
 <script>
-function settingsPage() {
-    return {
-        settings: {
-            default_provider: '',
-            default_model: ''
-        },
-        providers: [],
-        providerModels: [],
-        stats: {},
-        saving: false,
-        newPassword: '',
-        confirmPassword: '',
-        changingPassword: false,
-        importOverwrite: false,
-        importing: false,
-        reloading: false,
-        toasts: [],
+    function settingsPage() {
+        return {
+            settings: {
+                default_provider: "",
+                default_model: "",
+            },
+            providers: [],
+            providerModels: [],
+            stats: {},
+            saving: false,
+            newPassword: "",
+            confirmPassword: "",
+            changingPassword: false,
+            importOverwrite: false,
+            importing: false,
+            reloading: false,
+            toasts: [],
 
-        async loadSettings() {
-            try {
-                const [settingsRes, providersRes, statsRes] = await Promise.all([
-                    fetch('/admin/api/settings'),
-                    fetch('/admin/api/providers'),
-                    fetch('/admin/api/stats')
-                ]);
+            async loadSettings() {
+                try {
+                    const [settingsRes, providersRes, statsRes] =
+                        await Promise.all([
+                            fetch("/api/settings"),
+                            fetch("/api/providers"),
+                            fetch("/api/stats"),
+                        ]);
 
-                if (settingsRes.ok) {
-                    this.settings = await settingsRes.json();
+                    if (settingsRes.ok) {
+                        this.settings = await settingsRes.json();
+                    }
+                    if (providersRes.ok) {
+                        this.providers = await providersRes.json();
+                    }
+                    if (statsRes.ok) {
+                        this.stats = await statsRes.json();
+                    }
+
+                    // Load models for default provider
+                    if (this.settings.default_provider) {
+                        await this.loadProviderModels();
+                    }
+                } catch (err) {
+                    this.showToast("Failed to load settings", "error");
                 }
-                if (providersRes.ok) {
-                    this.providers = await providersRes.json();
+            },
+
+            async loadProviderModels() {
+                if (!this.settings.default_provider) {
+                    this.providerModels = [];
+                    return;
                 }
-                if (statsRes.ok) {
-                    this.stats = await statsRes.json();
+
+                try {
+                    const res = await fetch(
+                        `/api/models?provider=${this.settings.default_provider}`,
+                    );
+                    if (res.ok) {
+                        this.providerModels = await res.json();
+                    }
+                } catch (err) {
+                    console.error("Failed to load models", err);
+                }
+            },
+
+            async saveSettings() {
+                this.saving = true;
+                try {
+                    const res = await fetch("/api/settings", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(this.settings),
+                    });
+
+                    if (res.ok) {
+                        this.showToast("Settings saved");
+                    } else {
+                        this.showToast("Failed to save settings", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to save settings", "error");
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            async changePassword() {
+                if (this.newPassword !== this.confirmPassword) {
+                    this.showToast("Passwords do not match", "error");
+                    return;
                 }
 
-                // Load models for default provider
-                if (this.settings.default_provider) {
-                    await this.loadProviderModels();
+                if (this.newPassword.length < 8) {
+                    this.showToast(
+                        "Password must be at least 8 characters",
+                        "error",
+                    );
+                    return;
                 }
-            } catch (err) {
-                this.showToast('Failed to load settings', 'error');
-            }
-        },
 
-        async loadProviderModels() {
-            if (!this.settings.default_provider) {
-                this.providerModels = [];
-                return;
-            }
+                this.changingPassword = true;
+                try {
+                    const res = await fetch("/api/settings/password", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            new_password: this.newPassword,
+                        }),
+                    });
 
-            try {
-                const res = await fetch(`/admin/api/models?provider=${this.settings.default_provider}`);
-                if (res.ok) {
-                    this.providerModels = await res.json();
+                    if (res.ok) {
+                        this.showToast("Password changed successfully");
+                        this.newPassword = "";
+                        this.confirmPassword = "";
+                    } else {
+                        const data = await res.json();
+                        this.showToast(
+                            data.error || "Failed to change password",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast("Failed to change password", "error");
+                } finally {
+                    this.changingPassword = false;
                 }
-            } catch (err) {
-                console.error('Failed to load models', err);
-            }
-        },
+            },
 
-        async saveSettings() {
-            this.saving = true;
-            try {
-                const res = await fetch('/admin/api/settings', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(this.settings)
-                });
+            async importConfig() {
+                this.importing = true;
+                try {
+                    const res = await fetch("/api/config/import", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            overwrite: this.importOverwrite,
+                        }),
+                    });
 
-                if (res.ok) {
-                    this.showToast('Settings saved');
-                } else {
-                    this.showToast('Failed to save settings', 'error');
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.showToast("Configuration imported successfully");
+                        await this.loadSettings();
+                    } else {
+                        this.showToast(
+                            "Failed to import configuration",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast("Failed to import configuration", "error");
+                } finally {
+                    this.importing = false;
                 }
-            } catch (err) {
-                this.showToast('Failed to save settings', 'error');
-            } finally {
-                this.saving = false;
-            }
-        },
+            },
 
-        async changePassword() {
-            if (this.newPassword !== this.confirmPassword) {
-                this.showToast('Passwords do not match', 'error');
-                return;
-            }
+            async reloadConfig() {
+                this.reloading = true;
+                try {
+                    const res = await fetch("/api/config/reload", {
+                        method: "POST",
+                    });
 
-            if (this.newPassword.length < 8) {
-                this.showToast('Password must be at least 8 characters', 'error');
-                return;
-            }
-
-            this.changingPassword = true;
-            try {
-                const res = await fetch('/admin/api/settings/password', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ new_password: this.newPassword })
-                });
-
-                if (res.ok) {
-                    this.showToast('Password changed successfully');
-                    this.newPassword = '';
-                    this.confirmPassword = '';
-                } else {
-                    const data = await res.json();
-                    this.showToast(data.error || 'Failed to change password', 'error');
+                    if (res.ok) {
+                        this.showToast("Configuration reloaded");
+                    } else {
+                        this.showToast(
+                            "Failed to reload configuration",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast("Failed to reload configuration", "error");
+                } finally {
+                    this.reloading = false;
                 }
-            } catch (err) {
-                this.showToast('Failed to change password', 'error');
-            } finally {
-                this.changingPassword = false;
-            }
-        },
+            },
 
-        async importConfig() {
-            this.importing = true;
-            try {
-                const res = await fetch('/admin/api/config/import', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ overwrite: this.importOverwrite })
-                });
-
-                if (res.ok) {
-                    const data = await res.json();
-                    this.showToast('Configuration imported successfully');
-                    await this.loadSettings();
-                } else {
-                    this.showToast('Failed to import configuration', 'error');
-                }
-            } catch (err) {
-                this.showToast('Failed to import configuration', 'error');
-            } finally {
-                this.importing = false;
-            }
-        },
-
-        async reloadConfig() {
-            this.reloading = true;
-            try {
-                const res = await fetch('/admin/api/config/reload', { method: 'POST' });
-
-                if (res.ok) {
-                    this.showToast('Configuration reloaded');
-                } else {
-                    this.showToast('Failed to reload configuration', 'error');
-                }
-            } catch (err) {
-                this.showToast('Failed to reload configuration', 'error');
-            } finally {
-                this.reloading = false;
-            }
-        },
-
-        showToast(message, type = 'success') {
-            const id = Date.now();
-            this.toasts.push({ id, message, type });
-            setTimeout(() => {
-                this.toasts = this.toasts.filter(t => t.id !== id);
-            }, 3000);
-        }
-    };
-}
+            showToast(message, type = "success") {
+                const id = Date.now();
+                this.toasts.push({ id, message, type });
+                setTimeout(() => {
+                    this.toasts = this.toasts.filter((t) => t.id !== id);
+                }, 3000);
+            },
+        };
+    }
 </script>
 {% endblock %}
