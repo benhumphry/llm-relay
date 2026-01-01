@@ -2,6 +2,8 @@
 Authentication for the admin interface.
 
 Uses bcrypt for password hashing and session cookies for authentication.
+Authentication can be disabled via ADMIN_AUTH_ENABLED=false for environments
+using external authentication (Tailscale, Cloudflare Access, reverse proxy, etc.)
 """
 
 import logging
@@ -20,6 +22,11 @@ logger = logging.getLogger(__name__)
 # Session configuration
 SESSION_COOKIE_NAME = "admin_session"
 SESSION_LIFETIME_HOURS = 24
+
+
+def is_auth_enabled() -> bool:
+    """Check if authentication is enabled for the admin UI."""
+    return os.environ.get("ADMIN_AUTH_ENABLED", "true").lower() != "false"
 
 
 def get_session_secret() -> str:
@@ -95,8 +102,13 @@ def init_admin_password() -> bool:
     Initialize admin password from environment variable if not set.
 
     Returns:
-        True if password was initialized, False if already set
+        True if password was initialized, False if already set or auth disabled
     """
+    # Skip if auth is disabled
+    if not is_auth_enabled():
+        logger.info("Admin authentication disabled (ADMIN_AUTH_ENABLED=false)")
+        return False
+
     # Check if already set
     if get_admin_password_hash():
         return False
@@ -117,6 +129,7 @@ def init_admin_password() -> bool:
     logger.warning("ADMIN PASSWORD NOT SET - Generated random password:")
     logger.warning(f"  {password}")
     logger.warning("Set ADMIN_PASSWORD environment variable to use your own password.")
+    logger.warning("Or set ADMIN_AUTH_ENABLED=false if using external authentication.")
     logger.warning("=" * 60)
     return True
 
@@ -153,6 +166,9 @@ def logout_user() -> None:
 
 def is_authenticated() -> bool:
     """Check if the current session is authenticated."""
+    # If auth is disabled, always return True
+    if not is_auth_enabled():
+        return True
     return session.get("authenticated", False)
 
 

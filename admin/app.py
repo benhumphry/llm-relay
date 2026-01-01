@@ -26,6 +26,7 @@ from db.importer import import_all_from_yaml
 
 from .auth import (
     authenticate,
+    is_auth_enabled,
     is_authenticated,
     login_user,
     logout_user,
@@ -59,6 +60,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         template_folder=str(TEMPLATE_DIR),
     )
 
+    @admin.context_processor
+    def inject_auth_status():
+        """Make auth status available in all templates."""
+        return {"auth_enabled": is_auth_enabled()}
+
     # -------------------------------------------------------------------------
     # Authentication Routes
     # -------------------------------------------------------------------------
@@ -66,6 +72,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/login", methods=["GET", "POST"])
     def login():
         """Login page and handler."""
+        # If auth is disabled, redirect to dashboard
+        if not is_auth_enabled():
+            return redirect(url_for("admin.dashboard"))
+
         error = None
 
         if request.method == "POST":
