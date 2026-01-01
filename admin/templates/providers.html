@@ -126,15 +126,31 @@ content %}
                         </div>
                     </div>
 
-                    <div class="mt-4 flex gap-2">
-                        <template x-if="provider.enabled">
-                            <span class="badge badge-success">Enabled</span>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <!-- Active/Inactive status (usability) -->
+                        <template
+                            x-if="provider.enabled && provider.has_api_key"
+                        >
+                            <span class="badge badge-success">Active</span>
+                        </template>
+                        <template
+                            x-if="provider.enabled && !provider.has_api_key"
+                        >
+                            <span class="badge badge-warning">Inactive</span>
                         </template>
                         <template x-if="!provider.enabled">
                             <span class="badge badge-neutral">Disabled</span>
                         </template>
+                        <!-- Additional info badges -->
                         <template x-if="provider.has_api_key">
-                            <span class="badge badge-info">API Key Set</span>
+                            <span class="badge badge-outline badge-info"
+                                >API Key Set</span
+                            >
+                        </template>
+                        <template x-if="!provider.has_api_key">
+                            <span class="badge badge-outline badge-warning"
+                                >No API Key</span
+                            >
                         </template>
                     </div>
                 </div>
