@@ -42,13 +42,18 @@ STATIC_DIR = ADMIN_DIR / "static"
 TEMPLATE_DIR = ADMIN_DIR / "templates"
 
 
-def create_admin_blueprint() -> Blueprint:
-    """Create and configure the admin blueprint."""
+def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
+    """
+    Create and configure the admin blueprint.
 
+    Args:
+        url_prefix: URL prefix for admin routes. Use "" for root when running
+                   as a dedicated admin server on a separate port.
+    """
     admin = Blueprint(
         "admin",
         __name__,
-        url_prefix="/admin",
+        url_prefix=url_prefix,
         static_folder=str(STATIC_DIR),
         static_url_path="/static",
         template_folder=str(TEMPLATE_DIR),

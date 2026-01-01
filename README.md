@@ -7,6 +7,8 @@ A self-hosted proxy that presents multiple LLM providers via both Ollama and Ope
 ## Features
 
 - **9 providers built-in** - Anthropic, OpenAI, Gemini, Perplexity, Groq, DeepSeek, Mistral, xAI, OpenRouter
+- **Web Admin UI** - Manage providers, models, and aliases via a polished web interface
+- **Dual-port architecture** - API server and Admin UI run on separate ports for flexible deployment
 - **Full Ollama API compatibility** - Works with any application that supports Ollama (including Open WebUI)
 - **OpenAI API compatibility** - Also exposes `/v1/*` endpoints for OpenAI SDK compatibility
 - **Reasoning model support** - Automatic parameter handling for GPT-5, o1, o3 models
@@ -156,25 +158,62 @@ For Docker Swarm, use `docker-compose.swarm.yml` which includes Docker secrets s
 
 ## Configuration
 
+### Ports and Architecture
+
+The proxy runs two separate servers:
+
+| Server | Default Port | Purpose |
+|--------|-------------|---------|
+| **API Server** | 11434 | Ollama and OpenAI compatible endpoints |
+| **Admin UI** | 8080 | Web interface for configuration |
+
+This separation allows you to:
+- Expose the Admin UI publicly (it's password-protected) while keeping the API internal
+- Or expose the API publicly while keeping Admin UI on an internal network
+- Apply different authentication/routing rules to each
+
 ### Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | At least one | Anthropic API key for Claude models |
-| `OPENAI_API_KEY` | provider | OpenAI API key for GPT models |
-| `GOOGLE_API_KEY` | required | Google API key for Gemini models |
-| `PERPLEXITY_API_KEY` | | Perplexity API key for Sonar models |
-| `GROQ_API_KEY` | | Groq API key for fast inference |
-| `DEEPSEEK_API_KEY` | | DeepSeek API key |
-| `MISTRAL_API_KEY` | | Mistral API key |
-| `XAI_API_KEY` | | xAI API key for Grok models |
-| `OPENROUTER_API_KEY` | | OpenRouter API key (access 400+ models) |
-| `PORT` | No | Server port (default: 11434) |
-| `HOST` | No | Bind address (default: 0.0.0.0) |
-| `DEBUG` | No | Enable debug logging (default: false) |
-| `CONFIG_DIR` | No | Custom config directory path |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | At least one | | Anthropic API key for Claude models |
+| `OPENAI_API_KEY` | provider | | OpenAI API key for GPT models |
+| `GOOGLE_API_KEY` | required | | Google API key for Gemini models |
+| `PERPLEXITY_API_KEY` | | | Perplexity API key for Sonar models |
+| `GROQ_API_KEY` | | | Groq API key for fast inference |
+| `DEEPSEEK_API_KEY` | | | DeepSeek API key |
+| `MISTRAL_API_KEY` | | | Mistral API key |
+| `XAI_API_KEY` | | | xAI API key for Grok models |
+| `OPENROUTER_API_KEY` | | | OpenRouter API key (access 400+ models) |
+| `PORT` | | 11434 | API server port |
+| `HOST` | | 0.0.0.0 | API server bind address |
+| `ADMIN_PORT` | | 8080 | Admin UI port |
+| `ADMIN_HOST` | | 0.0.0.0 | Admin UI bind address |
+| `ADMIN_ENABLED` | | true | Set to "false" to disable Admin UI |
+| `ADMIN_PASSWORD` | | (random) | Admin UI password (logged on first run if not set) |
+| `DEBUG` | | false | Enable debug logging |
+| `CONFIG_DIR` | | | Custom config directory path |
 
 All API keys also support `_FILE` suffix for Docker secrets (e.g., `ANTHROPIC_API_KEY_FILE`).
+
+### Admin UI
+
+The Admin UI provides a web interface for managing:
+- **Providers** - Add, edit, enable/disable LLM providers
+- **Models** - View and configure model definitions
+- **Aliases** - Create shortcuts for model names
+- **Settings** - Configure defaults, change password, import/export config
+
+Access the Admin UI at `http://localhost:8080` (or your configured `ADMIN_PORT`).
+
+On first run, if `ADMIN_PASSWORD` is not set, a random password will be generated and logged:
+```
+============================================================
+ADMIN PASSWORD NOT SET - Generated random password:
+  abc123xyz789...
+Set ADMIN_PASSWORD environment variable to use your own password.
+============================================================
+```
 
 ## API Endpoints
 

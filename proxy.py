@@ -7,6 +7,10 @@ via both Ollama and OpenAI-compatible API interfaces.
 
 This allows any Ollama or OpenAI-compatible application to use models from
 multiple providers seamlessly.
+
+The proxy runs two separate servers:
+- API server (default port 11434): Ollama and OpenAI compatible endpoints
+- Admin server (default port 8080): Web UI for configuration and management
 """
 
 import json
@@ -14,17 +18,15 @@ import logging
 import os
 import random
 import string
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Generator
 
 from flask import Flask, Response, jsonify, request
 
-from admin import create_admin_blueprint, init_admin_password
-from admin.auth import get_session_secret
-
 # Import database and admin
-from db import check_db_initialized, init_db
+from db import init_db
 from db.connection import get_db_context
 from db.importer import import_all_from_yaml
 
@@ -38,25 +40,38 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def create_app():
-    """Create and configure the Flask application."""
+def create_api_app():
+    """Create the API Flask application (Ollama/OpenAI compatible endpoints)."""
     application = Flask(__name__)
 
-    # Initialize database first
+    # Initialize database
+    init_db()
+
+    return application
+
+
+def create_admin_app():
+    """Create the Admin Flask application (Web UI)."""
+    from admin import create_admin_blueprint
+    from admin.auth import get_session_secret
+
+    application = Flask(__name__)
+
+    # Initialize database (idempotent)
     init_db()
 
     # Configure session for admin authentication
     application.secret_key = get_session_secret()
 
-    # Register admin blueprint
-    admin_blueprint = create_admin_blueprint()
+    # Register admin blueprint at root (since this is a dedicated admin server)
+    admin_blueprint = create_admin_blueprint(url_prefix="")
     application.register_blueprint(admin_blueprint)
 
     return application
 
 
-# Create the app - database will be initialized here
-app = create_app()
+# Create the API app - database will be initialized here
+app = create_api_app()
 
 
 # ============================================================================
@@ -930,9 +945,29 @@ def openai_embeddings():
 # Main
 # ============================================================================
 
+
+def run_admin_server(host: str, port: int, debug: bool):
+    """Run the admin server in a separate thread."""
+    admin_app = create_admin_app()
+
+    # Use werkzeug directly for the admin server to avoid Flask's reloader issues
+    from werkzeug.serving import make_server
+
+    server = make_server(host, port, admin_app, threaded=True)
+    logger.info(f"Admin UI server started on http://{host}:{port}")
+    server.serve_forever()
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", os.environ.get("FLASK_PORT", 11434)))
-    host = os.environ.get("HOST", "0.0.0.0")
+    # API server configuration
+    api_port = int(os.environ.get("PORT", os.environ.get("FLASK_PORT", 11434)))
+    api_host = os.environ.get("HOST", "0.0.0.0")
+
+    # Admin server configuration
+    admin_port = int(os.environ.get("ADMIN_PORT", 8080))
+    admin_host = os.environ.get("ADMIN_HOST", "0.0.0.0")
+    admin_enabled = os.environ.get("ADMIN_ENABLED", "true").lower() == "true"
+
     debug = os.environ.get("DEBUG", "false").lower() == "true"
 
     # Import from YAML if database has no providers
@@ -944,6 +979,8 @@ if __name__ == "__main__":
             import_all_from_yaml(db, overwrite=False)
 
     # Initialize admin password
+    from admin import init_admin_password
+
     init_admin_password()
 
     # Check that at least one provider is configured
@@ -953,20 +990,40 @@ if __name__ == "__main__":
             "No LLM providers configured. Set at least one of: "
             "ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, PERPLEXITY_API_KEY"
         )
-        logger.info("Admin UI available at /admin for configuration")
 
     provider_names = [p.name for p in configured]
-    logger.info(f"Starting Multi-Provider LLM Proxy v2.0 on {host}:{port}")
-    logger.info(f"Admin UI available at http://{host}:{port}/admin")
+
+    logger.info("=" * 60)
+    logger.info("Multi-Provider LLM Proxy v2.0")
+    logger.info("=" * 60)
+    logger.info(f"API server:   http://{api_host}:{api_port}")
+
+    if admin_enabled:
+        logger.info(f"Admin UI:     http://{admin_host}:{admin_port}")
+    else:
+        logger.info("Admin UI:     disabled (set ADMIN_ENABLED=true to enable)")
+
+    logger.info("-" * 60)
 
     if configured:
-        logger.info(f"Configured providers: {provider_names}")
-        # Log available models count per provider
+        logger.info(f"Configured providers: {', '.join(provider_names)}")
         for provider in configured:
             model_count = len(provider.get_models())
             alias_count = len(provider.get_aliases())
             logger.info(
-                f"  - {provider.name}: {model_count} models, {alias_count} aliases"
+                f"  {provider.name}: {model_count} models, {alias_count} aliases"
             )
+    else:
+        logger.info("No providers configured - use Admin UI to configure")
 
-    app.run(host=host, port=port, debug=debug, threaded=True)
+    logger.info("=" * 60)
+
+    # Start admin server in a separate thread
+    if admin_enabled:
+        admin_thread = threading.Thread(
+            target=run_admin_server, args=(admin_host, admin_port, debug), daemon=True
+        )
+        admin_thread.start()
+
+    # Run API server in main thread
+    app.run(host=api_host, port=api_port, debug=debug, threaded=True)
