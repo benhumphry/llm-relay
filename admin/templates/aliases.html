@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+
+{% block title %}Aliases{% endblock %}
+
+{% block content %}
+<div x-data="aliasesPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl font-bold">Aliases</h1>
+            <p class="text-base-content/60">Manage model name shortcuts</p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Alias
+        </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="card bg-base-100 shadow mb-6">
+        <div class="card-body py-4">
+            <div class="flex flex-wrap gap-4 items-center">
+                <div class="form-control">
+                    <select x-model="filterProvider" @change="loadAliases()" class="select select-bordered select-sm">
+                        <option value="">All Providers</option>
+                        <template x-for="p in providers" :key="p.id">
+                            <option :value="p.id" x-text="p.id"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="form-control flex-1 max-w-xs">
+                    <input
+                        type="text"
+                        x-model="searchQuery"
+                        placeholder="Search aliases..."
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+                <div class="text-sm text-base-content/60">
+                    <span x-text="filteredAliases.length"></span> aliases
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Aliases Table -->
+    <div class="card bg-base-100 shadow-lg">
+        <div class="card-body p-0">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Alias</th>
+                            <th>Maps To</th>
+                            <th>Provider</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="alias in filteredAliases" :key="alias.alias">
+                            <tr class="hover">
+                                <td>
+                                    <code class="bg-base-200 px-2 py-1 rounded text-sm" x-text="alias.alias"></code>
+                                </td>
+                                <td>
+                                    <div class="flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                        </svg>
+                                        <span x-text="alias.model_id"></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge badge-ghost" x-text="alias.provider_id"></span>
+                                </td>
+                                <td>
+                                    <div class="flex gap-2 justify-end">
+                                        <button @click="openEditModal(alias)" class="btn btn-ghost btn-xs">Edit</button>
+                                        <button @click="deleteAlias(alias.alias)" class="btn btn-ghost btn-xs text-error">Delete</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty state -->
+            <template x-if="filteredAliases.length === 0 && !loading">
+                <div class="text-center py-12">
+                    <p class="text-base-content/60">No aliases found</p>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <dialog id="alias_modal" class="modal" :class="{ 'modal-open': showModal }">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg" x-text="editing ? 'Edit Alias' : 'Add Alias'"></h3>
+
+            <form @submit.prevent="saveAlias()" class="mt-4 space-y-4">
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Alias</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.alias"
+                        class="input input-bordered"
+                        placeholder="e.g., claude"
+                        :disabled="editing"
+                        required
+                    />
+                    <label class="label">
+                        <span class="label-text-alt text-base-content/60">Short name users can use</span>
+                    </label>
+                </div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Provider</span>
+                    </label>
+                    <select x-model="form.provider_id" @change="loadProviderModels()" class="select select-bordered" required>
+                        <option value="">Select provider</option>
+                        <template x-for="p in providers" :key="p.id">
+                            <option :value="p.id" x-text="p.id"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Model</span>
+                    </label>
+                    <select x-model="form.model_id" class="select select-bordered" required>
+                        <option value="">Select model</option>
+                        <template x-for="m in providerModels" :key="m.id">
+                            <option :value="m.id" x-text="m.id"></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt text-base-content/60">Model this alias points to</span>
+                    </label>
+                </div>
+
+                <div class="modal-action">
+                    <button type="button" @click="closeModal()" class="btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" :class="{ 'loading': saving }">
+                        <span x-text="editing ? 'Save Changes' : 'Add Alias'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button @click="closeModal()">close</button>
+        </form>
+    </dialog>
+
+    <!-- Toast notifications -->
+    <div class="toast toast-end">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="alert" :class="toast.type === 'error' ? 'alert-error' : 'alert-success'">
+                <span x-text="toast.message"></span>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script>
+function aliasesPage() {
+    return {
+        aliases: [],
+        providers: [],
+        providerModels: [],
+        loading: true,
+        filterProvider: '',
+        searchQuery: '',
+        showModal: false,
+        editing: false,
+        saving: false,
+        toasts: [],
+        form: {
+            alias: '',
+            provider_id: '',
+            model_id: ''
+        },
+
+        async init() {
+            await this.loadProviders();
+            await this.loadAliases();
+        },
+
+        async loadProviders() {
+            try {
+                const res = await fetch('/admin/api/providers');
+                if (res.ok) {
+                    this.providers = await res.json();
+                }
+            } catch (err) {
+                console.error('Failed to load providers', err);
+            }
+        },
+
+        async loadAliases() {
+            this.loading = true;
+            try {
+                let url = '/admin/api/aliases';
+                if (this.filterProvider) {
+                    url += `?provider=${this.filterProvider}`;
+                }
+                const res = await fetch(url);
+                if (res.ok) {
+                    this.aliases = await res.json();
+                }
+            } catch (err) {
+                this.showToast('Failed to load aliases', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async loadProviderModels() {
+            if (!this.form.provider_id) {
+                this.providerModels = [];
+                return;
+            }
+
+            try {
+                const res = await fetch(`/admin/api/models?provider=${this.form.provider_id}`);
+                if (res.ok) {
+                    this.providerModels = await res.json();
+                }
+            } catch (err) {
+                console.error('Failed to load models', err);
+            }
+        },
+
+        get filteredAliases() {
+            if (!this.searchQuery) return this.aliases;
+            const query = this.searchQuery.toLowerCase();
+            return this.aliases.filter(a =>
+                a.alias.toLowerCase().includes(query) ||
+                a.model_id.toLowerCase().includes(query)
+            );
+        },
+
+        openAddModal() {
+            this.editing = false;
+            this.form = {
+                alias: '',
+                provider_id: '',
+                model_id: ''
+            };
+            this.providerModels = [];
+            this.showModal = true;
+        },
+
+        async openEditModal(alias) {
+            this.editing = true;
+            this.form = { ...alias };
+            await this.loadProviderModels();
+            this.showModal = true;
+        },
+
+        closeModal() {
+            this.showModal = false;
+        },
+
+        async saveAlias() {
+            this.saving = true;
+            try {
+                const url = this.editing
+                    ? `/admin/api/aliases/${this.form.alias}`
+                    : '/admin/api/aliases';
+                const method = this.editing ? 'PUT' : 'POST';
+
+                const res = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form)
+                });
+
+                if (res.ok) {
+                    this.showToast(this.editing ? 'Alias updated' : 'Alias added');
+                    this.closeModal();
+                    await this.loadAliases();
+                } else {
+                    const data = await res.json();
+                    this.showToast(data.error || 'Failed to save', 'error');
+                }
+            } catch (err) {
+                this.showToast('Failed to save alias', 'error');
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        async deleteAlias(alias) {
+            if (!confirm(`Delete alias "${alias}"?`)) return;
+
+            try {
+                const res = await fetch(`/admin/api/aliases/${alias}`, { method: 'DELETE' });
+                if (res.ok) {
+                    this.showToast('Alias deleted');
+                    await this.loadAliases();
+                } else {
+                    this.showToast('Failed to delete', 'error');
+                }
+            } catch (err) {
+                this.showToast('Failed to delete alias', 'error');
+            }
+        },
+
+        showToast(message, type = 'success') {
+            const id = Date.now();
+            this.toasts.push({ id, message, type });
+            setTimeout(() => {
+                this.toasts = this.toasts.filter(t => t.id !== id);
+            }, 3000);
+        }
+    };
+}
+</script>
+{% endblock %}

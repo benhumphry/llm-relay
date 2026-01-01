@@ -1,0 +1,447 @@
+{% extends "base.html" %}
+
+{% block title %}Models{% endblock %}
+
+{% block content %}
+<div x-data="modelsPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl font-bold">Models</h1>
+            <p class="text-base-content/60">Manage model configurations across providers</p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Add Model
+        </button>
+    </div>
+
+    <!-- Filters -->
+    <div class="card bg-base-100 shadow mb-6">
+        <div class="card-body py-4">
+            <div class="flex flex-wrap gap-4 items-center">
+                <div class="form-control">
+                    <select x-model="filterProvider" @change="loadModels()" class="select select-bordered select-sm">
+                        <option value="">All Providers</option>
+                        <template x-for="p in providers" :key="p.id">
+                            <option :value="p.id" x-text="p.id"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="form-control flex-1 max-w-xs">
+                    <input
+                        type="text"
+                        x-model="searchQuery"
+                        placeholder="Search models..."
+                        class="input input-bordered input-sm"
+                    />
+                </div>
+                <div class="text-sm text-base-content/60">
+                    <span x-text="filteredModels.length"></span> models
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Models Table -->
+    <div class="card bg-base-100 shadow-lg">
+        <div class="card-body p-0">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Model ID</th>
+                            <th>Provider</th>
+                            <th>Family</th>
+                            <th>Context</th>
+                            <th>Capabilities</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="model in filteredModels" :key="model.provider_id + '/' + model.id">
+                            <tr class="hover">
+                                <td>
+                                    <div class="font-medium" x-text="model.id"></div>
+                                    <div class="text-xs text-base-content/60 max-w-xs truncate" x-text="model.description"></div>
+                                </td>
+                                <td>
+                                    <span class="badge badge-ghost" x-text="model.provider_id"></span>
+                                </td>
+                                <td x-text="model.family"></td>
+                                <td>
+                                    <span x-text="formatContext(model.context_length)"></span>
+                                </td>
+                                <td>
+                                    <div class="flex flex-wrap gap-1">
+                                        <template x-for="cap in model.capabilities?.slice(0, 3)" :key="cap">
+                                            <span class="badge badge-xs" x-text="cap"></span>
+                                        </template>
+                                        <template x-if="model.capabilities?.length > 3">
+                                            <span class="badge badge-xs badge-ghost" x-text="'+' + (model.capabilities.length - 3)"></span>
+                                        </template>
+                                    </div>
+                                </td>
+                                <td>
+                                    <template x-if="model.enabled">
+                                        <span class="badge badge-success badge-sm">Enabled</span>
+                                    </template>
+                                    <template x-if="!model.enabled">
+                                        <span class="badge badge-neutral badge-sm">Disabled</span>
+                                    </template>
+                                </td>
+                                <td>
+                                    <div class="dropdown dropdown-end">
+                                        <label tabindex="0" class="btn btn-ghost btn-xs">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                                            </svg>
+                                        </label>
+                                        <ul tabindex="0" class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-40 z-10">
+                                            <li><a @click="openEditModal(model)">Edit</a></li>
+                                            <li><a @click="toggleModel(model)" x-text="model.enabled ? 'Disable' : 'Enable'"></a></li>
+                                            <li><a @click="deleteModel(model)" class="text-error">Delete</a></li>
+                                        </ul>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty state -->
+            <template x-if="filteredModels.length === 0 && !loading">
+                <div class="text-center py-12">
+                    <p class="text-base-content/60">No models found</p>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <dialog id="model_modal" class="modal" :class="{ 'modal-open': showModal }">
+        <div class="modal-box max-w-2xl">
+            <h3 class="font-bold text-lg" x-text="editing ? 'Edit Model' : 'Add Model'"></h3>
+
+            <form @submit.prevent="saveModel()" class="mt-4 space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Model ID</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.id"
+                            class="input input-bordered"
+                            placeholder="e.g., gpt-4o"
+                            :disabled="editing"
+                            required
+                        />
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Provider</span>
+                        </label>
+                        <select x-model="form.provider_id" class="select select-bordered" :disabled="editing" required>
+                            <option value="">Select provider</option>
+                            <template x-for="p in providers" :key="p.id">
+                                <option :value="p.id" x-text="p.id"></option>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Family</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.family"
+                            class="input input-bordered"
+                            placeholder="e.g., gpt-4"
+                            required
+                        />
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Context Length</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model.number="form.context_length"
+                            class="input input-bordered"
+                            min="1"
+                        />
+                    </div>
+                </div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Description</span>
+                    </label>
+                    <textarea
+                        x-model="form.description"
+                        class="textarea textarea-bordered"
+                        rows="2"
+                        placeholder="Brief description of the model"
+                    ></textarea>
+                </div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Capabilities</span>
+                    </label>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="cap in availableCapabilities" :key="cap">
+                            <label class="label cursor-pointer gap-2 bg-base-200 px-3 py-1 rounded-lg">
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm"
+                                    :checked="form.capabilities?.includes(cap)"
+                                    @change="toggleCapability(cap)"
+                                />
+                                <span class="label-text" x-text="cap"></span>
+                            </label>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" x-model="form.supports_system_prompt" class="checkbox" />
+                            <span class="label-text">Supports System Prompt</span>
+                        </label>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input type="checkbox" x-model="form.use_max_completion_tokens" class="checkbox" />
+                            <span class="label-text">Use max_completion_tokens</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-control">
+                    <label class="label cursor-pointer justify-start gap-3">
+                        <input type="checkbox" x-model="form.enabled" class="checkbox" />
+                        <span class="label-text">Enabled</span>
+                    </label>
+                </div>
+
+                <div class="modal-action">
+                    <button type="button" @click="closeModal()" class="btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" :class="{ 'loading': saving }">
+                        <span x-text="editing ? 'Save Changes' : 'Add Model'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button @click="closeModal()">close</button>
+        </form>
+    </dialog>
+
+    <!-- Toast notifications -->
+    <div class="toast toast-end">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="alert" :class="toast.type === 'error' ? 'alert-error' : 'alert-success'">
+                <span x-text="toast.message"></span>
+            </div>
+        </template>
+    </div>
+</div>
+
+<script>
+function modelsPage() {
+    return {
+        models: [],
+        providers: [],
+        loading: true,
+        filterProvider: '',
+        searchQuery: '',
+        showModal: false,
+        editing: false,
+        saving: false,
+        toasts: [],
+        availableCapabilities: ['vision', 'analysis', 'coding', 'writing', 'reasoning', 'tools', 'search'],
+        form: {
+            id: '',
+            provider_id: '',
+            family: '',
+            description: '',
+            context_length: 128000,
+            capabilities: [],
+            supports_system_prompt: true,
+            use_max_completion_tokens: false,
+            enabled: true
+        },
+
+        async init() {
+            await this.loadProviders();
+            await this.loadModels();
+        },
+
+        async loadProviders() {
+            try {
+                const res = await fetch('/admin/api/providers');
+                if (res.ok) {
+                    this.providers = await res.json();
+                }
+            } catch (err) {
+                console.error('Failed to load providers', err);
+            }
+        },
+
+        async loadModels() {
+            this.loading = true;
+            try {
+                let url = '/admin/api/models';
+                if (this.filterProvider) {
+                    url += `?provider=${this.filterProvider}`;
+                }
+                const res = await fetch(url);
+                if (res.ok) {
+                    this.models = await res.json();
+                }
+            } catch (err) {
+                this.showToast('Failed to load models', 'error');
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        get filteredModels() {
+            if (!this.searchQuery) return this.models;
+            const query = this.searchQuery.toLowerCase();
+            return this.models.filter(m =>
+                m.id.toLowerCase().includes(query) ||
+                m.family.toLowerCase().includes(query) ||
+                m.description?.toLowerCase().includes(query)
+            );
+        },
+
+        formatContext(length) {
+            if (length >= 1000000) return (length / 1000000).toFixed(1) + 'M';
+            if (length >= 1000) return (length / 1000).toFixed(0) + 'K';
+            return length;
+        },
+
+        openAddModal() {
+            this.editing = false;
+            this.form = {
+                id: '',
+                provider_id: '',
+                family: '',
+                description: '',
+                context_length: 128000,
+                capabilities: [],
+                supports_system_prompt: true,
+                use_max_completion_tokens: false,
+                enabled: true
+            };
+            this.showModal = true;
+        },
+
+        openEditModal(model) {
+            this.editing = true;
+            this.form = {
+                ...model,
+                capabilities: [...(model.capabilities || [])]
+            };
+            this.showModal = true;
+        },
+
+        closeModal() {
+            this.showModal = false;
+        },
+
+        toggleCapability(cap) {
+            if (!this.form.capabilities) this.form.capabilities = [];
+            const idx = this.form.capabilities.indexOf(cap);
+            if (idx >= 0) {
+                this.form.capabilities.splice(idx, 1);
+            } else {
+                this.form.capabilities.push(cap);
+            }
+        },
+
+        async saveModel() {
+            this.saving = true;
+            try {
+                const url = this.editing
+                    ? `/admin/api/models/${this.form.provider_id}/${this.form.id}`
+                    : '/admin/api/models';
+                const method = this.editing ? 'PUT' : 'POST';
+
+                const res = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form)
+                });
+
+                if (res.ok) {
+                    this.showToast(this.editing ? 'Model updated' : 'Model added');
+                    this.closeModal();
+                    await this.loadModels();
+                } else {
+                    const data = await res.json();
+                    this.showToast(data.error || 'Failed to save', 'error');
+                }
+            } catch (err) {
+                this.showToast('Failed to save model', 'error');
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        async deleteModel(model) {
+            if (!confirm(`Delete model "${model.id}"?`)) return;
+
+            try {
+                const res = await fetch(`/admin/api/models/${model.provider_id}/${model.id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    this.showToast('Model deleted');
+                    await this.loadModels();
+                } else {
+                    this.showToast('Failed to delete', 'error');
+                }
+            } catch (err) {
+                this.showToast('Failed to delete model', 'error');
+            }
+        },
+
+        async toggleModel(model) {
+            try {
+                const res = await fetch(`/admin/api/models/${model.provider_id}/${model.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !model.enabled })
+                });
+                if (res.ok) {
+                    await this.loadModels();
+                }
+            } catch (err) {
+                this.showToast('Failed to update model', 'error');
+            }
+        },
+
+        showToast(message, type = 'success') {
+            const id = Date.now();
+            this.toasts.push({ id, message, type });
+            setTimeout(() => {
+                this.toasts = this.toasts.filter(t => t.id !== id);
+            }, 3000);
+        }
+    };
+}
+</script>
+{% endblock %}

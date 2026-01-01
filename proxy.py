@@ -11,6 +11,7 @@ multiple providers seamlessly.
 
 import json
 import logging
+import os
 import random
 import string
 import time
@@ -18,6 +19,14 @@ from datetime import datetime, timezone
 from typing import Generator
 
 from flask import Flask, Response, jsonify, request
+
+from admin import create_admin_blueprint, init_admin_password
+from admin.auth import get_session_secret
+
+# Import database and admin
+from db import check_db_initialized, init_db
+from db.connection import get_db_context
+from db.importer import import_all_from_yaml
 
 # Import the provider registry
 from providers import registry
@@ -28,7 +37,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+
+def create_app():
+    """Create and configure the Flask application."""
+    application = Flask(__name__)
+
+    # Initialize database first
+    init_db()
+
+    # Configure session for admin authentication
+    application.secret_key = get_session_secret()
+
+    # Register admin blueprint
+    admin_blueprint = create_admin_blueprint()
+    application.register_blueprint(admin_blueprint)
+
+    return application
+
+
+# Create the app - database will be initialized here
+app = create_app()
 
 
 # ============================================================================
@@ -903,29 +931,42 @@ def openai_embeddings():
 # ============================================================================
 
 if __name__ == "__main__":
-    import os
-
     port = int(os.environ.get("PORT", os.environ.get("FLASK_PORT", 11434)))
     host = os.environ.get("HOST", "0.0.0.0")
     debug = os.environ.get("DEBUG", "false").lower() == "true"
 
+    # Import from YAML if database has no providers
+    from db import Provider
+
+    with get_db_context() as db:
+        if db.query(Provider).count() == 0:
+            logger.info("Database empty, importing from YAML configuration...")
+            import_all_from_yaml(db, overwrite=False)
+
+    # Initialize admin password
+    init_admin_password()
+
     # Check that at least one provider is configured
     configured = registry.get_configured_providers()
     if not configured:
-        logger.error(
+        logger.warning(
             "No LLM providers configured. Set at least one of: "
             "ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, PERPLEXITY_API_KEY"
         )
-        exit(1)
+        logger.info("Admin UI available at /admin for configuration")
 
     provider_names = [p.name for p in configured]
-    logger.info(f"Starting Multi-Provider LLM Proxy on {host}:{port}")
-    logger.info(f"Configured providers: {provider_names}")
+    logger.info(f"Starting Multi-Provider LLM Proxy v2.0 on {host}:{port}")
+    logger.info(f"Admin UI available at http://{host}:{port}/admin")
 
-    # Log available models count per provider
-    for provider in configured:
-        model_count = len(provider.get_models())
-        alias_count = len(provider.get_aliases())
-        logger.info(f"  - {provider.name}: {model_count} models, {alias_count} aliases")
+    if configured:
+        logger.info(f"Configured providers: {provider_names}")
+        # Log available models count per provider
+        for provider in configured:
+            model_count = len(provider.get_models())
+            alias_count = len(provider.get_aliases())
+            logger.info(
+                f"  - {provider.name}: {model_count} models, {alias_count} aliases"
+            )
 
     app.run(host=host, port=port, debug=debug, threaded=True)
