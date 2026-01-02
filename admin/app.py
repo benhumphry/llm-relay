@@ -992,15 +992,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         # Count configured providers (have API key or don't need one)
         configured = 0
         for provider in all_providers:
-            config = get_provider_config(provider.name)
-            api_key_env = config.get("api_key_env")
+            # Check if this is an Ollama-type provider (doesn't need API key)
+            is_ollama = hasattr(provider, "type") and provider.type == "ollama"
 
-            # Ollama doesn't need an API key - check if it's running
-            if provider.name == "ollama":
+            if is_ollama:
+                # Ollama providers are configured if they're running/reachable
                 if provider.is_configured():
                     configured += 1
-            elif api_key_env and os.environ.get(api_key_env):
-                configured += 1
+            else:
+                # Other providers need an API key
+                config = get_provider_config(provider.name)
+                api_key_env = config.get("api_key_env")
+                if api_key_env and os.environ.get(api_key_env):
+                    configured += 1
 
         return jsonify(
             {
