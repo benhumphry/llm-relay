@@ -24,6 +24,7 @@ models:
     description: "GPT-5.2 - Latest flagship model for coding and agentic tasks"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
+    use_max_completion_tokens: true
 
   gpt-5.2-pro:
     family: gpt-5.2
@@ -39,6 +40,7 @@ models:
     description: "GPT-5.2 Chat - The model powering ChatGPT"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
+    use_max_completion_tokens: true
 
   # ==========================================================================
   # GPT-5.1 family
@@ -48,30 +50,35 @@ models:
     description: "GPT-5.1 - Previous flagship, optimized for steerability"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
+    use_max_completion_tokens: true
 
   gpt-5.1-chat-latest:
     family: gpt-5.1
     description: "GPT-5.1 Chat - ChatGPT version"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
+    use_max_completion_tokens: true
 
   gpt-5.1-codex:
     family: gpt-5.1
     description: "GPT-5.1 Codex - Optimized for coding"
     context_length: 128000
     capabilities: [coding, analysis, tools]
+    use_max_completion_tokens: true
 
   gpt-5.1-codex-max:
     family: gpt-5.1
     description: "GPT-5.1 Codex Max - Powers Codex and Codex CLI"
     context_length: 128000
     capabilities: [coding, analysis, tools]
+    use_max_completion_tokens: true
 
   gpt-5.1-codex-mini:
     family: gpt-5.1
     description: "GPT-5.1 Codex Mini - Fast coding model"
     context_length: 128000
     capabilities: [coding, analysis, tools, fast]
+    use_max_completion_tokens: true
 
   # ==========================================================================
   # GPT-5 family (Original GPT-5)
@@ -81,6 +88,7 @@ models:
     description: "GPT-5 - Original GPT-5 model"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
+    use_max_completion_tokens: true
 
   gpt-5-pro:
     family: gpt-5
@@ -96,24 +104,28 @@ models:
     description: "GPT-5 Mini - Fast and affordable"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, fast]
+    use_max_completion_tokens: true
 
   gpt-5-nano:
     family: gpt-5
     description: "GPT-5 Nano - Ultra-fast, lightweight"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, fast]
+    use_max_completion_tokens: true
 
   gpt-5-chat-latest:
     family: gpt-5
     description: "GPT-5 Chat - ChatGPT version"
     context_length: 128000
     capabilities: [vision, analysis, coding, writing, reasoning]
+    use_max_completion_tokens: true
 
   gpt-5-codex:
     family: gpt-5
     description: "GPT-5 Codex - Optimized for coding"
     context_length: 128000
     capabilities: [coding, analysis, tools]
+    use_max_completion_tokens: true
 
   # ==========================================================================
   # GPT-4.1 family (April 2025 - improved coding & long context)
