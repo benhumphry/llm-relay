@@ -4,12 +4,14 @@ A self-hosted proxy that presents multiple LLM providers via both Ollama and Ope
 
 **Built-in providers:** Anthropic Claude, OpenAI GPT, Google Gemini, Perplexity, Groq, DeepSeek, Mistral, xAI Grok, OpenRouter
 
-**v2.0 Features:** Local Ollama instance support, Web Admin UI, custom provider management
+**v2.1 Features:** Usage tracking & stats, cost estimation, tag-based attribution
 
 ## Features
 
 - **10+ providers supported** - Anthropic, OpenAI, Gemini, Perplexity, Groq, DeepSeek, Mistral, xAI, OpenRouter, and local Ollama instances
 - **Web Admin UI** - Manage providers, models, and aliases through a polished web interface
+- **Usage tracking** - Monitor requests, tokens, and estimated costs with charts and breakdowns
+- **Tag-based attribution** - Track usage by user/project with `X-Proxy-Tag` header or `model@tag` syntax
 - **Local Ollama support** - Connect to local or remote Ollama instances with automatic model discovery
 - **Custom providers** - Add OpenAI-compatible or Anthropic-compatible providers via the UI
 - **Full Ollama API compatibility** - Works with any application that supports Ollama (including Open WebUI)
@@ -82,10 +84,20 @@ The Admin UI at port 8080 provides complete management of the proxy:
 - Manage system and custom aliases
 - Example: `claude` → `claude-sonnet-4-5-20250929`
 
+### Usage
+- **Request tracking** - Monitor all proxy requests with tokens, response time, and cost
+- **Cost estimation** - Automatic cost calculation based on model pricing
+- **Breakdowns** - View usage by tag, provider, or model
+- **Time series charts** - Visualize usage trends over time
+- **Tag-based attribution** - Track usage per user/project/team
+- **Recent requests** - View detailed request logs with client IP and hostname
+
 ### Settings
 - Set default model for unknown requests
 - Change admin password
 - Configure proxy behavior
+- Enable/disable usage tracking
+- Configure DNS resolution for client hostnames
 
 ## Adding Providers
 
@@ -170,6 +182,35 @@ Data is persisted in a Docker volume at `/data`, ensuring your custom providers,
 | `/v1/models` | GET | List available models |
 | `/v1/chat/completions` | POST | Chat completions |
 | `/v1/completions` | POST | Text completions |
+
+## Usage Tracking
+
+The proxy tracks all requests with token counts, response times, and estimated costs. Usage can be attributed to different users or projects using tags.
+
+### Tagging Requests
+
+There are three ways to tag requests (in priority order):
+
+1. **HTTP Header** - Set `X-Proxy-Tag` header:
+   ```bash
+   curl -X POST http://localhost:11434/api/chat \
+     -H "X-Proxy-Tag: alice" \
+     -d '{"model": "claude-sonnet", "messages": [...]}'
+   ```
+
+2. **Model suffix** - Append `@tag` to the model name:
+   ```bash
+   curl -X POST http://localhost:11434/api/chat \
+     -d '{"model": "claude-sonnet@alice", "messages": [...]}'
+   ```
+
+3. **Default tag** - Requests without a tag use the default (configurable in Settings)
+
+### Cost Tracking
+
+Model costs are configured per-million tokens and automatically calculated for each request. Built-in costs are provided for all major providers. Custom models can have costs set when created.
+
+View usage breakdowns, costs, and trends in the **Usage** page of the Admin UI.
 
 ## Usage Examples
 
