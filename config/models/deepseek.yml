@@ -25,6 +25,8 @@ models:
     description: "DeepSeek-V3.2 - 685B MoE, GPT-5 level performance at low cost"
     context_length: 128000
     capabilities: [analysis, coding, writing, reasoning, tools]
+    input_cost: 0.28
+    output_cost: 0.42
 
   # DeepSeek-V3.2 Reasoner (thinking mode with Chain-of-Thought)
   deepseek-reasoner:
@@ -34,6 +36,8 @@ models:
     capabilities: [analysis, coding, reasoning, math, tools]
     unsupported_params: *reasoning_unsupported
     supports_system_prompt: false
+    input_cost: 0.28
+    output_cost: 0.42
 
 aliases:
   # Primary aliases
