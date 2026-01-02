@@ -962,6 +962,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Get dashboard statistics."""
         from providers import registry
         from providers.loader import get_provider_config
+        from providers.ollama_provider import OllamaProvider
 
         # Count models and aliases from hybrid system
         total_models = 0
@@ -993,9 +994,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         configured = 0
         for provider in all_providers:
             # Check if this is an Ollama-type provider (doesn't need API key)
-            is_ollama = hasattr(provider, "type") and provider.type == "ollama"
-
-            if is_ollama:
+            if isinstance(provider, OllamaProvider):
                 # Ollama providers are configured if they're running/reachable
                 if provider.is_configured():
                     configured += 1
