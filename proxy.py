@@ -144,7 +144,16 @@ def track_completion(
     """
     from flask import g
 
-    start_time = getattr(g, "start_time", time.time())
+    start_time = getattr(g, "start_time", None)
+    if start_time is None:
+        logger.warning("No start_time found in Flask g - using current time")
+        start_time = time.time()
+
+    response_time_ms = int((time.time() - start_time) * 1000)
+    logger.info(
+        f"Track: {provider_id}/{model_id} - {response_time_ms}ms, streaming={is_streaming}"
+    )
+
     client_ip = getattr(g, "client_ip", "unknown")
 
     # Extract tag from request
@@ -163,7 +172,7 @@ def track_completion(
         endpoint=endpoint,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        response_time_ms=int((time.time() - start_time) * 1000),
+        response_time_ms=response_time_ms,
         status_code=status_code,
         error_message=error_message,
         is_streaming=is_streaming,
