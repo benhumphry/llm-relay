@@ -302,7 +302,21 @@ class OllamaProvider(LLMProvider):
         output_tokens = response.usage.completion_tokens if response.usage else 0
 
         # Ollama may report inflated token counts (thinking tokens, cumulative counts)
-        # Estimate output tokens from content length as sanity check (~4 chars per token)
+        # Estimate tokens from content length as sanity check (~4 chars per token)
+
+        # Estimate input from messages
+        input_chars = sum(
+            len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+            for m in api_messages
+        )
+        estimated_input = input_chars // 4 + 1
+        if input_tokens > estimated_input * 3:
+            logger.info(
+                f"Ollama reported {input_tokens} input tokens for {input_chars} chars - using estimate {estimated_input}"
+            )
+            input_tokens = estimated_input
+
+        # Estimate output from response
         estimated_output = len(content) // 4 + 1
         if output_tokens > estimated_output * 3:
             logger.info(
