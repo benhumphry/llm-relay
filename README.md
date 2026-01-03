@@ -1,6 +1,12 @@
-# Multi-Provider LLM Proxy
+<p align="center">
+  <img src="logo.png" alt="LLM Proxy" width="128" height="128">
+</p>
 
+<h1 align="center">Multi-Provider LLM Proxy</h1>
+
+<p align="center">
 A self-hosted proxy that presents multiple LLM providers via both Ollama and OpenAI-compatible API interfaces. This allows any Ollama or OpenAI-compatible application to use models from multiple providers seamlessly.
+</p>
 
 **Built-in providers:** Anthropic Claude, OpenAI GPT, Google Gemini, Perplexity, Groq, DeepSeek, Mistral, xAI Grok, OpenRouter
 
