@@ -629,15 +629,32 @@ def chat():
             # Calculate input chars for token estimation
             input_chars = estimate_input_chars(messages, system_prompt)
 
+            # Capture request context before streaming starts (context won't exist after response starts)
+            from flask import g
+
+            start_time = getattr(g, "start_time", time.time())
+            client_ip = getattr(g, "client_ip", "unknown")
+            tag, _ = extract_tag(request, model_name)
+            hostname = resolve_hostname(client_ip)
+            prov_name = provider.name  # Capture for closure
+
             # Create callback to track after stream completes
             def on_stream_complete(input_tokens, output_tokens, error=None):
-                track_completion(
-                    provider_id=provider.name,
+                response_time_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
+                )
+                tracker.log_request(
+                    timestamp=datetime.now(timezone.utc),
+                    client_ip=client_ip,
+                    hostname=hostname,
+                    tag=tag,
+                    provider_id=prov_name,
                     model_id=model_id,
-                    model_name=model_name,
                     endpoint="/api/chat",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    response_time_ms=response_time_ms,
                     status_code=200 if not error else 500,
                     error_message=error,
                     is_streaming=True,
@@ -753,15 +770,32 @@ def generate():
             # Calculate input chars for token estimation
             input_chars = estimate_input_chars(messages, system)
 
+            # Capture request context before streaming starts
+            from flask import g
+
+            start_time = getattr(g, "start_time", time.time())
+            client_ip = getattr(g, "client_ip", "unknown")
+            tag, _ = extract_tag(request, model_name)
+            hostname = resolve_hostname(client_ip)
+            prov_name = provider.name
+
             # Create callback to track after stream completes
             def on_stream_complete(input_tokens, output_tokens, error=None):
-                track_completion(
-                    provider_id=provider.name,
+                response_time_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
+                )
+                tracker.log_request(
+                    timestamp=datetime.now(timezone.utc),
+                    client_ip=client_ip,
+                    hostname=hostname,
+                    tag=tag,
+                    provider_id=prov_name,
                     model_id=model_id,
-                    model_name=model_name,
                     endpoint="/api/generate",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    response_time_ms=response_time_ms,
                     status_code=200 if not error else 500,
                     error_message=error,
                     is_streaming=True,
@@ -961,15 +995,32 @@ def openai_chat_completions():
             # Calculate input chars for token estimation
             input_chars = estimate_input_chars(messages, system_prompt)
 
+            # Capture request context before streaming starts
+            from flask import g
+
+            start_time = getattr(g, "start_time", time.time())
+            client_ip = getattr(g, "client_ip", "unknown")
+            tag, _ = extract_tag(request, model_name)
+            hostname = resolve_hostname(client_ip)
+            prov_name = provider.name
+
             # Create callback to track after stream completes
             def on_stream_complete(input_tokens, output_tokens, error=None):
-                track_completion(
-                    provider_id=provider.name,
+                response_time_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
+                )
+                tracker.log_request(
+                    timestamp=datetime.now(timezone.utc),
+                    client_ip=client_ip,
+                    hostname=hostname,
+                    tag=tag,
+                    provider_id=prov_name,
                     model_id=model_id,
-                    model_name=model_name,
                     endpoint="/v1/chat/completions",
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    response_time_ms=response_time_ms,
                     status_code=200 if not error else 500,
                     error_message=error,
                     is_streaming=True,
@@ -1103,6 +1154,16 @@ def openai_completions():
             # Calculate input chars for token estimation
             input_chars = estimate_input_chars(messages, None)
 
+            # Capture request context before streaming starts (context won't exist after response starts)
+            from flask import g
+
+            start_time = getattr(g, "start_time", time.time())
+            client_ip = getattr(g, "client_ip", "unknown")
+            tag, _ = extract_tag(request, model_name)
+            hostname = resolve_hostname(client_ip)
+            prov_name = provider.name  # Capture for closure
+            captured_model_id = model_id  # Capture for closure
+
             def stream_completions():
                 response_id = generate_openai_id("cmpl")
                 created = int(time.time())
@@ -1110,7 +1171,7 @@ def openai_completions():
 
                 try:
                     for text in provider.chat_completion_stream(
-                        model_id, messages, None, options
+                        captured_model_id, messages, None, options
                     ):
                         output_chars += len(text)
                         chunk = {
@@ -1134,15 +1195,24 @@ def openai_completions():
                     yield f"data: {json.dumps(final_chunk)}\n\n"
                     yield "data: [DONE]\n\n"
 
-                    # Track after stream completes
-                    track_completion(
-                        provider_id=provider.name,
-                        model_id=model_id,
-                        model_name=model_name,
+                    # Track after stream completes using captured context
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    logger.info(
+                        f"Track: {prov_name}/{captured_model_id} - {response_time_ms}ms, streaming=True"
+                    )
+                    tracker.log_request(
+                        timestamp=datetime.now(timezone.utc),
+                        client_ip=client_ip,
+                        hostname=hostname,
+                        tag=tag,
+                        provider_id=prov_name,
+                        model_id=captured_model_id,
                         endpoint="/v1/completions",
                         input_tokens=input_chars // 4,
                         output_tokens=output_chars // 4,
+                        response_time_ms=response_time_ms,
                         status_code=200,
+                        error_message=None,
                         is_streaming=True,
                     )
 
@@ -1150,13 +1220,19 @@ def openai_completions():
                     logger.error(f"Provider error during streaming: {e}")
                     error_chunk = {"error": {"message": str(e), "type": "api_error"}}
                     yield f"data: {json.dumps(error_chunk)}\n\n"
-                    track_completion(
-                        provider_id=provider.name,
-                        model_id=model_id,
-                        model_name=model_name,
+                    # Track error using captured context
+                    response_time_ms = int((time.time() - start_time) * 1000)
+                    tracker.log_request(
+                        timestamp=datetime.now(timezone.utc),
+                        client_ip=client_ip,
+                        hostname=hostname,
+                        tag=tag,
+                        provider_id=prov_name,
+                        model_id=captured_model_id,
                         endpoint="/v1/completions",
                         input_tokens=0,
                         output_tokens=0,
+                        response_time_ms=response_time_ms,
                         status_code=500,
                         error_message=str(e),
                         is_streaming=True,
