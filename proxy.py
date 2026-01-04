@@ -430,9 +430,25 @@ def stream_ollama_response(
         }
         yield json.dumps(final) + "\n"
 
-        # Call completion callback with estimated tokens
+        # Get streaming result (cost, tokens) if provider supports it (e.g., OpenRouter)
+        stream_result = None
+        if hasattr(provider, "get_last_stream_result"):
+            stream_result = provider.get_last_stream_result()
+
+        # Call completion callback with tokens and optional cost
         if on_complete:
-            on_complete(input_char_count // 4, output_chars // 4)
+            input_tokens = (
+                stream_result.get("input_tokens")
+                if stream_result and stream_result.get("input_tokens")
+                else input_char_count // 4
+            )
+            output_tokens = (
+                stream_result.get("output_tokens")
+                if stream_result and stream_result.get("output_tokens")
+                else output_chars // 4
+            )
+            cost = stream_result.get("cost") if stream_result else None
+            on_complete(input_tokens, output_tokens, cost=cost)
 
     except Exception as e:
         logger.error(f"Provider error during streaming: {e}")
@@ -482,9 +498,25 @@ def stream_openai_response(
         yield f"data: {json.dumps(final_chunk)}\n\n"
         yield "data: [DONE]\n\n"
 
-        # Call completion callback with estimated tokens
+        # Get streaming result (cost, tokens) if provider supports it (e.g., OpenRouter)
+        stream_result = None
+        if hasattr(provider, "get_last_stream_result"):
+            stream_result = provider.get_last_stream_result()
+
+        # Call completion callback with tokens and optional cost
         if on_complete:
-            on_complete(input_char_count // 4, output_chars // 4)
+            input_tokens = (
+                stream_result.get("input_tokens")
+                if stream_result and stream_result.get("input_tokens")
+                else input_char_count // 4
+            )
+            output_tokens = (
+                stream_result.get("output_tokens")
+                if stream_result and stream_result.get("output_tokens")
+                else output_chars // 4
+            )
+            cost = stream_result.get("cost") if stream_result else None
+            on_complete(input_tokens, output_tokens, cost=cost)
 
     except Exception as e:
         logger.error(f"Provider error during streaming: {e}")
@@ -642,7 +674,7 @@ def chat():
             prov_name = provider.name  # Capture for closure
 
             # Create callback to track after stream completes
-            def on_stream_complete(input_tokens, output_tokens, error=None):
+            def on_stream_complete(input_tokens, output_tokens, error=None, cost=None):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
                     f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
@@ -661,6 +693,7 @@ def chat():
                     status_code=200 if not error else 500,
                     error_message=error,
                     is_streaming=True,
+                    cost=cost,
                 )
 
             return Response(
@@ -784,7 +817,7 @@ def generate():
             prov_name = provider.name
 
             # Create callback to track after stream completes
-            def on_stream_complete(input_tokens, output_tokens, error=None):
+            def on_stream_complete(input_tokens, output_tokens, error=None, cost=None):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
                     f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
@@ -803,6 +836,7 @@ def generate():
                     status_code=200 if not error else 500,
                     error_message=error,
                     is_streaming=True,
+                    cost=cost,
                 )
 
             return Response(
@@ -1010,7 +1044,7 @@ def openai_chat_completions():
             prov_name = provider.name
 
             # Create callback to track after stream completes
-            def on_stream_complete(input_tokens, output_tokens, error=None):
+            def on_stream_complete(input_tokens, output_tokens, error=None, cost=None):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
                     f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
@@ -1029,6 +1063,7 @@ def openai_chat_completions():
                     status_code=200 if not error else 500,
                     error_message=error,
                     is_streaming=True,
+                    cost=cost,
                 )
 
             return Response(

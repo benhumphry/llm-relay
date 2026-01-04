@@ -202,17 +202,27 @@ class OpenRouterProvider(LLMProvider):
         messages: list[dict],
         system: str | None,
         options: dict,
-    ) -> Generator[str, None, None]:
+    ) -> Generator[str, None, dict]:
         """
         Execute streaming chat completion.
 
-        Note: For streaming, we can't easily get the cost from the response
-        since it comes in the final chunk or via a separate API call.
-        The usage tracker will fall back to calculating from static pricing.
+        Yields content strings during streaming.
+        Returns a dict with 'cost', 'input_tokens', 'output_tokens' at the end
+        (accessible via generator.return_value after exhausting the generator).
+
+        OpenRouter includes usage/cost data in the final SSE chunk.
         """
+        import json as json_module
+
         client = self._get_client()
         body = self._build_request_body(model, messages, system, options)
         body["stream"] = True
+        # Also request usage info in streaming mode
+        body["stream_options"] = {"include_usage": True}
+
+        cost = None
+        input_tokens = 0
+        output_tokens = 0
 
         with client.stream("POST", "/chat/completions", json=body) as response:
             response.raise_for_status()
@@ -229,16 +239,44 @@ class OpenRouterProvider(LLMProvider):
                     break
 
                 try:
-                    import json
+                    chunk = json_module.loads(line)
 
-                    chunk = json.loads(line)
+                    # Check for usage data (usually in final chunk)
+                    if "usage" in chunk:
+                        usage = chunk["usage"]
+                        input_tokens = usage.get("prompt_tokens", input_tokens)
+                        output_tokens = usage.get("completion_tokens", output_tokens)
+                        # Extract cost
+                        if "cost" in usage:
+                            cost = float(usage["cost"])
+                        elif "total_cost" in usage:
+                            cost = float(usage["total_cost"])
+
+                    # Yield content
                     if chunk.get("choices"):
                         delta = chunk["choices"][0].get("delta", {})
                         content = delta.get("content")
                         if content:
                             yield content
-                except (json.JSONDecodeError, KeyError, IndexError):
+                except (json_module.JSONDecodeError, KeyError, IndexError):
                     continue
+
+        # Store the final stats for access after iteration
+        # The caller can access this via the generator's return value
+        self._last_stream_result = {
+            "cost": cost,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }
+
+        if cost is not None:
+            logger.debug(f"OpenRouter streaming returned cost: ${cost:.6f}")
+
+        return self._last_stream_result
+
+    def get_last_stream_result(self) -> dict | None:
+        """Get the result from the last streaming call (cost, tokens)."""
+        return getattr(self, "_last_stream_result", None)
 
     def resolve_model(self, model_name: str) -> str | None:
         """
