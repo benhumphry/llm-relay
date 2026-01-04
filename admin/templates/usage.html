@@ -957,6 +957,7 @@
                             <th>Model</th>
                             <th>Endpoint</th>
                             <th class="text-right">Tokens</th>
+                            <th>Mode</th>
                             <th class="text-right">Cost</th>
                             <th class="text-right">Time (ms)</th>
                             <th>Status</th>
@@ -998,11 +999,12 @@
                                     <span
                                         x-text="log.input_tokens + '/' + log.output_tokens"
                                     ></span>
+                                </td>
+                                <td class="text-xs">
                                     <span
-                                        x-show="log.is_streaming"
-                                        class="badge badge-ghost badge-xs ml-1"
-                                        >stream</span
-                                    >
+                                        class="badge badge-ghost badge-xs"
+                                        x-text="log.is_streaming ? 'stream' : 'sync'"
+                                    ></span>
                                 </td>
                                 <td class="text-right text-xs">
                                     <span
