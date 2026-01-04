@@ -399,10 +399,15 @@
                                     ></span>
                                 </td>
                                 <td>
-                                    <span
-                                        class="badge badge-outline badge-xs"
-                                        x-text="log.tag"
-                                    ></span>
+                                    <template
+                                        x-for="tag in log.tag.split(',')"
+                                        :key="tag"
+                                    >
+                                        <span
+                                            class="badge badge-outline badge-xs mr-1"
+                                            x-text="tag.trim()"
+                                        ></span>
+                                    </template>
                                 </td>
                                 <td
                                     class="text-xs"
