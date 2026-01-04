@@ -109,8 +109,44 @@ volumes:
 | `ADMIN_PORT` | No | 8080 | Admin UI port |
 | `ADMIN_PASSWORD` | No | (random) | Admin UI password |
 | `ADMIN_ENABLED` | No | true | Set to "false" to disable Admin UI |
+| `DATABASE_URL` | No | SQLite | PostgreSQL connection URL (see below) |
 
 All API keys support `_FILE` suffix for Docker secrets (e.g., `ANTHROPIC_API_KEY_FILE`).
+
+### External Database (PostgreSQL)
+
+By default, the proxy uses SQLite stored in the `/data` volume. For production deployments or multi-instance setups, you can use PostgreSQL:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql://user:password@postgres-host:5432/llm_proxy
+```
+
+Or with Docker Compose:
+
+```yaml
+services:
+  llm-proxy:
+    image: ghcr.io/your-username/ollama-llm-proxy:latest
+    environment:
+      - DATABASE_URL=postgresql://llmproxy:secret@db:5432/llmproxy
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=llmproxy
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=llmproxy
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
+```
+
+The proxy will automatically create all required tables on first run.
 
 **First Run:** If `ADMIN_PASSWORD` is not set, a random password is generated and logged:
 ```
