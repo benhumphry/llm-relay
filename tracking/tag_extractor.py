@@ -4,7 +4,8 @@ Tag extraction for usage attribution.
 Extracts usage tags from requests using multiple strategies:
 1. X-Proxy-Tag header
 2. Model name suffix (model@tag)
-3. Default tag from settings
+3. Authorization Bearer token (for apps like Open WebUI)
+4. Default tag from settings
 """
 
 from flask import Request
@@ -19,7 +20,8 @@ def extract_tag(request: Request, model_name: str) -> tuple[str, str]:
     Priority:
     1. X-Proxy-Tag header - explicit tag specification
     2. Model name suffix - model@tag format
-    3. Default tag from settings
+    3. Authorization Bearer token - use token value as tag
+    4. Default tag from settings
 
     Args:
         request: Flask request object
@@ -44,7 +46,21 @@ def extract_tag(request: Request, model_name: str) -> tuple[str, str]:
                 tag_part = tag_part.split(":")[0]
             return tag_part, model_part
 
-    # Priority 3: Default tag from settings
+    # Priority 3: Authorization Bearer token as tag
+    # Apps like Open WebUI send API key as "Authorization: Bearer <key>"
+    # We use the key value directly as the tag
+    auth_header = request.headers.get("Authorization")
+    if auth_header:
+        # Handle "Bearer <token>" format
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+            if token:
+                return token, model_name
+        # Handle plain token (no Bearer prefix)
+        elif auth_header.strip():
+            return auth_header.strip(), model_name
+
+    # Priority 4: Default tag from settings
     default_tag = get_default_tag()
     return default_tag, model_name
 
