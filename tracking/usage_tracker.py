@@ -167,10 +167,13 @@ class UsageTracker:
 
         Updates multiple aggregation levels:
         1. Overall daily totals (no dimensions)
-        2. Per-tag totals
+        2. Per-tag totals (split comma-separated tags into separate rows)
         3. Per-provider totals
         4. Per-model totals
         5. Full dimension combination (tag + provider + model)
+
+        For multi-tag entries like "alice,project-x", creates separate DailyStats
+        rows for each tag so filtering by either "alice" OR "project-x" works.
         """
         try:
             entry_date = entry["timestamp"].date()
@@ -182,12 +185,16 @@ class UsageTracker:
                 entry["output_tokens"],
             )
 
-            # Define aggregation levels
-            aggregations = [
+            # Split comma-separated tags into individual tags
+            raw_tag = entry["tag"]
+            individual_tags = [t.strip() for t in raw_tag.split(",") if t.strip()]
+            if not individual_tags:
+                individual_tags = [raw_tag]  # Fallback to original if no valid splits
+
+            # Define base aggregation levels (tag-independent)
+            base_aggregations = [
                 # Overall totals
                 {"tag": None, "provider_id": None, "model_id": None},
-                # Per-tag
-                {"tag": entry["tag"], "provider_id": None, "model_id": None},
                 # Per-provider
                 {"tag": None, "provider_id": entry["provider_id"], "model_id": None},
                 # Per-model
@@ -196,22 +203,46 @@ class UsageTracker:
                     "provider_id": entry["provider_id"],
                     "model_id": entry["model_id"],
                 },
-                # Full combination
-                {
-                    "tag": entry["tag"],
-                    "provider_id": entry["provider_id"],
-                    "model_id": entry["model_id"],
-                },
             ]
 
             with get_db_context() as db:
-                for dims in aggregations:
+                # Update tag-independent aggregations
+                for dims in base_aggregations:
                     self._upsert_daily_stat(
                         db,
                         entry_date,
                         dims["tag"],
                         dims["provider_id"],
                         dims["model_id"],
+                        entry["input_tokens"],
+                        entry["output_tokens"],
+                        entry["response_time_ms"],
+                        is_success,
+                        estimated_cost,
+                    )
+
+                # Update per-tag aggregations for EACH individual tag
+                for tag in individual_tags:
+                    # Per-tag total
+                    self._upsert_daily_stat(
+                        db,
+                        entry_date,
+                        tag,
+                        None,
+                        None,
+                        entry["input_tokens"],
+                        entry["output_tokens"],
+                        entry["response_time_ms"],
+                        is_success,
+                        estimated_cost,
+                    )
+                    # Full combination (tag + provider + model)
+                    self._upsert_daily_stat(
+                        db,
+                        entry_date,
+                        tag,
+                        entry["provider_id"],
+                        entry["model_id"],
                         entry["input_tokens"],
                         entry["output_tokens"],
                         entry["response_time_ms"],
