@@ -71,26 +71,34 @@ curl -X POST http://localhost:11434/api/chat \
 
 The recommended way to run the proxy:
 
-```yaml
-# docker-compose.yml
-services:
-  llm-proxy:
-    image: ghcr.io/your-username/ollama-llm-proxy:latest
-    ports:
-      - "11434:11434"  # API
-      - "8080:8080"    # Admin UI
-    volumes:
-      - llm-proxy-data:/data
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      # Add other API keys as needed
-    restart: unless-stopped
+1. Copy the example environment file and add your API keys:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API keys
+   ```
 
-volumes:
-  llm-proxy-data:
-```
+2. Create a `docker-compose.yml`:
+   ```yaml
+   services:
+     llm-proxy:
+       image: ghcr.io/benhumphry/ollama-llm-proxy:latest
+       ports:
+         - "11434:11434"  # API
+         - "8080:8080"    # Admin UI
+       volumes:
+         - llm-proxy-data:/data
+       env_file:
+         - .env
+       restart: unless-stopped
+
+   volumes:
+     llm-proxy-data:
+   ```
+
+3. Run:
+   ```bash
+   docker compose up -d
+   ```
 
 ### Environment Variables
 
@@ -122,12 +130,17 @@ environment:
   - DATABASE_URL=postgresql://user:password@postgres-host:5432/llm_proxy
 ```
 
-Or with Docker Compose:
+Or with Docker Compose (add to your existing setup):
 
 ```yaml
 services:
   llm-proxy:
-    image: ghcr.io/your-username/ollama-llm-proxy:latest
+    image: ghcr.io/benhumphry/ollama-llm-proxy:latest
+    ports:
+      - "11434:11434"
+      - "8080:8080"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://llmproxy:secret@db:5432/llmproxy
     depends_on:
@@ -160,7 +173,7 @@ ADMIN PASSWORD NOT SET - Generated random password:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/ollama-llm-proxy.git
+git clone https://github.com/benhumphry/ollama-llm-proxy.git
 cd ollama-llm-proxy
 
 # Create virtual environment
