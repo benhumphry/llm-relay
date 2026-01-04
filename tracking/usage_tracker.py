@@ -144,6 +144,16 @@ class UsageTracker:
     def _save_log(self, entry: dict):
         """Save a request log entry to the database."""
         try:
+            # Use provider-reported cost if available, otherwise calculate
+            cost = entry.get("cost")
+            if cost is None:
+                cost = self._calculate_cost(
+                    entry["provider_id"],
+                    entry["model_id"],
+                    entry["input_tokens"],
+                    entry["output_tokens"],
+                )
+
             with get_db_context() as db:
                 log = RequestLog(
                     timestamp=entry["timestamp"],
@@ -159,7 +169,7 @@ class UsageTracker:
                     status_code=entry["status_code"],
                     error_message=entry["error_message"],
                     is_streaming=entry["is_streaming"],
-                    cost=entry.get("cost"),  # Provider-reported cost (e.g., OpenRouter)
+                    cost=cost,
                 )
                 db.add(log)
         except Exception as e:
