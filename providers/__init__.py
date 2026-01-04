@@ -57,9 +57,12 @@ def _create_provider(provider_name: str, config: dict) -> LLMProvider | None:
     # Load models and aliases using hybrid loader (YAML + DB overrides)
     models, aliases = load_hybrid_models(provider_name)
 
+    # Note: We no longer skip providers with no enabled models.
+    # This allows providers to appear in the admin UI even when all models are disabled.
     if not models:
-        logger.warning(f"No models loaded for provider '{provider_name}', skipping")
-        return None
+        logger.info(
+            f"No enabled models for provider '{provider_name}' (all may be disabled)"
+        )
 
     # Check if this provider needs a custom class (non-OpenAI SDK)
     if provider_name in CUSTOM_PROVIDER_CLASSES:
