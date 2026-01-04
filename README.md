@@ -130,7 +130,7 @@ environment:
   - DATABASE_URL=postgresql://user:password@postgres-host:5432/llm_proxy
 ```
 
-Or with Docker Compose (add to your existing setup):
+Or with Docker Compose, add a PostgreSQL service and set `DATABASE_URL` in your `.env`:
 
 ```yaml
 services:
@@ -141,8 +141,6 @@ services:
       - "8080:8080"
     env_file:
       - .env
-    environment:
-      - DATABASE_URL=postgresql://llmproxy:secret@db:5432/llmproxy
     depends_on:
       - db
 
@@ -157,6 +155,11 @@ services:
 
 volumes:
   postgres-data:
+```
+
+Then in your `.env`:
+```
+DATABASE_URL=postgresql://llmproxy:secret@db:5432/llmproxy
 ```
 
 The proxy will automatically create all required tables on first run.
