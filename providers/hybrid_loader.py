@@ -27,8 +27,11 @@ def _ensure_db_initialized():
         init_db()
 
 
-def get_model_overrides(provider_id: str) -> dict[str, ModelOverride]:
-    """Get all model overrides for a provider, keyed by model_id."""
+def get_model_overrides(provider_id: str) -> dict[str, dict]:
+    """Get all model overrides for a provider, keyed by model_id.
+
+    Returns dict of model_id -> {"disabled": bool} to avoid SQLAlchemy session issues.
+    """
     _ensure_db_initialized()
     with get_db_context() as db:
         overrides = (
@@ -36,11 +39,15 @@ def get_model_overrides(provider_id: str) -> dict[str, ModelOverride]:
             .filter(ModelOverride.provider_id == provider_id)
             .all()
         )
-        return {o.model_id: o for o in overrides}
+        # Return dicts instead of ORM objects to avoid detached session issues
+        return {o.model_id: {"disabled": o.disabled} for o in overrides}
 
 
-def get_alias_overrides(provider_id: str) -> dict[str, AliasOverride]:
-    """Get all alias overrides for a provider, keyed by alias."""
+def get_alias_overrides(provider_id: str) -> dict[str, dict]:
+    """Get all alias overrides for a provider, keyed by alias.
+
+    Returns dict of alias -> {"disabled": bool} to avoid SQLAlchemy session issues.
+    """
     _ensure_db_initialized()
     with get_db_context() as db:
         overrides = (
@@ -48,7 +55,8 @@ def get_alias_overrides(provider_id: str) -> dict[str, AliasOverride]:
             .filter(AliasOverride.provider_id == provider_id)
             .all()
         )
-        return {o.alias: o for o in overrides}
+        # Return dicts instead of ORM objects to avoid detached session issues
+        return {o.alias: {"disabled": o.disabled} for o in overrides}
 
 
 def get_custom_models(provider_id: str) -> list[dict]:
@@ -137,7 +145,7 @@ def load_hybrid_models(
     # Step 2: Apply model overrides
     model_overrides = get_model_overrides(provider_name)
     for model_id, override in model_overrides.items():
-        if override.disabled and model_id in yaml_models:
+        if override["disabled"] and model_id in yaml_models:
             logger.debug(f"Disabling system model {provider_name}/{model_id}")
             del yaml_models[model_id]
 
@@ -153,7 +161,7 @@ def load_hybrid_models(
     # Step 5: Apply alias overrides
     alias_overrides = get_alias_overrides(provider_name)
     for alias, override in alias_overrides.items():
-        if override.disabled and alias in yaml_aliases:
+        if override["disabled"] and alias in yaml_aliases:
             logger.debug(f"Disabling system alias {provider_name}/{alias}")
             del yaml_aliases[alias]
 
@@ -238,7 +246,7 @@ def get_all_models_with_metadata(
     # Add models from YAML or dynamic discovery
     for model_id, model_info in yaml_models.items():
         override = model_overrides.get(model_id)
-        disabled = override.disabled if override else False
+        disabled = override["disabled"] if override else False
 
         result.append(
             {
@@ -335,7 +343,7 @@ def get_all_aliases_with_metadata(
     # Add system aliases
     for alias, model_id in yaml_aliases.items():
         override = alias_overrides.get(alias)
-        disabled = override.disabled if override else False
+        disabled = override["disabled"] if override else False
 
         result.append(
             {
