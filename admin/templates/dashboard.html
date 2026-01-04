@@ -193,7 +193,7 @@ content %}
                                 <td>
                                     <span
                                         class="badge badge-ghost"
-                                        x-text="provider.type === 'ollama' ? 'Ollama Compatible' : (provider.type === 'anthropic' ? 'Anthropic Compatible' : 'OpenAI Compatible')"
+                                        x-text="provider.id === 'openrouter' ? 'OpenRouter (Dynamic Pricing)' : (provider.type === 'ollama' ? 'Ollama Compatible' : (provider.type === 'anthropic' ? 'Anthropic Compatible' : 'OpenAI Compatible'))"
                                     ></span>
                                 </td>
                                 <td x-text="provider.model_count"></td>

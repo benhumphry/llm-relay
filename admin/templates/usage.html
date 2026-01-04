@@ -3,22 +3,51 @@
 <div x-data="usagePage()" x-init="init()">
     <!-- Header with date range selector -->
     <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4"
     >
         <div>
             <h1 class="text-2xl font-bold">Usage & Stats</h1>
             <p class="text-base-content/60">Monitor proxy usage and costs</p>
         </div>
-        <div class="flex gap-2">
-            <select
-                x-model="dateRange"
-                @change="loadData()"
-                class="select select-bordered select-sm"
-            >
-                <option value="7">Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 90 days</option>
-            </select>
+        <div class="flex flex-wrap gap-2 items-center">
+            <!-- Date Range -->
+            <div class="join">
+                <button
+                    @click="setDatePreset('today')"
+                    :class="{'btn-active': dateMode === 'today'}"
+                    class="btn btn-sm join-item"
+                >
+                    Today
+                </button>
+                <button
+                    @click="setDatePreset(7)"
+                    :class="{'btn-active': dateMode === 7}"
+                    class="btn btn-sm join-item"
+                >
+                    7d
+                </button>
+                <button
+                    @click="setDatePreset(30)"
+                    :class="{'btn-active': dateMode === 30}"
+                    class="btn btn-sm join-item"
+                >
+                    30d
+                </button>
+                <button
+                    @click="setDatePreset(90)"
+                    :class="{'btn-active': dateMode === 90}"
+                    class="btn btn-sm join-item"
+                >
+                    90d
+                </button>
+                <button
+                    @click="toggleCustomDate()"
+                    :class="{'btn-active': dateMode === 'custom'}"
+                    class="btn btn-sm join-item"
+                >
+                    Custom
+                </button>
+            </div>
             <button @click="loadData()" class="btn btn-sm btn-outline">
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -37,6 +66,299 @@
                 Refresh
             </button>
         </div>
+    </div>
+
+    <!-- Custom Date Range Picker -->
+    <div
+        x-show="dateMode === 'custom'"
+        x-transition
+        class="mb-4 flex flex-wrap gap-2 items-center"
+    >
+        <label class="text-sm text-base-content/60">From:</label>
+        <input
+            type="date"
+            x-model="customStartDate"
+            @change="loadData()"
+            class="input input-bordered input-sm"
+        />
+        <label class="text-sm text-base-content/60">To:</label>
+        <input
+            type="date"
+            x-model="customEndDate"
+            @change="loadData()"
+            class="input input-bordered input-sm"
+        />
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="flex flex-wrap gap-2 items-center mb-4">
+        <!-- Tag Filter -->
+        <div class="dropdown">
+            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                    />
+                </svg>
+                Tags
+                <span
+                    x-show="filters.tags.length > 0"
+                    class="badge badge-primary badge-xs"
+                    x-text="filters.tags.length"
+                ></span>
+            </label>
+            <div
+                tabindex="0"
+                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52 max-h-60 overflow-y-auto"
+            >
+                <template x-for="tag in filterOptions.tags" :key="tag">
+                    <label class="label cursor-pointer py-1">
+                        <span class="label-text text-sm" x-text="tag"></span>
+                        <input
+                            type="checkbox"
+                            :checked="filters.tags.includes(tag)"
+                            @change="toggleFilter('tags', tag)"
+                            class="checkbox checkbox-sm checkbox-primary"
+                        />
+                    </label>
+                </template>
+                <div
+                    x-show="filterOptions.tags.length === 0"
+                    class="text-sm text-base-content/60 p-2"
+                >
+                    No tags available
+                </div>
+            </div>
+        </div>
+
+        <!-- Provider Filter -->
+        <div class="dropdown">
+            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"
+                    />
+                </svg>
+                Providers
+                <span
+                    x-show="filters.providers.length > 0"
+                    class="badge badge-info badge-xs"
+                    x-text="filters.providers.length"
+                ></span>
+            </label>
+            <div
+                tabindex="0"
+                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52 max-h-60 overflow-y-auto"
+            >
+                <template
+                    x-for="provider in filterOptions.providers"
+                    :key="provider"
+                >
+                    <label class="label cursor-pointer py-1">
+                        <span
+                            class="label-text text-sm"
+                            x-text="provider"
+                        ></span>
+                        <input
+                            type="checkbox"
+                            :checked="filters.providers.includes(provider)"
+                            @change="toggleFilter('providers', provider)"
+                            class="checkbox checkbox-sm checkbox-info"
+                        />
+                    </label>
+                </template>
+                <div
+                    x-show="filterOptions.providers.length === 0"
+                    class="text-sm text-base-content/60 p-2"
+                >
+                    No providers available
+                </div>
+            </div>
+        </div>
+
+        <!-- Model Filter -->
+        <div class="dropdown">
+            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                </svg>
+                Models
+                <span
+                    x-show="filters.models.length > 0"
+                    class="badge badge-secondary badge-xs"
+                    x-text="filters.models.length"
+                ></span>
+            </label>
+            <div
+                tabindex="0"
+                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-64 max-h-60 overflow-y-auto"
+            >
+                <template
+                    x-for="model in getFilteredModels()"
+                    :key="model.provider + '/' + model.model"
+                >
+                    <label class="label cursor-pointer py-1">
+                        <span class="label-text text-sm">
+                            <span
+                                class="text-base-content/60"
+                                x-text="model.provider + '/'"
+                            ></span>
+                            <span x-text="model.model"></span>
+                        </span>
+                        <input
+                            type="checkbox"
+                            :checked="filters.models.includes(model.model)"
+                            @change="toggleFilter('models', model.model)"
+                            class="checkbox checkbox-sm checkbox-secondary"
+                        />
+                    </label>
+                </template>
+                <div
+                    x-show="getFilteredModels().length === 0"
+                    class="text-sm text-base-content/60 p-2"
+                >
+                    No models available
+                </div>
+            </div>
+        </div>
+
+        <!-- Client Filter -->
+        <div class="dropdown">
+            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                </svg>
+                Clients
+                <span
+                    x-show="filters.clients.length > 0"
+                    class="badge badge-warning badge-xs"
+                    x-text="filters.clients.length"
+                ></span>
+            </label>
+            <div
+                tabindex="0"
+                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-64 max-h-60 overflow-y-auto"
+            >
+                <template x-for="client in filterOptions.clients" :key="client">
+                    <label class="label cursor-pointer py-1">
+                        <span
+                            class="label-text text-sm truncate"
+                            x-text="client"
+                        ></span>
+                        <input
+                            type="checkbox"
+                            :checked="filters.clients.includes(client)"
+                            @change="toggleFilter('clients', client)"
+                            class="checkbox checkbox-sm checkbox-warning"
+                        />
+                    </label>
+                </template>
+                <div
+                    x-show="filterOptions.clients.length === 0"
+                    class="text-sm text-base-content/60 p-2"
+                >
+                    No clients available
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Filters Display -->
+        <template x-for="tag in filters.tags" :key="'tag-' + tag">
+            <span class="badge badge-primary gap-1">
+                <span x-text="tag"></span>
+                <button
+                    @click="removeFilter('tags', tag)"
+                    class="hover:text-error"
+                >
+                    x
+                </button>
+            </span>
+        </template>
+        <template
+            x-for="provider in filters.providers"
+            :key="'provider-' + provider"
+        >
+            <span class="badge badge-info gap-1">
+                <span x-text="provider"></span>
+                <button
+                    @click="removeFilter('providers', provider)"
+                    class="hover:text-error"
+                >
+                    x
+                </button>
+            </span>
+        </template>
+        <template x-for="model in filters.models" :key="'model-' + model">
+            <span class="badge badge-secondary gap-1">
+                <span x-text="model"></span>
+                <button
+                    @click="removeFilter('models', model)"
+                    class="hover:text-error"
+                >
+                    x
+                </button>
+            </span>
+        </template>
+        <template x-for="client in filters.clients" :key="'client-' + client">
+            <span class="badge badge-warning gap-1">
+                <span x-text="client"></span>
+                <button
+                    @click="removeFilter('clients', client)"
+                    class="hover:text-error"
+                >
+                    x
+                </button>
+            </span>
+        </template>
+
+        <!-- Clear Filters -->
+        <button
+            x-show="hasActiveFilters()"
+            @click="clearFilters()"
+            class="btn btn-sm btn-ghost text-error"
+        >
+            Clear All
+        </button>
     </div>
 
     <!-- Summary Cards -->
@@ -116,21 +438,21 @@
                 <h2 class="card-title">Usage Over Time</h2>
                 <div class="join">
                     <button
-                        @click="chartMetric = 'requests'; renderChart()"
+                        @click="chartMetric = 'requests'; renderChart(); renderBreakdownCharts()"
                         :class="{'btn-active': chartMetric === 'requests'}"
                         class="btn btn-sm join-item"
                     >
                         Requests
                     </button>
                     <button
-                        @click="chartMetric = 'tokens'; renderChart()"
+                        @click="chartMetric = 'tokens'; renderChart(); renderBreakdownCharts()"
                         :class="{'btn-active': chartMetric === 'tokens'}"
                         class="btn btn-sm join-item"
                     >
                         Tokens
                     </button>
                     <button
-                        @click="chartMetric = 'cost'; renderChart()"
+                        @click="chartMetric = 'cost'; renderChart(); renderBreakdownCharts()"
                         :class="{'btn-active': chartMetric === 'cost'}"
                         class="btn btn-sm join-item"
                     >
@@ -152,31 +474,37 @@
     <!-- Tabs for breakdown tables -->
     <div class="tabs tabs-boxed mb-4 bg-base-100 p-1">
         <a
-            @click="activeTab = 'tags'"
+            @click="switchTab('tags')"
             :class="{'tab-active': activeTab === 'tags'}"
             class="tab"
             >By Tag</a
         >
         <a
-            @click="activeTab = 'providers'"
+            @click="switchTab('providers')"
             :class="{'tab-active': activeTab === 'providers'}"
             class="tab"
             >By Provider</a
         >
         <a
-            @click="activeTab = 'models'"
+            @click="switchTab('models')"
             :class="{'tab-active': activeTab === 'models'}"
             class="tab"
             >By Model</a
         >
         <a
-            @click="activeTab = 'recent'"
+            @click="switchTab('clients')"
+            :class="{'tab-active': activeTab === 'clients'}"
+            class="tab"
+            >By Client</a
+        >
+        <a
+            @click="switchTab('recent')"
             :class="{'tab-active': activeTab === 'recent'}"
             class="tab"
             >Recent Requests</a
         >
         <a
-            @click="activeTab = 'settings'"
+            @click="switchTab('settings')"
             :class="{'tab-active': activeTab === 'settings'}"
             class="tab"
             >Settings</a
@@ -187,54 +515,108 @@
     <div x-show="activeTab === 'tags'" class="card bg-base-100 shadow">
         <div class="card-body">
             <h3 class="card-title">Usage by Tag</h3>
-            <div class="overflow-x-auto">
-                <table class="table table-zebra">
-                    <thead>
-                        <tr>
-                            <th>Tag</th>
-                            <th class="text-right">Requests</th>
-                            <th class="text-right">Input Tokens</th>
-                            <th class="text-right">Output Tokens</th>
-                            <th class="text-right">Cost</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="row in byTag" :key="row.tag">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Breakdown Chart -->
+                <div id="tag-chart" style="height: 300px">
+                    <div
+                        x-show="byTag.length === 0"
+                        class="flex items-center justify-center h-full text-base-content/60"
+                    >
+                        No data available
+                    </div>
+                </div>
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra table-sm">
+                        <thead>
                             <tr>
-                                <td>
+                                <th
+                                    @click="setSortColumn('tag', 'tag')"
+                                    class="cursor-pointer hover:bg-base-200"
+                                >
+                                    Tag
                                     <span
-                                        class="badge badge-outline"
-                                        x-text="row.tag"
+                                        x-show="sortColumn === 'tag'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
                                     ></span>
-                                </td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatNumber(row.requests)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatTokens(row.input_tokens)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatTokens(row.output_tokens)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="'$' + row.cost.toFixed(4)"
-                                ></td>
+                                </th>
+                                <th
+                                    @click="setSortColumn('tag', 'requests')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Requests
+                                    <span
+                                        x-show="sortColumn === 'requests'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th class="text-right">%</th>
+                                <th
+                                    @click="setSortColumn('tag', 'total_tokens')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Tokens
+                                    <span
+                                        x-show="sortColumn === 'total_tokens'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th
+                                    @click="setSortColumn('tag', 'cost')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Cost
+                                    <span
+                                        x-show="sortColumn === 'cost'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
                             </tr>
-                        </template>
-                        <tr x-show="byTag.length === 0">
-                            <td
-                                colspan="5"
-                                class="text-center text-base-content/60"
+                        </thead>
+                        <tbody>
+                            <template
+                                x-for="row in getSortedData(byTag, 'tag')"
+                                :key="row.tag"
                             >
-                                No data available
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                                <tr
+                                    @click="drillDown('tags', row.tag)"
+                                    class="cursor-pointer hover:bg-primary/10"
+                                >
+                                    <td>
+                                        <span
+                                            class="badge badge-outline"
+                                            x-text="row.tag"
+                                        ></span>
+                                    </td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatNumber(row.requests)"
+                                    ></td>
+                                    <td
+                                        class="text-right text-base-content/60"
+                                        x-text="getPercentage(row.requests, getTotalRequests(byTag)) + '%'"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatTokens(row.total_tokens)"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="'$' + row.cost.toFixed(4)"
+                                    ></td>
+                                </tr>
+                            </template>
+                            <tr x-show="byTag.length === 0">
+                                <td
+                                    colspan="5"
+                                    class="text-center text-base-content/60"
+                                >
+                                    No data available
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -243,57 +625,108 @@
     <div x-show="activeTab === 'providers'" class="card bg-base-100 shadow">
         <div class="card-body">
             <h3 class="card-title">Usage by Provider</h3>
-            <div class="overflow-x-auto">
-                <table class="table table-zebra">
-                    <thead>
-                        <tr>
-                            <th>Provider</th>
-                            <th class="text-right">Requests</th>
-                            <th class="text-right">Input Tokens</th>
-                            <th class="text-right">Output Tokens</th>
-                            <th class="text-right">Cost</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template
-                            x-for="row in byProvider"
-                            :key="row.provider_id"
-                        >
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Breakdown Chart -->
+                <div id="provider-chart" style="height: 300px">
+                    <div
+                        x-show="byProvider.length === 0"
+                        class="flex items-center justify-center h-full text-base-content/60"
+                    >
+                        No data available
+                    </div>
+                </div>
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra table-sm">
+                        <thead>
                             <tr>
-                                <td>
+                                <th
+                                    @click="setSortColumn('provider', 'provider_id')"
+                                    class="cursor-pointer hover:bg-base-200"
+                                >
+                                    Provider
                                     <span
-                                        class="badge badge-info badge-outline"
-                                        x-text="row.provider_id"
+                                        x-show="sortColumn === 'provider_id'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
                                     ></span>
-                                </td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatNumber(row.requests)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatTokens(row.input_tokens)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatTokens(row.output_tokens)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="'$' + row.cost.toFixed(4)"
-                                ></td>
+                                </th>
+                                <th
+                                    @click="setSortColumn('provider', 'requests')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Requests
+                                    <span
+                                        x-show="sortColumn === 'requests'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th class="text-right">%</th>
+                                <th
+                                    @click="setSortColumn('provider', 'total_tokens')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Tokens
+                                    <span
+                                        x-show="sortColumn === 'total_tokens'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th
+                                    @click="setSortColumn('provider', 'cost')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Cost
+                                    <span
+                                        x-show="sortColumn === 'cost'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
                             </tr>
-                        </template>
-                        <tr x-show="byProvider.length === 0">
-                            <td
-                                colspan="5"
-                                class="text-center text-base-content/60"
+                        </thead>
+                        <tbody>
+                            <template
+                                x-for="row in getSortedData(byProvider, 'provider_id')"
+                                :key="row.provider_id"
                             >
-                                No data available
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                                <tr
+                                    @click="drillDown('providers', row.provider_id)"
+                                    class="cursor-pointer hover:bg-info/10"
+                                >
+                                    <td>
+                                        <span
+                                            class="badge badge-info badge-outline"
+                                            x-text="row.provider_id"
+                                        ></span>
+                                    </td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatNumber(row.requests)"
+                                    ></td>
+                                    <td
+                                        class="text-right text-base-content/60"
+                                        x-text="getPercentage(row.requests, getTotalRequests(byProvider)) + '%'"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatTokens(row.total_tokens)"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="'$' + row.cost.toFixed(4)"
+                                    ></td>
+                                </tr>
+                            </template>
+                            <tr x-show="byProvider.length === 0">
+                                <td
+                                    colspan="5"
+                                    class="text-center text-base-content/60"
+                                >
+                                    No data available
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -302,62 +735,204 @@
     <div x-show="activeTab === 'models'" class="card bg-base-100 shadow">
         <div class="card-body">
             <h3 class="card-title">Usage by Model</h3>
-            <div class="overflow-x-auto">
-                <table class="table table-zebra">
-                    <thead>
-                        <tr>
-                            <th>Provider</th>
-                            <th>Model</th>
-                            <th class="text-right">Requests</th>
-                            <th class="text-right">Input Tokens</th>
-                            <th class="text-right">Output Tokens</th>
-                            <th class="text-right">Cost</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template
-                            x-for="row in byModel"
-                            :key="row.provider_id + '/' + row.model_id"
-                        >
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Breakdown Chart -->
+                <div id="model-chart" style="height: 300px">
+                    <div
+                        x-show="byModel.length === 0"
+                        class="flex items-center justify-center h-full text-base-content/60"
+                    >
+                        No data available
+                    </div>
+                </div>
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra table-sm">
+                        <thead>
                             <tr>
-                                <td>
+                                <th
+                                    @click="setSortColumn('model', 'provider_id')"
+                                    class="cursor-pointer hover:bg-base-200"
+                                >
+                                    Provider
                                     <span
-                                        class="badge badge-info badge-outline badge-sm"
-                                        x-text="row.provider_id"
+                                        x-show="sortColumn === 'provider_id'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
                                     ></span>
-                                </td>
-                                <td
-                                    class="font-mono text-sm"
-                                    x-text="row.model_id"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatNumber(row.requests)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatTokens(row.input_tokens)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="formatTokens(row.output_tokens)"
-                                ></td>
-                                <td
-                                    class="text-right"
-                                    x-text="'$' + row.cost.toFixed(4)"
-                                ></td>
+                                </th>
+                                <th
+                                    @click="setSortColumn('model', 'model_id')"
+                                    class="cursor-pointer hover:bg-base-200"
+                                >
+                                    Model
+                                    <span
+                                        x-show="sortColumn === 'model_id'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th
+                                    @click="setSortColumn('model', 'requests')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Requests
+                                    <span
+                                        x-show="sortColumn === 'requests'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th class="text-right">%</th>
+                                <th
+                                    @click="setSortColumn('model', 'cost')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Cost
+                                    <span
+                                        x-show="sortColumn === 'cost'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
                             </tr>
-                        </template>
-                        <tr x-show="byModel.length === 0">
-                            <td
-                                colspan="6"
-                                class="text-center text-base-content/60"
+                        </thead>
+                        <tbody>
+                            <template
+                                x-for="row in getSortedData(byModel, 'model_id')"
+                                :key="row.provider_id + '/' + row.model_id"
                             >
-                                No data available
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                                <tr
+                                    @click="drillDown('models', row.model_id)"
+                                    class="cursor-pointer hover:bg-secondary/10"
+                                >
+                                    <td>
+                                        <span
+                                            class="badge badge-info badge-outline badge-sm"
+                                            x-text="row.provider_id"
+                                        ></span>
+                                    </td>
+                                    <td
+                                        class="font-mono text-sm max-w-40 truncate"
+                                        x-text="row.model_id"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatNumber(row.requests)"
+                                    ></td>
+                                    <td
+                                        class="text-right text-base-content/60"
+                                        x-text="getPercentage(row.requests, getTotalRequests(byModel)) + '%'"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="'$' + row.cost.toFixed(4)"
+                                    ></td>
+                                </tr>
+                            </template>
+                            <tr x-show="byModel.length === 0">
+                                <td
+                                    colspan="5"
+                                    class="text-center text-base-content/60"
+                                >
+                                    No data available
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- By Client Table -->
+    <div x-show="activeTab === 'clients'" class="card bg-base-100 shadow">
+        <div class="card-body">
+            <h3 class="card-title">Usage by Client</h3>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Breakdown Chart -->
+                <div id="client-chart" style="height: 300px">
+                    <div
+                        x-show="byClient.length === 0"
+                        class="flex items-center justify-center h-full text-base-content/60"
+                    >
+                        No data available
+                    </div>
+                </div>
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra table-sm">
+                        <thead>
+                            <tr>
+                                <th
+                                    @click="setSortColumn('client', 'client')"
+                                    class="cursor-pointer hover:bg-base-200"
+                                >
+                                    Client
+                                    <span
+                                        x-show="sortColumn === 'client'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th
+                                    @click="setSortColumn('client', 'requests')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Requests
+                                    <span
+                                        x-show="sortColumn === 'requests'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th class="text-right">%</th>
+                                <th
+                                    @click="setSortColumn('client', 'total_tokens')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Tokens
+                                    <span
+                                        x-show="sortColumn === 'total_tokens'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template
+                                x-for="row in getSortedData(byClient, 'client')"
+                                :key="row.client"
+                            >
+                                <tr
+                                    @click="drillDown('clients', row.client)"
+                                    class="cursor-pointer hover:bg-warning/10"
+                                >
+                                    <td>
+                                        <span
+                                            class="badge badge-warning badge-outline text-xs"
+                                            x-text="row.client"
+                                        ></span>
+                                    </td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatNumber(row.requests)"
+                                    ></td>
+                                    <td
+                                        class="text-right text-base-content/60"
+                                        x-text="getPercentage(row.requests, getTotalRequests(byClient)) + '%'"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatTokens(row.total_tokens)"
+                                    ></td>
+                                </tr>
+                            </template>
+                            <tr x-show="byClient.length === 0">
+                                <td
+                                    colspan="4"
+                                    class="text-center text-base-content/60"
+                                >
+                                    No data available
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -382,6 +957,7 @@
                             <th>Model</th>
                             <th>Endpoint</th>
                             <th class="text-right">Tokens</th>
+                            <th class="text-right">Cost</th>
                             <th class="text-right">Time (ms)</th>
                             <th>Status</th>
                         </tr>
@@ -426,6 +1002,17 @@
                                         x-show="log.is_streaming"
                                         class="badge badge-ghost badge-xs ml-1"
                                         >stream</span
+                                    >
+                                </td>
+                                <td class="text-right text-xs">
+                                    <span
+                                        x-show="log.cost !== null"
+                                        x-text="'$' + log.cost.toFixed(6)"
+                                    ></span>
+                                    <span
+                                        x-show="log.cost === null"
+                                        class="text-base-content/40"
+                                        >-</span
                                     >
                                 </td>
                                 <td
@@ -542,7 +1129,32 @@
 <script>
     function usagePage() {
         return {
+            // Date range state
+            dateMode: 30, // 'today', 7, 30, 90, or 'custom'
             dateRange: 30,
+            customStartDate: "",
+            customEndDate: "",
+
+            // Filter state
+            filters: {
+                tags: [],
+                providers: [],
+                models: [],
+                clients: [],
+            },
+            filterOptions: {
+                tags: [],
+                providers: [],
+                models: [],
+                clients: [],
+            },
+
+            // Sorting state
+            sortColumn: "requests",
+            sortDirection: "desc",
+            sortTable: null,
+
+            // Data
             summary: {
                 total_requests: 0,
                 total_input_tokens: 0,
@@ -555,6 +1167,7 @@
             byTag: [],
             byProvider: [],
             byModel: [],
+            byClient: [],
             recentRequests: [],
             settings: {
                 tracking_enabled: true,
@@ -562,14 +1175,189 @@
                 dns_resolution_enabled: true,
                 retention_days: 90,
             },
+
+            // UI state
             activeTab: "tags",
             chartMetric: "requests",
             chart: null,
+            tagChart: null,
+            providerChart: null,
+            modelChart: null,
             toast: { show: false, message: "", type: "info" },
 
             async init() {
+                // Set default custom dates
+                const today = new Date();
+                const thirtyDaysAgo = new Date(
+                    today - 30 * 24 * 60 * 60 * 1000,
+                );
+                this.customEndDate = today.toISOString().split("T")[0];
+                this.customStartDate = thirtyDaysAgo
+                    .toISOString()
+                    .split("T")[0];
+
+                await this.loadFilterOptions();
                 await this.loadData();
                 await this.loadSettings();
+            },
+
+            // Date range methods
+            setDatePreset(preset) {
+                this.dateMode = preset;
+                if (preset === "today") {
+                    this.dateRange = 1;
+                } else if (typeof preset === "number") {
+                    this.dateRange = preset;
+                }
+                this.loadData();
+            },
+
+            toggleCustomDate() {
+                this.dateMode = "custom";
+            },
+
+            buildQueryParams() {
+                const params = new URLSearchParams();
+
+                // Date params
+                if (this.dateMode === "custom") {
+                    if (this.customStartDate)
+                        params.set("start", this.customStartDate);
+                    if (this.customEndDate)
+                        params.set("end", this.customEndDate);
+                } else {
+                    params.set("days", this.dateRange);
+                }
+
+                // Filter params
+                if (this.filters.tags.length > 0) {
+                    params.set("tags", this.filters.tags.join(","));
+                }
+                if (this.filters.providers.length > 0) {
+                    params.set("providers", this.filters.providers.join(","));
+                }
+                if (this.filters.models.length > 0) {
+                    params.set("models", this.filters.models.join(","));
+                }
+                if (this.filters.clients.length > 0) {
+                    params.set("clients", this.filters.clients.join(","));
+                }
+
+                return params.toString();
+            },
+
+            // Tab switching with chart re-render
+            switchTab(tab) {
+                this.activeTab = tab;
+                // Re-render charts after tab switch (needed for ECharts to size correctly)
+                this.$nextTick(() => {
+                    this.renderBreakdownCharts();
+                });
+            },
+
+            // Filter methods
+            async loadFilterOptions() {
+                try {
+                    const res = await fetch("/api/usage/filters");
+                    if (res.ok) {
+                        this.filterOptions = await res.json();
+                    }
+                } catch (e) {
+                    console.error("Error loading filter options:", e);
+                }
+            },
+
+            toggleFilter(type, value) {
+                const idx = this.filters[type].indexOf(value);
+                if (idx === -1) {
+                    this.filters[type].push(value);
+                } else {
+                    this.filters[type].splice(idx, 1);
+                }
+                this.loadData();
+            },
+
+            removeFilter(type, value) {
+                const idx = this.filters[type].indexOf(value);
+                if (idx !== -1) {
+                    this.filters[type].splice(idx, 1);
+                    this.loadData();
+                }
+            },
+
+            clearFilters() {
+                this.filters.tags = [];
+                this.filters.providers = [];
+                this.filters.models = [];
+                this.filters.clients = [];
+                this.loadData();
+            },
+
+            hasActiveFilters() {
+                return (
+                    this.filters.tags.length > 0 ||
+                    this.filters.providers.length > 0 ||
+                    this.filters.models.length > 0 ||
+                    this.filters.clients.length > 0
+                );
+            },
+
+            getFilteredModels() {
+                // If providers are selected, only show models from those providers
+                if (this.filters.providers.length > 0) {
+                    return this.filterOptions.models.filter((m) =>
+                        this.filters.providers.includes(m.provider),
+                    );
+                }
+                return this.filterOptions.models;
+            },
+
+            // Drill-down
+            drillDown(type, value) {
+                if (!this.filters[type].includes(value)) {
+                    this.filters[type].push(value);
+                    this.loadData();
+                }
+            },
+
+            // Sorting methods
+            setSortColumn(table, column) {
+                if (this.sortTable === table && this.sortColumn === column) {
+                    this.sortDirection =
+                        this.sortDirection === "asc" ? "desc" : "asc";
+                } else {
+                    this.sortTable = table;
+                    this.sortColumn = column;
+                    this.sortDirection = "desc";
+                }
+            },
+
+            getSortedData(data, defaultKey) {
+                if (!data || data.length === 0) return [];
+                const sorted = [...data].sort((a, b) => {
+                    let aVal = a[this.sortColumn] ?? a[defaultKey];
+                    let bVal = b[this.sortColumn] ?? b[defaultKey];
+                    if (typeof aVal === "string") {
+                        aVal = aVal.toLowerCase();
+                        bVal = bVal.toLowerCase();
+                    }
+                    if (aVal < bVal)
+                        return this.sortDirection === "asc" ? -1 : 1;
+                    if (aVal > bVal)
+                        return this.sortDirection === "asc" ? 1 : -1;
+                    return 0;
+                });
+                return sorted;
+            },
+
+            // Helper methods
+            getTotalRequests(data) {
+                return data.reduce((sum, row) => sum + (row.requests || 0), 0);
+            },
+
+            getPercentage(value, total) {
+                if (!total || total === 0) return 0;
+                return ((value / total) * 100).toFixed(1);
             },
 
             async loadData() {
@@ -579,15 +1367,17 @@
                     this.loadByTag(),
                     this.loadByProvider(),
                     this.loadByModel(),
+                    this.loadByClient(),
                     this.loadRecent(),
                 ]);
                 this.renderChart();
+                this.renderBreakdownCharts();
             },
 
             async loadSummary() {
                 try {
                     const res = await fetch(
-                        `/api/usage/summary?days=${this.dateRange}`,
+                        `/api/usage/summary?${this.buildQueryParams()}`,
                     );
                     if (res.ok) this.summary = await res.json();
                 } catch (e) {
@@ -598,7 +1388,7 @@
             async loadTimeseries() {
                 try {
                     const res = await fetch(
-                        `/api/usage/timeseries?days=${this.dateRange}`,
+                        `/api/usage/timeseries?${this.buildQueryParams()}`,
                     );
                     if (res.ok) this.timeseries = await res.json();
                 } catch (e) {
@@ -609,7 +1399,7 @@
             async loadByTag() {
                 try {
                     const res = await fetch(
-                        `/api/usage/by-tag?days=${this.dateRange}`,
+                        `/api/usage/by-tag?${this.buildQueryParams()}`,
                     );
                     if (res.ok) this.byTag = await res.json();
                 } catch (e) {
@@ -620,7 +1410,7 @@
             async loadByProvider() {
                 try {
                     const res = await fetch(
-                        `/api/usage/by-provider?days=${this.dateRange}`,
+                        `/api/usage/by-provider?${this.buildQueryParams()}`,
                     );
                     if (res.ok) this.byProvider = await res.json();
                 } catch (e) {
@@ -631,11 +1421,22 @@
             async loadByModel() {
                 try {
                     const res = await fetch(
-                        `/api/usage/by-model?days=${this.dateRange}`,
+                        `/api/usage/by-model?${this.buildQueryParams()}`,
                     );
                     if (res.ok) this.byModel = await res.json();
                 } catch (e) {
                     console.error("Error loading by-model:", e);
+                }
+            },
+
+            async loadByClient() {
+                try {
+                    const res = await fetch(
+                        `/api/usage/by-client?${this.buildQueryParams()}`,
+                    );
+                    if (res.ok) this.byClient = await res.json();
+                } catch (e) {
+                    console.error("Error loading by-client:", e);
                 }
             },
 
@@ -678,8 +1479,13 @@
                 if (this.timeseries.length === 0) return;
 
                 const chartDom = document.getElementById("usage-chart");
+                const theme = this.getEChartsTheme();
                 if (!this.chart) {
-                    this.chart = echarts.init(chartDom, "dark");
+                    this.chart = echarts.init(chartDom, theme);
+                } else if (this.chart._theme !== theme) {
+                    // Theme changed, recreate chart
+                    this.chart.dispose();
+                    this.chart = echarts.init(chartDom, theme);
                 }
 
                 const metricLabels = {
@@ -719,14 +1525,10 @@
                     xAxis: {
                         type: "category",
                         data: data.map((d) => d.date),
-                        axisLine: { lineStyle: { color: "#666" } },
-                        axisLabel: { color: "#999" },
                     },
                     yAxis: {
                         type: "value",
-                        axisLine: { lineStyle: { color: "#666" } },
                         axisLabel: {
-                            color: "#999",
                             formatter: (val) => {
                                 if (this.chartMetric === "cost")
                                     return "$" + val.toFixed(2);
@@ -740,7 +1542,6 @@
                                 return val;
                             },
                         },
-                        splitLine: { lineStyle: { color: "#333" } },
                     },
                     series: [
                         {
@@ -758,6 +1559,195 @@
                     ],
                 };
                 this.chart.setOption(option);
+            },
+
+            renderBreakdownCharts() {
+                // Map chartMetric to data field
+                const metricField =
+                    this.chartMetric === "tokens"
+                        ? "total_tokens"
+                        : this.chartMetric === "cost"
+                          ? "cost"
+                          : "requests";
+                const metricColor =
+                    this.chartMetric === "cost"
+                        ? "#f59e0b"
+                        : this.chartMetric === "tokens"
+                          ? "#3b82f6"
+                          : "#22c55e";
+
+                // Only render charts for visible tabs to ensure proper sizing
+                if (this.activeTab === "tags") {
+                    this.renderBreakdownChart(
+                        "tag-chart",
+                        this.byTag,
+                        "tag",
+                        metricField,
+                        metricColor,
+                    );
+                }
+                if (this.activeTab === "providers") {
+                    this.renderBreakdownChart(
+                        "provider-chart",
+                        this.byProvider,
+                        "provider_id",
+                        metricField,
+                        metricColor,
+                    );
+                }
+                if (this.activeTab === "models") {
+                    this.renderBreakdownChart(
+                        "model-chart",
+                        this.byModel,
+                        "model_id",
+                        metricField,
+                        metricColor,
+                    );
+                }
+                if (this.activeTab === "clients") {
+                    this.renderBreakdownChart(
+                        "client-chart",
+                        this.byClient,
+                        "client",
+                        metricField,
+                        metricColor,
+                    );
+                }
+            },
+
+            renderBreakdownChart(containerId, data, labelKey, valueKey, color) {
+                if (!data || data.length === 0) return;
+
+                const chartDom = document.getElementById(containerId);
+                if (!chartDom) return;
+
+                const theme = this.getEChartsTheme();
+                let chart = echarts.getInstanceByDom(chartDom);
+                if (!chart) {
+                    chart = echarts.init(chartDom, theme);
+                } else if (chart._theme !== theme) {
+                    // Theme changed, recreate chart
+                    chart.dispose();
+                    chart = echarts.init(chartDom, theme);
+                }
+
+                // Take top 10 and aggregate rest as "Other"
+                const sorted = [...data].sort(
+                    (a, b) => (b[valueKey] || 0) - (a[valueKey] || 0),
+                );
+                const top10 = sorted.slice(0, 10);
+                const other = sorted.slice(10);
+                const otherSum = other.reduce(
+                    (sum, item) => sum + (item[valueKey] || 0),
+                    0,
+                );
+
+                // Build data for horizontal bar chart (reversed for top-to-bottom display)
+                const labels = top10.map((item) => item[labelKey]).reverse();
+                const values = top10
+                    .map((item) => item[valueKey] || 0)
+                    .reverse();
+                if (otherSum > 0) {
+                    labels.unshift("Other");
+                    values.unshift(otherSum);
+                }
+
+                const total = values.reduce((sum, v) => sum + v, 0);
+
+                // Determine metric label and formatter
+                const metricLabels = {
+                    requests: "Requests",
+                    total_tokens: "Tokens",
+                    cost: "Cost",
+                };
+                const metricLabel = metricLabels[valueKey] || "Value";
+                const isCost = valueKey === "cost";
+                const isTokens = valueKey === "total_tokens";
+
+                const formatValue = (val) => {
+                    if (isCost) return "$" + val.toFixed(4);
+                    if (val >= 1000000) return (val / 1000000).toFixed(1) + "M";
+                    if (val >= 1000) return (val / 1000).toFixed(1) + "K";
+                    return this.formatNumber(val);
+                };
+
+                const option = {
+                    backgroundColor: "transparent",
+                    tooltip: {
+                        trigger: "axis",
+                        axisPointer: { type: "shadow" },
+                        formatter: (params) => {
+                            const d = params[0];
+                            const pct =
+                                total > 0
+                                    ? ((d.value / total) * 100).toFixed(1)
+                                    : 0;
+                            return `${d.name}<br/>${metricLabel}: ${formatValue(d.value)} (${pct}%)`;
+                        },
+                    },
+                    grid: {
+                        left: "3%",
+                        right: "15%",
+                        top: "3%",
+                        bottom: "3%",
+                        containLabel: true,
+                    },
+                    xAxis: {
+                        type: "value",
+                        axisLabel: {
+                            formatter: (val) => {
+                                if (isCost) return "$" + val.toFixed(2);
+                                if (val >= 1000000)
+                                    return (val / 1000000).toFixed(1) + "M";
+                                if (val >= 1000)
+                                    return (val / 1000).toFixed(0) + "K";
+                                return val;
+                            },
+                        },
+                    },
+                    yAxis: {
+                        type: "category",
+                        data: labels,
+                        axisLabel: {
+                            width: 100,
+                            overflow: "truncate",
+                            ellipsis: "...",
+                        },
+                    },
+                    series: [
+                        {
+                            type: "bar",
+                            data: values,
+                            itemStyle: {
+                                color: color,
+                                borderRadius: [0, 4, 4, 0],
+                            },
+                            label: {
+                                show: true,
+                                position: "right",
+                                formatter: (params) => {
+                                    const pct =
+                                        total > 0
+                                            ? (
+                                                  (params.value / total) *
+                                                  100
+                                              ).toFixed(1)
+                                            : 0;
+                                    return `${pct}%`;
+                                },
+                            },
+                        },
+                    ],
+                };
+
+                chart.setOption(option, true);
+            },
+
+            // Get current theme for ECharts (null for light, 'dark' for dark)
+            getEChartsTheme() {
+                const dataTheme =
+                    document.documentElement.getAttribute("data-theme");
+                return dataTheme === "dark" ? "dark" : null;
             },
 
             formatNumber(n) {

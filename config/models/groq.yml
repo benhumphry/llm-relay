@@ -8,12 +8,16 @@ models:
     description: "Llama 4 Maverick 17B - Latest Llama model with 128 experts"
     context_length: 131072
     capabilities: [analysis, coding, writing, reasoning]
+    input_cost: 0.20
+    output_cost: 0.60
 
   meta-llama/llama-4-scout-17b-16e-instruct:
     family: llama-4
     description: "Llama 4 Scout 17B - Efficient Llama 4 with 16 experts"
     context_length: 131072
     capabilities: [analysis, coding, writing, fast]
+    input_cost: 0.11
+    output_cost: 0.34
 
   # Llama 3.3 family (Production)
   llama-3.3-70b-versatile:
@@ -21,6 +25,8 @@ models:
     description: "Llama 3.3 70B Versatile - Best open-source model on Groq"
     context_length: 131072
     capabilities: [analysis, coding, writing, reasoning]
+    input_cost: 0.59
+    output_cost: 0.79
 
   # Llama 3.1 family (Production)
   llama-3.1-8b-instant:
@@ -28,6 +34,8 @@ models:
     description: "Llama 3.1 8B Instant - Ultra-fast small model"
     context_length: 131072
     capabilities: [analysis, coding, writing, fast]
+    input_cost: 0.05
+    output_cost: 0.08
 
   # Qwen family (Preview)
   qwen/qwen3-32b:
@@ -35,6 +43,8 @@ models:
     description: "Qwen 3 32B - Strong multilingual and reasoning model"
     context_length: 131072
     capabilities: [analysis, coding, writing, reasoning]
+    input_cost: 0.29
+    output_cost: 0.39
 
   # Kimi/Moonshot (Preview)
   moonshotai/kimi-k2-instruct-0905:
@@ -42,6 +52,8 @@ models:
     description: "Kimi K2 - Moonshot AI model with extended context"
     context_length: 262144
     capabilities: [analysis, coding, writing, reasoning]
+    input_cost: 0.20
+    output_cost: 0.60
 
   # GPT-OSS (Production - open-source GPT alternatives)
   openai/gpt-oss-120b:
@@ -49,12 +61,16 @@ models:
     description: "GPT-OSS 120B - Large open-source GPT alternative"
     context_length: 131072
     capabilities: [analysis, coding, writing, reasoning]
+    input_cost: 0.29
+    output_cost: 0.39
 
   openai/gpt-oss-20b:
     family: gpt-oss
     description: "GPT-OSS 20B - Fast open-source GPT alternative"
     context_length: 131072
     capabilities: [analysis, coding, writing, fast]
+    input_cost: 0.20
+    output_cost: 0.20
 
   # Compound models (agentic with tools)
   groq/compound:
@@ -62,12 +78,16 @@ models:
     description: "Groq Compound - Agentic model with code execution and web search"
     context_length: 131072
     capabilities: [analysis, coding, search, tools]
+    input_cost: 0.59
+    output_cost: 0.79
 
   groq/compound-mini:
     family: compound
     description: "Groq Compound Mini - Fast agentic model"
     context_length: 131072
     capabilities: [analysis, coding, search, tools, fast]
+    input_cost: 0.05
+    output_cost: 0.08
 
   # Guard models
   meta-llama/llama-guard-4-12b:
@@ -75,6 +95,8 @@ models:
     description: "Llama Guard 4 12B - Content safety classifier"
     context_length: 131072
     capabilities: [moderation]
+    input_cost: 0.20
+    output_cost: 0.20
 
 aliases:
   # Primary aliases

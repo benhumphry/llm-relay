@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from db import AliasOverride, CustomAlias, CustomModel, ModelOverride
-from db.connection import check_db_initialized, get_db_context, init_db
+from db.connection import check_db_initialized, get_db_context, init_db, run_migrations
 
 from .base import ModelInfo
 from .loader import load_models_for_provider as load_yaml_models
@@ -21,16 +21,19 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_db_initialized():
-    """Ensure database tables exist before querying."""
+    """Ensure database tables exist and migrations are run before querying."""
     if not check_db_initialized():
         logger.info("Database not initialized, creating tables...")
         init_db()
+    else:
+        # Run migrations for existing databases (safe to call multiple times)
+        run_migrations()
 
 
 def get_model_overrides(provider_id: str) -> dict[str, dict]:
     """Get all model overrides for a provider, keyed by model_id.
 
-    Returns dict of model_id -> {"disabled": bool} to avoid SQLAlchemy session issues.
+    Returns dict of model_id -> override dict to avoid SQLAlchemy session issues.
     """
     _ensure_db_initialized()
     with get_db_context() as db:
@@ -40,7 +43,17 @@ def get_model_overrides(provider_id: str) -> dict[str, dict]:
             .all()
         )
         # Return dicts instead of ORM objects to avoid detached session issues
-        return {o.model_id: {"disabled": o.disabled} for o in overrides}
+        return {
+            o.model_id: {
+                "disabled": o.disabled,
+                "input_cost": o.input_cost,
+                "output_cost": o.output_cost,
+                "capabilities": o.capabilities,
+                "context_length": o.context_length,
+                "description": o.description,
+            }
+            for o in overrides
+        }
 
 
 def get_alias_overrides(provider_id: str) -> dict[str, dict]:
@@ -247,25 +260,69 @@ def get_all_models_with_metadata(
     for model_id, model_info in yaml_models.items():
         override = model_overrides.get(model_id)
         disabled = override["disabled"] if override else False
+        has_override = override is not None and any(
+            override.get(k) is not None
+            for k in [
+                "input_cost",
+                "output_cost",
+                "capabilities",
+                "context_length",
+                "description",
+            ]
+        )
+
+        # Apply overrides if present, otherwise use system defaults
+        description = (
+            override.get("description")
+            if override and override.get("description")
+            else model_info.description
+        )
+        context_length = (
+            override.get("context_length")
+            if override and override.get("context_length")
+            else model_info.context_length
+        )
+        capabilities = (
+            override.get("capabilities")
+            if override and override.get("capabilities")
+            else model_info.capabilities
+        )
+        input_cost = (
+            override.get("input_cost")
+            if override and override.get("input_cost") is not None
+            else getattr(model_info, "input_cost", None)
+        )
+        output_cost = (
+            override.get("output_cost")
+            if override and override.get("output_cost") is not None
+            else getattr(model_info, "output_cost", None)
+        )
 
         result.append(
             {
                 "id": model_id,
                 "provider_id": provider_name,
                 "family": model_info.family,
-                "description": model_info.description,
-                "context_length": model_info.context_length,
-                "capabilities": model_info.capabilities,
+                "description": description,
+                "context_length": context_length,
+                "capabilities": capabilities,
                 "unsupported_params": list(model_info.unsupported_params),
                 "supports_system_prompt": model_info.supports_system_prompt,
                 "use_max_completion_tokens": model_info.use_max_completion_tokens,
-                "input_cost": getattr(model_info, "input_cost", None),
-                "output_cost": getattr(model_info, "output_cost", None),
+                "input_cost": input_cost,
+                "output_cost": output_cost,
                 "source": model_source,
                 "is_system": model_source == "system",
                 "is_dynamic": model_source == "dynamic",
                 "disabled": disabled,
                 "enabled": not disabled,
+                "has_override": has_override,
+                # Store original values for UI to show what's being overridden
+                "system_input_cost": getattr(model_info, "input_cost", None),
+                "system_output_cost": getattr(model_info, "output_cost", None),
+                "system_capabilities": model_info.capabilities,
+                "system_context_length": model_info.context_length,
+                "system_description": model_info.description,
             }
         )
 

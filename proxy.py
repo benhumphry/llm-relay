@@ -127,6 +127,7 @@ def track_completion(
     status_code: int,
     error_message: str | None = None,
     is_streaming: bool = False,
+    cost: float | None = None,
 ):
     """
     Track a completed request.
@@ -141,6 +142,7 @@ def track_completion(
         status_code: HTTP status code
         error_message: Error message if request failed
         is_streaming: Whether this was a streaming request
+        cost: Actual cost from provider (if available, e.g., OpenRouter)
     """
     from flask import g
 
@@ -176,6 +178,7 @@ def track_completion(
         status_code=status_code,
         error_message=error_message,
         is_streaming=is_streaming,
+        cost=cost,
     )
 
 
@@ -685,6 +688,7 @@ def chat():
                 input_tokens=result.get("input_tokens", 0),
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
+                cost=result.get("cost"),
             )
             return jsonify(
                 {
@@ -824,6 +828,7 @@ def generate():
                 input_tokens=result.get("input_tokens", 0),
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
+                cost=result.get("cost"),
             )
             return jsonify(
                 {
@@ -1057,6 +1062,7 @@ def openai_chat_completions():
                 input_tokens=result.get("input_tokens", 0),
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
+                cost=result.get("cost"),
             )
 
             return jsonify(
@@ -1258,6 +1264,7 @@ def openai_completions():
                 input_tokens=result.get("input_tokens", 0),
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
+                cost=result.get("cost"),
             )
 
             return jsonify(

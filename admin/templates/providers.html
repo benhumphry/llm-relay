@@ -50,7 +50,7 @@ content %}
                             </div>
                             <p
                                 class="text-sm text-base-content/60"
-                                x-text="provider.type === 'ollama' ? 'Ollama Compatible' : (provider.type === 'anthropic' ? 'Anthropic Compatible' : 'OpenAI Compatible')"
+                                x-text="provider.id === 'openrouter' ? 'OpenRouter (Dynamic Pricing)' : (provider.type === 'ollama' ? 'Ollama Compatible' : (provider.type === 'anthropic' ? 'Anthropic Compatible' : 'OpenAI Compatible'))"
                             ></p>
                         </div>
                         <template x-if="!provider.is_system">

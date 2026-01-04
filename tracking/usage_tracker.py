@@ -66,6 +66,7 @@ class UsageTracker:
         status_code: int,
         error_message: Optional[str] = None,
         is_streaming: bool = False,
+        cost: Optional[float] = None,
     ):
         """
         Queue a request log entry.
@@ -84,6 +85,7 @@ class UsageTracker:
             status_code: HTTP status code
             error_message: Error message if request failed
             is_streaming: Whether this was a streaming request
+            cost: Actual cost from provider (if available, e.g., OpenRouter)
         """
         if not self._is_tracking_enabled():
             return
@@ -103,6 +105,7 @@ class UsageTracker:
                 "status_code": status_code,
                 "error_message": error_message,
                 "is_streaming": is_streaming,
+                "cost": cost,
             }
         )
 
@@ -156,6 +159,7 @@ class UsageTracker:
                     status_code=entry["status_code"],
                     error_message=entry["error_message"],
                     is_streaming=entry["is_streaming"],
+                    cost=entry.get("cost"),  # Provider-reported cost (e.g., OpenRouter)
                 )
                 db.add(log)
         except Exception as e:
@@ -178,12 +182,17 @@ class UsageTracker:
         try:
             entry_date = entry["timestamp"].date()
             is_success = 200 <= entry["status_code"] < 400
-            estimated_cost = self._calculate_cost(
-                entry["provider_id"],
-                entry["model_id"],
-                entry["input_tokens"],
-                entry["output_tokens"],
-            )
+
+            # Use provider-returned cost if available (e.g., OpenRouter),
+            # otherwise calculate from static pricing
+            estimated_cost = entry.get("cost")
+            if estimated_cost is None:
+                estimated_cost = self._calculate_cost(
+                    entry["provider_id"],
+                    entry["model_id"],
+                    entry["input_tokens"],
+                    entry["output_tokens"],
+                )
 
             # Split comma-separated tags into individual tags
             raw_tag = entry["tag"]

@@ -581,7 +581,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         provider_id = data["provider_id"]
         model_id = data["model_id"]
-        disabled = data.get("disabled", True)
+        disabled = data.get("disabled", False)
 
         with get_db_context() as db:
             # Find existing override or create new
@@ -596,11 +596,37 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
             if override:
                 override.disabled = disabled
+                # Update optional override fields
+                if "input_cost" in data:
+                    override.input_cost = (
+                        data["input_cost"] if data["input_cost"] else None
+                    )
+                if "output_cost" in data:
+                    override.output_cost = (
+                        data["output_cost"] if data["output_cost"] else None
+                    )
+                if "capabilities" in data:
+                    override.capabilities = (
+                        data["capabilities"] if data["capabilities"] else None
+                    )
+                if "context_length" in data:
+                    override.context_length = (
+                        data["context_length"] if data["context_length"] else None
+                    )
+                if "description" in data:
+                    override.description = (
+                        data["description"] if data["description"] else None
+                    )
             else:
                 override = ModelOverride(
                     provider_id=provider_id,
                     model_id=model_id,
                     disabled=disabled,
+                    input_cost=data.get("input_cost"),
+                    output_cost=data.get("output_cost"),
+                    capabilities=data.get("capabilities"),
+                    context_length=data.get("context_length"),
+                    description=data.get("description"),
                 )
                 db.add(override)
 
@@ -1383,182 +1409,636 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Usage statistics page."""
         return render_template("usage.html")
 
+    def parse_usage_filters():
+        """Parse common filter parameters from request args.
+
+        Returns dict with:
+        - start_date: datetime
+        - end_date: datetime (or None for "now")
+        - tags: list of tag strings (or None for all)
+        - providers: list of provider strings (or None for all)
+        - models: list of model strings (or None for all)
+        """
+        from datetime import datetime, timedelta
+
+        # Date range - support both preset days and custom range
+        days = request.args.get("days")
+        start = request.args.get("start")
+        end = request.args.get("end")
+
+        if start:
+            # Custom date range
+            start_date = datetime.strptime(start, "%Y-%m-%d")
+            end_date = datetime.strptime(end, "%Y-%m-%d") if end else datetime.utcnow()
+            # Include full end day
+            end_date = end_date.replace(hour=23, minute=59, second=59)
+        else:
+            # Preset days
+            days = int(days) if days else 30
+            start_date = datetime.utcnow() - timedelta(days=days)
+            end_date = None  # No upper bound
+
+        # Tag filter
+        tags_param = request.args.get("tags")
+        tags = (
+            [t.strip() for t in tags_param.split(",") if t.strip()]
+            if tags_param
+            else None
+        )
+
+        # Provider filter
+        providers_param = request.args.get("providers")
+        providers = (
+            [p.strip() for p in providers_param.split(",") if p.strip()]
+            if providers_param
+            else None
+        )
+
+        # Model filter
+        models_param = request.args.get("models")
+        models = (
+            [m.strip() for m in models_param.split(",") if m.strip()]
+            if models_param
+            else None
+        )
+
+        # Client filter
+        clients_param = request.args.get("clients")
+        clients = (
+            [c.strip() for c in clients_param.split(",") if c.strip()]
+            if clients_param
+            else None
+        )
+
+        return {
+            "start_date": start_date,
+            "end_date": end_date,
+            "tags": tags,
+            "providers": providers,
+            "models": models,
+            "clients": clients,
+        }
+
+    @admin.route("/api/usage/filters", methods=["GET"])
+    @require_auth_api
+    def get_usage_filters():
+        """Get available filter options (tags, providers, models, clients with data)."""
+        from sqlalchemy import distinct, func
+
+        with get_db_context() as db:
+            # Get distinct tags that have usage data
+            tags = [
+                r[0]
+                for r in db.query(distinct(DailyStats.tag))
+                .filter(DailyStats.tag.isnot(None))
+                .order_by(DailyStats.tag)
+                .all()
+            ]
+
+            # Get distinct providers
+            providers = [
+                r[0]
+                for r in db.query(distinct(DailyStats.provider_id))
+                .filter(DailyStats.provider_id.isnot(None))
+                .order_by(DailyStats.provider_id)
+                .all()
+            ]
+
+            # Get distinct models (with their providers)
+            model_results = (
+                db.query(distinct(DailyStats.provider_id), DailyStats.model_id)
+                .filter(
+                    DailyStats.provider_id.isnot(None),
+                    DailyStats.model_id.isnot(None),
+                )
+                .order_by(DailyStats.provider_id, DailyStats.model_id)
+                .all()
+            )
+            models = [{"provider": r[0], "model": r[1]} for r in model_results]
+
+            # Get distinct clients (hostname or IP) from RequestLog
+            client_results = (
+                db.query(
+                    func.coalesce(RequestLog.hostname, RequestLog.client_ip).label(
+                        "client"
+                    )
+                )
+                .distinct()
+                .order_by(func.coalesce(RequestLog.hostname, RequestLog.client_ip))
+                .limit(100)  # Limit to prevent huge lists
+                .all()
+            )
+            clients = [r[0] for r in client_results if r[0]]
+
+            return jsonify(
+                {
+                    "tags": tags,
+                    "providers": providers,
+                    "models": models,
+                    "clients": clients,
+                }
+            )
+
     @admin.route("/api/usage/summary", methods=["GET"])
     @require_auth_api
     def get_usage_summary():
-        """Get usage summary for dashboard cards."""
-        from datetime import datetime, timedelta
-
+        """Get usage summary for dashboard cards with optional filters."""
         from sqlalchemy import func
 
-        days = int(request.args.get("days", 30))
-        start_date = datetime.utcnow() - timedelta(days=days)
+        filters = parse_usage_filters()
 
         with get_db_context() as db:
-            # Query overall totals (where all dimensions are null)
-            stats = (
-                db.query(
+            # Build base query - use RequestLog for filtered queries
+            # since DailyStats pre-aggregation doesn't support arbitrary filters
+            if filters["tags"] or filters["providers"] or filters["models"]:
+                # Query from RequestLog for filtered results
+                query = db.query(
+                    func.count(RequestLog.id),
+                    func.sum(RequestLog.input_tokens),
+                    func.sum(RequestLog.output_tokens),
+                    func.count(RequestLog.id).filter(RequestLog.status_code < 400),
+                    func.count(RequestLog.id).filter(RequestLog.status_code >= 400),
+                ).filter(RequestLog.timestamp >= filters["start_date"])
+
+                if filters["end_date"]:
+                    query = query.filter(RequestLog.timestamp <= filters["end_date"])
+
+                if filters["tags"]:
+                    # Support multi-tag filtering (tag column may contain comma-separated tags)
+                    from sqlalchemy import or_
+
+                    tag_conditions = []
+                    for tag in filters["tags"]:
+                        tag_conditions.append(RequestLog.tag == tag)
+                        tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                    query = query.filter(or_(*tag_conditions))
+
+                if filters["providers"]:
+                    query = query.filter(
+                        RequestLog.provider_id.in_(filters["providers"])
+                    )
+
+                if filters["models"]:
+                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+                stats = query.first()
+
+                # Calculate cost from RequestLog (need to join with cost data or estimate)
+                # For now, use a simpler cost query
+                cost_query = db.query(
+                    func.sum(RequestLog.input_tokens),
+                    func.sum(RequestLog.output_tokens),
+                ).filter(RequestLog.timestamp >= filters["start_date"])
+
+                if filters["end_date"]:
+                    cost_query = cost_query.filter(
+                        RequestLog.timestamp <= filters["end_date"]
+                    )
+                if filters["tags"]:
+                    from sqlalchemy import or_
+
+                    tag_conditions = []
+                    for tag in filters["tags"]:
+                        tag_conditions.append(RequestLog.tag == tag)
+                        tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                    cost_query = cost_query.filter(or_(*tag_conditions))
+                if filters["providers"]:
+                    cost_query = cost_query.filter(
+                        RequestLog.provider_id.in_(filters["providers"])
+                    )
+                if filters["models"]:
+                    cost_query = cost_query.filter(
+                        RequestLog.model_id.in_(filters["models"])
+                    )
+
+                # Estimate cost (simplified - ideally would join with model costs)
+                estimated_cost = 0.0
+
+                return jsonify(
+                    {
+                        "period_days": request.args.get("days", 30),
+                        "total_requests": stats[0] or 0,
+                        "total_input_tokens": stats[1] or 0,
+                        "total_output_tokens": stats[2] or 0,
+                        "total_tokens": (stats[1] or 0) + (stats[2] or 0),
+                        "estimated_cost": estimated_cost,
+                        "success_count": stats[3] or 0,
+                        "error_count": stats[4] or 0,
+                    }
+                )
+            else:
+                # No filters - use pre-aggregated DailyStats for performance
+                query = db.query(
                     func.sum(DailyStats.request_count),
                     func.sum(DailyStats.input_tokens),
                     func.sum(DailyStats.output_tokens),
                     func.sum(DailyStats.estimated_cost),
                     func.sum(DailyStats.success_count),
                     func.sum(DailyStats.error_count),
-                )
-                .filter(
-                    DailyStats.date >= start_date,
+                ).filter(
+                    DailyStats.date >= filters["start_date"],
                     DailyStats.tag.is_(None),
                     DailyStats.provider_id.is_(None),
                     DailyStats.model_id.is_(None),
                 )
-                .first()
-            )
 
-            return jsonify(
-                {
-                    "period_days": days,
-                    "total_requests": stats[0] or 0,
-                    "total_input_tokens": stats[1] or 0,
-                    "total_output_tokens": stats[2] or 0,
-                    "total_tokens": (stats[1] or 0) + (stats[2] or 0),
-                    "estimated_cost": round(stats[3] or 0, 4),
-                    "success_count": stats[4] or 0,
-                    "error_count": stats[5] or 0,
-                }
-            )
+                if filters["end_date"]:
+                    query = query.filter(DailyStats.date <= filters["end_date"])
+
+                stats = query.first()
+
+                return jsonify(
+                    {
+                        "period_days": request.args.get("days", 30),
+                        "total_requests": stats[0] or 0,
+                        "total_input_tokens": stats[1] or 0,
+                        "total_output_tokens": stats[2] or 0,
+                        "total_tokens": (stats[1] or 0) + (stats[2] or 0),
+                        "estimated_cost": round(stats[3] or 0, 4),
+                        "success_count": stats[4] or 0,
+                        "error_count": stats[5] or 0,
+                    }
+                )
 
     @admin.route("/api/usage/by-tag", methods=["GET"])
     @require_auth_api
     def get_usage_by_tag():
-        """Get usage breakdown by tag."""
-        from datetime import datetime, timedelta
+        """Get usage breakdown by tag with optional filters."""
+        from sqlalchemy import func, or_
 
-        from sqlalchemy import func
-
-        days = int(request.args.get("days", 30))
-        start_date = datetime.utcnow() - timedelta(days=days)
+        filters = parse_usage_filters()
 
         with get_db_context() as db:
-            results = (
-                db.query(
+            # Use RequestLog for filtered queries, DailyStats for unfiltered
+            if filters["providers"] or filters["models"]:
+                # Query from RequestLog when filtering by provider/model
+                query = db.query(
+                    RequestLog.tag,
+                    func.count(RequestLog.id).label("requests"),
+                    func.sum(RequestLog.input_tokens).label("input_tokens"),
+                    func.sum(RequestLog.output_tokens).label("output_tokens"),
+                ).filter(
+                    RequestLog.timestamp >= filters["start_date"],
+                    RequestLog.tag.isnot(None),
+                )
+
+                if filters["end_date"]:
+                    query = query.filter(RequestLog.timestamp <= filters["end_date"])
+
+                if filters["providers"]:
+                    query = query.filter(
+                        RequestLog.provider_id.in_(filters["providers"])
+                    )
+
+                if filters["models"]:
+                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+                results = (
+                    query.group_by(RequestLog.tag)
+                    .order_by(func.count(RequestLog.id).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "tag": r.tag,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": 0,  # Cost requires model info, simplified for now
+                        }
+                        for r in results
+                    ]
+                )
+            else:
+                # Use pre-aggregated DailyStats for performance
+                query = db.query(
                     DailyStats.tag,
                     func.sum(DailyStats.request_count).label("requests"),
                     func.sum(DailyStats.input_tokens).label("input_tokens"),
                     func.sum(DailyStats.output_tokens).label("output_tokens"),
                     func.sum(DailyStats.estimated_cost).label("cost"),
-                )
-                .filter(
-                    DailyStats.date >= start_date,
+                ).filter(
+                    DailyStats.date >= filters["start_date"],
                     DailyStats.tag.isnot(None),
                     DailyStats.provider_id.is_(None),
                     DailyStats.model_id.is_(None),
                 )
-                .group_by(DailyStats.tag)
-                .order_by(func.sum(DailyStats.request_count).desc())
-                .all()
-            )
 
-            return jsonify(
-                [
-                    {
-                        "tag": r.tag,
-                        "requests": r.requests or 0,
-                        "input_tokens": r.input_tokens or 0,
-                        "output_tokens": r.output_tokens or 0,
-                        "total_tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
-                        "cost": round(r.cost or 0, 4),
-                    }
-                    for r in results
-                ]
-            )
+                if filters["end_date"]:
+                    query = query.filter(DailyStats.date <= filters["end_date"])
+
+                # If tag filter is provided, filter to those tags
+                if filters["tags"]:
+                    query = query.filter(DailyStats.tag.in_(filters["tags"]))
+
+                results = (
+                    query.group_by(DailyStats.tag)
+                    .order_by(func.sum(DailyStats.request_count).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "tag": r.tag,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": round(r.cost or 0, 4),
+                        }
+                        for r in results
+                    ]
+                )
 
     @admin.route("/api/usage/by-provider", methods=["GET"])
     @require_auth_api
     def get_usage_by_provider():
-        """Get usage breakdown by provider."""
-        from datetime import datetime, timedelta
+        """Get usage breakdown by provider with optional filters."""
+        from sqlalchemy import func, or_
 
-        from sqlalchemy import func
-
-        days = int(request.args.get("days", 30))
-        start_date = datetime.utcnow() - timedelta(days=days)
+        filters = parse_usage_filters()
 
         with get_db_context() as db:
-            results = (
-                db.query(
+            # Use RequestLog for filtered queries, DailyStats for unfiltered
+            if filters["tags"] or filters["models"]:
+                # Query from RequestLog when filtering by tag/model
+                query = db.query(
+                    RequestLog.provider_id,
+                    func.count(RequestLog.id).label("requests"),
+                    func.sum(RequestLog.input_tokens).label("input_tokens"),
+                    func.sum(RequestLog.output_tokens).label("output_tokens"),
+                ).filter(
+                    RequestLog.timestamp >= filters["start_date"],
+                    RequestLog.provider_id.isnot(None),
+                )
+
+                if filters["end_date"]:
+                    query = query.filter(RequestLog.timestamp <= filters["end_date"])
+
+                if filters["tags"]:
+                    # Support multi-tag filtering
+                    tag_conditions = []
+                    for tag in filters["tags"]:
+                        tag_conditions.append(RequestLog.tag == tag)
+                        tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                    query = query.filter(or_(*tag_conditions))
+
+                if filters["models"]:
+                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+                # If provider filter is provided, filter to those providers
+                if filters["providers"]:
+                    query = query.filter(
+                        RequestLog.provider_id.in_(filters["providers"])
+                    )
+
+                results = (
+                    query.group_by(RequestLog.provider_id)
+                    .order_by(func.count(RequestLog.id).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "provider_id": r.provider_id,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": 0,  # Cost requires model info, simplified for now
+                        }
+                        for r in results
+                    ]
+                )
+            else:
+                # Use pre-aggregated DailyStats for performance
+                query = db.query(
                     DailyStats.provider_id,
                     func.sum(DailyStats.request_count).label("requests"),
                     func.sum(DailyStats.input_tokens).label("input_tokens"),
                     func.sum(DailyStats.output_tokens).label("output_tokens"),
                     func.sum(DailyStats.estimated_cost).label("cost"),
-                )
-                .filter(
-                    DailyStats.date >= start_date,
+                ).filter(
+                    DailyStats.date >= filters["start_date"],
                     DailyStats.tag.is_(None),
                     DailyStats.provider_id.isnot(None),
                     DailyStats.model_id.is_(None),
                 )
-                .group_by(DailyStats.provider_id)
-                .order_by(func.sum(DailyStats.request_count).desc())
-                .all()
-            )
 
-            return jsonify(
-                [
-                    {
-                        "provider_id": r.provider_id,
-                        "requests": r.requests or 0,
-                        "input_tokens": r.input_tokens or 0,
-                        "output_tokens": r.output_tokens or 0,
-                        "total_tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
-                        "cost": round(r.cost or 0, 4),
-                    }
-                    for r in results
-                ]
-            )
+                if filters["end_date"]:
+                    query = query.filter(DailyStats.date <= filters["end_date"])
+
+                # If provider filter is provided, filter to those providers
+                if filters["providers"]:
+                    query = query.filter(
+                        DailyStats.provider_id.in_(filters["providers"])
+                    )
+
+                results = (
+                    query.group_by(DailyStats.provider_id)
+                    .order_by(func.sum(DailyStats.request_count).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "provider_id": r.provider_id,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": round(r.cost or 0, 4),
+                        }
+                        for r in results
+                    ]
+                )
 
     @admin.route("/api/usage/by-model", methods=["GET"])
     @require_auth_api
     def get_usage_by_model():
-        """Get usage breakdown by model."""
-        from datetime import datetime, timedelta
+        """Get usage breakdown by model with optional filters."""
+        from sqlalchemy import func, or_
 
-        from sqlalchemy import func
-
-        days = int(request.args.get("days", 30))
-        start_date = datetime.utcnow() - timedelta(days=days)
+        filters = parse_usage_filters()
 
         with get_db_context() as db:
-            results = (
-                db.query(
+            # Use RequestLog for filtered queries, DailyStats for unfiltered
+            if filters["tags"]:
+                # Query from RequestLog when filtering by tag
+                query = db.query(
+                    RequestLog.provider_id,
+                    RequestLog.model_id,
+                    func.count(RequestLog.id).label("requests"),
+                    func.sum(RequestLog.input_tokens).label("input_tokens"),
+                    func.sum(RequestLog.output_tokens).label("output_tokens"),
+                ).filter(
+                    RequestLog.timestamp >= filters["start_date"],
+                    RequestLog.provider_id.isnot(None),
+                    RequestLog.model_id.isnot(None),
+                )
+
+                if filters["end_date"]:
+                    query = query.filter(RequestLog.timestamp <= filters["end_date"])
+
+                # Support multi-tag filtering
+                tag_conditions = []
+                for tag in filters["tags"]:
+                    tag_conditions.append(RequestLog.tag == tag)
+                    tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                query = query.filter(or_(*tag_conditions))
+
+                if filters["providers"]:
+                    query = query.filter(
+                        RequestLog.provider_id.in_(filters["providers"])
+                    )
+
+                if filters["models"]:
+                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+                results = (
+                    query.group_by(RequestLog.provider_id, RequestLog.model_id)
+                    .order_by(func.count(RequestLog.id).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "provider_id": r.provider_id,
+                            "model_id": r.model_id,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": 0,  # Cost requires model info, simplified for now
+                        }
+                        for r in results
+                    ]
+                )
+            else:
+                # Use pre-aggregated DailyStats for performance
+                query = db.query(
                     DailyStats.provider_id,
                     DailyStats.model_id,
                     func.sum(DailyStats.request_count).label("requests"),
                     func.sum(DailyStats.input_tokens).label("input_tokens"),
                     func.sum(DailyStats.output_tokens).label("output_tokens"),
                     func.sum(DailyStats.estimated_cost).label("cost"),
-                )
-                .filter(
-                    DailyStats.date >= start_date,
+                ).filter(
+                    DailyStats.date >= filters["start_date"],
                     DailyStats.tag.is_(None),
                     DailyStats.provider_id.isnot(None),
                     DailyStats.model_id.isnot(None),
                 )
-                .group_by(DailyStats.provider_id, DailyStats.model_id)
-                .order_by(func.sum(DailyStats.request_count).desc())
+
+                if filters["end_date"]:
+                    query = query.filter(DailyStats.date <= filters["end_date"])
+
+                if filters["providers"]:
+                    query = query.filter(
+                        DailyStats.provider_id.in_(filters["providers"])
+                    )
+
+                if filters["models"]:
+                    query = query.filter(DailyStats.model_id.in_(filters["models"]))
+
+                results = (
+                    query.group_by(DailyStats.provider_id, DailyStats.model_id)
+                    .order_by(func.sum(DailyStats.request_count).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "provider_id": r.provider_id,
+                            "model_id": r.model_id,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": round(r.cost or 0, 4),
+                        }
+                        for r in results
+                    ]
+                )
+
+    @admin.route("/api/usage/by-client", methods=["GET"])
+    @require_auth_api
+    def get_usage_by_client():
+        """Get usage breakdown by client (hostname or IP) with optional filters."""
+        from sqlalchemy import func, or_
+
+        filters = parse_usage_filters()
+
+        with get_db_context() as db:
+            # Always query from RequestLog since DailyStats doesn't have client dimension
+            client_col = func.coalesce(RequestLog.hostname, RequestLog.client_ip)
+
+            query = db.query(
+                client_col.label("client"),
+                func.count(RequestLog.id).label("requests"),
+                func.sum(RequestLog.input_tokens).label("input_tokens"),
+                func.sum(RequestLog.output_tokens).label("output_tokens"),
+            ).filter(RequestLog.timestamp >= filters["start_date"])
+
+            if filters["end_date"]:
+                query = query.filter(RequestLog.timestamp <= filters["end_date"])
+
+            if filters["tags"]:
+                # Support multi-tag filtering
+                tag_conditions = []
+                for tag in filters["tags"]:
+                    tag_conditions.append(RequestLog.tag == tag)
+                    tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                query = query.filter(or_(*tag_conditions))
+
+            if filters["providers"]:
+                query = query.filter(RequestLog.provider_id.in_(filters["providers"]))
+
+            if filters["models"]:
+                query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+            if filters["clients"]:
+                query = query.filter(client_col.in_(filters["clients"]))
+
+            results = (
+                query.group_by(client_col)
+                .order_by(func.count(RequestLog.id).desc())
                 .all()
             )
 
             return jsonify(
                 [
                     {
-                        "provider_id": r.provider_id,
-                        "model_id": r.model_id,
+                        "client": r.client,
                         "requests": r.requests or 0,
                         "input_tokens": r.input_tokens or 0,
                         "output_tokens": r.output_tokens or 0,
                         "total_tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
-                        "cost": round(r.cost or 0, 4),
+                        "cost": 0,  # Cost requires model info, simplified for now
                     }
                     for r in results
                 ]
@@ -1567,45 +2047,94 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/usage/timeseries", methods=["GET"])
     @require_auth_api
     def get_usage_timeseries():
-        """Get time series data for charts."""
-        from datetime import datetime, timedelta
+        """Get time series data for charts with optional filters."""
+        from sqlalchemy import func, or_
 
-        from sqlalchemy import func
-
-        days = int(request.args.get("days", 30))
-        start_date = datetime.utcnow() - timedelta(days=days)
+        filters = parse_usage_filters()
 
         with get_db_context() as db:
-            results = (
-                db.query(
+            # Use RequestLog for filtered queries, DailyStats for unfiltered
+            if filters["tags"] or filters["providers"] or filters["models"]:
+                # Query from RequestLog when filtering
+                # Use func.date() for SQLite compatibility (works with datetime columns)
+                date_expr = func.date(RequestLog.timestamp)
+                query = db.query(
+                    date_expr.label("date"),
+                    func.count(RequestLog.id).label("requests"),
+                    func.sum(RequestLog.input_tokens).label("input_tokens"),
+                    func.sum(RequestLog.output_tokens).label("output_tokens"),
+                ).filter(RequestLog.timestamp >= filters["start_date"])
+
+                if filters["end_date"]:
+                    query = query.filter(RequestLog.timestamp <= filters["end_date"])
+
+                if filters["tags"]:
+                    # Support multi-tag filtering
+                    tag_conditions = []
+                    for tag in filters["tags"]:
+                        tag_conditions.append(RequestLog.tag == tag)
+                        tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                    query = query.filter(or_(*tag_conditions))
+
+                if filters["providers"]:
+                    query = query.filter(
+                        RequestLog.provider_id.in_(filters["providers"])
+                    )
+
+                if filters["models"]:
+                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+                results = query.group_by(date_expr).order_by(date_expr).all()
+
+                return jsonify(
+                    [
+                        {
+                            # func.date() returns string in SQLite, date object in other DBs
+                            "date": r.date
+                            if isinstance(r.date, str)
+                            else (r.date.strftime("%Y-%m-%d") if r.date else None),
+                            "requests": r.requests or 0,
+                            "tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
+                            "cost": 0,  # Cost requires model info, simplified for now
+                        }
+                        for r in results
+                    ]
+                )
+            else:
+                # Use pre-aggregated DailyStats for performance
+                query = db.query(
                     DailyStats.date,
                     func.sum(DailyStats.request_count).label("requests"),
                     func.sum(DailyStats.input_tokens).label("input_tokens"),
                     func.sum(DailyStats.output_tokens).label("output_tokens"),
                     func.sum(DailyStats.estimated_cost).label("cost"),
-                )
-                .filter(
-                    DailyStats.date >= start_date,
+                ).filter(
+                    DailyStats.date >= filters["start_date"],
                     DailyStats.tag.is_(None),
                     DailyStats.provider_id.is_(None),
                     DailyStats.model_id.is_(None),
                 )
-                .group_by(DailyStats.date)
-                .order_by(DailyStats.date)
-                .all()
-            )
 
-            return jsonify(
-                [
-                    {
-                        "date": r.date.strftime("%Y-%m-%d") if r.date else None,
-                        "requests": r.requests or 0,
-                        "tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
-                        "cost": round(r.cost or 0, 4),
-                    }
-                    for r in results
-                ]
-            )
+                if filters["end_date"]:
+                    query = query.filter(DailyStats.date <= filters["end_date"])
+
+                results = (
+                    query.group_by(DailyStats.date).order_by(DailyStats.date).all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "date": r.date.strftime("%Y-%m-%d") if r.date else None,
+                            "requests": r.requests or 0,
+                            "tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
+                            "cost": round(r.cost or 0, 4),
+                        }
+                        for r in results
+                    ]
+                )
 
     @admin.route("/api/usage/recent", methods=["GET"])
     @require_auth_api

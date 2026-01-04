@@ -171,7 +171,16 @@
                                             x-text="'$' + model.input_cost.toFixed(2) + ' / $' + (model.output_cost || 0).toFixed(2)"
                                         ></span>
                                     </template>
-                                    <template x-if="model.input_cost == null">
+                                    <template
+                                        x-if="model.input_cost == null && model.provider_id === 'openrouter'"
+                                    >
+                                        <span class="badge badge-xs badge-info"
+                                            >Dynamic</span
+                                        >
+                                    </template>
+                                    <template
+                                        x-if="model.input_cost == null && model.provider_id !== 'openrouter'"
+                                    >
                                         <span class="text-base-content/40"
                                             >-</span
                                         >
@@ -241,7 +250,17 @@
                                             tabindex="0"
                                             class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-40 z-10"
                                         >
-                                            <!-- System/Dynamic model actions (can only disable) -->
+                                            <!-- System/Dynamic model actions -->
+                                            <template
+                                                x-if="model.source === 'system' || model.source === 'dynamic'"
+                                            >
+                                                <li>
+                                                    <a
+                                                        @click="openOverrideModal(model)"
+                                                        >Edit Override</a
+                                                    >
+                                                </li>
+                                            </template>
                                             <template
                                                 x-if="model.source === 'system' || model.source === 'dynamic'"
                                             >
@@ -374,39 +393,63 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text"
-                                >Input Cost ($ per million tokens)</span
-                            >
-                        </label>
-                        <input
-                            type="number"
-                            x-model.number="form.input_cost"
-                            class="input input-bordered"
-                            placeholder="e.g., 3.00"
-                            min="0"
-                            step="0.01"
-                        />
+                <!-- Cost fields - hidden for OpenRouter (dynamic pricing) -->
+                <template x-if="form.provider_id === 'openrouter'">
+                    <div class="alert alert-info py-2">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            class="stroke-current shrink-0 w-5 h-5"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            ></path>
+                        </svg>
+                        <span class="text-sm"
+                            >OpenRouter provides dynamic pricing - costs are
+                            fetched from the API response.</span
+                        >
                     </div>
+                </template>
+                <template x-if="form.provider_id !== 'openrouter'">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Input Cost ($ per million tokens)</span
+                                >
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.input_cost"
+                                class="input input-bordered"
+                                placeholder="e.g., 3.00"
+                                min="0"
+                                step="0.01"
+                            />
+                        </div>
 
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text"
-                                >Output Cost ($ per million tokens)</span
-                            >
-                        </label>
-                        <input
-                            type="number"
-                            x-model.number="form.output_cost"
-                            class="input input-bordered"
-                            placeholder="e.g., 15.00"
-                            min="0"
-                            step="0.01"
-                        />
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Output Cost ($ per million tokens)</span
+                                >
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.output_cost"
+                                class="input input-bordered"
+                                placeholder="e.g., 15.00"
+                                min="0"
+                                step="0.01"
+                            />
+                        </div>
                     </div>
-                </div>
+                </template>
 
                 <div class="form-control">
                     <label class="label">
@@ -504,6 +547,215 @@
         </form>
     </dialog>
 
+    <!-- Override Modal for System/Dynamic Models -->
+    <dialog
+        id="override_modal"
+        class="modal"
+        :class="{ 'modal-open': showOverrideModal }"
+    >
+        <div class="modal-box max-w-2xl">
+            <h3 class="font-bold text-lg">Edit Model Override</h3>
+            <p class="text-sm text-base-content/60 mt-1">
+                Override system defaults for
+                <span class="font-mono" x-text="overrideForm.model_id"></span>.
+                Leave fields empty to use system defaults.
+            </p>
+
+            <form @submit.prevent="saveOverride()" class="mt-4 space-y-4">
+                <!-- Model info (read-only) -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Model ID</span>
+                        </label>
+                        <input
+                            type="text"
+                            :value="overrideForm.model_id"
+                            class="input input-bordered bg-base-200"
+                            disabled
+                        />
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Provider</span>
+                        </label>
+                        <input
+                            type="text"
+                            :value="overrideForm.provider_id"
+                            class="input input-bordered bg-base-200"
+                            disabled
+                        />
+                    </div>
+                </div>
+
+                <!-- Cost overrides (hidden for OpenRouter) -->
+                <template x-if="overrideForm.provider_id === 'openrouter'">
+                    <div class="alert alert-info py-2">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            class="stroke-current shrink-0 w-5 h-5"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            ></path>
+                        </svg>
+                        <span class="text-sm"
+                            >OpenRouter provides dynamic pricing - costs are
+                            fetched from the API response.</span
+                        >
+                    </div>
+                </template>
+                <template x-if="overrideForm.provider_id !== 'openrouter'">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Input Cost ($ per million tokens)</span
+                                >
+                                <span
+                                    class="label-text-alt text-base-content/50"
+                                    x-text="'System: ' + (overrideForm.system_input_cost != null ? '$' + overrideForm.system_input_cost : '-')"
+                                ></span>
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="overrideForm.input_cost"
+                                class="input input-bordered"
+                                :placeholder="overrideForm.system_input_cost != null ? overrideForm.system_input_cost : 'Not set'"
+                                min="0"
+                                step="0.01"
+                            />
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Output Cost ($ per million tokens)</span
+                                >
+                                <span
+                                    class="label-text-alt text-base-content/50"
+                                    x-text="'System: ' + (overrideForm.system_output_cost != null ? '$' + overrideForm.system_output_cost : '-')"
+                                ></span>
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="overrideForm.output_cost"
+                                class="input input-bordered"
+                                :placeholder="overrideForm.system_output_cost != null ? overrideForm.system_output_cost : 'Not set'"
+                                min="0"
+                                step="0.01"
+                            />
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Context length override -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Context Length</span>
+                        <span
+                            class="label-text-alt text-base-content/50"
+                            x-text="'System: ' + formatContext(overrideForm.system_context_length)"
+                        ></span>
+                    </label>
+                    <input
+                        type="number"
+                        x-model.number="overrideForm.context_length"
+                        class="input input-bordered"
+                        :placeholder="overrideForm.system_context_length"
+                        min="1"
+                    />
+                </div>
+
+                <!-- Description override -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Description</span>
+                    </label>
+                    <textarea
+                        x-model="overrideForm.description"
+                        class="textarea textarea-bordered"
+                        rows="2"
+                        :placeholder="overrideForm.system_description || 'No description'"
+                    ></textarea>
+                </div>
+
+                <!-- Capabilities override -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Capabilities</span>
+                        <span
+                            class="label-text-alt text-base-content/50"
+                            x-text="'System: ' + (overrideForm.system_capabilities?.join(', ') || 'None')"
+                        ></span>
+                    </label>
+                    <div class="flex flex-wrap gap-2">
+                        <template
+                            x-for="cap in availableCapabilities"
+                            :key="cap"
+                        >
+                            <label
+                                class="label cursor-pointer gap-2 bg-base-200 px-3 py-1 rounded-lg"
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm"
+                                    :checked="overrideForm.capabilities?.includes(cap)"
+                                    @change="toggleOverrideCapability(cap)"
+                                />
+                                <span class="label-text" x-text="cap"></span>
+                            </label>
+                        </template>
+                    </div>
+                    <label class="label">
+                        <span class="label-text-alt">
+                            <button
+                                type="button"
+                                @click="clearOverrideCapabilities()"
+                                class="link link-primary text-xs"
+                            >
+                                Clear (use system default)
+                            </button>
+                        </span>
+                    </label>
+                </div>
+
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="closeOverrideModal()"
+                        class="btn"
+                    >
+                        Cancel
+                    </button>
+                    <template x-if="overrideForm.has_override">
+                        <button
+                            type="button"
+                            @click="clearOverride()"
+                            class="btn btn-warning"
+                        >
+                            Reset to System
+                        </button>
+                    </template>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': savingOverride }"
+                    >
+                        Save Override
+                    </button>
+                </div>
+            </form>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button @click="closeOverrideModal()">close</button>
+        </form>
+    </dialog>
+
     <!-- Toast notifications -->
     <div class="toast toast-end">
         <template x-for="toast in toasts" :key="toast.id">
@@ -527,8 +779,10 @@
             filterType: "",
             searchQuery: "",
             showModal: false,
+            showOverrideModal: false,
             editing: false,
             saving: false,
+            savingOverride: false,
             toasts: [],
             availableCapabilities: [
                 "vision",
@@ -551,6 +805,21 @@
                 enabled: true,
                 input_cost: null,
                 output_cost: null,
+            },
+            overrideForm: {
+                model_id: "",
+                provider_id: "",
+                input_cost: null,
+                output_cost: null,
+                context_length: null,
+                description: "",
+                capabilities: null,
+                has_override: false,
+                system_input_cost: null,
+                system_output_cost: null,
+                system_context_length: null,
+                system_description: "",
+                system_capabilities: [],
             },
 
             async init() {
@@ -761,6 +1030,133 @@
                     }
                 } catch (err) {
                     this.showToast("Failed to delete model", "error");
+                }
+            },
+
+            // Override modal functions for system/dynamic models
+            openOverrideModal(model) {
+                // Check if current values differ from system defaults (indicating an override exists)
+                const hasOverride = model.has_override || false;
+
+                this.overrideForm = {
+                    model_id: model.id,
+                    provider_id: model.provider_id,
+                    // Current values (may be overridden or system defaults)
+                    input_cost:
+                        hasOverride &&
+                        model.input_cost !== model.system_input_cost
+                            ? model.input_cost
+                            : null,
+                    output_cost:
+                        hasOverride &&
+                        model.output_cost !== model.system_output_cost
+                            ? model.output_cost
+                            : null,
+                    context_length:
+                        hasOverride &&
+                        model.context_length !== model.system_context_length
+                            ? model.context_length
+                            : null,
+                    description:
+                        hasOverride &&
+                        model.description !== model.system_description
+                            ? model.description
+                            : "",
+                    capabilities:
+                        hasOverride &&
+                        JSON.stringify(model.capabilities) !==
+                            JSON.stringify(model.system_capabilities)
+                            ? [...model.capabilities]
+                            : null,
+                    has_override: hasOverride,
+                    // System defaults for display
+                    system_input_cost: model.system_input_cost,
+                    system_output_cost: model.system_output_cost,
+                    system_context_length: model.system_context_length,
+                    system_description: model.system_description,
+                    system_capabilities: model.system_capabilities || [],
+                };
+                this.showOverrideModal = true;
+            },
+
+            closeOverrideModal() {
+                this.showOverrideModal = false;
+            },
+
+            toggleOverrideCapability(cap) {
+                // Initialize capabilities array if null (means use system default)
+                if (this.overrideForm.capabilities === null) {
+                    this.overrideForm.capabilities = [
+                        ...(this.overrideForm.system_capabilities || []),
+                    ];
+                }
+                const idx = this.overrideForm.capabilities.indexOf(cap);
+                if (idx >= 0) {
+                    this.overrideForm.capabilities.splice(idx, 1);
+                } else {
+                    this.overrideForm.capabilities.push(cap);
+                }
+            },
+
+            clearOverrideCapabilities() {
+                this.overrideForm.capabilities = null;
+            },
+
+            async saveOverride() {
+                this.savingOverride = true;
+                try {
+                    const payload = {
+                        provider_id: this.overrideForm.provider_id,
+                        model_id: this.overrideForm.model_id,
+                        input_cost: this.overrideForm.input_cost || null,
+                        output_cost: this.overrideForm.output_cost || null,
+                        context_length:
+                            this.overrideForm.context_length || null,
+                        description: this.overrideForm.description || null,
+                        capabilities: this.overrideForm.capabilities,
+                    };
+
+                    const res = await fetch("/api/models/override", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+
+                    if (res.ok) {
+                        this.showToast("Override saved");
+                        this.closeOverrideModal();
+                        await this.loadModels();
+                    } else {
+                        const data = await res.json();
+                        this.showToast(
+                            data.error || "Failed to save override",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast("Failed to save override", "error");
+                } finally {
+                    this.savingOverride = false;
+                }
+            },
+
+            async clearOverride() {
+                if (!confirm("Reset all overrides to system defaults?")) return;
+
+                try {
+                    const res = await fetch(
+                        `/api/models/override/${this.overrideForm.provider_id}/${encodeURIComponent(this.overrideForm.model_id)}`,
+                        { method: "DELETE" },
+                    );
+                    if (res.ok) {
+                        this.showToast("Override cleared");
+                        this.closeOverrideModal();
+                        await this.loadModels();
+                    } else {
+                        this.showToast("Failed to clear override", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to clear override", "error");
                 }
             },
 

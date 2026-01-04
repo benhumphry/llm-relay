@@ -103,6 +103,14 @@ def create_model_info(model_id: str, config: dict[str, Any]) -> ModelInfo:
     # Handle unsupported_params - convert list to set
     unsupported_params = set(config.get("unsupported_params", []))
 
+    # Support both field naming conventions for costs:
+    # - input_cost/output_cost (short form)
+    # - cost_per_million_input_tokens/cost_per_million_output_tokens (explicit form)
+    input_cost = config.get("input_cost") or config.get("cost_per_million_input_tokens")
+    output_cost = config.get("output_cost") or config.get(
+        "cost_per_million_output_tokens"
+    )
+
     return ModelInfo(
         family=config["family"],
         description=config["description"],
@@ -113,8 +121,8 @@ def create_model_info(model_id: str, config: dict[str, Any]) -> ModelInfo:
         unsupported_params=unsupported_params,
         supports_system_prompt=config.get("supports_system_prompt", True),
         use_max_completion_tokens=config.get("use_max_completion_tokens", False),
-        input_cost=config.get("input_cost"),
-        output_cost=config.get("output_cost"),
+        input_cost=input_cost,
+        output_cost=output_cost,
     )
 
 

@@ -22,6 +22,7 @@ from .loader import (
     get_provider_config,
 )
 from .ollama_provider import OllamaProvider
+from .openrouter_provider import OpenRouterProvider
 from .registry import registry
 
 logger = logging.getLogger(__name__)
@@ -29,9 +30,11 @@ logger = logging.getLogger(__name__)
 # Providers with custom implementations
 # - anthropic: Uses Anthropic SDK (not OpenAI-compatible)
 # - ollama: Dynamic model discovery from local Ollama instance
+# - openrouter: Custom implementation for dynamic cost extraction
 CUSTOM_PROVIDER_CLASSES = {
     "anthropic": AnthropicProvider,
     "ollama": OllamaProvider,
+    "openrouter": OpenRouterProvider,
 }
 
 
@@ -157,4 +160,5 @@ __all__ = [
     "get_api_key",
     "AnthropicProvider",
     "OllamaProvider",
+    "OpenRouterProvider",
 ]

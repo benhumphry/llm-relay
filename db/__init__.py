@@ -10,6 +10,7 @@ from .connection import (
     get_db_context,
     get_engine,
     init_db,
+    run_migrations,
 )
 from .models import (
     Alias,
@@ -31,6 +32,7 @@ __all__ = [
     "get_db",
     "get_db_context",
     "init_db",
+    "run_migrations",
     "check_db_initialized",
     "get_engine",
     "Provider",

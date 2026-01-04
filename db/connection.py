@@ -155,6 +155,83 @@ def get_db_context() -> Generator[Session, None, None]:
         db.close()
 
 
+_migrations_run = False
+
+
+def run_migrations() -> None:
+    """
+    Run database migrations if not already run in this process.
+
+    Safe to call multiple times - will only run once per process.
+    """
+    global _migrations_run
+    if _migrations_run:
+        return
+
+    engine = get_engine()
+    _run_migrations(engine)
+    _migrations_run = True
+
+
+def _run_migrations(engine) -> None:
+    """
+    Run database migrations to add new columns to existing tables.
+
+    This handles schema evolution without requiring users to delete their database.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+
+    # Migration: Add override fields to model_overrides table
+    if "model_overrides" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("model_overrides")
+        }
+
+        migrations = []
+
+        # New columns added for model override support
+        if "input_cost" not in existing_columns:
+            migrations.append("ALTER TABLE model_overrides ADD COLUMN input_cost REAL")
+        if "output_cost" not in existing_columns:
+            migrations.append("ALTER TABLE model_overrides ADD COLUMN output_cost REAL")
+        if "capabilities_json" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN capabilities_json TEXT"
+            )
+        if "context_length" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN context_length INTEGER"
+            )
+        if "description" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN description VARCHAR(500)"
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for model_overrides table"
+            )
+            with engine.connect() as conn:
+                for migration in migrations:
+                    logger.debug(f"Running migration: {migration}")
+                    conn.execute(text(migration))
+                conn.commit()
+
+    # Migration: Add cost column to request_logs table
+    if "request_logs" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("request_logs")
+        }
+
+        if "cost" not in existing_columns:
+            logger.info("Running migration: Adding cost column to request_logs table")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE request_logs ADD COLUMN cost REAL"))
+                conn.commit()
+
+
 def init_db(drop_all: bool = False) -> None:
     """
     Initialize the database schema.
@@ -170,6 +247,9 @@ def init_db(drop_all: bool = False) -> None:
 
     logger.info("Creating database tables")
     Base.metadata.create_all(bind=engine)
+
+    # Run migrations for existing databases
+    _run_migrations(engine)
 
 
 def check_db_initialized() -> bool:

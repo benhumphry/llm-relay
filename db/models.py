@@ -219,8 +219,9 @@ class ModelOverride(Base):
     """
     Override settings for system models (from YAML).
 
-    Allows users to disable system models without modifying YAML files.
-    System models auto-update with releases; overrides persist user preferences.
+    Allows users to disable system models or override specific properties
+    without modifying YAML files. System models auto-update with releases;
+    overrides persist user preferences.
     """
 
     __tablename__ = "model_overrides"
@@ -229,6 +230,28 @@ class ModelOverride(Base):
     provider_id: Mapped[str] = mapped_column(String(50), nullable=False)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False)
     disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Override fields (null means use system default)
+    input_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    output_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    capabilities_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # JSON array
+    context_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    @property
+    def capabilities(self) -> list | None:
+        """Get capabilities as a list."""
+        if self.capabilities_json is None:
+            return None
+        return json.loads(self.capabilities_json)
+
+    @capabilities.setter
+    def capabilities(self, value: list | None):
+        """Set capabilities from a list."""
+        self.capabilities_json = json.dumps(value) if value is not None else None
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -244,6 +267,11 @@ class ModelOverride(Base):
             "provider_id": self.provider_id,
             "model_id": self.model_id,
             "disabled": self.disabled,
+            "input_cost": self.input_cost,
+            "output_cost": self.output_cost,
+            "capabilities": self.capabilities,
+            "context_length": self.context_length,
+            "description": self.description,
         }
 
 
@@ -485,6 +513,9 @@ class RequestLog(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Cost tracking (provider-reported cost, e.g., from OpenRouter)
+    cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     # Performance & status
     response_time_ms: Mapped[int] = mapped_column(Integer, default=0)
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -506,6 +537,7 @@ class RequestLog(Base):
             "endpoint": self.endpoint,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "cost": self.cost,  # Provider-reported cost (e.g., OpenRouter)
             "response_time_ms": self.response_time_ms,
             "status_code": self.status_code,
             "error_message": self.error_message,
