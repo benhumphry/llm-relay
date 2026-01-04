@@ -161,6 +161,91 @@ content %}
             </div>
         </div>
 
+        <!-- Backup & Restore -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Backup & Restore</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Export your configuration for backup or import to a new
+                    instance
+                </p>
+
+                <div class="space-y-4">
+                    <!-- Export -->
+                    <div>
+                        <p class="text-sm mb-2">
+                            Export custom models, aliases, providers, overrides,
+                            and settings.
+                        </p>
+                        <a
+                            href="/api/config/export"
+                            class="btn btn-outline btn-sm"
+                            download
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 mr-1"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                />
+                            </svg>
+                            Export Configuration
+                        </a>
+                    </div>
+
+                    <!-- Import -->
+                    <div class="border-t border-base-300 pt-4">
+                        <p class="text-sm mb-2">
+                            Import configuration from a previously exported JSON
+                            file. Existing entries will be updated.
+                        </p>
+                        <input
+                            type="file"
+                            id="importFile"
+                            accept=".json"
+                            class="hidden"
+                            @change="handleImportFile($event)"
+                        />
+                        <button
+                            @click="$refs.importFile.click()"
+                            class="btn btn-outline btn-sm"
+                            :class="{ 'loading': importing }"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 mr-1"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                                />
+                            </svg>
+                            Import Configuration
+                        </button>
+                        <input
+                            type="file"
+                            x-ref="importFile"
+                            accept=".json"
+                            class="hidden"
+                            @change="handleImportFile($event)"
+                        />
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Theme -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
@@ -303,6 +388,7 @@ content %}
             confirmPassword: "",
             changingPassword: false,
             reloading: false,
+            importing: false,
             toasts: [],
             currentTheme: localStorage.getItem("theme") || "system",
 
@@ -468,6 +554,49 @@ content %}
                     this.showToast("Failed to reload configuration", "error");
                 } finally {
                     this.reloading = false;
+                }
+            },
+
+            async handleImportFile(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                this.importing = true;
+                try {
+                    const text = await file.text();
+                    const data = JSON.parse(text);
+
+                    const res = await fetch("/api/config/import", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(data),
+                    });
+
+                    if (res.ok) {
+                        const result = await res.json();
+                        const stats = result.stats;
+                        const total = Object.values(stats).reduce(
+                            (a, b) => a + b,
+                            0,
+                        );
+                        this.showToast(`Imported ${total} items successfully`);
+                        await this.loadSettings();
+                    } else {
+                        const error = await res.json();
+                        this.showToast(
+                            error.error || "Failed to import configuration",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast(
+                        "Failed to parse import file: " + err.message,
+                        "error",
+                    );
+                } finally {
+                    this.importing = false;
+                    // Reset the file input
+                    event.target.value = "";
                 }
             },
 

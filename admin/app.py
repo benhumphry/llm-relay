@@ -9,6 +9,7 @@ Provides:
 
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 from flask import (
@@ -958,15 +959,312 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     # Config Import/Export
     # -------------------------------------------------------------------------
 
+    @admin.route("/api/config/export", methods=["GET"])
+    @require_auth_api
+    def export_config():
+        """Export database configuration as JSON for backup/migration."""
+        from db.models import (
+            AliasOverride,
+            CustomAlias,
+            CustomModel,
+            CustomProvider,
+            ModelOverride,
+            OllamaInstance,
+            Setting,
+        )
+
+        with get_db_context() as db:
+            export_data = {
+                "version": "2.2",
+                "exported_at": datetime.utcnow().isoformat(),
+                "settings": [
+                    {"key": s.key, "value": s.value}
+                    for s in db.query(Setting).all()
+                    # Exclude password hash from export
+                    if s.key != Setting.KEY_ADMIN_PASSWORD_HASH
+                ],
+                "model_overrides": [
+                    {
+                        "provider_id": o.provider_id,
+                        "model_id": o.model_id,
+                        "disabled": o.disabled,
+                        "input_cost": o.input_cost,
+                        "output_cost": o.output_cost,
+                        "capabilities": o.capabilities,
+                        "context_length": o.context_length,
+                        "description": o.description,
+                    }
+                    for o in db.query(ModelOverride).all()
+                ],
+                "alias_overrides": [
+                    {
+                        "provider_id": o.provider_id,
+                        "alias": o.alias,
+                        "disabled": o.disabled,
+                    }
+                    for o in db.query(AliasOverride).all()
+                ],
+                "custom_models": [
+                    {
+                        "provider_id": m.provider_id,
+                        "model_id": m.model_id,
+                        "family": m.family,
+                        "description": m.description,
+                        "context_length": m.context_length,
+                        "capabilities": m.capabilities,
+                        "unsupported_params": m.unsupported_params,
+                        "supports_system_prompt": m.supports_system_prompt,
+                        "use_max_completion_tokens": m.use_max_completion_tokens,
+                        "enabled": m.enabled,
+                        "input_cost": m.input_cost,
+                        "output_cost": m.output_cost,
+                    }
+                    for m in db.query(CustomModel).all()
+                ],
+                "custom_aliases": [
+                    {
+                        "provider_id": a.provider_id,
+                        "alias": a.alias,
+                        "model_id": a.model_id,
+                    }
+                    for a in db.query(CustomAlias).all()
+                ],
+                "ollama_instances": [
+                    {
+                        "name": o.name,
+                        "base_url": o.base_url,
+                        "enabled": o.enabled,
+                    }
+                    for o in db.query(OllamaInstance).all()
+                ],
+                "custom_providers": [
+                    {
+                        "name": p.name,
+                        "type": p.type,
+                        "base_url": p.base_url,
+                        "api_key_env": p.api_key_env,
+                        "enabled": p.enabled,
+                    }
+                    for p in db.query(CustomProvider).all()
+                ],
+            }
+
+        response = jsonify(export_data)
+        response.headers["Content-Disposition"] = (
+            f"attachment; filename=llm-proxy-config-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
+        )
+        return response
+
     @admin.route("/api/config/import", methods=["POST"])
     @require_auth_api
     def import_config():
-        """Import configuration from YAML files."""
-        data = request.get_json() or {}
-        overwrite = data.get("overwrite", False)
+        """Import database configuration from JSON backup."""
+        from db.models import (
+            AliasOverride,
+            CustomAlias,
+            CustomModel,
+            CustomProvider,
+            ModelOverride,
+            OllamaInstance,
+            Setting,
+        )
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        # Validate version
+        version = data.get("version", "")
+        if not version.startswith("2."):
+            return jsonify(
+                {"success": False, "error": f"Unsupported export version: {version}"}
+            ), 400
+
+        stats = {
+            "settings": 0,
+            "model_overrides": 0,
+            "alias_overrides": 0,
+            "custom_models": 0,
+            "custom_aliases": 0,
+            "ollama_instances": 0,
+            "custom_providers": 0,
+        }
 
         with get_db_context() as db:
-            stats = import_all_from_yaml(db, overwrite=overwrite)
+            # Import settings (skip password)
+            for s in data.get("settings", []):
+                if s["key"] == Setting.KEY_ADMIN_PASSWORD_HASH:
+                    continue
+                existing = db.query(Setting).filter(Setting.key == s["key"]).first()
+                if existing:
+                    existing.value = s["value"]
+                else:
+                    db.add(Setting(key=s["key"], value=s["value"]))
+                stats["settings"] += 1
+
+            # Import model overrides
+            for o in data.get("model_overrides", []):
+                existing = (
+                    db.query(ModelOverride)
+                    .filter(
+                        ModelOverride.provider_id == o["provider_id"],
+                        ModelOverride.model_id == o["model_id"],
+                    )
+                    .first()
+                )
+                if existing:
+                    existing.disabled = o.get("disabled", False)
+                    existing.input_cost = o.get("input_cost")
+                    existing.output_cost = o.get("output_cost")
+                    existing.capabilities = o.get("capabilities")
+                    existing.context_length = o.get("context_length")
+                    existing.description = o.get("description")
+                else:
+                    override = ModelOverride(
+                        provider_id=o["provider_id"],
+                        model_id=o["model_id"],
+                        disabled=o.get("disabled", False),
+                        input_cost=o.get("input_cost"),
+                        output_cost=o.get("output_cost"),
+                        context_length=o.get("context_length"),
+                        description=o.get("description"),
+                    )
+                    override.capabilities = o.get("capabilities")
+                    db.add(override)
+                stats["model_overrides"] += 1
+
+            # Import alias overrides
+            for o in data.get("alias_overrides", []):
+                existing = (
+                    db.query(AliasOverride)
+                    .filter(
+                        AliasOverride.provider_id == o["provider_id"],
+                        AliasOverride.alias == o["alias"],
+                    )
+                    .first()
+                )
+                if existing:
+                    existing.disabled = o.get("disabled", False)
+                else:
+                    db.add(
+                        AliasOverride(
+                            provider_id=o["provider_id"],
+                            alias=o["alias"],
+                            disabled=o.get("disabled", False),
+                        )
+                    )
+                stats["alias_overrides"] += 1
+
+            # Import custom models
+            for m in data.get("custom_models", []):
+                existing = (
+                    db.query(CustomModel)
+                    .filter(
+                        CustomModel.provider_id == m["provider_id"],
+                        CustomModel.model_id == m["model_id"],
+                    )
+                    .first()
+                )
+                if existing:
+                    existing.family = m.get("family")
+                    existing.description = m.get("description")
+                    existing.context_length = m.get("context_length", 128000)
+                    existing.capabilities = m.get("capabilities", [])
+                    existing.unsupported_params = m.get("unsupported_params", [])
+                    existing.supports_system_prompt = m.get(
+                        "supports_system_prompt", True
+                    )
+                    existing.use_max_completion_tokens = m.get(
+                        "use_max_completion_tokens", False
+                    )
+                    existing.enabled = m.get("enabled", True)
+                    existing.input_cost = m.get("input_cost")
+                    existing.output_cost = m.get("output_cost")
+                else:
+                    model = CustomModel(
+                        provider_id=m["provider_id"],
+                        model_id=m["model_id"],
+                        family=m.get("family"),
+                        description=m.get("description"),
+                        context_length=m.get("context_length", 128000),
+                        supports_system_prompt=m.get("supports_system_prompt", True),
+                        use_max_completion_tokens=m.get(
+                            "use_max_completion_tokens", False
+                        ),
+                        enabled=m.get("enabled", True),
+                        input_cost=m.get("input_cost"),
+                        output_cost=m.get("output_cost"),
+                    )
+                    model.capabilities = m.get("capabilities", [])
+                    model.unsupported_params = m.get("unsupported_params", [])
+                    db.add(model)
+                stats["custom_models"] += 1
+
+            # Import custom aliases
+            for a in data.get("custom_aliases", []):
+                existing = (
+                    db.query(CustomAlias)
+                    .filter(
+                        CustomAlias.provider_id == a["provider_id"],
+                        CustomAlias.alias == a["alias"],
+                    )
+                    .first()
+                )
+                if existing:
+                    existing.model_id = a["model_id"]
+                else:
+                    db.add(
+                        CustomAlias(
+                            provider_id=a["provider_id"],
+                            alias=a["alias"],
+                            model_id=a["model_id"],
+                        )
+                    )
+                stats["custom_aliases"] += 1
+
+            # Import Ollama instances
+            for o in data.get("ollama_instances", []):
+                existing = (
+                    db.query(OllamaInstance)
+                    .filter(OllamaInstance.name == o["name"])
+                    .first()
+                )
+                if existing:
+                    existing.base_url = o["base_url"]
+                    existing.enabled = o.get("enabled", True)
+                else:
+                    db.add(
+                        OllamaInstance(
+                            name=o["name"],
+                            base_url=o["base_url"],
+                            enabled=o.get("enabled", True),
+                        )
+                    )
+                stats["ollama_instances"] += 1
+
+            # Import custom providers
+            for p in data.get("custom_providers", []):
+                existing = (
+                    db.query(CustomProvider)
+                    .filter(CustomProvider.name == p["name"])
+                    .first()
+                )
+                if existing:
+                    existing.type = p["type"]
+                    existing.base_url = p["base_url"]
+                    existing.api_key_env = p.get("api_key_env")
+                    existing.enabled = p.get("enabled", True)
+                else:
+                    db.add(
+                        CustomProvider(
+                            name=p["name"],
+                            type=p["type"],
+                            base_url=p["base_url"],
+                            api_key_env=p.get("api_key_env"),
+                            enabled=p.get("enabled", True),
+                        )
+                    )
+                stats["custom_providers"] += 1
 
         return jsonify({"success": True, "stats": stats})
 
