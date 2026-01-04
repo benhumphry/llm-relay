@@ -14,9 +14,30 @@ content %}
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
                 <h2 class="card-title text-lg">Default Model</h2>
-                <p class="text-sm text-base-content/60 mb-4">
+                <p class="text-sm text-base-content/60 mb-2">
                     Fallback model used when an unknown model is requested
                 </p>
+
+                <!-- Current default display -->
+                <div
+                    x-show="settings.default_provider && settings.default_model"
+                    class="alert alert-info mb-4 py-2"
+                >
+                    <span class="text-sm">
+                        Current default:
+                        <strong
+                            x-text="settings.default_provider + '/' + settings.default_model"
+                        ></strong>
+                    </span>
+                </div>
+                <div
+                    x-show="!settings.default_provider || !settings.default_model"
+                    class="alert mb-4 py-2"
+                >
+                    <span class="text-sm text-base-content/60"
+                        >No default model configured</span
+                    >
+                </div>
 
                 <div class="space-y-4">
                     <div class="form-control">
@@ -356,9 +377,6 @@ content %}
                             fetch("/api/stats"),
                         ]);
 
-                    if (settingsRes.ok) {
-                        this.settings = await settingsRes.json();
-                    }
                     if (providersRes.ok) {
                         this.providers = await providersRes.json();
                     }
@@ -366,7 +384,13 @@ content %}
                         this.stats = await statsRes.json();
                     }
 
-                    // Load models for default provider
+                    // Load settings and merge with defaults
+                    if (settingsRes.ok) {
+                        const loaded = await settingsRes.json();
+                        this.settings = { ...this.settings, ...loaded };
+                    }
+
+                    // Load models for default provider (need to wait for Alpine to render options)
                     if (this.settings.default_provider) {
                         await this.loadProviderModels();
                     }
