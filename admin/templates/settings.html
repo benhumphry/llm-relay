@@ -405,12 +405,22 @@ content %}
                     return;
                 }
 
+                // Save current model selection before loading new options
+                const savedModel = this.settings.default_model;
+
                 try {
                     const res = await fetch(
                         `/api/models?provider=${this.settings.default_provider}`,
                     );
                     if (res.ok) {
                         this.providerModels = await res.json();
+
+                        // Restore model selection after options are rendered
+                        if (savedModel) {
+                            this.$nextTick(() => {
+                                this.settings.default_model = savedModel;
+                            });
+                        }
                     }
                 } catch (err) {
                     console.error("Failed to load models", err);
