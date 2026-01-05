@@ -116,24 +116,14 @@ class ProviderRegistry:
         Get combined model list from all configured providers.
 
         Returns list of model info dicts suitable for /api/tags response.
-        Filters out disabled models and aliases.
+        Models and aliases are already filtered for enabled status in load_models_for_provider().
         """
-        from .hybrid_loader import get_alias_overrides, get_model_overrides
-
         models = []
         seen = set()
 
         for provider in self.get_configured_providers():
-            # Get overrides to filter disabled models
-            model_overrides = get_model_overrides(provider.name)
-
             for model_id, info in provider.get_models().items():
                 if model_id in seen:
-                    continue
-
-                # Skip disabled models
-                override = model_overrides.get(model_id)
-                if override and override["disabled"]:
                     continue
 
                 seen.add(model_id)
@@ -156,22 +146,10 @@ class ProviderRegistry:
                 )
 
             # Also add aliases as separate entries for discoverability
-            alias_overrides = get_alias_overrides(provider.name)
-
             for alias, model_id in provider.get_aliases().items():
                 # Skip if alias matches provider-model format already added
                 full_name = f"{provider.name}-{model_id}"
                 if alias == full_name or alias in seen:
-                    continue
-
-                # Skip disabled aliases
-                alias_override = alias_overrides.get(alias)
-                if alias_override and alias_override["disabled"]:
-                    continue
-
-                # Skip if target model is disabled
-                model_override = model_overrides.get(model_id)
-                if model_override and model_override["disabled"]:
                     continue
 
                 info = provider.get_models().get(model_id)
@@ -203,25 +181,15 @@ class ProviderRegistry:
         Get combined model list in OpenAI format.
 
         Returns list of model info dicts suitable for /v1/models response.
-        Filters out disabled models and aliases.
+        Models and aliases are already filtered for enabled status in load_models_for_provider().
         """
-        from .hybrid_loader import get_alias_overrides, get_model_overrides
-
         models = []
         seen = set()
 
         for provider in self.get_configured_providers():
-            # Get overrides to filter disabled models
-            model_overrides = get_model_overrides(provider.name)
-
             for model_id, info in provider.get_models().items():
                 full_name = f"{provider.name}-{model_id}"
                 if full_name in seen:
-                    continue
-
-                # Skip disabled models
-                override = model_overrides.get(model_id)
-                if override and override["disabled"]:
                     continue
 
                 seen.add(full_name)
@@ -235,20 +203,8 @@ class ProviderRegistry:
                 )
 
             # Add key aliases
-            alias_overrides = get_alias_overrides(provider.name)
-
             for alias, model_id in provider.get_aliases().items():
                 if alias in seen:
-                    continue
-
-                # Skip disabled aliases
-                alias_override = alias_overrides.get(alias)
-                if alias_override and alias_override["disabled"]:
-                    continue
-
-                # Skip if target model is disabled
-                model_override = model_overrides.get(model_id)
-                if model_override and model_override["disabled"]:
                     continue
 
                 seen.add(alias)

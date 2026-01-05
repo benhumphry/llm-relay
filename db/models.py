@@ -32,7 +32,7 @@ class Provider(Base):
     """
     LLM provider configuration.
 
-    Replaces entries in config/providers.yml
+    All providers are stored in the database, seeded from defaults on first run.
     """
 
     __tablename__ = "providers"
@@ -40,14 +40,25 @@ class Provider(Base):
     id: Mapped[str] = mapped_column(String(50), primary_key=True)
     type: Mapped[str] = mapped_column(
         String(50), nullable=False
-    )  # 'anthropic' or 'openai-compatible'
+    )  # 'anthropic', 'openai-compatible', 'ollama', 'openrouter', 'perplexity', 'gemini'
     base_url: Mapped[Optional[str]] = mapped_column(String(500))
     api_key_env: Mapped[Optional[str]] = mapped_column(String(100))  # Env var name
     api_key_encrypted: Mapped[Optional[str]] = mapped_column(
         Text
     )  # Encrypted key stored in DB
+
+    # Display
+    display_name: Mapped[Optional[str]] = mapped_column(String(100))  # "Anthropic"
+
+    # Source tracking
+    source: Mapped[str] = mapped_column(
+        String(20), default="system"
+    )  # "system", "custom"
+
+    # State
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -75,6 +86,8 @@ class Provider(Base):
             "type": self.type,
             "base_url": self.base_url,
             "api_key_env": self.api_key_env,
+            "display_name": self.display_name,
+            "source": self.source,
             "has_api_key": has_api_key,
             "enabled": self.enabled,
             "display_order": self.display_order,
@@ -87,7 +100,10 @@ class Model(Base):
     """
     Model definition for a provider.
 
-    Replaces entries in config/models/*.yml
+    All models are stored in the database:
+    - source="litellm": Seeded from LiteLLM pricing data
+    - source="custom": User-created models
+    - source="ollama": Dynamically discovered from Ollama API
     """
 
     __tablename__ = "models"
@@ -96,6 +112,16 @@ class Model(Base):
     provider_id: Mapped[str] = mapped_column(
         String(50), ForeignKey("providers.id"), primary_key=True
     )
+
+    # Source tracking
+    source: Mapped[str] = mapped_column(
+        String(20), default="litellm"
+    )  # "litellm", "custom", "ollama"
+    last_synced: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )  # When last updated from LiteLLM
+
+    # Basic info
     family: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     context_length: Mapped[int] = mapped_column(Integer, default=128000)
@@ -103,13 +129,20 @@ class Model(Base):
     unsupported_params_json: Mapped[Optional[str]] = mapped_column(Text)  # JSON array
     supports_system_prompt: Mapped[bool] = mapped_column(Boolean, default=True)
     use_max_completion_tokens: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Cost per million tokens (USD)
+    input_cost: Mapped[Optional[float]] = mapped_column(Float)
+    output_cost: Mapped[Optional[float]] = mapped_column(Float)
+    # Cache read multiplier (e.g., 0.1 = 10% of input cost for Anthropic)
+    cache_read_multiplier: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Cache write multiplier (e.g., 1.25 = 125% of input cost for Anthropic)
+    cache_write_multiplier: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+
+    # State
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    input_cost: Mapped[Optional[float]] = mapped_column(
-        Float
-    )  # Cost per million input tokens
-    output_cost: Mapped[Optional[float]] = mapped_column(
-        Float
-    )  # Cost per million output tokens
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -147,6 +180,8 @@ class Model(Base):
         return {
             "id": self.id,
             "provider_id": self.provider_id,
+            "source": self.source,
+            "last_synced": self.last_synced.isoformat() if self.last_synced else None,
             "family": self.family,
             "description": self.description,
             "context_length": self.context_length,
@@ -154,9 +189,11 @@ class Model(Base):
             "unsupported_params": self.unsupported_params,
             "supports_system_prompt": self.supports_system_prompt,
             "use_max_completion_tokens": self.use_max_completion_tokens,
-            "enabled": self.enabled,
             "input_cost": self.input_cost,
             "output_cost": self.output_cost,
+            "cache_read_multiplier": self.cache_read_multiplier,
+            "cache_write_multiplier": self.cache_write_multiplier,
+            "enabled": self.enabled,
         }
 
 
@@ -170,10 +207,19 @@ class Alias(Base):
     __tablename__ = "aliases"
 
     alias: Mapped[str] = mapped_column(String(100), primary_key=True)
-    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
     provider_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("providers.id"), nullable=False
+        String(50), ForeignKey("providers.id"), primary_key=True
     )
+    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Source tracking
+    source: Mapped[str] = mapped_column(
+        String(20), default="custom"
+    )  # "system", "custom"
+
+    # State
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -183,8 +229,10 @@ class Alias(Base):
         """Convert to dictionary for API responses."""
         return {
             "alias": self.alias,
-            "model_id": self.model_id,
             "provider_id": self.provider_id,
+            "model_id": self.model_id,
+            "source": self.source,
+            "enabled": self.enabled,
         }
 
 
@@ -234,6 +282,12 @@ class ModelOverride(Base):
     # Override fields (null means use system default)
     input_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     output_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Extended cost parameters (v2.2.3)
+    cache_read_multiplier: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cache_write_multiplier: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+
     capabilities_json: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True
     )  # JSON array
@@ -269,6 +323,8 @@ class ModelOverride(Base):
             "disabled": self.disabled,
             "input_cost": self.input_cost,
             "output_cost": self.output_cost,
+            "cache_read_multiplier": self.cache_read_multiplier,
+            "cache_write_multiplier": self.cache_write_multiplier,
             "capabilities": self.capabilities,
             "context_length": self.context_length,
             "description": self.description,
@@ -326,6 +382,15 @@ class CustomModel(Base):
     supports_system_prompt: Mapped[bool] = mapped_column(Boolean, default=True)
     use_max_completion_tokens: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Cost per million tokens (USD)
+    input_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    output_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Extended cost parameters (v2.2.3)
+    cache_read_multiplier: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cache_write_multiplier: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -373,6 +438,8 @@ class CustomModel(Base):
             "enabled": self.enabled,
             "input_cost": self.input_cost,
             "output_cost": self.output_cost,
+            "cache_read_multiplier": self.cache_read_multiplier,
+            "cache_write_multiplier": self.cache_write_multiplier,
             "is_system": False,  # Always false for custom models
         }
 
@@ -513,6 +580,19 @@ class RequestLog(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Extended token tracking (v2.2.3)
+    # OpenAI reasoning tokens (o1, o3 models) - billed at output rate
+    reasoning_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # OpenAI cached input tokens (discounted rate)
+    cached_input_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Anthropic cache tokens
+    cache_creation_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # 1.25x input rate
+    cache_read_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # 0.1x input rate
+
     # Cost tracking (provider-reported cost, e.g., from OpenRouter)
     cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
@@ -537,7 +617,11 @@ class RequestLog(Base):
             "endpoint": self.endpoint,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
-            "cost": self.cost,  # Provider-reported cost (e.g., OpenRouter)
+            "reasoning_tokens": self.reasoning_tokens,
+            "cached_input_tokens": self.cached_input_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cost": self.cost,
             "response_time_ms": self.response_time_ms,
             "status_code": self.status_code,
             "error_message": self.error_message,

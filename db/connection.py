@@ -208,6 +208,15 @@ def _run_migrations(engine) -> None:
             migrations.append(
                 "ALTER TABLE model_overrides ADD COLUMN description VARCHAR(500)"
             )
+        # v2.2.3: Extended cost parameters
+        if "cache_read_multiplier" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN cache_read_multiplier REAL"
+            )
+        if "cache_write_multiplier" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN cache_write_multiplier REAL"
+            )
 
         if migrations:
             logger.info(
@@ -219,16 +228,214 @@ def _run_migrations(engine) -> None:
                     conn.execute(text(migration))
                 conn.commit()
 
-    # Migration: Add cost column to request_logs table
+    # Migration: Add columns to request_logs table
     if "request_logs" in inspector.get_table_names():
         existing_columns = {
             col["name"] for col in inspector.get_columns("request_logs")
         }
 
+        migrations = []
+
+        # v2.2.2: Add cost column
         if "cost" not in existing_columns:
-            logger.info("Running migration: Adding cost column to request_logs table")
+            migrations.append(("cost", "ALTER TABLE request_logs ADD COLUMN cost REAL"))
+
+        # v2.2.3: Add extended token tracking columns
+        if "reasoning_tokens" not in existing_columns:
+            migrations.append(
+                (
+                    "reasoning_tokens",
+                    "ALTER TABLE request_logs ADD COLUMN reasoning_tokens INTEGER",
+                )
+            )
+        if "cached_input_tokens" not in existing_columns:
+            migrations.append(
+                (
+                    "cached_input_tokens",
+                    "ALTER TABLE request_logs ADD COLUMN cached_input_tokens INTEGER",
+                )
+            )
+        if "cache_creation_tokens" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_creation_tokens",
+                    "ALTER TABLE request_logs ADD COLUMN cache_creation_tokens INTEGER",
+                )
+            )
+        if "cache_read_tokens" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_read_tokens",
+                    "ALTER TABLE request_logs ADD COLUMN cache_read_tokens INTEGER",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for request_logs table"
+            )
             with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE request_logs ADD COLUMN cost REAL"))
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add extended cost columns to custom_models table
+    if "custom_models" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("custom_models")
+        }
+
+        migrations = []
+
+        # v2.2.3: Add cost columns (were missing entirely)
+        if "input_cost" not in existing_columns:
+            migrations.append(
+                ("input_cost", "ALTER TABLE custom_models ADD COLUMN input_cost REAL")
+            )
+        if "output_cost" not in existing_columns:
+            migrations.append(
+                ("output_cost", "ALTER TABLE custom_models ADD COLUMN output_cost REAL")
+            )
+        if "cache_read_multiplier" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_read_multiplier",
+                    "ALTER TABLE custom_models ADD COLUMN cache_read_multiplier REAL",
+                )
+            )
+        if "cache_write_multiplier" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_write_multiplier",
+                    "ALTER TABLE custom_models ADD COLUMN cache_write_multiplier REAL",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for custom_models table"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add extended cost columns to models table
+    if "models" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("models")}
+
+        migrations = []
+
+        # v2.2.3: Base cost parameters
+        if "input_cost" not in existing_columns:
+            migrations.append(
+                ("input_cost", "ALTER TABLE models ADD COLUMN input_cost REAL")
+            )
+        if "output_cost" not in existing_columns:
+            migrations.append(
+                ("output_cost", "ALTER TABLE models ADD COLUMN output_cost REAL")
+            )
+
+        # v2.2.3: Extended cost parameters
+        if "cache_read_multiplier" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_read_multiplier",
+                    "ALTER TABLE models ADD COLUMN cache_read_multiplier REAL",
+                )
+            )
+        if "cache_write_multiplier" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_write_multiplier",
+                    "ALTER TABLE models ADD COLUMN cache_write_multiplier REAL",
+                )
+            )
+
+        # v3.0: Source tracking for DB-driven config
+        if "source" not in existing_columns:
+            migrations.append(
+                (
+                    "source",
+                    "ALTER TABLE models ADD COLUMN source VARCHAR(20) DEFAULT 'litellm'",
+                )
+            )
+        if "last_synced" not in existing_columns:
+            migrations.append(
+                (
+                    "last_synced",
+                    "ALTER TABLE models ADD COLUMN last_synced DATETIME",
+                )
+            )
+
+        if migrations:
+            logger.info(f"Running {len(migrations)} migration(s) for models table")
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add columns to providers table
+    if "providers" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("providers")}
+
+        migrations = []
+
+        # v3.0: Source tracking and display name
+        if "source" not in existing_columns:
+            migrations.append(
+                (
+                    "source",
+                    "ALTER TABLE providers ADD COLUMN source VARCHAR(20) DEFAULT 'system'",
+                )
+            )
+        if "display_name" not in existing_columns:
+            migrations.append(
+                (
+                    "display_name",
+                    "ALTER TABLE providers ADD COLUMN display_name VARCHAR(100)",
+                )
+            )
+
+        if migrations:
+            logger.info(f"Running {len(migrations)} migration(s) for providers table")
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add columns to aliases table
+    if "aliases" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("aliases")}
+
+        migrations = []
+
+        # v3.0: Source tracking and enabled flag
+        if "source" not in existing_columns:
+            migrations.append(
+                (
+                    "source",
+                    "ALTER TABLE aliases ADD COLUMN source VARCHAR(20) DEFAULT 'custom'",
+                )
+            )
+        if "enabled" not in existing_columns:
+            migrations.append(
+                (
+                    "enabled",
+                    "ALTER TABLE aliases ADD COLUMN enabled BOOLEAN DEFAULT 1",
+                )
+            )
+
+        if migrations:
+            logger.info(f"Running {len(migrations)} migration(s) for aliases table")
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
                 conn.commit()
 
 

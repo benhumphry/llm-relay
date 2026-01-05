@@ -67,6 +67,11 @@ class UsageTracker:
         error_message: Optional[str] = None,
         is_streaming: bool = False,
         cost: Optional[float] = None,
+        # Extended token tracking (v2.2.3)
+        reasoning_tokens: Optional[int] = None,
+        cached_input_tokens: Optional[int] = None,
+        cache_creation_tokens: Optional[int] = None,
+        cache_read_tokens: Optional[int] = None,
     ):
         """
         Queue a request log entry.
@@ -86,6 +91,10 @@ class UsageTracker:
             error_message: Error message if request failed
             is_streaming: Whether this was a streaming request
             cost: Actual cost from provider (if available, e.g., OpenRouter)
+            reasoning_tokens: OpenAI reasoning tokens (o1/o3 models)
+            cached_input_tokens: OpenAI cached prompt tokens
+            cache_creation_tokens: Anthropic cache creation tokens
+            cache_read_tokens: Anthropic cache read tokens
         """
         if not self._is_tracking_enabled():
             return
@@ -106,6 +115,10 @@ class UsageTracker:
                 "error_message": error_message,
                 "is_streaming": is_streaming,
                 "cost": cost,
+                "reasoning_tokens": reasoning_tokens,
+                "cached_input_tokens": cached_input_tokens,
+                "cache_creation_tokens": cache_creation_tokens,
+                "cache_read_tokens": cache_read_tokens,
             }
         )
 
@@ -152,6 +165,10 @@ class UsageTracker:
                     entry["model_id"],
                     entry["input_tokens"],
                     entry["output_tokens"],
+                    reasoning_tokens=entry.get("reasoning_tokens"),
+                    cached_input_tokens=entry.get("cached_input_tokens"),
+                    cache_creation_tokens=entry.get("cache_creation_tokens"),
+                    cache_read_tokens=entry.get("cache_read_tokens"),
                 )
 
             with get_db_context() as db:
@@ -165,6 +182,10 @@ class UsageTracker:
                     endpoint=entry["endpoint"],
                     input_tokens=entry["input_tokens"],
                     output_tokens=entry["output_tokens"],
+                    reasoning_tokens=entry.get("reasoning_tokens"),
+                    cached_input_tokens=entry.get("cached_input_tokens"),
+                    cache_creation_tokens=entry.get("cache_creation_tokens"),
+                    cache_read_tokens=entry.get("cache_read_tokens"),
                     response_time_ms=entry["response_time_ms"],
                     status_code=entry["status_code"],
                     error_message=entry["error_message"],
@@ -342,17 +363,30 @@ class UsageTracker:
         model_id: str,
         input_tokens: int,
         output_tokens: int,
+        reasoning_tokens: Optional[int] = None,
+        cached_input_tokens: Optional[int] = None,
+        cache_creation_tokens: Optional[int] = None,
+        cache_read_tokens: Optional[int] = None,
     ) -> float:
         """
         Calculate estimated cost for a request.
 
         Reads cost from the hybrid model loader (YAML + custom models).
+        Accounts for different token types with different pricing:
+        - Reasoning tokens (o1/o3): billed at output rate
+        - Cached input tokens (OpenAI): 50% discount on input rate
+        - Cache creation tokens (Anthropic): 1.25x input rate
+        - Cache read tokens (Anthropic): 0.1x input rate
 
         Args:
             provider_id: Provider ID
             model_id: Model ID
-            input_tokens: Number of input tokens
-            output_tokens: Number of output tokens
+            input_tokens: Number of input tokens (total, includes cached)
+            output_tokens: Number of output tokens (total, includes reasoning)
+            reasoning_tokens: OpenAI reasoning tokens (o1/o3 models)
+            cached_input_tokens: OpenAI cached prompt tokens
+            cache_creation_tokens: Anthropic cache creation tokens
+            cache_read_tokens: Anthropic cache read tokens
 
         Returns:
             Estimated cost in USD
@@ -365,10 +399,56 @@ class UsageTracker:
             model_info = models.get(model_id)
 
             if model_info and model_info.input_cost is not None:
-                input_cost = (input_tokens / 1_000_000) * model_info.input_cost
-                output_cost = (output_tokens / 1_000_000) * (
-                    model_info.output_cost or 0.0
+                input_rate = model_info.input_cost
+                output_rate = model_info.output_cost or 0.0
+
+                # Get model-specific cache multipliers, or use defaults
+                # Default: OpenAI cached = 0.5x, Anthropic write = 1.25x, read = 0.1x
+                cache_read_mult = (
+                    model_info.cache_read_multiplier
+                    if model_info.cache_read_multiplier is not None
+                    else 0.1  # Default for Anthropic cache reads
                 )
+                cache_write_mult = (
+                    model_info.cache_write_multiplier
+                    if model_info.cache_write_multiplier is not None
+                    else 1.25  # Default for Anthropic cache writes
+                )
+
+                # Calculate input cost
+                # For OpenAI: cached tokens use cache_read_multiplier (default 0.5)
+                if cached_input_tokens:
+                    # OpenAI uses 0.5x for cached tokens by default
+                    openai_cache_mult = (
+                        model_info.cache_read_multiplier
+                        if model_info.cache_read_multiplier is not None
+                        else 0.5
+                    )
+                    regular_input = input_tokens - cached_input_tokens
+                    input_cost = (regular_input / 1_000_000) * input_rate
+                    input_cost += (cached_input_tokens / 1_000_000) * (
+                        input_rate * openai_cache_mult
+                    )
+                # For Anthropic: cache creation and read use model-specific multipliers
+                elif cache_creation_tokens or cache_read_tokens:
+                    cache_creation = cache_creation_tokens or 0
+                    cache_read = cache_read_tokens or 0
+                    regular_input = input_tokens - cache_creation - cache_read
+                    input_cost = (regular_input / 1_000_000) * input_rate
+                    input_cost += (cache_creation / 1_000_000) * (
+                        input_rate * cache_write_mult
+                    )
+                    input_cost += (cache_read / 1_000_000) * (
+                        input_rate * cache_read_mult
+                    )
+                else:
+                    input_cost = (input_tokens / 1_000_000) * input_rate
+
+                # Calculate output cost
+                # Reasoning tokens are already included in output_tokens and billed
+                # at output rate, so no adjustment needed
+                output_cost = (output_tokens / 1_000_000) * output_rate
+
                 return input_cost + output_cost
 
         except Exception as e:

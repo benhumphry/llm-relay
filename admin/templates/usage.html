@@ -474,6 +474,12 @@
     <!-- Tabs for breakdown tables -->
     <div class="tabs tabs-boxed mb-4 bg-base-100 p-1">
         <a
+            @click="switchTab('recent')"
+            :class="{'tab-active': activeTab === 'recent'}"
+            class="tab"
+            >Recent Requests</a
+        >
+        <a
             @click="switchTab('tags')"
             :class="{'tab-active': activeTab === 'tags'}"
             class="tab"
@@ -496,12 +502,6 @@
             :class="{'tab-active': activeTab === 'clients'}"
             class="tab"
             >By Client</a
-        >
-        <a
-            @click="switchTab('recent')"
-            :class="{'tab-active': activeTab === 'recent'}"
-            class="tab"
-            >Recent Requests</a
         >
         <a
             @click="switchTab('settings')"
@@ -996,9 +996,19 @@
                                 ></td>
                                 <td class="text-xs" x-text="log.endpoint"></td>
                                 <td class="text-right text-xs">
-                                    <span
-                                        x-text="log.input_tokens + '/' + log.output_tokens"
-                                    ></span>
+                                    <div
+                                        class="tooltip tooltip-left"
+                                        :data-tip="formatTokenTooltip(log)"
+                                    >
+                                        <span
+                                            x-text="log.input_tokens + '/' + log.output_tokens"
+                                        ></span>
+                                        <span
+                                            x-show="hasExtendedTokens(log)"
+                                            class="text-info ml-1"
+                                            >*</span
+                                        >
+                                    </div>
                                 </td>
                                 <td class="text-xs">
                                     <span
@@ -1179,7 +1189,7 @@
             },
 
             // UI state
-            activeTab: "tags",
+            activeTab: "recent",
             chartMetric: "requests",
             chart: null,
             tagChart: null,
@@ -1768,6 +1778,46 @@
                 if (!iso) return "-";
                 const d = new Date(iso);
                 return d.toLocaleString();
+            },
+
+            // Check if a log entry has extended token data
+            hasExtendedTokens(log) {
+                return (
+                    log.reasoning_tokens ||
+                    log.cached_input_tokens ||
+                    log.cache_creation_tokens ||
+                    log.cache_read_tokens
+                );
+            },
+
+            // Format tooltip showing token breakdown
+            formatTokenTooltip(log) {
+                let parts = [
+                    `In: ${log.input_tokens}`,
+                    `Out: ${log.output_tokens}`,
+                ];
+
+                // OpenAI reasoning tokens (o1/o3 models)
+                if (log.reasoning_tokens) {
+                    parts.push(`Reasoning: ${log.reasoning_tokens}`);
+                }
+
+                // OpenAI cached input tokens
+                if (log.cached_input_tokens) {
+                    parts.push(`Cached: ${log.cached_input_tokens}`);
+                }
+
+                // Anthropic cache creation tokens
+                if (log.cache_creation_tokens) {
+                    parts.push(`Cache Write: ${log.cache_creation_tokens}`);
+                }
+
+                // Anthropic cache read tokens
+                if (log.cache_read_tokens) {
+                    parts.push(`Cache Read: ${log.cache_read_tokens}`);
+                }
+
+                return parts.join(" | ");
             },
 
             showToast(message, type = "info") {

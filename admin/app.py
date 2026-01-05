@@ -35,7 +35,8 @@ from db import (
     Setting,
     get_db_context,
 )
-from db.importer import import_all_from_yaml
+
+# db.importer is deprecated - seeding now happens via db.seed
 from providers import registry
 from providers.hybrid_loader import (
     get_all_aliases_with_metadata,
@@ -183,13 +184,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def list_providers():
         """List all providers from the registry and DB."""
-        from db import OllamaInstance
+        from db import OllamaInstance, Provider
         from providers import registry
         from providers.loader import get_provider_config
         from providers.ollama_provider import OllamaProvider
 
         providers_list = []
         seen_ids = set()
+
+        # Get source info from database
+        provider_sources = {}
+        with get_db_context() as db:
+            for p in db.query(Provider).all():
+                provider_sources[p.id] = p.source
 
         for provider in registry.get_all_providers():
             config = get_provider_config(provider.name)
@@ -201,12 +208,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 provider_type = "ollama"
                 has_api_key = True  # Ollama doesn't need API key
                 base_url = provider.base_url
-                # Check if it's a system (YAML) or user-created (DB) provider
-                is_system = bool(config.get("type") == "ollama")
             else:
                 provider_type = config.get("type", provider.name)
                 base_url = config.get("base_url")
-                is_system = True  # Non-Ollama providers are always from YAML
+
+            # Check if it's a system provider (seeded from defaults)
+            is_system = provider_sources.get(provider.name) == "system"
 
             providers_list.append(
                 {
@@ -219,6 +226,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "model_count": len(provider.get_models()),
                     "alias_count": len(provider.get_aliases()),
                     "is_system": is_system,
+                    "has_custom_cost": getattr(
+                        provider, "has_custom_cost_calculation", False
+                    ),
                 }
             )
             seen_ids.add(provider.name)
@@ -332,10 +342,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     }
                 ), 201
         else:
-            # Other provider types (openai-compatible, anthropic) must be configured in YAML
+            # Other provider types (openai-compatible, anthropic, etc.) are system providers
+            # They are seeded from defaults and cannot be added via UI
             return jsonify(
                 {
-                    "error": f"Provider type '{provider_type}' must be configured in config/providers.yml. Only Ollama providers can be added via UI."
+                    "error": f"Provider type '{provider_type}' is a system provider. Only Ollama providers can be added via UI."
                 }
             ), 400
 
@@ -343,20 +354,20 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def update_provider(provider_id: str):
         """Update a provider (only Ollama providers can be updated via UI)."""
-        from db import OllamaInstance
+        from db import OllamaInstance, Provider
         from providers import registry
-        from providers.loader import get_provider_config
 
         data = request.get_json() or {}
 
-        # Check if this is a YAML-configured (system) provider
-        yaml_config = get_provider_config(provider_id)
-        if yaml_config:
-            return jsonify(
-                {
-                    "error": "System providers cannot be modified via UI. Edit config/providers.yml instead."
-                }
-            ), 400
+        # Check if this is a system provider (seeded from defaults)
+        with get_db_context() as db:
+            provider_record = (
+                db.query(Provider).filter(Provider.id == provider_id).first()
+            )
+            if provider_record and provider_record.source == "system":
+                return jsonify(
+                    {"error": "System providers cannot be modified via UI."}
+                ), 400
 
         # Check if it's an Ollama instance in DB
         with get_db_context() as db:
@@ -397,18 +408,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def delete_provider(provider_id: str):
         """Delete a provider (only Ollama providers can be deleted via UI)."""
-        from db import OllamaInstance
+        from db import OllamaInstance, Provider
         from providers import registry
-        from providers.loader import get_provider_config
 
-        # Check if this is a YAML-configured (system) provider
-        yaml_config = get_provider_config(provider_id)
-        if yaml_config:
-            return jsonify(
-                {
-                    "error": "System providers cannot be deleted via UI. Edit config/providers.yml instead."
-                }
-            ), 400
+        # Check if this is a system provider (seeded from defaults)
+        with get_db_context() as db:
+            provider_record = (
+                db.query(Provider).filter(Provider.id == provider_id).first()
+            )
+            if provider_record and provider_record.source == "system":
+                return jsonify(
+                    {"error": "System providers cannot be deleted via UI."}
+                ), 400
 
         with get_db_context() as db:
             instance = (
@@ -547,11 +558,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 logger.error(f"Failed to get models for {provider_id}: {e}")
                 return jsonify({"error": f"Failed to load models: {str(e)}"}), 500
 
-        # Get models for all providers (YAML + registry)
+        # Get models for all providers (database + registry)
         all_models = []
         seen_providers = set()
 
-        # First, get YAML providers
+        # First, get database providers
         for prov_name in get_all_provider_names():
             try:
                 all_models.extend(get_all_models_with_metadata(prov_name))
@@ -606,6 +617,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     override.output_cost = (
                         data["output_cost"] if data["output_cost"] else None
                     )
+                if "cache_read_multiplier" in data:
+                    override.cache_read_multiplier = (
+                        data["cache_read_multiplier"]
+                        if data["cache_read_multiplier"]
+                        else None
+                    )
+                if "cache_write_multiplier" in data:
+                    override.cache_write_multiplier = (
+                        data["cache_write_multiplier"]
+                        if data["cache_write_multiplier"]
+                        else None
+                    )
                 if "capabilities" in data:
                     override.capabilities = (
                         data["capabilities"] if data["capabilities"] else None
@@ -625,6 +648,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     disabled=disabled,
                     input_cost=data.get("input_cost"),
                     output_cost=data.get("output_cost"),
+                    cache_read_multiplier=data.get("cache_read_multiplier"),
+                    cache_write_multiplier=data.get("cache_write_multiplier"),
                     capabilities=data.get("capabilities"),
                     context_length=data.get("context_length"),
                     description=data.get("description"),
@@ -689,6 +714,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 enabled=data.get("enabled", True),
                 input_cost=data.get("input_cost"),
                 output_cost=data.get("output_cost"),
+                cache_read_multiplier=data.get("cache_read_multiplier"),
+                cache_write_multiplier=data.get("cache_write_multiplier"),
             )
             model.capabilities = data.get("capabilities", [])
             model.unsupported_params = data.get("unsupported_params", [])
@@ -732,6 +759,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 model.input_cost = data["input_cost"] if data["input_cost"] else None
             if "output_cost" in data:
                 model.output_cost = data["output_cost"] if data["output_cost"] else None
+            if "cache_read_multiplier" in data:
+                model.cache_read_multiplier = (
+                    data["cache_read_multiplier"]
+                    if data["cache_read_multiplier"]
+                    else None
+                )
+            if "cache_write_multiplier" in data:
+                model.cache_write_multiplier = (
+                    data["cache_write_multiplier"]
+                    if data["cache_write_multiplier"]
+                    else None
+                )
 
             db.commit()
             return jsonify(model.to_dict())
@@ -764,11 +803,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             aliases = get_all_aliases_with_metadata(provider_id)
             return jsonify(aliases)
 
-        # Get aliases for all providers (YAML + registry)
+        # Get aliases for all providers (database + registry)
         all_aliases = []
         seen_providers = set()
 
-        # First, get YAML providers
+        # First, get database providers
         for prov_name in get_all_provider_names():
             all_aliases.extend(get_all_aliases_with_metadata(prov_name))
             seen_providers.add(prov_name)
@@ -975,7 +1014,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         with get_db_context() as db:
             export_data = {
-                "version": "2.2",
+                "version": "2.3",
                 "exported_at": datetime.utcnow().isoformat(),
                 "settings": [
                     {"key": s.key, "value": s.value}
@@ -990,6 +1029,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "disabled": o.disabled,
                         "input_cost": o.input_cost,
                         "output_cost": o.output_cost,
+                        "cache_read_multiplier": o.cache_read_multiplier,
+                        "cache_write_multiplier": o.cache_write_multiplier,
                         "capabilities": o.capabilities,
                         "context_length": o.context_length,
                         "description": o.description,
@@ -1018,6 +1059,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "enabled": m.enabled,
                         "input_cost": m.input_cost,
                         "output_cost": m.output_cost,
+                        "cache_read_multiplier": m.cache_read_multiplier,
+                        "cache_write_multiplier": m.cache_write_multiplier,
                     }
                     for m in db.query(CustomModel).all()
                 ],
@@ -1116,6 +1159,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     existing.disabled = o.get("disabled", False)
                     existing.input_cost = o.get("input_cost")
                     existing.output_cost = o.get("output_cost")
+                    existing.cache_read_multiplier = o.get("cache_read_multiplier")
+                    existing.cache_write_multiplier = o.get("cache_write_multiplier")
                     existing.capabilities = o.get("capabilities")
                     existing.context_length = o.get("context_length")
                     existing.description = o.get("description")
@@ -1126,6 +1171,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         disabled=o.get("disabled", False),
                         input_cost=o.get("input_cost"),
                         output_cost=o.get("output_cost"),
+                        cache_read_multiplier=o.get("cache_read_multiplier"),
+                        cache_write_multiplier=o.get("cache_write_multiplier"),
                         context_length=o.get("context_length"),
                         description=o.get("description"),
                     )
@@ -1180,6 +1227,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     existing.enabled = m.get("enabled", True)
                     existing.input_cost = m.get("input_cost")
                     existing.output_cost = m.get("output_cost")
+                    existing.cache_read_multiplier = m.get("cache_read_multiplier")
+                    existing.cache_write_multiplier = m.get("cache_write_multiplier")
                 else:
                     model = CustomModel(
                         provider_id=m["provider_id"],
@@ -1194,6 +1243,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         enabled=m.get("enabled", True),
                         input_cost=m.get("input_cost"),
                         output_cost=m.get("output_cost"),
+                        cache_read_multiplier=m.get("cache_read_multiplier"),
+                        cache_write_multiplier=m.get("cache_write_multiplier"),
                     )
                     model.capabilities = m.get("capabilities", [])
                     model.unsupported_params = m.get("unsupported_params", [])
@@ -1376,18 +1427,22 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/ollama/instances", methods=["GET"])
     @require_auth_api
     def list_ollama_instances():
-        """List all configured Ollama instances (YAML + DB)."""
-        from db import OllamaInstance
-        from providers.loader import get_provider_config
+        """List all configured Ollama instances (system + user-created)."""
+        from db import OllamaInstance, Provider
 
         instances = []
 
-        # Get instances from registry (includes both YAML and dynamically added)
+        # Get source info from database
+        provider_sources = {}
+        with get_db_context() as db:
+            for p in db.query(Provider).all():
+                provider_sources[p.id] = p.source
+
+        # Get instances from registry (includes both system and dynamically added)
         for provider in _get_ollama_providers():
             running = provider.is_configured()
-            # Check if this is a YAML-configured provider
-            yaml_config = get_provider_config(provider.name)
-            is_system = yaml_config.get("type") == "ollama"
+            # Check if this is a system provider (seeded from defaults)
+            is_system = provider_sources.get(provider.name) == "system"
 
             instances.append(
                 {
@@ -1489,18 +1544,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def update_ollama_instance(instance_name: str):
         """Update an Ollama instance."""
-        from db import OllamaInstance
+        from db import OllamaInstance, Provider
         from providers import registry
-        from providers.loader import get_provider_config
 
-        # Check if this is a YAML-configured (system) instance
-        yaml_config = get_provider_config(instance_name)
-        if yaml_config.get("type") == "ollama":
-            return jsonify(
-                {
-                    "error": "Cannot modify YAML-configured instances. Edit config/providers.yml instead."
-                }
-            ), 400
+        # Check if this is a system provider (seeded from defaults)
+        with get_db_context() as db:
+            provider_record = (
+                db.query(Provider).filter(Provider.id == instance_name).first()
+            )
+            if provider_record and provider_record.source == "system":
+                return jsonify(
+                    {"error": "Cannot modify system-configured instances."}
+                ), 400
 
         data = request.get_json() or {}
 
@@ -1534,18 +1589,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def delete_ollama_instance(instance_name: str):
         """Delete an Ollama instance."""
-        from db import OllamaInstance
+        from db import OllamaInstance, Provider
         from providers import registry
-        from providers.loader import get_provider_config
 
-        # Check if this is a YAML-configured (system) instance
-        yaml_config = get_provider_config(instance_name)
-        if yaml_config.get("type") == "ollama":
-            return jsonify(
-                {
-                    "error": "Cannot delete YAML-configured instances. Edit config/providers.yml instead."
-                }
-            ), 400
+        # Check if this is a system provider (seeded from defaults)
+        with get_db_context() as db:
+            provider_record = (
+                db.query(Provider).filter(Provider.id == instance_name).first()
+            )
+            if provider_record and provider_record.source == "system":
+                return jsonify(
+                    {"error": "Cannot delete system-configured instances."}
+                ), 400
 
         with get_db_context() as db:
             instance = (
@@ -2528,5 +2583,143 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         db.add(Setting(key=key, value=value))
 
             return jsonify({"success": True})
+
+    # =========================================================================
+    # Model Sync API (sync models/pricing from LiteLLM)
+    # =========================================================================
+
+    @admin.route("/api/models/sync", methods=["POST"])
+    @require_auth_api
+    def sync_models():
+        """
+        Sync models and pricing from LiteLLM and return a diff report.
+
+        Request body (optional):
+        {
+            "provider": "openai",      // Optional: sync specific provider only
+            "update_existing": false,  // Optional: update prices for existing models
+            "add_new": false           // Optional: add new models as custom models
+        }
+
+        Compares LiteLLM data against current database models.
+        When apply options are set, updates database models directly.
+        """
+        import sys
+        from pathlib import Path
+
+        # Add scripts directory to path for import
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+
+        try:
+            from sync_pricing import (
+                PROVIDER_MAPPING,
+                apply_pricing_overrides,
+                compare_pricing,
+                fetch_litellm_pricing,
+                load_effective_pricing,
+                parse_litellm_model,
+            )
+        except ImportError as e:
+            return jsonify({"error": f"Failed to import sync module: {e}"}), 500
+
+        data = request.get_json() or {}
+        provider_filter = data.get("provider")
+        update_existing = data.get("update_existing", False)
+        add_new = data.get("add_new", False)
+
+        try:
+            # Fetch remote pricing data
+            litellm_data = fetch_litellm_pricing()
+
+            # Parse all models
+            remote_models = []
+            for key, model_data in litellm_data.items():
+                if key == "sample_spec":
+                    continue
+                model = parse_litellm_model(key, model_data)
+                if model:
+                    remote_models.append(model)
+
+            # Determine which providers to sync
+            if provider_filter:
+                providers = [provider_filter]
+            else:
+                providers = list(set(PROVIDER_MAPPING.values()))
+
+            # Compare with current database models
+            all_diffs = []
+            for provider in providers:
+                # Use load_effective_pricing to include DB overrides
+                local_config = load_effective_pricing(provider)
+                provider_models = [m for m in remote_models if m.provider == provider]
+                if provider_models:
+                    diffs = compare_pricing(local_config, provider_models, provider)
+                    all_diffs.extend(diffs)
+
+            # Categorize diffs
+            price_updates = [
+                d
+                for d in all_diffs
+                if d.field != "(new model)" and d.change_type != "info"
+            ]
+            new_models = [d for d in all_diffs if d.field == "(new model)"]
+
+            # Format results
+            results = {
+                "total_remote_models": len(remote_models),
+                "providers_checked": providers,
+                "differences_found": len(all_diffs),
+                "price_update_count": len(price_updates),
+                "new_model_count": len(new_models),
+                "diffs": [
+                    {
+                        "model_id": d.model_id,
+                        "provider": d.provider,
+                        "field": d.field,
+                        "local_value": d.local_value,
+                        "remote_value": d.remote_value,
+                        "change_type": d.change_type,
+                    }
+                    for d in all_diffs
+                ],
+            }
+
+            # Apply changes if requested
+            if (update_existing or add_new) and all_diffs:
+                apply_result = apply_pricing_overrides(
+                    all_diffs,
+                    dry_run=False,
+                    update_existing=update_existing,
+                    add_new=add_new,
+                )
+                results["overrides_created"] = apply_result["created"]
+                results["overrides_updated"] = apply_result["updated"]
+                results["new_models_added"] = apply_result["new_models_added"]
+
+            return jsonify(results)
+
+        except Exception as e:
+            logger.exception("Failed to sync models")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/models/sync/providers", methods=["GET"])
+    @require_auth_api
+    def get_sync_providers():
+        """Get list of providers that can be synced."""
+        import sys
+        from pathlib import Path
+
+        scripts_dir = Path(__file__).parent.parent / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+
+        try:
+            from sync_pricing import PROVIDER_MAPPING
+
+            return jsonify({"providers": list(set(PROVIDER_MAPPING.values()))})
+        except ImportError:
+            return jsonify({"providers": []})
 
     return admin

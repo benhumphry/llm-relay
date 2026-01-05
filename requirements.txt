@@ -3,6 +3,7 @@ anthropic>=0.40.0
 openai>=1.0.0
 gunicorn>=21.0.0
 pyyaml>=6.0.0
+requests>=2.31.0
 
 # v2.0: Database and admin
 sqlalchemy>=2.0.0

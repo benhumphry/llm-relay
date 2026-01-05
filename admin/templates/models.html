@@ -82,6 +82,18 @@
                         <option value="custom">Custom Only</option>
                     </select>
                 </div>
+                <div class="form-control">
+                    <label class="label cursor-pointer gap-2">
+                        <input
+                            type="checkbox"
+                            x-model="filterActiveProviders"
+                            class="checkbox checkbox-sm"
+                        />
+                        <span class="label-text text-sm"
+                            >Active providers only</span
+                        >
+                    </label>
+                </div>
                 <div class="form-control flex-1 max-w-xs">
                     <input
                         type="text"
@@ -92,6 +104,14 @@
                 </div>
                 <div class="text-sm text-base-content/60">
                     <span x-text="filteredModels.length"></span> models
+                    <template
+                        x-if="!filterActiveProviders && inactiveProviderCount > 0"
+                    >
+                        <span class="text-warning">
+                            (<span x-text="inactiveProviderModelsCount"></span>
+                            from inactive providers)
+                        </span>
+                    </template>
                 </div>
             </div>
         </div>
@@ -122,7 +142,7 @@
                         >
                             <tr
                                 class="hover"
-                                :class="{ 'opacity-50': model.disabled }"
+                                :class="{ 'opacity-50': model.disabled || !model.provider_active }"
                             >
                                 <td>
                                     <div
@@ -172,14 +192,14 @@
                                         ></span>
                                     </template>
                                     <template
-                                        x-if="model.input_cost == null && model.provider_id === 'openrouter'"
+                                        x-if="model.input_cost == null && model.has_custom_cost"
                                     >
                                         <span class="badge badge-xs badge-info"
                                             >Dynamic</span
                                         >
                                     </template>
                                     <template
-                                        x-if="model.input_cost == null && model.provider_id !== 'openrouter'"
+                                        x-if="model.input_cost == null && !model.has_custom_cost"
                                     >
                                         <span class="text-base-content/40"
                                             >-</span
@@ -208,8 +228,15 @@
                                     </div>
                                 </td>
                                 <td>
+                                    <template x-if="!model.provider_active">
+                                        <span
+                                            class="badge badge-warning badge-sm"
+                                            title="Provider API key not configured"
+                                            >No API Key</span
+                                        >
+                                    </template>
                                     <template
-                                        x-if="model.enabled && !model.disabled"
+                                        x-if="model.provider_active && model.enabled && !model.disabled"
                                     >
                                         <span
                                             class="badge badge-success badge-sm"
@@ -217,7 +244,7 @@
                                         >
                                     </template>
                                     <template
-                                        x-if="!model.enabled || model.disabled"
+                                        x-if="model.provider_active && (!model.enabled || model.disabled)"
                                     >
                                         <span
                                             class="badge badge-neutral badge-sm"
@@ -248,7 +275,7 @@
                                         </label>
                                         <ul
                                             tabindex="0"
-                                            class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-40 z-10"
+                                            class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-40 z-50 opacity-100"
                                         >
                                             <!-- System/Dynamic model actions -->
                                             <template
@@ -393,8 +420,8 @@
                     </div>
                 </div>
 
-                <!-- Cost fields - hidden for OpenRouter (dynamic pricing) -->
-                <template x-if="form.provider_id === 'openrouter'">
+                <!-- Cost fields - hidden for providers with dynamic pricing -->
+                <template x-if="providerHasCustomCost(form.provider_id)">
                     <div class="alert alert-info py-2">
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -410,43 +437,88 @@
                             ></path>
                         </svg>
                         <span class="text-sm"
-                            >OpenRouter provides dynamic pricing - costs are
-                            fetched from the API response.</span
+                            >This provider calculates costs dynamically based on
+                            API response data.</span
                         >
                     </div>
                 </template>
-                <template x-if="form.provider_id !== 'openrouter'">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text"
-                                    >Input Cost ($ per million tokens)</span
-                                >
-                            </label>
-                            <input
-                                type="number"
-                                x-model.number="form.input_cost"
-                                class="input input-bordered"
-                                placeholder="e.g., 3.00"
-                                min="0"
-                                step="0.01"
-                            />
+                <template x-if="!providerHasCustomCost(form.provider_id)">
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Input Cost ($ per million tokens)</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.input_cost"
+                                    class="input input-bordered"
+                                    placeholder="e.g., 3.00"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
+
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Output Cost ($ per million
+                                        tokens)</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.output_cost"
+                                    class="input input-bordered"
+                                    placeholder="e.g., 15.00"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
                         </div>
 
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text"
-                                    >Output Cost ($ per million tokens)</span
-                                >
-                            </label>
-                            <input
-                                type="number"
-                                x-model.number="form.output_cost"
-                                class="input input-bordered"
-                                placeholder="e.g., 15.00"
-                                min="0"
-                                step="0.01"
-                            />
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Cache Read Multiplier</span
+                                    >
+                                    <span
+                                        class="label-text-alt text-base-content/50"
+                                        >e.g., 0.1 = 10% of input cost</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.cache_read_multiplier"
+                                    class="input input-bordered"
+                                    placeholder="Leave empty for default"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
+
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Cache Write Multiplier</span
+                                    >
+                                    <span
+                                        class="label-text-alt text-base-content/50"
+                                        >e.g., 1.25 = 125% of input cost</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.cache_write_multiplier"
+                                    class="input input-bordered"
+                                    placeholder="Leave empty for default"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
                         </div>
                     </div>
                 </template>
@@ -588,8 +660,8 @@
                     </div>
                 </div>
 
-                <!-- Cost overrides (hidden for OpenRouter) -->
-                <template x-if="overrideForm.provider_id === 'openrouter'">
+                <!-- Cost overrides (hidden for providers with dynamic pricing) -->
+                <template x-if="overrideForm.has_custom_cost">
                     <div class="alert alert-info py-2">
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -605,50 +677,94 @@
                             ></path>
                         </svg>
                         <span class="text-sm"
-                            >OpenRouter provides dynamic pricing - costs are
-                            fetched from the API response.</span
+                            >This provider calculates costs dynamically based on
+                            API response data.</span
                         >
                     </div>
                 </template>
-                <template x-if="overrideForm.provider_id !== 'openrouter'">
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text"
-                                    >Input Cost ($ per million tokens)</span
-                                >
-                                <span
-                                    class="label-text-alt text-base-content/50"
-                                    x-text="'System: ' + (overrideForm.system_input_cost != null ? '$' + overrideForm.system_input_cost : '-')"
-                                ></span>
-                            </label>
-                            <input
-                                type="number"
-                                x-model.number="overrideForm.input_cost"
-                                class="input input-bordered"
-                                :placeholder="overrideForm.system_input_cost != null ? overrideForm.system_input_cost : 'Not set'"
-                                min="0"
-                                step="0.01"
-                            />
+                <template x-if="!overrideForm.has_custom_cost">
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Input Cost ($ per million tokens)</span
+                                    >
+                                    <span
+                                        class="label-text-alt text-base-content/50"
+                                        x-text="'System: ' + (overrideForm.system_input_cost != null ? '$' + overrideForm.system_input_cost : '-')"
+                                    ></span>
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="overrideForm.input_cost"
+                                    class="input input-bordered"
+                                    :placeholder="overrideForm.system_input_cost != null ? overrideForm.system_input_cost : 'Not set'"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Output Cost ($ per million
+                                        tokens)</span
+                                    >
+                                    <span
+                                        class="label-text-alt text-base-content/50"
+                                        x-text="'System: ' + (overrideForm.system_output_cost != null ? '$' + overrideForm.system_output_cost : '-')"
+                                    ></span>
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="overrideForm.output_cost"
+                                    class="input input-bordered"
+                                    :placeholder="overrideForm.system_output_cost != null ? overrideForm.system_output_cost : 'Not set'"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
                         </div>
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text"
-                                    >Output Cost ($ per million tokens)</span
-                                >
-                                <span
-                                    class="label-text-alt text-base-content/50"
-                                    x-text="'System: ' + (overrideForm.system_output_cost != null ? '$' + overrideForm.system_output_cost : '-')"
-                                ></span>
-                            </label>
-                            <input
-                                type="number"
-                                x-model.number="overrideForm.output_cost"
-                                class="input input-bordered"
-                                :placeholder="overrideForm.system_output_cost != null ? overrideForm.system_output_cost : 'Not set'"
-                                min="0"
-                                step="0.01"
-                            />
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Cache Read Multiplier</span
+                                    >
+                                    <span
+                                        class="label-text-alt text-base-content/50"
+                                        x-text="'System: ' + (overrideForm.system_cache_read_multiplier != null ? overrideForm.system_cache_read_multiplier : 'default')"
+                                    ></span>
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="overrideForm.cache_read_multiplier"
+                                    class="input input-bordered"
+                                    placeholder="Leave empty for default"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Cache Write Multiplier</span
+                                    >
+                                    <span
+                                        class="label-text-alt text-base-content/50"
+                                        x-text="'System: ' + (overrideForm.system_cache_write_multiplier != null ? overrideForm.system_cache_write_multiplier : 'default')"
+                                    ></span>
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="overrideForm.cache_write_multiplier"
+                                    class="input input-bordered"
+                                    placeholder="Leave empty for default"
+                                    min="0"
+                                    step="0.01"
+                                />
+                            </div>
                         </div>
                     </div>
                 </template>
@@ -777,6 +893,7 @@
             loading: true,
             filterProvider: "",
             filterType: "",
+            filterActiveProviders: true, // Default to showing only active providers
             searchQuery: "",
             showModal: false,
             showOverrideModal: false,
@@ -805,18 +922,25 @@
                 enabled: true,
                 input_cost: null,
                 output_cost: null,
+                cache_read_multiplier: null,
+                cache_write_multiplier: null,
             },
             overrideForm: {
                 model_id: "",
                 provider_id: "",
                 input_cost: null,
                 output_cost: null,
+                cache_read_multiplier: null,
+                cache_write_multiplier: null,
                 context_length: null,
                 description: "",
                 capabilities: null,
                 has_override: false,
+                has_custom_cost: false,
                 system_input_cost: null,
                 system_output_cost: null,
+                system_cache_read_multiplier: null,
+                system_cache_write_multiplier: null,
                 system_context_length: null,
                 system_description: "",
                 system_capabilities: [],
@@ -859,6 +983,11 @@
             get filteredModels() {
                 let result = this.models;
 
+                // Filter by active providers
+                if (this.filterActiveProviders) {
+                    result = result.filter((m) => m.provider_active);
+                }
+
                 // Filter by type/source
                 if (this.filterType) {
                     result = result.filter((m) => m.source === this.filterType);
@@ -878,11 +1007,32 @@
                 return result;
             },
 
+            get inactiveProviderCount() {
+                const inactiveProviders = new Set(
+                    this.models
+                        .filter((m) => !m.provider_active)
+                        .map((m) => m.provider_id),
+                );
+                return inactiveProviders.size;
+            },
+
+            get inactiveProviderModelsCount() {
+                return this.models.filter((m) => !m.provider_active).length;
+            },
+
             formatContext(length) {
                 if (length >= 1000000)
                     return (length / 1000000).toFixed(1) + "M";
                 if (length >= 1000) return (length / 1000).toFixed(0) + "K";
                 return length;
+            },
+
+            providerHasCustomCost(providerId) {
+                if (!providerId) return false;
+                const provider = this.providers.find(
+                    (p) => p.id === providerId,
+                );
+                return provider ? provider.has_custom_cost : false;
             },
 
             openAddModal() {
@@ -899,6 +1049,8 @@
                     enabled: true,
                     input_cost: null,
                     output_cost: null,
+                    cache_read_multiplier: null,
+                    cache_write_multiplier: null,
                 };
                 this.showModal = true;
             },
@@ -918,6 +1070,8 @@
                     enabled: model.enabled,
                     input_cost: model.input_cost,
                     output_cost: model.output_cost,
+                    cache_read_multiplier: model.cache_read_multiplier,
+                    cache_write_multiplier: model.cache_write_multiplier,
                 };
                 this.showModal = true;
             },
@@ -1052,6 +1206,18 @@
                         model.output_cost !== model.system_output_cost
                             ? model.output_cost
                             : null,
+                    cache_read_multiplier:
+                        hasOverride &&
+                        model.cache_read_multiplier !==
+                            model.system_cache_read_multiplier
+                            ? model.cache_read_multiplier
+                            : null,
+                    cache_write_multiplier:
+                        hasOverride &&
+                        model.cache_write_multiplier !==
+                            model.system_cache_write_multiplier
+                            ? model.cache_write_multiplier
+                            : null,
                     context_length:
                         hasOverride &&
                         model.context_length !== model.system_context_length
@@ -1072,9 +1238,14 @@
                     // System defaults for display
                     system_input_cost: model.system_input_cost,
                     system_output_cost: model.system_output_cost,
+                    system_cache_read_multiplier:
+                        model.system_cache_read_multiplier,
+                    system_cache_write_multiplier:
+                        model.system_cache_write_multiplier,
                     system_context_length: model.system_context_length,
                     system_description: model.system_description,
                     system_capabilities: model.system_capabilities || [],
+                    has_custom_cost: model.has_custom_cost || false,
                 };
                 this.showOverrideModal = true;
             },
@@ -1110,6 +1281,10 @@
                         model_id: this.overrideForm.model_id,
                         input_cost: this.overrideForm.input_cost || null,
                         output_cost: this.overrideForm.output_cost || null,
+                        cache_read_multiplier:
+                            this.overrideForm.cache_read_multiplier || null,
+                        cache_write_multiplier:
+                            this.overrideForm.cache_write_multiplier || null,
                         context_length:
                             this.overrideForm.context_length || null,
                         description: this.overrideForm.description || null,

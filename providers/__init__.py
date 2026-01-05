@@ -1,11 +1,14 @@
 """
 LLM Providers package.
 
-This module loads provider configurations from YAML files and registers
-them with the global registry. To add a new provider:
+This module loads provider configurations from the database and registers
+them with the global registry. Provider and model data is seeded from:
+- Providers: Hardcoded DEFAULT_PROVIDERS list (see db/seed.py)
+- Models: LiteLLM pricing data on first run, then stored in database
 
-1. Add the provider definition to config/providers.yml
-2. Create config/models/{provider_name}.yml with model definitions
+To add a new provider:
+1. Add entry to DEFAULT_PROVIDERS in db/seed.py
+2. Add provider to LITELLM_PROVIDER_MAPPING if models come from LiteLLM
 
 OpenAI-compatible providers work automatically. Only providers with custom
 SDK requirements (like Anthropic) need a Python class.
@@ -15,6 +18,7 @@ import logging
 
 from .anthropic_provider import AnthropicProvider
 from .base import LLMProvider, ModelInfo, OpenAICompatibleProvider, get_api_key
+from .gemini_provider import GeminiProvider
 from .hybrid_loader import load_hybrid_models
 from .loader import (
     get_all_provider_names,
@@ -23,6 +27,7 @@ from .loader import (
 )
 from .ollama_provider import OllamaProvider
 from .openrouter_provider import OpenRouterProvider
+from .perplexity_provider import PerplexityProvider
 from .registry import registry
 
 logger = logging.getLogger(__name__)
@@ -31,10 +36,14 @@ logger = logging.getLogger(__name__)
 # - anthropic: Uses Anthropic SDK (not OpenAI-compatible)
 # - ollama: Dynamic model discovery from local Ollama instance
 # - openrouter: Custom implementation for dynamic cost extraction
+# - perplexity: Custom cost calculation (request fees, citation tokens, etc.)
+# - gemini: Custom cost calculation (tiered pricing, thinking tokens, caching, search)
 CUSTOM_PROVIDER_CLASSES = {
     "anthropic": AnthropicProvider,
+    "gemini": GeminiProvider,
     "ollama": OllamaProvider,
     "openrouter": OpenRouterProvider,
+    "perplexity": PerplexityProvider,
 }
 
 

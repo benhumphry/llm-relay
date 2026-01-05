@@ -77,6 +77,18 @@ content %}
                         <option value="custom">Custom Only</option>
                     </select>
                 </div>
+                <div class="form-control">
+                    <label class="label cursor-pointer gap-2">
+                        <input
+                            type="checkbox"
+                            x-model="filterActiveProviders"
+                            class="checkbox checkbox-sm"
+                        />
+                        <span class="label-text text-sm"
+                            >Active providers only</span
+                        >
+                    </label>
+                </div>
                 <div class="form-control flex-1 max-w-xs">
                     <input
                         type="text"
@@ -87,6 +99,14 @@ content %}
                 </div>
                 <div class="text-sm text-base-content/60">
                     <span x-text="filteredAliases.length"></span> aliases
+                    <template
+                        x-if="!filterActiveProviders && inactiveProviderAliasesCount > 0"
+                    >
+                        <span class="text-warning">
+                            (<span x-text="inactiveProviderAliasesCount"></span>
+                            from inactive providers)
+                        </span>
+                    </template>
                 </div>
             </div>
         </div>
@@ -114,7 +134,7 @@ content %}
                         >
                             <tr
                                 class="hover"
-                                :class="{ 'opacity-50': alias.disabled }"
+                                :class="{ 'opacity-50': alias.disabled || !alias.provider_active }"
                             >
                                 <td>
                                     <code
@@ -161,13 +181,24 @@ content %}
                                     </template>
                                 </td>
                                 <td>
-                                    <template x-if="!alias.disabled">
+                                    <template x-if="!alias.provider_active">
+                                        <span
+                                            class="badge badge-warning badge-sm"
+                                            title="Provider API key not configured"
+                                            >No API Key</span
+                                        >
+                                    </template>
+                                    <template
+                                        x-if="alias.provider_active && !alias.disabled"
+                                    >
                                         <span
                                             class="badge badge-success badge-sm"
                                             >Enabled</span
                                         >
                                     </template>
-                                    <template x-if="alias.disabled">
+                                    <template
+                                        x-if="alias.provider_active && alias.disabled"
+                                    >
                                         <span
                                             class="badge badge-neutral badge-sm"
                                             >Disabled</span
@@ -197,7 +228,7 @@ content %}
                                         </label>
                                         <ul
                                             tabindex="0"
-                                            class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-40 z-10"
+                                            class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-40 z-50 opacity-100"
                                         >
                                             <!-- System alias actions -->
                                             <template x-if="alias.is_system">
@@ -357,6 +388,7 @@ content %}
             loading: true,
             filterProvider: "",
             filterType: "",
+            filterActiveProviders: true, // Default to showing only active providers
             searchQuery: "",
             showModal: false,
             editing: false,
@@ -423,6 +455,11 @@ content %}
             get filteredAliases() {
                 let result = this.aliases;
 
+                // Filter by active providers
+                if (this.filterActiveProviders) {
+                    result = result.filter((a) => a.provider_active);
+                }
+
                 // Filter by type
                 if (this.filterType === "system") {
                     result = result.filter((a) => a.is_system);
@@ -441,6 +478,10 @@ content %}
                 }
 
                 return result;
+            },
+
+            get inactiveProviderAliasesCount() {
+                return this.aliases.filter((a) => !a.provider_active).length;
             },
 
             openAddModal() {

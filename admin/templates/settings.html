@@ -134,7 +134,7 @@ content %}
             <div class="card-body">
                 <h2 class="card-title text-lg">Configuration</h2>
                 <p class="text-sm text-base-content/60 mb-4">
-                    Reload configuration from YAML files to pick up changes
+                    Reload configuration to pick up database changes
                 </p>
 
                 <button
@@ -322,6 +322,287 @@ content %}
             </div>
         </div>
 
+        <!-- Model Sync -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Model Sync</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Sync models and pricing from LiteLLM's community-maintained
+                    database
+                </p>
+
+                <div class="space-y-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Provider (optional)</span>
+                        </label>
+                        <select
+                            x-model="syncProvider"
+                            class="select select-bordered select-sm"
+                        >
+                            <option value="">All providers</option>
+                            <template x-for="p in syncProviders" :key="p">
+                                <option :value="p" x-text="p"></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <button
+                        @click="checkSync()"
+                        class="btn btn-outline btn-sm"
+                        :class="{ 'loading': checkingSync }"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4 mr-1"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                        </svg>
+                        Check for Updates
+                    </button>
+
+                    <!-- Results -->
+                    <template x-if="syncResults">
+                        <div class="space-y-2">
+                            <div class="text-sm">
+                                <span class="text-base-content/60"
+                                    >Remote models:</span
+                                >
+                                <span
+                                    x-text="syncResults.total_remote_models"
+                                ></span>
+                            </div>
+                            <div class="text-sm">
+                                <span class="text-base-content/60"
+                                    >Price updates:</span
+                                >
+                                <span
+                                    x-text="syncResults.price_update_count || 0"
+                                    :class="syncResults.price_update_count > 0 ? 'text-warning font-semibold' : 'text-success'"
+                                ></span>
+                            </div>
+                            <div class="text-sm">
+                                <span class="text-base-content/60"
+                                    >New models:</span
+                                >
+                                <span
+                                    x-text="syncResults.new_model_count || 0"
+                                    :class="syncResults.new_model_count > 0 ? 'text-info font-semibold' : 'text-success'"
+                                ></span>
+                            </div>
+
+                            <template x-if="syncResults.differences_found > 0">
+                                <div class="mt-4">
+                                    <button
+                                        @click="showSyncDiffs = !showSyncDiffs"
+                                        class="btn btn-xs btn-ghost"
+                                    >
+                                        <span
+                                            x-text="showSyncDiffs ? 'Hide details' : 'Show details'"
+                                        ></span>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 ml-1 transition-transform"
+                                            :class="showSyncDiffs ? 'rotate-180' : ''"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M19 9l-7 7-7-7"
+                                            />
+                                        </svg>
+                                    </button>
+
+                                    <template x-if="showSyncDiffs">
+                                        <div
+                                            class="mt-2 max-h-64 overflow-y-auto text-xs font-mono bg-base-200 rounded p-2"
+                                        >
+                                            <template
+                                                x-for="diff in syncResults.diffs"
+                                                :key="diff.model_id + diff.field"
+                                            >
+                                                <div
+                                                    class="py-1 border-b border-base-300 last:border-0"
+                                                >
+                                                    <span
+                                                        class="text-primary"
+                                                        x-text="diff.provider + '/'"
+                                                    ></span>
+                                                    <span
+                                                        x-text="diff.model_id"
+                                                    ></span>
+                                                    <span
+                                                        class="text-base-content/50"
+                                                        >.</span
+                                                    >
+                                                    <span
+                                                        class="text-secondary"
+                                                        x-text="diff.field"
+                                                    ></span>
+                                                    <template
+                                                        x-if="diff.change_type === 'changed'"
+                                                    >
+                                                        <span>
+                                                            <span
+                                                                class="text-error"
+                                                                x-text="diff.local_value"
+                                                            ></span>
+                                                            <span
+                                                                class="text-base-content/50"
+                                                            >
+                                                                ->
+                                                            </span>
+                                                            <span
+                                                                class="text-success"
+                                                                x-text="diff.remote_value"
+                                                            ></span>
+                                                        </span>
+                                                    </template>
+                                                    <template
+                                                        x-if="diff.change_type === 'added'"
+                                                    >
+                                                        <span
+                                                            class="text-success"
+                                                            x-text="'+ ' + diff.remote_value"
+                                                        ></span>
+                                                    </template>
+                                                    <template
+                                                        x-if="diff.change_type === 'info'"
+                                                    >
+                                                        <span
+                                                            class="text-info"
+                                                            x-text="'(info) ' + diff.remote_value"
+                                                        ></span>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+
+                                    <!-- Action Buttons -->
+                                    <div class="mt-4 space-y-3">
+                                        <!-- Update Existing Models -->
+                                        <template
+                                            x-if="syncResults.price_update_count > 0 && !syncResults.updates_applied"
+                                        >
+                                            <div
+                                                class="flex items-center gap-2"
+                                            >
+                                                <button
+                                                    @click="applyModelSync('update_existing')"
+                                                    class="btn btn-primary btn-sm"
+                                                    :class="{ 'loading': applyingSync }"
+                                                    :disabled="applyingSync"
+                                                >
+                                                    Update Existing
+                                                </button>
+                                                <span
+                                                    class="text-xs text-base-content/60"
+                                                >
+                                                    Update prices for
+                                                    <span
+                                                        x-text="syncResults.price_update_count"
+                                                    ></span>
+                                                    existing models
+                                                </span>
+                                            </div>
+                                        </template>
+
+                                        <!-- Add New Models -->
+                                        <template
+                                            x-if="syncResults.new_model_count > 0 && !syncResults.new_models_applied"
+                                        >
+                                            <div
+                                                class="flex items-center gap-2"
+                                            >
+                                                <button
+                                                    @click="applyModelSync('add_new')"
+                                                    class="btn btn-secondary btn-sm"
+                                                    :class="{ 'loading': applyingSync }"
+                                                    :disabled="applyingSync"
+                                                >
+                                                    Add New Models
+                                                </button>
+                                                <span
+                                                    class="text-xs text-base-content/60"
+                                                >
+                                                    Add
+                                                    <span
+                                                        x-text="syncResults.new_model_count"
+                                                    ></span>
+                                                    new models as custom models
+                                                </span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- Applied confirmation -->
+                            <template
+                                x-if="syncResults.updates_applied || syncResults.new_models_applied"
+                            >
+                                <div class="alert alert-success mt-4">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="stroke-current shrink-0 h-6 w-6"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        />
+                                    </svg>
+                                    <div class="flex flex-col">
+                                        <template
+                                            x-if="syncResults.updates_applied"
+                                        >
+                                            <span>
+                                                Prices updated:
+                                                <span
+                                                    x-text="syncResults.overrides_created || 0"
+                                                ></span>
+                                                created,
+                                                <span
+                                                    x-text="syncResults.overrides_updated || 0"
+                                                ></span>
+                                                updated
+                                            </span>
+                                        </template>
+                                        <template
+                                            x-if="syncResults.new_models_applied"
+                                        >
+                                            <span>
+                                                New models added:
+                                                <span
+                                                    x-text="syncResults.new_models_added || 0"
+                                                ></span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
         <!-- System Info -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
@@ -391,6 +672,12 @@ content %}
             importing: false,
             toasts: [],
             currentTheme: localStorage.getItem("theme") || "system",
+            syncProviders: [],
+            syncProvider: "",
+            checkingSync: false,
+            applyingSync: false,
+            syncResults: null,
+            showSyncDiffs: false,
 
             setTheme(theme) {
                 this.currentTheme = theme;
@@ -415,18 +702,27 @@ content %}
 
             async loadSettings() {
                 try {
-                    const [settingsRes, providersRes, statsRes] =
-                        await Promise.all([
-                            fetch("/api/settings"),
-                            fetch("/api/providers"),
-                            fetch("/api/stats"),
-                        ]);
+                    const [
+                        settingsRes,
+                        providersRes,
+                        statsRes,
+                        syncProvidersRes,
+                    ] = await Promise.all([
+                        fetch("/api/settings"),
+                        fetch("/api/providers"),
+                        fetch("/api/stats"),
+                        fetch("/api/models/sync/providers"),
+                    ]);
 
                     if (providersRes.ok) {
                         this.providers = await providersRes.json();
                     }
                     if (statsRes.ok) {
                         this.stats = await statsRes.json();
+                    }
+                    if (syncProvidersRes.ok) {
+                        const data = await syncProvidersRes.json();
+                        this.syncProviders = data.providers || [];
                     }
 
                     // Load settings and merge with defaults
@@ -597,6 +893,113 @@ content %}
                     this.importing = false;
                     // Reset the file input
                     event.target.value = "";
+                }
+            },
+
+            async checkSync() {
+                this.checkingSync = true;
+                this.syncResults = null;
+                this.showSyncDiffs = false;
+
+                try {
+                    const body = {};
+                    if (this.syncProvider) {
+                        body.provider = this.syncProvider;
+                    }
+
+                    const res = await fetch("/api/models/sync", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    });
+
+                    if (res.ok) {
+                        this.syncResults = await res.json();
+                        if (this.syncResults.differences_found === 0) {
+                            this.showToast("Models are up to date");
+                        } else {
+                            const updates =
+                                this.syncResults.price_update_count || 0;
+                            const newModels =
+                                this.syncResults.new_model_count || 0;
+                            this.showToast(
+                                `Found ${updates} price updates, ${newModels} new models`,
+                                "warning",
+                            );
+                        }
+                    } else {
+                        const error = await res.json();
+                        this.showToast(
+                            error.error || "Failed to check models",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast(
+                        "Failed to check models: " + err.message,
+                        "error",
+                    );
+                } finally {
+                    this.checkingSync = false;
+                }
+            },
+
+            async applyModelSync(action) {
+                this.applyingSync = true;
+
+                try {
+                    const body = {};
+                    if (this.syncProvider) {
+                        body.provider = this.syncProvider;
+                    }
+
+                    if (action === "update_existing") {
+                        body.update_existing = true;
+                    } else if (action === "add_new") {
+                        body.add_new = true;
+                    }
+
+                    const res = await fetch("/api/models/sync", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    });
+
+                    if (res.ok) {
+                        const result = await res.json();
+
+                        if (action === "update_existing") {
+                            this.syncResults.updates_applied = true;
+                            this.syncResults.overrides_created =
+                                result.overrides_created || 0;
+                            this.syncResults.overrides_updated =
+                                result.overrides_updated || 0;
+                            const total =
+                                (result.overrides_created || 0) +
+                                (result.overrides_updated || 0);
+                            this.showToast(`Updated ${total} model prices`);
+                        } else if (action === "add_new") {
+                            this.syncResults.new_models_applied = true;
+                            this.syncResults.new_models_added =
+                                result.new_models_added || 0;
+                            this.showToast(
+                                `Added ${result.new_models_added || 0} new models`,
+                            );
+                        }
+                    } else {
+                        const error = await res.json();
+                        this.showToast(
+                            error.error || "Failed to apply changes",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast(
+                        "Failed to apply changes: " + err.message,
+                        "error",
+                    );
+                } finally {
+                    this.applyingSync = false;
                 }
             },
 

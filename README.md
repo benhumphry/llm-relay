@@ -5,222 +5,250 @@
 <h1 align="center">Multi-Provider LLM Proxy</h1>
 
 <p align="center">
-A self-hosted proxy that presents multiple LLM providers via both Ollama and OpenAI-compatible API interfaces. This allows any Ollama or OpenAI-compatible application to use models from multiple providers seamlessly.
+<strong>A self-hosted alternative to OpenRouter</strong><br>
+Unified API for cloud and local LLMs with comprehensive cost tracking and flexible attribution.
 </p>
 
-**Built-in providers:** Anthropic Claude, OpenAI GPT, Google Gemini, Perplexity, Groq, DeepSeek, Mistral, xAI Grok, OpenRouter
+<p align="center">
+<a href="#quick-start">Quick Start</a> •
+<a href="#features">Features</a> •
+<a href="#cost-tracking">Cost Tracking</a> •
+<a href="#tagging">Tagging</a> •
+<a href="#admin-ui">Admin UI</a> •
+<a href="#providers">Providers</a>
+</p>
 
-**v2.2 Features:** Dynamic pricing from OpenRouter, model cost overrides, enhanced usage filtering
+---
 
-## Features
+## Why This Proxy?
 
-- **10+ providers supported** - Anthropic, OpenAI, Gemini, Perplexity, Groq, DeepSeek, Mistral, xAI, OpenRouter, and local Ollama instances
-- **Web Admin UI** - Manage providers, models, and aliases through a polished web interface
-- **Usage tracking** - Monitor requests, tokens, and costs with charts and breakdowns
-- **Dynamic pricing** - OpenRouter reports actual costs per request; other providers use configured rates
-- **Tag-based attribution** - Track usage by user/project via headers, bearer tokens, or model suffix
-- **Local Ollama support** - Connect to local or remote Ollama instances with automatic model discovery
-- **Custom providers** - Add OpenAI-compatible or Anthropic-compatible providers via the UI
-- **Model overrides** - Customize pricing, capabilities, and descriptions for any model
-- **Full Ollama API compatibility** - Works with any application that supports Ollama (including Open WebUI)
-- **OpenAI API compatibility** - Also exposes `/v1/*` endpoints for OpenAI SDK compatibility
-- **Reasoning model support** - Automatic parameter handling for o1, o3, DeepSeek-R1 models
-- **Vision support** - Pass images via base64 encoding (Ollama and OpenAI formats)
-- **Streaming responses** - Real-time streaming (NDJSON for Ollama, SSE for OpenAI)
-- **Docker ready** - Simple deployment with persistent configuration
+**The problem:** You use multiple LLM providers—Claude for writing, GPT for coding, Gemini for long context, local Ollama for experimentation. Each has different APIs, pricing models, and billing dashboards. Tracking costs across teams and projects is painful.
+
+**The solution:** A single self-hosted proxy that:
+
+- **Unifies all providers** behind Ollama and OpenAI-compatible APIs
+- **Tracks every token** with accurate cost calculation per provider
+- **Attributes costs** to users, projects, or teams via flexible tagging
+- **Works with any client** that supports Ollama or OpenAI SDKs
+
+Think of it as running your own OpenRouter—but self-hosted, with granular cost tracking, and support for local models.
 
 ## Quick Start
 
-### Docker Compose (Recommended)
-
-1. Copy the example environment file and add your API keys:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys
-   ```
-
-2. Run:
-   ```bash
-   docker compose up -d
-   ```
-
-3. Access:
-   - **API Server:** http://localhost:11434
-   - **Admin UI:** http://localhost:8080
-
-That's it! The proxy is ready to use. Configure additional providers and models through the Admin UI.
-
-### Test the API
-
 ```bash
-# List available models
-curl http://localhost:11434/api/tags
-
-# Chat with Claude
-curl -X POST http://localhost:11434/api/chat \
-  -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello!"}]}'
-
-# Chat with GPT-4o
-curl -X POST http://localhost:11434/api/chat \
-  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello!"}]}'
-```
-
-## Installation
-
-### Docker Compose
-
-The recommended way to run the proxy:
-
-1. Copy the example environment file and add your API keys:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys
-   ```
-
-2. Create a `docker-compose.yml`:
-   ```yaml
-   services:
-     llm-proxy:
-       image: ghcr.io/benhumphry/ollama-llm-proxy:latest
-       ports:
-         - "11434:11434"  # API
-         - "8080:8080"    # Admin UI
-       volumes:
-         - llm-proxy-data:/data
-       env_file:
-         - .env
-       restart: unless-stopped
-
-   volumes:
-     llm-proxy-data:
-   ```
-
-3. Run:
-   ```bash
-   docker compose up -d
-   ```
-
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | No | | Anthropic API key |
-| `OPENAI_API_KEY` | No | | OpenAI API key |
-| `GOOGLE_API_KEY` | No | | Google API key |
-| `PERPLEXITY_API_KEY` | No | | Perplexity API key |
-| `GROQ_API_KEY` | No | | Groq API key |
-| `DEEPSEEK_API_KEY` | No | | DeepSeek API key |
-| `MISTRAL_API_KEY` | No | | Mistral API key |
-| `XAI_API_KEY` | No | | xAI API key |
-| `OPENROUTER_API_KEY` | No | | OpenRouter API key |
-| `PORT` | No | 11434 | API server port |
-| `ADMIN_PORT` | No | 8080 | Admin UI port |
-| `ADMIN_PASSWORD` | No | (random) | Admin UI password |
-| `ADMIN_ENABLED` | No | true | Set to "false" to disable Admin UI |
-| `DATABASE_URL` | No | SQLite | PostgreSQL connection URL (see below) |
-
-All API keys support `_FILE` suffix for Docker secrets (e.g., `ANTHROPIC_API_KEY_FILE`).
-
-### External Database (PostgreSQL)
-
-By default, the proxy uses SQLite stored in the `/data` volume. For production deployments or multi-instance setups, you can use PostgreSQL:
-
-```yaml
-environment:
-  - DATABASE_URL=postgresql://user:password@postgres-host:5432/llm_proxy
-```
-
-Or with Docker Compose, add a PostgreSQL service and set `DATABASE_URL` in your `.env`:
-
-```yaml
-services:
-  llm-proxy:
-    image: ghcr.io/benhumphry/ollama-llm-proxy:latest
-    ports:
-      - "11434:11434"
-      - "8080:8080"
-    env_file:
-      - .env
-    depends_on:
-      - db
-
-  db:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER=llmproxy
-      - POSTGRES_PASSWORD=secret
-      - POSTGRES_DB=llmproxy
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-
-volumes:
-  postgres-data:
-```
-
-Then in your `.env`:
-```
-DATABASE_URL=postgresql://llmproxy:secret@db:5432/llmproxy
-```
-
-The proxy will automatically create all required tables on first run.
-
-**First Run:** If `ADMIN_PASSWORD` is not set, a random password is generated and logged:
-```
-============================================================
-ADMIN PASSWORD NOT SET - Generated random password:
-  abc123xyz789...
-============================================================
-```
-
-### Running Without Docker
-
-```bash
-# Clone the repository
+# 1. Clone and configure
 git clone https://github.com/benhumphry/ollama-llm-proxy.git
 cd ollama-llm-proxy
+cp .env.example .env
+# Edit .env with your API keys
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
+# 2. Run
+docker compose up -d
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Set API keys
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."
-
-# Run the proxy
-python proxy.py
-```
-
-## Usage Tracking & Tags
-
-The proxy tracks all requests with token counts, response times, and costs. Usage can be attributed to different users or projects using **tags**.
-
-### Tagging Requests
-
-There are four ways to tag requests (in priority order):
-
-#### 1. Bearer Token (Best for API clients)
-
-Use the Authorization header with your tag as the bearer token:
-
-```bash
-curl -X POST http://localhost:11434/v1/chat/completions \
-  -H "Authorization: Bearer alice" \
-  -H "Content-Type: application/json" \
+# 3. Use
+curl http://localhost:11434/api/chat \
   -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-This works seamlessly with OpenAI SDK clients:
+**Access:**
+- API Server: http://localhost:11434
+- Admin UI: http://localhost:8080
+
+## Features
+
+### Unified LLM Interface
+
+One API endpoint, all your models:
 
 ```python
 from openai import OpenAI
 
+client = OpenAI(base_url="http://localhost:11434/v1", api_key="my-team")
+
+# Use Claude
+client.chat.completions.create(model="claude-sonnet", messages=[...])
+
+# Use GPT
+client.chat.completions.create(model="gpt-5.2", messages=[...])
+
+# Use Gemini
+client.chat.completions.create(model="gemini-2.5-pro", messages=[...])
+
+# Use local Ollama
+client.chat.completions.create(model="llama3.2", messages=[...])
+```
+
+Both **Ollama API** (`/api/chat`) and **OpenAI API** (`/v1/chat/completions`) formats are supported. Works with Open WebUI, Cursor, Continue, and any Ollama or OpenAI-compatible client.
+
+### 10+ Providers, 400+ Models
+
+| Provider | Models | Highlights |
+|----------|--------|------------|
+| **Anthropic** | Claude 4.5, 4, 3.5 | Cache tokens, vision, extended thinking |
+| **OpenAI** | GPT-5.x, 4.x, o1/o3/o4 | Reasoning models, vision |
+| **Google** | Gemini 3, 2.5, 2.0 | 2M context, grounding, thinking |
+| **Perplexity** | Sonar, Deep Research | Real-time web search |
+| **Groq** | Llama 4, Qwen, Compound | Ultra-fast inference |
+| **DeepSeek** | V3.2, R1 | Advanced reasoning |
+| **Mistral** | Large, Codestral, Pixtral | European provider |
+| **xAI** | Grok 4.1, 4, 3 | 2M context, real-time knowledge |
+| **OpenRouter** | 400+ models | Meta-provider with dynamic pricing |
+| **Ollama** | Any local model | Automatic discovery, multiple instances |
+
+Add custom OpenAI-compatible or Anthropic-compatible providers through the Admin UI.
+
+### Accurate Cost Tracking
+
+The proxy calculates costs with the same precision as your provider bills:
+
+**Token-level tracking:**
+- Input and output tokens
+- Reasoning tokens (o1, o3, DeepSeek-R1)
+- Cache read/write tokens (Anthropic, OpenAI, xAI, Groq)
+
+**Provider-specific pricing:**
+- **Static rates** from pre-configured pricing (updated with releases)
+- **Dynamic pricing** from OpenRouter (actual cost per request)
+- **Tiered pricing** for Gemini (rates change above 200k tokens)
+- **Complex pricing** for Perplexity (per-request fees + search costs)
+- **Cache multipliers** per model (e.g., Anthropic cache reads at 10% of input cost)
+
+**Model overrides:** Customize pricing for any model through the Admin UI.
+
+### Flexible Cost Attribution
+
+Tag requests to track costs by user, project, team, or any dimension:
+
+```bash
+# Via bearer token (best for SDKs)
+curl -H "Authorization: Bearer alice" ...
+
+# Via header
+curl -H "X-Proxy-Tag: project-alpha" ...
+
+# Via model suffix
+curl -d '{"model": "claude-sonnet@alice"}' ...
+
+# Multiple tags for multi-dimensional tracking
+curl -H "Authorization: Bearer alice,project-alpha,q1-2025" ...
+```
+
+Tags appear in the usage dashboard with breakdowns by cost, tokens, and request count.
+
+### Web Admin UI
+
+A polished interface for configuration and analytics:
+
+- **Dashboard** — Provider status, connection testing
+- **Providers** — Add/remove providers, configure Ollama instances
+- **Models** — Browse all models, override pricing, enable/disable
+- **Aliases** — Create shortcuts (e.g., `claude` → `claude-sonnet-4-5-20250929`)
+- **Usage** — Charts, breakdowns by tag/provider/model, request logs
+- **Settings** — Default model, admin password, data retention
+
+### Additional Capabilities
+
+- **Streaming** — NDJSON (Ollama) and SSE (OpenAI) formats
+- **Vision** — Pass images to any vision-capable model
+- **Reasoning models** — Automatic parameter handling for o1/o3/o4/DeepSeek-R1
+- **Local Ollama** — Connect multiple instances, auto-discover models
+- **Docker secrets** — `*_FILE` suffix for secure key injection
+- **PostgreSQL** — Optional external database for production
+
+## Cost Tracking
+
+### How It Works
+
+Every request is logged with:
+
+| Field | Description |
+|-------|-------------|
+| `input_tokens` | Prompt tokens |
+| `output_tokens` | Response tokens |
+| `reasoning_tokens` | Thinking tokens (reasoning models) |
+| `cached_input_tokens` | Cache hits (OpenAI, xAI, Groq) |
+| `cache_read_tokens` | Cache reads (Anthropic) |
+| `cache_creation_tokens` | Cache writes (Anthropic) |
+| `cost` | Calculated or provider-reported cost |
+| `tag` | Attribution tag(s) |
+
+### Cost Calculation
+
+The proxy uses model-specific rates and multipliers:
+
+```yaml
+# Example: Anthropic Claude Sonnet
+claude-sonnet-4-5-20250929:
+  input_cost: 3.00           # $ per million tokens
+  output_cost: 15.00
+  cache_read_multiplier: 0.1  # Cache reads at 10% of input cost
+  cache_write_multiplier: 1.25 # Cache writes at 125% of input cost
+```
+
+For a request with 10,000 input tokens (5,000 cached) and 2,000 output tokens:
+
+```
+Regular input:  5,000 × $3.00/1M = $0.015
+Cached input:   5,000 × $3.00/1M × 0.1 = $0.0015
+Output:         2,000 × $15.00/1M = $0.030
+Total:          $0.0465
+```
+
+### Provider-Specific Handling
+
+| Provider | Method |
+|----------|--------|
+| **OpenRouter** | Extracts actual cost from API response |
+| **Gemini** | Tiered calculation (rates double above 200k tokens) |
+| **Perplexity** | Per-request fees + token costs + citation costs |
+| **Anthropic** | Separate cache read/write multipliers |
+| **Others** | Standard token × rate calculation |
+
+### Usage Dashboard
+
+View costs in the Admin UI:
+
+- **Summary** — Total requests, tokens, and cost for the period
+- **Time series** — Cost trends over days/weeks/months
+- **Breakdowns** — By tag, provider, model, or client
+- **Recent requests** — Individual request logs with cost
+
+Filter by date range, tag, provider, or model. Click any row to drill down.
+
+## Tagging
+
+Tags enable cost attribution across any dimension you need.
+
+### Methods
+
+| Method | Example | Priority |
+|--------|---------|----------|
+| Bearer token | `Authorization: Bearer alice` | 1 (highest) |
+| Header | `X-Proxy-Tag: alice` | 2 |
+| Model suffix | `model: claude@alice` | 3 |
+| Default tag | Configured in Settings | 4 (lowest) |
+
+### Multiple Tags
+
+Assign multiple tags to track across dimensions:
+
+```bash
+curl -H "Authorization: Bearer alice,project-x,q1-2025" \
+  -d '{"model": "claude-sonnet", "messages": [...]}' \
+  http://localhost:11434/v1/chat/completions
+```
+
+Each tag gets its own entry in the usage breakdown, so you can analyze costs by user AND by project AND by quarter.
+
+### SDK Usage
+
+```python
+from openai import OpenAI
+
+# Tag via api_key parameter
 client = OpenAI(
     base_url="http://localhost:11434/v1",
-    api_key="alice"  # Your tag becomes the "API key"
+    api_key="alice,project-x"  # Your tags
 )
 
 response = client.chat.completions.create(
@@ -229,155 +257,167 @@ response = client.chat.completions.create(
 )
 ```
 
-#### 2. X-Proxy-Tag Header
-
-Set the `X-Proxy-Tag` header explicitly:
-
-```bash
-curl -X POST http://localhost:11434/api/chat \
-  -H "X-Proxy-Tag: alice" \
-  -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello!"}]}'
-```
-
-#### 3. Model Suffix
-
-Append `@tag` to the model name:
-
-```bash
-curl -X POST http://localhost:11434/api/chat \
-  -d '{"model": "claude-sonnet@alice", "messages": [{"role": "user", "content": "Hello!"}]}'
-```
-
-#### 4. Default Tag
-
-Requests without any tag use the default tag (configurable in Settings, defaults to "default").
-
-### Multiple Tags
-
-You can assign multiple tags to a single request using comma-separated values:
-
-```bash
-# Via header
-curl -X POST http://localhost:11434/api/chat \
-  -H "X-Proxy-Tag: alice,project-x,testing" \
-  -d '{"model": "claude-sonnet", "messages": [...]}'
-
-# Via bearer token
-curl -X POST http://localhost:11434/v1/chat/completions \
-  -H "Authorization: Bearer alice,project-x" \
-  -d '{"model": "claude-sonnet", "messages": [...]}'
-
-# Via model suffix
-curl -X POST http://localhost:11434/api/chat \
-  -d '{"model": "claude-sonnet@alice,project-x", "messages": [...]}'
-```
-
-Multiple tags allow you to track usage across different dimensions simultaneously (e.g., by user AND by project).
-
-### Cost Tracking
-
-The proxy tracks costs in two ways:
-
-1. **Dynamic pricing (OpenRouter)** - OpenRouter returns actual cost per request in its API response. This is shown as the exact cost in the Recent Requests view.
-
-2. **Estimated pricing (all other providers)** - Costs are calculated based on token counts and configured rates (cost per million tokens). Rates are pre-configured for all major providers and can be overridden via the Admin UI.
-
-View usage breakdowns, costs, and trends in the **Usage** page of the Admin UI.
-
 ## Admin UI
 
-The Admin UI at port 8080 provides complete management of the proxy:
+Access the Admin UI at port 8080 (password protected).
 
 ### Dashboard
-- Overview of all providers and their status
+
+Overview of all providers with:
+- Connection status indicators
 - Quick test buttons to verify API connectivity
-- Model and alias counts per provider
+- Model and alias counts
 
 ### Providers
-- View all configured providers (system and custom)
-- Add custom providers (Ollama, OpenAI-compatible, Anthropic-compatible)
-- Test provider connections
+
+Manage provider connections:
+- View system providers (from configuration)
+- Add custom Ollama instances
+- Add OpenAI-compatible endpoints
+- Add Anthropic-compatible endpoints
+- Test connections
 - Enable/disable providers
 
 ### Models
-- Browse all available models across providers
-- **System models** - Pre-configured, update automatically
-- **Dynamic models** - Discovered from Ollama instances
-- **Custom models** - Add your own model definitions
-- **Override system models** - Customize pricing, capabilities, context length
-- Enable/disable specific models
+
+Browse and configure models:
+- **System models** — Pre-configured, update with releases
+- **Dynamic models** — Auto-discovered from Ollama instances
+- **Custom models** — Create your own definitions
+
+**Override system models** without editing files:
+- Input/output cost
+- Context length
+- Capabilities
+- Description
 
 ### Aliases
-- Create shortcuts for model names
-- Manage system and custom aliases
-- Example: `claude` → `claude-sonnet-4-5-20250929`
+
+Create shortcuts for model names:
+- `claude` → `claude-sonnet-4-5-20250929`
+- `gpt` → `gpt-5.2`
+- `fast` → `llama-3.1-8b-instant`
 
 ### Usage
-- **Summary cards** - Total requests, tokens, and cost
-- **Time series charts** - Visualize usage trends over time
-- **Breakdowns** - View usage by tag, provider, model, or client
-- **Filtering** - Filter by tag, provider, model, or date range
-- **Drill-down** - Click any breakdown row to filter further
-- **Recent requests** - Detailed request logs with cost, tokens, and timing
-- **Per-request cost** - OpenRouter shows actual cost; others show "-"
+
+Analytics dashboard with:
+- Summary cards (requests, tokens, cost)
+- Time series charts
+- Breakdowns by tag, provider, model, client
+- Recent request logs
+- Export capabilities
 
 ### Settings
-- Set default model for unknown requests
-- Change admin password
-- Configure default tag for untagged requests
-- Enable/disable usage tracking
-- Configure DNS resolution for client hostnames
-- Set data retention period
 
-## Adding Providers
+Configure:
+- Default model for unknown requests
+- Default tag for untagged requests
+- Admin password
+- DNS resolution for client hostnames
+- Usage tracking toggle
+- Data retention period
 
-### Via Admin UI (Recommended)
+## Providers
 
-1. Go to **Providers** page
-2. Click **Add Provider**
-3. Select type:
-   - **Ollama Compatible** - Local or remote Ollama instance
-   - **OpenAI Compatible** - Any OpenAI-compatible API
-   - **Anthropic Compatible** - Any Anthropic-compatible API
-4. Enter the base URL and API key environment variable
-5. Click **Add Provider**
+### Built-in Providers
 
-### Adding a Local Ollama Instance
+Set the corresponding environment variable to enable:
+
+| Provider | Environment Variable |
+|----------|---------------------|
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Google Gemini | `GOOGLE_API_KEY` |
+| Perplexity | `PERPLEXITY_API_KEY` |
+| Groq | `GROQ_API_KEY` |
+| DeepSeek | `DEEPSEEK_API_KEY` |
+| Mistral | `MISTRAL_API_KEY` |
+| xAI | `XAI_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+
+### Adding Ollama Instances
+
+Connect to local or remote Ollama servers:
 
 1. Go to **Providers** → **Add Provider**
 2. Select **Ollama Compatible**
-3. Enter:
-   - **Provider ID:** `my-ollama` (any unique name)
-   - **Base URL:** `http://192.168.1.100:11434` (your Ollama server)
-4. Click **Add Provider**
+3. Enter base URL (e.g., `http://192.168.1.100:11434`)
+4. Models are automatically discovered
 
-Models from your Ollama instance will be automatically discovered and appear in the models list.
+### Adding Custom Providers
 
-## Architecture
+Add any OpenAI-compatible or Anthropic-compatible endpoint:
 
-The proxy runs two servers on separate ports:
+1. Go to **Providers** → **Add Provider**
+2. Select provider type
+3. Enter base URL and API key environment variable
+4. Add models manually or let the proxy discover them
 
-| Server | Default Port | Purpose |
-|--------|-------------|---------|
-| **API Server** | 11434 | Ollama and OpenAI compatible endpoints |
-| **Admin UI** | 8080 | Web interface (password protected) |
+## Installation
 
-Data is persisted in a Docker volume at `/data`, ensuring your custom providers, models, and settings survive container restarts.
+### Docker Compose (Recommended)
 
-## API Endpoints
+```yaml
+services:
+  llm-proxy:
+    image: ghcr.io/benhumphry/ollama-llm-proxy:latest
+    ports:
+      - "11434:11434"  # API
+      - "8080:8080"    # Admin UI
+    volumes:
+      - llm-proxy-data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
 
-### Ollama API
+volumes:
+  llm-proxy-data:
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | 11434 | API server port |
+| `ADMIN_PORT` | 8080 | Admin UI port |
+| `ADMIN_PASSWORD` | (random) | Admin UI password |
+| `ADMIN_ENABLED` | true | Enable Admin UI |
+| `DATABASE_URL` | SQLite | PostgreSQL connection URL |
+
+All API keys support `_FILE` suffix for Docker secrets.
+
+### PostgreSQL (Production)
+
+For multi-instance deployments:
+
+```yaml
+environment:
+  - DATABASE_URL=postgresql://user:password@postgres:5432/llm_proxy
+```
+
+### Running Without Docker
+
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY="sk-ant-..."
+python proxy.py
+```
+
+## API Reference
+
+### Ollama-Compatible Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Health check |
 | `/api/tags` | GET | List available models |
 | `/api/chat` | POST | Chat completion |
 | `/api/generate` | POST | Text generation |
 | `/api/show` | POST | Get model details |
 | `/api/ps` | GET | List running models |
 
-### OpenAI API
+### OpenAI-Compatible Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -385,194 +425,105 @@ Data is persisted in a Docker volume at `/data`, ensuring your custom providers,
 | `/v1/chat/completions` | POST | Chat completions |
 | `/v1/completions` | POST | Text completions |
 
-## Usage Examples
+## Examples
 
-### Python (OpenAI SDK)
+### Python with OpenAI SDK
 
 ```python
 from openai import OpenAI
 
-# Basic usage
 client = OpenAI(
     base_url="http://localhost:11434/v1",
-    api_key="not-needed"
+    api_key="my-team"  # Tag for cost attribution
 )
 
 response = client.chat.completions.create(
     model="claude-sonnet",
-    messages=[{"role": "user", "content": "Hello!"}]
+    messages=[{"role": "user", "content": "Explain quantum computing"}]
 )
 print(response.choices[0].message.content)
 ```
 
-```python
-# With usage tracking tag
-client = OpenAI(
-    base_url="http://localhost:11434/v1",
-    api_key="alice"  # Tag for usage tracking
-)
-
-response = client.chat.completions.create(
-    model="gpt-4o",
-    messages=[{"role": "user", "content": "Hello!"}]
-)
-```
-
 ### Open WebUI
-
-Configure the Ollama connection in your Open WebUI setup:
 
 ```yaml
 environment:
-  - OLLAMA_BASE_URL=http://ollama-llm-proxy:11434
+  - OLLAMA_BASE_URL=http://llm-proxy:11434
 ```
 
 All models from all providers appear in the model selector.
-
-To track usage per user, configure Open WebUI to pass user info in headers (if supported), or use different proxy instances per user.
 
 ### curl
 
 ```bash
 # Ollama format
-curl -X POST http://localhost:11434/api/chat \
-  -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello!"}]}'
+curl http://localhost:11434/api/chat \
+  -d '{"model": "gpt-5.2", "messages": [{"role": "user", "content": "Hello"}]}'
 
-# OpenAI format
-curl -X POST http://localhost:11434/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello!"}]}'
-
-# With tag via bearer token
-curl -X POST http://localhost:11434/v1/chat/completions \
+# OpenAI format with tag
+curl http://localhost:11434/v1/chat/completions \
   -H "Authorization: Bearer alice" \
   -H "Content-Type: application/json" \
-  -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello!"}]}'
+  -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello"}]}'
 
-# With multiple tags
-curl -X POST http://localhost:11434/api/chat \
-  -H "X-Proxy-Tag: alice,project-alpha" \
-  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello!"}]}'
+# Streaming
+curl http://localhost:11434/api/chat \
+  -d '{"model": "gemini-2.5-pro", "stream": true, "messages": [...]}'
 ```
 
-### Streaming
+## Architecture
 
-```bash
-# Ollama streaming (NDJSON)
-curl -X POST http://localhost:11434/api/chat \
-  -d '{"model": "claude-sonnet", "stream": true, "messages": [{"role": "user", "content": "Write a poem"}]}'
-
-# OpenAI streaming (SSE)
-curl -X POST http://localhost:11434/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o", "stream": true, "messages": [{"role": "user", "content": "Write a poem"}]}'
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Clients                               │
+│   (Open WebUI, Cursor, Python SDK, curl, any Ollama client) │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     LLM Proxy (:11434)                       │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │ Ollama API  │  │ OpenAI API  │  │ Cost Tracking       │  │
+│  │ /api/chat   │  │ /v1/chat    │  │ Tokens, Tags, Rates │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌───────────────┐   ┌───────────────┐   ┌───────────────────┐
+│   Anthropic   │   │    OpenAI     │   │  Local Ollama     │
+│   Claude      │   │    GPT        │   │  Llama, Mistral   │
+└───────────────┘   └───────────────┘   └───────────────────┘
+        ▼                     ▼                     ▼
+┌───────────────┐   ┌───────────────┐   ┌───────────────────┐
+│    Gemini     │   │  Perplexity   │   │   OpenRouter      │
+│    Google     │   │  Sonar        │   │   400+ models     │
+└───────────────┘   └───────────────┘   └───────────────────┘
 ```
 
-## Supported Models
+**Admin UI** runs on port 8080, sharing the same database for configuration and usage data.
 
-### Anthropic Claude
-`claude-opus`, `claude-sonnet`, `claude-haiku` and version-specific variants
+## Comparison with OpenRouter
 
-### OpenAI GPT
-`gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1`, `o1-mini`, `o3`, `o3-mini` and more
-
-### Google Gemini
-`gemini`, `gemini-pro`, `gemini-flash`, `gemini-2.5-pro`, `gemini-2.5-flash` and variants
-
-### Perplexity
-`sonar`, `sonar-pro` (online search-augmented models)
-
-### Groq
-`llama`, `llama-70b`, `llama-8b`, `qwen`, `compound` (fast inference)
-
-### DeepSeek
-`deepseek`, `deepseek-v3`, `deepseek-r1` (reasoning model)
-
-### Mistral
-`mistral`, `mistral-large`, `mistral-small`, `codestral`, `ministral`
-
-### xAI Grok
-`grok`, `grok-3`, `grok-2`, `grok-vision`
-
-### OpenRouter
-Access 400+ models through a single API. OpenRouter provides **dynamic pricing** - actual costs are returned per request and tracked in the usage dashboard.
-
-### Local Ollama
-Any models installed on connected Ollama instances are automatically discovered.
-
-Use the Admin UI to see all available models and their aliases.
-
-## Model Overrides
-
-You can override properties of any system model without editing configuration files:
-
-1. Go to **Models** page
-2. Find the model and click the **Override** button
-3. Customize:
-   - **Input/Output Cost** - Override pricing (per million tokens)
-   - **Context Length** - Override context window size
-   - **Capabilities** - Override capability tags
-   - **Description** - Override model description
-
-Overrides are stored in the database and persist across updates. Click **Clear Override** to restore original values.
-
-## Docker Swarm
-
-For production deployments with Docker Swarm:
-
-```bash
-# Create secrets
-echo "sk-ant-..." | docker secret create anthropic_api_key -
-echo "sk-..." | docker secret create openai_api_key -
-
-# Deploy
-docker stack deploy -c docker-compose.swarm.yml llm-proxy
-```
-
-## Development
-
-```bash
-# Clone and setup
-git clone https://github.com/your-username/ollama-llm-proxy.git
-cd ollama-llm-proxy
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Set API keys
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OPENAI_API_KEY="sk-..."
-
-# Run
-python proxy.py
-```
+| Feature | This Proxy | OpenRouter |
+|---------|-----------|------------|
+| Self-hosted | Yes | No |
+| Local models | Yes (Ollama) | No |
+| Multiple Ollama instances | Yes | No |
+| Cost tracking granularity | Token-level with cache/reasoning | Basic |
+| Tag-based attribution | Multi-tag, 4 methods | Limited |
+| Custom providers | Full UI support | No |
+| Model overrides | Per-model via UI | No |
+| Data ownership | 100% yours | SaaS |
+| Pricing | Your API costs only | Markup on API costs |
 
 ## Changelog
 
-### v2.2.1
-- **OpenRouter dynamic pricing** - Actual costs from API responses
-- **Per-request cost tracking** - Cost column in Recent Requests
-- **Model overrides** - Customize system model properties via UI
-- **Updated provider pricing** - Current rates for Groq, Mistral, xAI, Perplexity, Gemini
-- **Database migrations** - Automatic schema updates for existing installations
-- **Bug fixes** - Favicon loading, SQLite date handling in filtered queries
-
-### v2.1.0
-- Usage tracking and statistics dashboard
-- Tag-based attribution for requests
-- Cost estimation based on model pricing
-- Time series charts and breakdowns
-- Client hostname resolution
-
-### v2.0.0
-- Complete rewrite with Admin UI
-- Support for 10+ providers
-- Custom providers via UI
-- Model and alias management
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Credits
 
-This project is forked from [psenger/ollama-claude-proxy](https://github.com/psenger/ollama-claude-proxy).
+Originally forked from [psenger/ollama-claude-proxy](https://github.com/psenger/ollama-claude-proxy).
 
 ## License
 

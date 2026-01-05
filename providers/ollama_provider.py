@@ -143,6 +143,25 @@ class OllamaProvider(LLMProvider):
                     use_max_completion_tokens=False,
                 )
 
+                # For thinking-capable models, also create a :think variant
+                if self._is_thinking_model(name):
+                    think_name = name + self.THINKING_SUFFIX
+                    think_capabilities = capabilities.copy()
+                    if "reasoning" not in think_capabilities:
+                        think_capabilities.append("reasoning")
+
+                    self._models[think_name] = ModelInfo(
+                        family=family,
+                        description=f"{description} (thinking enabled)",
+                        context_length=self.DEFAULT_CONTEXT_LENGTH,
+                        capabilities=think_capabilities,
+                        parameter_size=parameter_size,
+                        quantization_level=quantization,
+                        unsupported_params=set(),
+                        supports_system_prompt=True,
+                        use_max_completion_tokens=False,
+                    )
+
             self._last_refresh = time.time()
             logger.info(f"Refreshed Ollama models: {len(self._models)} models found")
 
@@ -263,6 +282,27 @@ class OllamaProvider(LLMProvider):
             logger.error(f"Failed to get info for model {model_name}: {e}")
             return None
 
+    # Models that support thinking/reasoning mode
+    THINKING_MODELS = {"deepseek-r1", "qwq", "qwen3"}
+
+    # Suffix for thinking-enabled model variants
+    THINKING_SUFFIX = ":think"
+
+    def _is_thinking_model(self, model: str) -> bool:
+        """Check if a model supports thinking/reasoning mode."""
+        model_lower = model.lower()
+        return any(tm in model_lower for tm in self.THINKING_MODELS)
+
+    def _wants_thinking(self, model: str) -> bool:
+        """Check if the request wants thinking mode enabled."""
+        return model.endswith(self.THINKING_SUFFIX)
+
+    def _strip_thinking_suffix(self, model: str) -> str:
+        """Remove the :think suffix from model name."""
+        if model.endswith(self.THINKING_SUFFIX):
+            return model[: -len(self.THINKING_SUFFIX)]
+        return model
+
     def chat_completion(
         self,
         model: str,
@@ -270,8 +310,13 @@ class OllamaProvider(LLMProvider):
         system: str | None,
         options: dict,
     ) -> dict:
-        """Execute non-streaming chat completion via OpenAI-compatible API."""
-        client = self._get_openai_client()
+        """Execute non-streaming chat completion via native Ollama API."""
+        # Use native Ollama API to support thinking mode
+        client = self._get_http_client()
+
+        # Check if thinking mode requested via :think suffix
+        enable_thinking = self._wants_thinking(model)
+        actual_model = self._strip_thinking_suffix(model)
 
         # Build messages with system prompt
         api_messages = []
@@ -279,56 +324,81 @@ class OllamaProvider(LLMProvider):
             api_messages.append({"role": "system", "content": system})
         api_messages.extend(messages)
 
-        # Build kwargs
-        kwargs = {
-            "model": model,
+        # Build request body
+        body = {
+            "model": actual_model,
             "messages": api_messages,
+            "stream": False,
         }
 
+        # Enable thinking only if explicitly requested via :think suffix
+        if enable_thinking:
+            body["think"] = True
+
+        # Add options
+        ollama_options = {}
         if "max_tokens" in options:
-            kwargs["max_tokens"] = options["max_tokens"]
+            ollama_options["num_predict"] = options["max_tokens"]
         if "temperature" in options:
-            kwargs["temperature"] = options["temperature"]
+            ollama_options["temperature"] = options["temperature"]
         if "top_p" in options:
-            kwargs["top_p"] = options["top_p"]
+            ollama_options["top_p"] = options["top_p"]
         if "stop" in options:
             stop = options["stop"]
-            kwargs["stop"] = stop if isinstance(stop, list) else [stop]
+            ollama_options["stop"] = stop if isinstance(stop, list) else [stop]
+        if ollama_options:
+            body["options"] = ollama_options
 
-        response = client.chat.completions.create(**kwargs)
+        response = client.post("/api/chat", json=body, timeout=300.0)
+        response.raise_for_status()
+        data = response.json()
 
-        content = response.choices[0].message.content or ""
-        input_tokens = response.usage.prompt_tokens if response.usage else 0
-        output_tokens = response.usage.completion_tokens if response.usage else 0
+        message = data.get("message", {})
+        content = message.get("content", "")
+        thinking = message.get("thinking", "")
 
-        # Ollama may report inflated token counts (thinking tokens, cumulative counts)
-        # Estimate tokens from content length as sanity check (~4 chars per token)
+        # Get token counts from response
+        input_tokens = data.get("prompt_eval_count", 0)
+        output_tokens = data.get("eval_count", 0)
 
-        # Estimate input from messages
+        # Estimate input from messages if not provided
         input_chars = sum(
             len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
             for m in api_messages
         )
         estimated_input = input_chars // 4 + 1
-        if input_tokens > estimated_input * 3:
-            logger.info(
-                f"Ollama reported {input_tokens} input tokens for {input_chars} chars - using estimate {estimated_input}"
-            )
+        if input_tokens == 0 or input_tokens > estimated_input * 3:
+            if input_tokens > 0:
+                logger.info(
+                    f"Ollama reported {input_tokens} input tokens for {input_chars} chars - using estimate {estimated_input}"
+                )
             input_tokens = estimated_input
 
-        # Estimate output from response
+        # Estimate output from response if not provided or inflated
         estimated_output = len(content) // 4 + 1
-        if output_tokens > estimated_output * 3:
-            logger.info(
-                f"Ollama reported {output_tokens} output tokens for {len(content)} chars - using estimate {estimated_output}"
-            )
+        if output_tokens == 0 or output_tokens > estimated_output * 3:
+            if output_tokens > 0:
+                logger.info(
+                    f"Ollama reported {output_tokens} output tokens for {len(content)} chars - using estimate {estimated_output}"
+                )
             output_tokens = estimated_output
 
-        return {
+        result = {
             "content": content,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
         }
+
+        # Track reasoning tokens from thinking content
+        if thinking:
+            # Estimate reasoning tokens from thinking content (~4 chars per token)
+            reasoning_tokens = len(thinking) // 4 + 1
+            result["reasoning_tokens"] = reasoning_tokens
+            logger.info(
+                f"Ollama thinking mode: {reasoning_tokens} reasoning tokens estimated from {len(thinking)} chars"
+            )
+
+        return result
 
     def chat_completion_stream(
         self,
@@ -340,6 +410,14 @@ class OllamaProvider(LLMProvider):
         """Execute streaming chat completion via OpenAI-compatible API."""
         client = self._get_openai_client()
 
+        # Strip :think suffix - streaming doesn't support thinking mode
+        # (thinking requires non-streaming to capture the thinking content)
+        actual_model = self._strip_thinking_suffix(model)
+        if model != actual_model:
+            logger.info(
+                f"Streaming mode: thinking not supported, using {actual_model} without thinking"
+            )
+
         # Build messages with system prompt
         api_messages = []
         if system:
@@ -348,7 +426,7 @@ class OllamaProvider(LLMProvider):
 
         # Build kwargs
         kwargs = {
-            "model": model,
+            "model": actual_model,
             "messages": api_messages,
             "stream": True,
         }

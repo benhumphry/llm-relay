@@ -31,6 +31,7 @@ class OpenRouterProvider(LLMProvider):
     name = "openrouter"
     api_key_env = "OPENROUTER_API_KEY"
     base_url = "https://openrouter.ai/api/v1"
+    has_custom_cost_calculation = True  # Dynamic pricing from API response
 
     def __init__(
         self,

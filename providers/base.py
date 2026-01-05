@@ -48,12 +48,22 @@ class ModelInfo:
     # Cost per million tokens (USD)
     input_cost: float | None = None
     output_cost: float | None = None
+    # Cache cost multipliers (v2.2.3)
+    # e.g., 0.1 = 10% of input cost for Anthropic cache reads
+    cache_read_multiplier: float | None = None
+    # e.g., 1.25 = 125% of input cost for Anthropic cache writes
+    cache_write_multiplier: float | None = None
 
 
 class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
 
     name: str  # Provider identifier (e.g., "anthropic", "openai", "gemini")
+
+    # Whether this provider calculates costs dynamically (vs using static YAML rates)
+    # Providers with custom cost calculation (Anthropic, Gemini, Perplexity, OpenRouter)
+    # should set this to True. When True, cost overrides in the admin UI are hidden.
+    has_custom_cost_calculation: bool = False
 
     @abstractmethod
     def is_configured(self) -> bool:
@@ -338,11 +348,27 @@ class OpenAICompatibleProvider(LLMProvider):
 
         content = response.choices[0].message.content or ""
 
-        return {
+        result = {
             "content": content,
             "input_tokens": response.usage.prompt_tokens if response.usage else 0,
             "output_tokens": response.usage.completion_tokens if response.usage else 0,
         }
+
+        # Extract extended token details if available (OpenAI o1/o3 models)
+        if response.usage:
+            # OpenAI reasoning tokens (o1, o3 models)
+            if hasattr(response.usage, "completion_tokens_details"):
+                details = response.usage.completion_tokens_details
+                if details and hasattr(details, "reasoning_tokens"):
+                    result["reasoning_tokens"] = details.reasoning_tokens
+
+            # OpenAI cached input tokens
+            if hasattr(response.usage, "prompt_tokens_details"):
+                details = response.usage.prompt_tokens_details
+                if details and hasattr(details, "cached_tokens"):
+                    result["cached_input_tokens"] = details.cached_tokens
+
+        return result
 
     def chat_completion_stream(
         self,

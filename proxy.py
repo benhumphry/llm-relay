@@ -26,7 +26,7 @@ from typing import Generator
 from flask import Flask, Response, jsonify, request
 
 # Import database and admin
-from db import init_db
+from db import ensure_seeded, init_db
 from db.connection import get_db_context
 
 # Import the provider registry
@@ -46,8 +46,9 @@ def create_api_app():
     """Create the API Flask application (Ollama/OpenAI compatible endpoints)."""
     application = Flask(__name__)
 
-    # Initialize database
+    # Initialize database and seed default data
     init_db()
+    ensure_seeded()
 
     return application
 
@@ -60,8 +61,9 @@ def create_admin_app():
     # Disable default static folder to avoid conflict with blueprint's static route
     application = Flask(__name__, static_folder=None)
 
-    # Initialize database (idempotent)
+    # Initialize database and seed default data (idempotent)
     init_db()
+    ensure_seeded()
 
     # Configure session for admin authentication
     application.secret_key = get_session_secret()
@@ -128,6 +130,11 @@ def track_completion(
     error_message: str | None = None,
     is_streaming: bool = False,
     cost: float | None = None,
+    # Extended token tracking (v2.2.3)
+    reasoning_tokens: int | None = None,
+    cached_input_tokens: int | None = None,
+    cache_creation_tokens: int | None = None,
+    cache_read_tokens: int | None = None,
 ):
     """
     Track a completed request.
@@ -143,6 +150,10 @@ def track_completion(
         error_message: Error message if request failed
         is_streaming: Whether this was a streaming request
         cost: Actual cost from provider (if available, e.g., OpenRouter)
+        reasoning_tokens: OpenAI reasoning tokens (o1/o3 models)
+        cached_input_tokens: OpenAI cached prompt tokens
+        cache_creation_tokens: Anthropic cache creation tokens
+        cache_read_tokens: Anthropic cache read tokens
     """
     from flask import g
 
@@ -179,6 +190,10 @@ def track_completion(
         error_message=error_message,
         is_streaming=is_streaming,
         cost=cost,
+        reasoning_tokens=reasoning_tokens,
+        cached_input_tokens=cached_input_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
     )
 
 
@@ -722,6 +737,10 @@ def chat():
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
                 cost=result.get("cost"),
+                reasoning_tokens=result.get("reasoning_tokens"),
+                cached_input_tokens=result.get("cached_input_tokens"),
+                cache_creation_tokens=result.get("cache_creation_tokens"),
+                cache_read_tokens=result.get("cache_read_tokens"),
             )
             return jsonify(
                 {
@@ -863,6 +882,10 @@ def generate():
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
                 cost=result.get("cost"),
+                reasoning_tokens=result.get("reasoning_tokens"),
+                cached_input_tokens=result.get("cached_input_tokens"),
+                cache_creation_tokens=result.get("cache_creation_tokens"),
+                cache_read_tokens=result.get("cache_read_tokens"),
             )
             return jsonify(
                 {
@@ -1098,6 +1121,10 @@ def openai_chat_completions():
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
                 cost=result.get("cost"),
+                reasoning_tokens=result.get("reasoning_tokens"),
+                cached_input_tokens=result.get("cached_input_tokens"),
+                cache_creation_tokens=result.get("cache_creation_tokens"),
+                cache_read_tokens=result.get("cache_read_tokens"),
             )
 
             return jsonify(
@@ -1300,6 +1327,10 @@ def openai_completions():
                 output_tokens=result.get("output_tokens", 0),
                 status_code=200,
                 cost=result.get("cost"),
+                reasoning_tokens=result.get("reasoning_tokens"),
+                cached_input_tokens=result.get("cached_input_tokens"),
+                cache_creation_tokens=result.get("cache_creation_tokens"),
+                cache_read_tokens=result.get("cache_read_tokens"),
             )
 
             return jsonify(

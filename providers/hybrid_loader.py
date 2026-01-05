@@ -1,23 +1,75 @@
 """
 Hybrid configuration loader for providers and models.
 
-Merges system models (from YAML) with database overrides and custom models.
-This allows:
-- System models to auto-update with releases
-- Users to disable specific system models
-- Users to create custom models that persist across updates
+This module provides backwards-compatible functions that work with
+the new database-driven configuration system.
+
+In the new system:
+- All providers are in the Provider table
+- All models are in the Model table (source: litellm, custom, ollama)
+- All aliases are in the Alias table
+- No more separate Override tables needed
 """
 
 import logging
+import os
 from typing import Any
 
-from db import AliasOverride, CustomAlias, CustomModel, ModelOverride
+from db import Alias, Model, Provider
 from db.connection import check_db_initialized, get_db_context, init_db, run_migrations
 
 from .base import ModelInfo
-from .loader import load_models_for_provider as load_yaml_models
+from .loader import get_provider_config, load_models_for_provider
 
 logger = logging.getLogger(__name__)
+
+
+def is_provider_active(provider_name: str) -> bool:
+    """Check if a provider is active (has API key configured or doesn't need one).
+
+    A provider is considered active if:
+    - It's an Ollama provider (no API key needed)
+    - It has its API key environment variable set
+
+    Args:
+        provider_name: Name of the provider
+
+    Returns:
+        True if the provider is active, False otherwise
+    """
+    from . import registry
+
+    # First check if provider exists in registry
+    provider = registry.get_provider(provider_name)
+    if provider:
+        # Ollama providers don't need API keys
+        if hasattr(provider, "type") and provider.type == "ollama":
+            return True
+        # Check provider's api_key_env attribute
+        if hasattr(provider, "api_key_env") and provider.api_key_env:
+            if os.environ.get(provider.api_key_env):
+                return True
+            return False
+        # Provider exists but has no api_key_env requirement
+        return True
+
+    # Fall back to DB config for providers not yet in registry
+    config = get_provider_config(provider_name)
+    if not config:
+        return False
+
+    provider_type = config.get("type", provider_name)
+
+    # Ollama providers don't need API keys
+    if provider_type == "ollama":
+        return True
+
+    # Check if API key is configured
+    api_key_env = config.get("api_key_env")
+    if api_key_env and os.environ.get(api_key_env):
+        return True
+
+    return False
 
 
 def _ensure_db_initialized():
@@ -26,125 +78,17 @@ def _ensure_db_initialized():
         logger.info("Database not initialized, creating tables...")
         init_db()
     else:
-        # Run migrations for existing databases (safe to call multiple times)
         run_migrations()
-
-
-def get_model_overrides(provider_id: str) -> dict[str, dict]:
-    """Get all model overrides for a provider, keyed by model_id.
-
-    Returns dict of model_id -> override dict to avoid SQLAlchemy session issues.
-    """
-    _ensure_db_initialized()
-    with get_db_context() as db:
-        overrides = (
-            db.query(ModelOverride)
-            .filter(ModelOverride.provider_id == provider_id)
-            .all()
-        )
-        # Return dicts instead of ORM objects to avoid detached session issues
-        return {
-            o.model_id: {
-                "disabled": o.disabled,
-                "input_cost": o.input_cost,
-                "output_cost": o.output_cost,
-                "capabilities": o.capabilities,
-                "context_length": o.context_length,
-                "description": o.description,
-            }
-            for o in overrides
-        }
-
-
-def get_alias_overrides(provider_id: str) -> dict[str, dict]:
-    """Get all alias overrides for a provider, keyed by alias.
-
-    Returns dict of alias -> {"disabled": bool} to avoid SQLAlchemy session issues.
-    """
-    _ensure_db_initialized()
-    with get_db_context() as db:
-        overrides = (
-            db.query(AliasOverride)
-            .filter(AliasOverride.provider_id == provider_id)
-            .all()
-        )
-        # Return dicts instead of ORM objects to avoid detached session issues
-        return {o.alias: {"disabled": o.disabled} for o in overrides}
-
-
-def get_custom_models(provider_id: str) -> list[dict]:
-    """Get all custom models for a provider as dicts (to avoid detached session issues)."""
-    _ensure_db_initialized()
-    with get_db_context() as db:
-        models = (
-            db.query(CustomModel).filter(CustomModel.provider_id == provider_id).all()
-        )
-        # Convert to dicts while still in session
-        return [
-            {
-                "id": m.id,
-                "provider_id": m.provider_id,
-                "model_id": m.model_id,
-                "family": m.family,
-                "description": m.description,
-                "context_length": m.context_length,
-                "capabilities": m.capabilities,
-                "unsupported_params": m.unsupported_params,
-                "supports_system_prompt": m.supports_system_prompt,
-                "use_max_completion_tokens": m.use_max_completion_tokens,
-                "enabled": m.enabled,
-            }
-            for m in models
-        ]
-
-
-def get_custom_aliases(provider_id: str) -> list[dict]:
-    """Get all custom aliases for a provider as dicts (to avoid detached session issues)."""
-    _ensure_db_initialized()
-    with get_db_context() as db:
-        aliases = (
-            db.query(CustomAlias).filter(CustomAlias.provider_id == provider_id).all()
-        )
-        # Convert to dicts while still in session
-        return [
-            {
-                "id": a.id,
-                "provider_id": a.provider_id,
-                "alias": a.alias,
-                "model_id": a.model_id,
-            }
-            for a in aliases
-        ]
-
-
-def custom_model_to_model_info(model: dict) -> ModelInfo:
-    """Convert a CustomModel dict to a ModelInfo dataclass."""
-    return ModelInfo(
-        family=model["family"],
-        description=model["description"] or "",
-        context_length=model["context_length"],
-        capabilities=model["capabilities"],
-        parameter_size="?B",
-        quantization_level="none",
-        unsupported_params=set(model["unsupported_params"] or []),
-        supports_system_prompt=model["supports_system_prompt"],
-        use_max_completion_tokens=model["use_max_completion_tokens"],
-    )
 
 
 def load_hybrid_models(
     provider_name: str,
 ) -> tuple[dict[str, ModelInfo], dict[str, str]]:
     """
-    Load models and aliases by merging YAML config with DB overrides and custom models.
+    Load models and aliases for a provider from the database.
 
-    Flow:
-    1. Load system models from YAML
-    2. Apply model overrides (disable specific system models)
-    3. Add custom models from database
-    4. Load system aliases from YAML
-    5. Apply alias overrides (disable specific system aliases)
-    6. Add custom aliases from database
+    This is now just a wrapper around load_models_for_provider since
+    all models are stored in the database.
 
     Args:
         provider_name: Name of the provider (e.g., 'openai', 'anthropic')
@@ -152,203 +96,106 @@ def load_hybrid_models(
     Returns:
         Tuple of (models dict, aliases dict)
     """
-    # Step 1: Load from YAML
-    yaml_models, yaml_aliases = load_yaml_models(provider_name)
-
-    # Step 2: Apply model overrides
-    model_overrides = get_model_overrides(provider_name)
-    for model_id, override in model_overrides.items():
-        if override["disabled"] and model_id in yaml_models:
-            logger.debug(f"Disabling system model {provider_name}/{model_id}")
-            del yaml_models[model_id]
-
-    # Step 3: Add custom models (now dicts from get_custom_models)
-    custom_models = get_custom_models(provider_name)
-    for custom in custom_models:
-        if custom["enabled"]:
-            yaml_models[custom["model_id"]] = custom_model_to_model_info(custom)
-            logger.debug(f"Added custom model {provider_name}/{custom['model_id']}")
-
-    # Step 4: Aliases are already in yaml_aliases
-
-    # Step 5: Apply alias overrides
-    alias_overrides = get_alias_overrides(provider_name)
-    for alias, override in alias_overrides.items():
-        if override["disabled"] and alias in yaml_aliases:
-            logger.debug(f"Disabling system alias {provider_name}/{alias}")
-            del yaml_aliases[alias]
-
-    # Step 6: Add custom aliases (now dicts from get_custom_aliases)
-    custom_aliases = get_custom_aliases(provider_name)
-    for custom in custom_aliases:
-        # Only add if target model exists
-        if custom["model_id"] in yaml_models:
-            yaml_aliases[custom["alias"]] = custom["model_id"]
-            logger.debug(f"Added custom alias {provider_name}/{custom['alias']}")
-        else:
-            logger.warning(
-                f"Custom alias {custom['alias']} points to non-existent model "
-                f"{custom['model_id']}, skipping"
-            )
-
-    logger.info(
-        f"Hybrid loaded {len(yaml_models)} models and {len(yaml_aliases)} aliases "
-        f"for {provider_name}"
-    )
-
-    return yaml_models, yaml_aliases
+    _ensure_db_initialized()
+    return load_models_for_provider(provider_name)
 
 
 def get_all_models_with_metadata(
     provider_name: str,
 ) -> list[dict[str, Any]]:
     """
-    Get all models for a provider with system/custom metadata for the admin UI.
+    Get all models for a provider with metadata for the admin UI.
 
-    Returns a list of model dicts with 'is_system' and 'disabled' flags.
+    Returns a list of model dicts with source, enabled status, etc.
     """
     from . import registry
-    from .loader import load_providers_config
 
-    yaml_models = {}
-    model_source = (
-        "system"  # "system" (YAML), "dynamic" (API-discovered), or "custom" (DB)
-    )
+    _ensure_db_initialized()
 
     # Get provider from registry
     provider = registry.get_provider(provider_name)
 
-    # Check if this is an Ollama provider (dynamic models from API, not YAML)
+    # Check if this is an Ollama provider (dynamic models from API)
     is_ollama = provider and hasattr(provider, "type") and provider.type == "ollama"
 
-    if is_ollama:
-        # For Ollama providers, get models dynamically from the registry
-        model_source = "dynamic"
-        try:
-            yaml_models = provider.get_models()
-        except Exception as e:
-            logger.warning(f"Failed to get dynamic models for {provider_name}: {e}")
-    else:
-        # Check if this provider exists in YAML config
-        providers_config = load_providers_config()
-        yaml_providers = providers_config.get("providers", {})
+    # Check if provider has custom cost calculation
+    has_custom_cost = (
+        provider
+        and hasattr(provider, "has_custom_cost_calculation")
+        and provider.has_custom_cost_calculation
+    )
 
-        if provider_name in yaml_providers:
-            # Load from YAML (system provider)
-            model_source = "system"
-            yaml_models, _ = load_yaml_models(provider_name)
-        else:
-            # Custom provider without YAML - get models from registry if available
-            model_source = "dynamic"
-            if provider:
-                try:
-                    yaml_models = provider.get_models()
-                except Exception as e:
-                    logger.debug(
-                        f"No models available for custom provider {provider_name}: {e}"
-                    )
-
-    # Get overrides
-    model_overrides = get_model_overrides(provider_name)
-
-    # Get custom models
-    custom_models = get_custom_models(provider_name)
+    # Check if provider is active (has API key configured)
+    provider_active = is_provider_active(provider_name)
 
     result = []
 
-    # Add models from YAML or dynamic discovery
-    for model_id, model_info in yaml_models.items():
-        override = model_overrides.get(model_id)
-        disabled = override["disabled"] if override else False
-        has_override = override is not None and any(
-            override.get(k) is not None
-            for k in [
-                "input_cost",
-                "output_cost",
-                "capabilities",
-                "context_length",
-                "description",
-            ]
-        )
+    with get_db_context() as db:
+        # Load all models for this provider (including disabled)
+        db_models = db.query(Model).filter(Model.provider_id == provider_name).all()
 
-        # Apply overrides if present, otherwise use system defaults
-        description = (
-            override.get("description")
-            if override and override.get("description")
-            else model_info.description
-        )
-        context_length = (
-            override.get("context_length")
-            if override and override.get("context_length")
-            else model_info.context_length
-        )
-        capabilities = (
-            override.get("capabilities")
-            if override and override.get("capabilities")
-            else model_info.capabilities
-        )
-        input_cost = (
-            override.get("input_cost")
-            if override and override.get("input_cost") is not None
-            else getattr(model_info, "input_cost", None)
-        )
-        output_cost = (
-            override.get("output_cost")
-            if override and override.get("output_cost") is not None
-            else getattr(model_info, "output_cost", None)
-        )
+        for m in db_models:
+            result.append(
+                {
+                    "id": m.id,
+                    "provider_id": m.provider_id,
+                    "source": m.source,
+                    "last_synced": m.last_synced.isoformat() if m.last_synced else None,
+                    "family": m.family,
+                    "description": m.description,
+                    "context_length": m.context_length,
+                    "capabilities": m.capabilities,
+                    "unsupported_params": m.unsupported_params,
+                    "supports_system_prompt": m.supports_system_prompt,
+                    "use_max_completion_tokens": m.use_max_completion_tokens,
+                    "input_cost": m.input_cost,
+                    "output_cost": m.output_cost,
+                    "cache_read_multiplier": m.cache_read_multiplier,
+                    "cache_write_multiplier": m.cache_write_multiplier,
+                    "enabled": m.enabled,
+                    "disabled": not m.enabled,  # For backwards compatibility
+                    "is_system": m.source == "litellm",
+                    "is_dynamic": m.source == "ollama",
+                    "has_custom_cost": has_custom_cost,
+                    "provider_active": provider_active,
+                }
+            )
 
-        result.append(
-            {
-                "id": model_id,
-                "provider_id": provider_name,
-                "family": model_info.family,
-                "description": description,
-                "context_length": context_length,
-                "capabilities": capabilities,
-                "unsupported_params": list(model_info.unsupported_params),
-                "supports_system_prompt": model_info.supports_system_prompt,
-                "use_max_completion_tokens": model_info.use_max_completion_tokens,
-                "input_cost": input_cost,
-                "output_cost": output_cost,
-                "source": model_source,
-                "is_system": model_source == "system",
-                "is_dynamic": model_source == "dynamic",
-                "disabled": disabled,
-                "enabled": not disabled,
-                "has_override": has_override,
-                # Store original values for UI to show what's being overridden
-                "system_input_cost": getattr(model_info, "input_cost", None),
-                "system_output_cost": getattr(model_info, "output_cost", None),
-                "system_capabilities": model_info.capabilities,
-                "system_context_length": model_info.context_length,
-                "system_description": model_info.description,
-            }
-        )
+    # For Ollama providers, also get dynamically discovered models
+    if is_ollama and provider:
+        try:
+            dynamic_models = provider.get_models()
+            existing_ids = {m["id"] for m in result}
 
-    # Add custom models (now dicts from get_custom_models)
-    for custom in custom_models:
-        result.append(
-            {
-                "id": custom["model_id"],
-                "db_id": custom["id"],  # Database ID for edit/delete
-                "provider_id": provider_name,
-                "family": custom["family"],
-                "description": custom["description"],
-                "context_length": custom["context_length"],
-                "capabilities": custom["capabilities"],
-                "unsupported_params": custom["unsupported_params"],
-                "supports_system_prompt": custom["supports_system_prompt"],
-                "use_max_completion_tokens": custom["use_max_completion_tokens"],
-                "input_cost": custom.get("input_cost"),
-                "output_cost": custom.get("output_cost"),
-                "source": "custom",
-                "is_system": False,
-                "is_dynamic": False,
-                "disabled": not custom["enabled"],
-                "enabled": custom["enabled"],
-            }
-        )
+            for model_id, model_info in dynamic_models.items():
+                if model_id not in existing_ids:
+                    result.append(
+                        {
+                            "id": model_id,
+                            "provider_id": provider_name,
+                            "source": "ollama",
+                            "last_synced": None,
+                            "family": model_info.family,
+                            "description": model_info.description,
+                            "context_length": model_info.context_length,
+                            "capabilities": model_info.capabilities,
+                            "unsupported_params": list(model_info.unsupported_params),
+                            "supports_system_prompt": model_info.supports_system_prompt,
+                            "use_max_completion_tokens": model_info.use_max_completion_tokens,
+                            "input_cost": model_info.input_cost,
+                            "output_cost": model_info.output_cost,
+                            "cache_read_multiplier": model_info.cache_read_multiplier,
+                            "cache_write_multiplier": model_info.cache_write_multiplier,
+                            "enabled": True,
+                            "disabled": False,
+                            "is_system": False,
+                            "is_dynamic": True,
+                            "has_custom_cost": False,
+                            "provider_active": provider_active,
+                        }
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to get dynamic models for {provider_name}: {e}")
 
     return result
 
@@ -357,72 +204,94 @@ def get_all_aliases_with_metadata(
     provider_name: str,
 ) -> list[dict[str, Any]]:
     """
-    Get all aliases for a provider with system/custom metadata for the admin UI.
+    Get all aliases for a provider with metadata for the admin UI.
 
-    Returns a list of alias dicts with 'is_system' and 'disabled' flags.
+    Returns a list of alias dicts with source, enabled status, etc.
     """
     from . import registry
-    from .loader import load_providers_config
 
-    yaml_aliases = {}
+    _ensure_db_initialized()
 
     # Get provider from registry
     provider = registry.get_provider(provider_name)
 
-    # Check if this is an Ollama provider (dynamic, no YAML aliases)
-    is_ollama = provider and hasattr(provider, "type") and provider.type == "ollama"
-
-    if is_ollama:
-        # Ollama providers get aliases from the provider if available
-        if provider and hasattr(provider, "aliases"):
-            yaml_aliases = provider.aliases or {}
-    else:
-        # Check if this provider exists in YAML config
-        providers_config = load_providers_config()
-        yaml_providers = providers_config.get("providers", {})
-
-        if provider_name in yaml_providers:
-            # Load from YAML (system provider)
-            _, yaml_aliases = load_yaml_models(provider_name)
-        else:
-            # Custom provider without YAML - get aliases from registry if available
-            if provider and hasattr(provider, "aliases"):
-                yaml_aliases = provider.aliases or {}
-
-    # Get overrides
-    alias_overrides = get_alias_overrides(provider_name)
-
-    # Get custom aliases
-    custom_aliases = get_custom_aliases(provider_name)
+    # Check if provider is active
+    provider_active = is_provider_active(provider_name)
 
     result = []
 
-    # Add system aliases
-    for alias, model_id in yaml_aliases.items():
-        override = alias_overrides.get(alias)
-        disabled = override["disabled"] if override else False
+    with get_db_context() as db:
+        # Load all aliases for this provider (including disabled)
+        db_aliases = db.query(Alias).filter(Alias.provider_id == provider_name).all()
 
-        result.append(
-            {
-                "alias": alias,
-                "model_id": model_id,
-                "provider_id": provider_name,
-                "is_system": True,
-                "disabled": disabled,
-            }
-        )
+        for a in db_aliases:
+            result.append(
+                {
+                    "alias": a.alias,
+                    "model_id": a.model_id,
+                    "provider_id": a.provider_id,
+                    "source": a.source,
+                    "enabled": a.enabled,
+                    "disabled": not a.enabled,  # For backwards compatibility
+                    "is_system": a.source == "system",
+                    "provider_active": provider_active,
+                }
+            )
 
-    # Add custom aliases (now dicts from get_custom_aliases)
-    for custom in custom_aliases:
-        result.append(
-            {
-                "alias": custom["alias"],
-                "model_id": custom["model_id"],
-                "provider_id": provider_name,
-                "db_id": custom["id"],  # Database ID for edit/delete
-                "is_system": False,
-                "disabled": False,  # Custom aliases don't have a disabled state
-            }
-        )
+    # For Ollama providers with dynamic aliases
+    if provider and hasattr(provider, "aliases") and provider.aliases:
+        existing_aliases = {a["alias"] for a in result}
+        for alias, model_id in provider.aliases.items():
+            if alias not in existing_aliases:
+                result.append(
+                    {
+                        "alias": alias,
+                        "model_id": model_id,
+                        "provider_id": provider_name,
+                        "source": "dynamic",
+                        "enabled": True,
+                        "disabled": False,
+                        "is_system": False,
+                        "provider_active": provider_active,
+                    }
+                )
 
     return result
+
+
+# Legacy functions for backwards compatibility
+# These can be removed once all code is updated to use the new Model table directly
+
+
+def get_model_overrides(provider_id: str) -> dict[str, dict]:
+    """Legacy function - returns empty dict since overrides are no longer used."""
+    return {}
+
+
+def get_alias_overrides(provider_id: str) -> dict[str, dict]:
+    """Legacy function - returns empty dict since overrides are no longer used."""
+    return {}
+
+
+def get_custom_models(provider_id: str) -> list[dict]:
+    """Legacy function - returns models with source='custom' from Model table."""
+    _ensure_db_initialized()
+    with get_db_context() as db:
+        models = (
+            db.query(Model)
+            .filter(Model.provider_id == provider_id, Model.source == "custom")
+            .all()
+        )
+        return [m.to_dict() for m in models]
+
+
+def get_custom_aliases(provider_id: str) -> list[dict]:
+    """Legacy function - returns aliases with source='custom' from Alias table."""
+    _ensure_db_initialized()
+    with get_db_context() as db:
+        aliases = (
+            db.query(Alias)
+            .filter(Alias.provider_id == provider_id, Alias.source == "custom")
+            .all()
+        )
+        return [a.to_dict() for a in aliases]

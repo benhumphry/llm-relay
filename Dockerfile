@@ -16,10 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY proxy.py .
 COPY providers/ ./providers/
-COPY config/ ./config/
 COPY db/ ./db/
 COPY admin/ ./admin/
 COPY tracking/ ./tracking/
+COPY scripts/ ./scripts/
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

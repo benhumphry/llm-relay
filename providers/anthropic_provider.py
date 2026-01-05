@@ -20,6 +20,7 @@ class AnthropicProvider(LLMProvider):
 
     name = "anthropic"
     api_key_env = "ANTHROPIC_API_KEY"
+    has_custom_cost_calculation = True  # Complex pricing: cache read/write tokens
 
     _client: anthropic.Anthropic | None = None
 
@@ -106,11 +107,19 @@ class AnthropicProvider(LLMProvider):
             if hasattr(block, "text"):
                 content += block.text
 
-        return {
+        result = {
             "content": content,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
         }
+
+        # Extract Anthropic cache token details if available
+        if hasattr(response.usage, "cache_creation_input_tokens"):
+            result["cache_creation_tokens"] = response.usage.cache_creation_input_tokens
+        if hasattr(response.usage, "cache_read_input_tokens"):
+            result["cache_read_tokens"] = response.usage.cache_read_input_tokens
+
+        return result
 
     def chat_completion_stream(
         self,
