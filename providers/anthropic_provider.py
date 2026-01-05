@@ -27,17 +27,14 @@ class AnthropicProvider(LLMProvider):
     def __init__(
         self,
         models: dict[str, ModelInfo] | None = None,
-        aliases: dict[str, str] | None = None,
     ):
         """
         Initialize the provider.
 
         Args:
             models: Dict of model_id -> ModelInfo (loads from config if not provided)
-            aliases: Dict of alias -> model_id (loads from config if not provided)
         """
         self._models = models if models is not None else {}
-        self._aliases = aliases if aliases is not None else {}
 
     def is_configured(self) -> bool:
         """Check if Anthropic API key is available."""
@@ -46,10 +43,6 @@ class AnthropicProvider(LLMProvider):
     def get_models(self) -> dict[str, ModelInfo]:
         """Return models dict."""
         return self._models
-
-    def get_aliases(self) -> dict[str, str]:
-        """Return aliases dict."""
-        return self._aliases
 
     def get_client(self) -> anthropic.Anthropic:
         """Get or create Anthropic client."""

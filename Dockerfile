@@ -20,6 +20,7 @@ COPY db/ ./db/
 COPY admin/ ./admin/
 COPY tracking/ ./tracking/
 COPY scripts/ ./scripts/
+COPY config/ ./config/
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

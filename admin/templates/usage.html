@@ -782,6 +782,16 @@
                                 </th>
                                 <th class="text-right">%</th>
                                 <th
+                                    @click="setSortColumn('model', 'total_tokens')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Tokens
+                                    <span
+                                        x-show="sortColumn === 'total_tokens'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th
                                     @click="setSortColumn('model', 'cost')"
                                     class="text-right cursor-pointer hover:bg-base-200"
                                 >
@@ -822,13 +832,17 @@
                                     ></td>
                                     <td
                                         class="text-right"
+                                        x-text="formatTokens(row.total_tokens)"
+                                    ></td>
+                                    <td
+                                        class="text-right"
                                         x-text="'$' + row.cost.toFixed(4)"
                                     ></td>
                                 </tr>
                             </template>
                             <tr x-show="byModel.length === 0">
                                 <td
-                                    colspan="5"
+                                    colspan="6"
                                     class="text-center text-base-content/60"
                                 >
                                     No data available
@@ -891,6 +905,16 @@
                                         x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
                                     ></span>
                                 </th>
+                                <th
+                                    @click="setSortColumn('client', 'cost')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Cost
+                                    <span
+                                        x-show="sortColumn === 'cost'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -920,11 +944,15 @@
                                         class="text-right"
                                         x-text="formatTokens(row.total_tokens)"
                                     ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="'$' + row.cost.toFixed(4)"
+                                    ></td>
                                 </tr>
                             </template>
                             <tr x-show="byClient.length === 0">
                                 <td
-                                    colspan="4"
+                                    colspan="5"
                                     class="text-center text-base-content/60"
                                 >
                                     No data available

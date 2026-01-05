@@ -3,16 +3,17 @@
 Sync model pricing from LiteLLM's model_prices_and_context_window.json.
 
 This script fetches the latest pricing data from LiteLLM's GitHub repository
-and compares it with our local YAML configuration, generating a report of
-differences and optionally updating the local files.
+and compares it with our database configuration, generating a report of
+differences and optionally applying updates.
 
 Usage:
-    python scripts/sync_pricing.py [--update] [--provider PROVIDER]
+    python scripts/sync_pricing.py [--update] [--add-new] [--provider PROVIDER]
 
 Options:
-    --update            Apply changes to YAML files (default: report only)
+    --update            Apply price changes to database (default: report only)
+    --add-new           Add new models found in LiteLLM
     --provider NAME     Only sync specific provider (e.g., openai, anthropic)
-    --output FORMAT     Output format: text, json, yaml (default: text)
+    --output FORMAT     Output format: text, json (default: text)
     --verbose           Show detailed comparison info
 """
 
@@ -25,7 +26,6 @@ from pathlib import Path
 from typing import Any
 
 import requests
-import yaml
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -53,6 +53,8 @@ PROVIDER_MAPPING = {
     "cerebras": "cerebras",
     "sambanova": "sambanova",
     "cohere": "cohere",
+    # Meta-providers (pricing is dynamic from API, but models are seeded for discovery)
+    "openrouter": "openrouter",
 }
 
 # Map LiteLLM capability flags to our capability names
@@ -71,6 +73,71 @@ INVALID_MODEL_NAMES = {
     "test",
     "sample",
 }
+
+# Patterns for models that should be excluded from sync suggestions
+# These are typically experimental, preview, or special-purpose models
+EXCLUDE_MODEL_PATTERNS = [
+    # Dated preview/experimental versions (keep only the latest non-dated version)
+    r"-\d{2}-\d{2}$",  # Matches -MM-DD suffix (e.g., -04-17, -09-2025)
+    r"-\d{4}$",  # Matches -MMDD suffix (e.g., -0827, -1206)
+    r"-\d{6}$",  # Matches -YYMMDD suffix
+    r"-\d{3}$",  # Matches -001, -002 version suffixes
+    # Experimental models
+    r"-exp-\d+",  # Matches -exp-0827, -exp-1114, etc.
+    r"-exp$",  # Matches -exp suffix
+    # Preview versions with dates
+    r"-preview-\d",  # Matches -preview-02-05, -preview-09-2025, etc.
+    # Special purpose models that don't work with standard chat API
+    r"-live-",  # Live/streaming models
+    r"-live$",
+    r"-tts",  # Text-to-speech models
+    r"-native-audio",  # Audio-specific models
+    r"-image-generation",  # Image generation models
+    r"-computer-use",  # Computer use models (special API)
+    # Legacy/deprecated patterns
+    r"-vision$",  # Old vision-specific models (modern models have vision built-in)
+    r"-latest$",  # Alias models that point to other versions
+]
+
+# Models to always include even if they match exclude patterns
+INCLUDE_MODEL_OVERRIDES = {
+    # Current flagship models that happen to have dates
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "claude-sonnet-4-20250514",
+    "claude-opus-4-20250514",
+}
+
+
+def should_exclude_model(model_id: str) -> bool:
+    """Check if a model should be excluded from sync suggestions.
+
+    Returns True if the model matches exclusion patterns and is not
+    in the override list.
+    """
+    import re
+
+    # Check if model is in override list (always include)
+    if model_id in INCLUDE_MODEL_OVERRIDES:
+        return False
+
+    # Check against exclusion patterns
+    for pattern in EXCLUDE_MODEL_PATTERNS:
+        if re.search(pattern, model_id):
+            return True
+
+    return False
+
+
+def has_valid_pricing(model: "ModelPricing") -> bool:
+    """Check if a model has valid pricing data.
+
+    Models without pricing are typically experimental or not yet available.
+    """
+    return model.input_cost is not None and model.output_cost is not None
 
 
 @dataclass
@@ -209,16 +276,6 @@ def parse_litellm_model(key: str, data: dict) -> ModelPricing | None:
     )
 
 
-def load_local_yaml(provider: str) -> dict:
-    """Load local YAML config for a provider."""
-    config_path = Path(__file__).parent.parent / "config" / "models" / f"{provider}.yml"
-    if not config_path.exists():
-        return {"models": {}, "aliases": {}}
-
-    with open(config_path) as f:
-        return yaml.safe_load(f) or {"models": {}, "aliases": {}}
-
-
 def get_model_overrides_for_provider(provider: str) -> dict[str, dict]:
     """Get all model overrides from database for a provider.
 
@@ -261,29 +318,50 @@ def get_model_overrides_for_provider(provider: str) -> dict[str, dict]:
 
 
 def load_effective_pricing(provider: str) -> dict:
-    """Load effective pricing: YAML config merged with DB overrides.
+    """Load effective pricing from database.
 
-    DB overrides take precedence over YAML values.
+    Returns models with their current pricing and source information.
     """
-    yaml_config = load_local_yaml(provider)
-    db_overrides = get_model_overrides_for_provider(provider)
+    try:
+        import sys
 
-    models = yaml_config.get("models", {})
+        parent_dir = Path(__file__).parent.parent
+        if str(parent_dir) not in sys.path:
+            sys.path.insert(0, str(parent_dir))
 
-    # Apply DB overrides
-    for model_id, override in db_overrides.items():
-        if model_id in models:
-            for field, value in override.items():
-                if value is not None:
-                    models[model_id][field] = value
+        from db import Model
+        from db.connection import check_db_initialized, get_db_context, init_db
 
-    return {"models": models, "aliases": yaml_config.get("aliases", {})}
+        if not check_db_initialized():
+            init_db()
+
+        models = {}
+        with get_db_context() as db:
+            db_models = (
+                db.query(Model)
+                .filter(Model.provider_id == provider, Model.enabled == True)
+                .all()
+            )
+            for m in db_models:
+                models[m.id] = {
+                    "input_cost": m.input_cost,
+                    "output_cost": m.output_cost,
+                    "cache_read_multiplier": m.cache_read_multiplier,
+                    "cache_write_multiplier": m.cache_write_multiplier,
+                    "context_length": m.context_length,
+                    "source": m.source,  # "litellm", "custom", "ollama"
+                }
+
+        return {"models": models}
+    except Exception as e:
+        logger.warning(f"Could not load models for {provider}: {e}")
+        return {"models": {}}
 
 
 def compare_pricing(
     local: dict, remote: list[ModelPricing], provider: str
 ) -> list[PricingDiff]:
-    """Compare local YAML config with remote LiteLLM data."""
+    """Compare local database config with remote LiteLLM data."""
     diffs = []
     local_models = local.get("models", {})
 
@@ -390,6 +468,14 @@ def compare_pricing(
     # Check for new models in remote not in local
     for model_id, remote_model in remote_by_id.items():
         if model_id not in local_models:
+            # Skip models without valid pricing
+            if not has_valid_pricing(remote_model):
+                continue
+
+            # Skip models matching exclusion patterns
+            if should_exclude_model(model_id):
+                continue
+
             diffs.append(
                 PricingDiff(
                     model_id=model_id,
@@ -400,6 +486,26 @@ def compare_pricing(
                     change_type="added",
                 )
             )
+
+    # Check for models in local that are not in remote (deprecated/removed)
+    for model_id, local_data in local_models.items():
+        if model_id not in remote_by_id:
+            # Only flag models that came from LiteLLM originally
+            # (source == "litellm"), not custom models
+            source = local_data.get("source", "litellm")
+            if source == "litellm":
+                input_cost = local_data.get("input_cost")
+                output_cost = local_data.get("output_cost")
+                diffs.append(
+                    PricingDiff(
+                        model_id=model_id,
+                        provider=provider,
+                        field="(deprecated)",
+                        local_value=f"${input_cost} in / ${output_cost} out",
+                        remote_value=None,
+                        change_type="removed",
+                    )
+                )
 
     return diffs
 
@@ -463,58 +569,6 @@ def format_json_report(diffs: list[PricingDiff]) -> str:
     )
 
 
-def update_yaml_files(diffs: list[PricingDiff], dry_run: bool = True) -> None:
-    """Apply pricing updates to YAML files."""
-    if dry_run:
-        logger.info("\n[DRY RUN] Would apply the following changes:")
-
-    # Group by provider
-    by_provider: dict[str, list[PricingDiff]] = {}
-    for diff in diffs:
-        if diff.change_type in ("changed", "added") and diff.field != "(new model)":
-            by_provider.setdefault(diff.provider, []).append(diff)
-
-    for provider, provider_diffs in by_provider.items():
-        config_path = (
-            Path(__file__).parent.parent / "config" / "models" / f"{provider}.yml"
-        )
-        if not config_path.exists():
-            logger.warning(f"  Config file not found: {config_path}")
-            continue
-
-        # Load current config
-        with open(config_path) as f:
-            config = yaml.safe_load(f) or {}
-
-        models = config.get("models", {})
-        changes_made = 0
-
-        for diff in provider_diffs:
-            if diff.model_id in models:
-                if diff.field in (
-                    "input_cost",
-                    "output_cost",
-                    "cache_read_multiplier",
-                    "cache_write_multiplier",
-                    "context_length",
-                ):
-                    old_val = models[diff.model_id].get(diff.field)
-                    if dry_run:
-                        logger.info(
-                            f"  {provider}/{diff.model_id}.{diff.field}: "
-                            f"{old_val} -> {diff.remote_value}"
-                        )
-                    else:
-                        models[diff.model_id][diff.field] = diff.remote_value
-                    changes_made += 1
-
-        if not dry_run and changes_made > 0:
-            # Write updated config
-            with open(config_path, "w") as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-            logger.info(f"  Updated {config_path} with {changes_made} changes")
-
-
 def apply_pricing_overrides(
     diffs: list[PricingDiff],
     dry_run: bool = True,
@@ -522,10 +576,10 @@ def apply_pricing_overrides(
     add_new: bool = False,
     disable_removed: bool = False,
 ) -> dict:
-    """Apply pricing updates as database overrides.
+    """Apply pricing updates directly to the Model table.
 
-    This creates or updates ModelOverride records in the database,
-    which take precedence over YAML values.
+    Updates the Model table directly for LiteLLM-sourced models.
+    This ensures the comparison logic sees the updated values.
 
     Args:
         diffs: List of pricing differences to apply
@@ -535,7 +589,7 @@ def apply_pricing_overrides(
         disable_removed: Disable models not found in LiteLLM (not implemented yet)
 
     Returns:
-        Dict with counts of created/updated overrides
+        Dict with counts of updated/created models
     """
     import sys
 
@@ -543,7 +597,7 @@ def apply_pricing_overrides(
     if str(parent_dir) not in sys.path:
         sys.path.insert(0, str(parent_dir))
 
-    from db import CustomModel, ModelOverride
+    from db import Model
     from db.connection import check_db_initialized, get_db_context, init_db
 
     if not check_db_initialized():
@@ -605,65 +659,48 @@ def apply_pricing_overrides(
         return results
 
     with get_db_context() as db:
-        # Apply price updates to existing models
+        # Apply price updates to existing models in the Model table
         if update_existing:
             for (provider, model_id), fields in update_diffs.items():
-                override = (
-                    db.query(ModelOverride)
+                model = (
+                    db.query(Model)
                     .filter(
-                        ModelOverride.provider_id == provider,
-                        ModelOverride.model_id == model_id,
+                        Model.provider_id == provider,
+                        Model.id == model_id,
                     )
                     .first()
                 )
 
-                if override:
+                if model:
                     for field, value in fields.items():
-                        if hasattr(override, field):
-                            setattr(override, field, value)
+                        if hasattr(model, field):
+                            setattr(model, field, value)
                     results["updated"] += 1
-                    action = "updated"
-                else:
-                    override = ModelOverride(
-                        provider_id=provider,
-                        model_id=model_id,
-                        disabled=False,
-                        **{
-                            k: v
-                            for k, v in fields.items()
-                            if k
-                            in [
-                                "input_cost",
-                                "output_cost",
-                                "cache_read_multiplier",
-                                "cache_write_multiplier",
-                                "context_length",
-                            ]
-                        },
+                    results["details"].append(
+                        {
+                            "provider": provider,
+                            "model_id": model_id,
+                            "fields": fields,
+                            "action": "updated",
+                        }
                     )
-                    db.add(override)
-                    results["created"] += 1
-                    action = "created"
+                    logger.info(f"  Updated model: {provider}/{model_id}")
+                else:
+                    # Model not found in database, skip
+                    results["skipped"] += 1
+                    logger.warning(
+                        f"  Model not found, skipping: {provider}/{model_id}"
+                    )
 
-                results["details"].append(
-                    {
-                        "provider": provider,
-                        "model_id": model_id,
-                        "fields": fields,
-                        "action": action,
-                    }
-                )
-                logger.info(f"  {action.capitalize()} override: {provider}/{model_id}")
-
-        # Add new models as custom models
+        # Add new models to the Model table
         if add_new:
             for diff in new_model_diffs:
-                # Check if model already exists as custom model
+                # Check if model already exists
                 existing = (
-                    db.query(CustomModel)
+                    db.query(Model)
                     .filter(
-                        CustomModel.provider_id == diff.provider,
-                        CustomModel.model_id == diff.model_id,
+                        Model.provider_id == diff.provider,
+                        Model.id == diff.model_id,
                     )
                     .first()
                 )
@@ -714,9 +751,10 @@ def apply_pricing_overrides(
                 else:
                     family = "other"
 
-                custom_model = CustomModel(
+                new_model = Model(
+                    id=diff.model_id,
                     provider_id=diff.provider,
-                    model_id=diff.model_id,
+                    source="litellm",
                     family=family,
                     description=diff.model_id,
                     context_length=128000,  # Default
@@ -728,7 +766,7 @@ def apply_pricing_overrides(
                     input_cost=input_cost,
                     output_cost=output_cost,
                 )
-                db.add(custom_model)
+                db.add(new_model)
                 results["new_models_added"] += 1
 
                 results["details"].append(
@@ -758,7 +796,12 @@ def main():
     parser.add_argument(
         "--update",
         action="store_true",
-        help="Apply changes to YAML files (default: report only)",
+        help="Apply price changes to database (default: report only)",
+    )
+    parser.add_argument(
+        "--add-new",
+        action="store_true",
+        help="Add new models found in LiteLLM to database",
     )
     parser.add_argument(
         "--provider",
@@ -800,10 +843,10 @@ def main():
         [args.provider] if args.provider else list(set(PROVIDER_MAPPING.values()))
     )
 
-    # Compare with local configs
+    # Compare with database
     all_diffs = []
     for provider in providers:
-        local_config = load_local_yaml(provider)
+        local_config = load_effective_pricing(provider)
         provider_models = [m for m in remote_models if m.provider == provider]
         if provider_models:
             diffs = compare_pricing(local_config, provider_models, provider)
@@ -816,10 +859,20 @@ def main():
         print(format_diff_report(all_diffs, verbose=args.verbose))
 
     # Apply updates if requested
-    if args.update:
-        update_yaml_files(all_diffs, dry_run=False)
+    if args.update or args.add_new:
+        result = apply_pricing_overrides(
+            all_diffs,
+            dry_run=False,
+            update_existing=args.update,
+            add_new=args.add_new,
+        )
+        logger.info(
+            f"\nApplied: {result['created']} overrides created, "
+            f"{result['updated']} updated, {result['new_models_added']} new models"
+        )
     elif all_diffs:
-        logger.info("\nRun with --update to apply these changes to YAML files.")
+        logger.info("\nRun with --update to apply price changes to database.")
+        logger.info("Run with --add-new to add new models to database.")
 
 
 if __name__ == "__main__":

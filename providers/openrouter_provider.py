@@ -36,17 +36,14 @@ class OpenRouterProvider(LLMProvider):
     def __init__(
         self,
         models: dict[str, ModelInfo] | None = None,
-        aliases: dict[str, str] | None = None,
     ):
         """
         Initialize the provider.
 
         Args:
             models: Dict of model_id -> ModelInfo (loads from config if not provided)
-            aliases: Dict of alias -> model_id (loads from config if not provided)
         """
         self._models = models if models is not None else {}
-        self._aliases = aliases if aliases is not None else {}
         self._client: httpx.Client | None = None
 
     def is_configured(self) -> bool:
@@ -56,10 +53,6 @@ class OpenRouterProvider(LLMProvider):
     def get_models(self) -> dict[str, ModelInfo]:
         """Return models dict."""
         return self._models
-
-    def get_aliases(self) -> dict[str, str]:
-        """Return aliases dict."""
-        return self._aliases
 
     def _get_client(self) -> httpx.Client:
         """Get or create HTTP client."""
@@ -82,22 +75,53 @@ class OpenRouterProvider(LLMProvider):
         return self._client
 
     def _get_model_info(self, model: str) -> ModelInfo | None:
-        """Get ModelInfo for a model, checking aliases if needed."""
+        """Get ModelInfo for a model."""
         if model in self._models:
             return self._models[model]
-        for alias, model_id in self._aliases.items():
-            if model == model_id and model_id in self._models:
-                return self._models[model_id]
         return None
+
+    def _convert_image_format(self, content: list) -> list:
+        """Convert Anthropic-style image format to OpenAI format.
+
+        Anthropic format: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+        OpenAI format: {"type": "image_url", "url": "data:image/jpeg;base64,..."}
+        """
+        converted = []
+        for block in content:
+            if block.get("type") == "image" and "source" in block:
+                source = block["source"]
+                if source.get("type") == "base64":
+                    media_type = source.get("media_type", "image/jpeg")
+                    data = source.get("data", "")
+                    converted.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{data}"},
+                        }
+                    )
+                else:
+                    converted.append(block)
+            else:
+                converted.append(block)
+        return converted
 
     def _build_messages(
         self, model: str, messages: list[dict], system: str | None
     ) -> list[dict]:
-        """Build messages list with system prompt."""
+        """Build messages list with system prompt and image format conversion."""
         result = []
         if system:
             result.append({"role": "system", "content": system})
-        result.extend(messages)
+
+        # Convert image formats in messages
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                new_msg = msg.copy()
+                new_msg["content"] = self._convert_image_format(content)
+                result.append(new_msg)
+            else:
+                result.append(msg)
         return result
 
     def _build_request_body(
@@ -283,7 +307,6 @@ class OpenRouterProvider(LLMProvider):
         """
         Resolve a model name to a model ID for this provider.
 
-        Checks aliases first, then direct model IDs.
         Returns None if model not found in this provider.
         """
         name = model_name.lower().strip()
@@ -291,10 +314,6 @@ class OpenRouterProvider(LLMProvider):
         # Remove :latest suffix
         if name.endswith(":latest"):
             name = name[:-7]
-
-        # Check aliases
-        if name in self._aliases:
-            return self._aliases[name]
 
         # Check direct model IDs (case-sensitive for OpenRouter)
         if model_name in self._models:

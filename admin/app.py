@@ -23,9 +23,6 @@ from flask import (
 )
 
 from db import (
-    Alias,
-    AliasOverride,
-    CustomAlias,
     CustomModel,
     DailyStats,
     Model,
@@ -38,10 +35,7 @@ from db import (
 
 # db.importer is deprecated - seeding now happens via db.seed
 from providers import registry
-from providers.hybrid_loader import (
-    get_all_aliases_with_metadata,
-    get_all_models_with_metadata,
-)
+from providers.hybrid_loader import get_all_models_with_metadata
 from providers.loader import get_all_provider_names
 
 from .auth import (
@@ -149,20 +143,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/providers")
     @require_auth
     def providers_page():
-        """Providers management page."""
-        return render_template("providers.html")
+        """Redirect to consolidated Providers & Models page."""
+        return redirect(url_for("admin.models_page"))
 
     @admin.route("/models")
     @require_auth
     def models_page():
         """Models management page."""
         return render_template("models.html")
-
-    @admin.route("/aliases")
-    @require_auth
-    def aliases_page():
-        """Aliases management page."""
-        return render_template("aliases.html")
 
     @admin.route("/settings")
     @require_auth
@@ -192,11 +180,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         providers_list = []
         seen_ids = set()
 
-        # Get source info from database
-        provider_sources = {}
+        # Get source and enabled info from database
+        provider_db_info = {}
         with get_db_context() as db:
             for p in db.query(Provider).all():
-                provider_sources[p.id] = p.source
+                provider_db_info[p.id] = {"source": p.source, "enabled": p.enabled}
 
         for provider in registry.get_all_providers():
             config = get_provider_config(provider.name)
@@ -212,8 +200,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 provider_type = config.get("type", provider.name)
                 base_url = config.get("base_url")
 
-            # Check if it's a system provider (seeded from defaults)
-            is_system = provider_sources.get(provider.name) == "system"
+            # Get DB info for this provider
+            db_info = provider_db_info.get(provider.name, {})
+            is_system = db_info.get("source") == "system"
+            # Use runtime enabled status from provider instance
+            is_enabled = getattr(provider, "enabled", True)
 
             providers_list.append(
                 {
@@ -221,10 +212,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "type": provider_type,
                     "base_url": base_url,
                     "api_key_env": api_key_env,
-                    "enabled": True,  # All registered providers are enabled
+                    "enabled": is_enabled,
                     "has_api_key": has_api_key,
                     "model_count": len(provider.get_models()),
-                    "alias_count": len(provider.get_aliases()),
                     "is_system": is_system,
                     "has_custom_cost": getattr(
                         provider, "has_custom_cost_calculation", False
@@ -233,8 +223,29 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             )
             seen_ids.add(provider.name)
 
-        # Also include DB Ollama instances not yet in registry (e.g., pending restart)
+        # Also include disabled providers from DB that aren't in registry
         with get_db_context() as db:
+            # DB providers (system providers that might be disabled)
+            for p in db.query(Provider).all():
+                if p.id not in seen_ids:
+                    has_api_key = bool(p.api_key_env and os.environ.get(p.api_key_env))
+                    providers_list.append(
+                        {
+                            "id": p.id,
+                            "type": p.type,
+                            "base_url": p.base_url,
+                            "api_key_env": p.api_key_env,
+                            "enabled": p.enabled,
+                            "has_api_key": has_api_key,
+                            "model_count": 0,
+                            "is_system": p.source == "system",
+                            "has_custom_cost": p.type
+                            in ("openrouter", "perplexity", "gemini"),
+                        }
+                    )
+                    seen_ids.add(p.id)
+
+            # DB Ollama instances not yet in registry (e.g., pending restart)
             db_instances = db.query(OllamaInstance).all()
             for inst in db_instances:
                 if inst.name not in seen_ids:
@@ -247,7 +258,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                             "enabled": inst.enabled,
                             "has_api_key": True,
                             "model_count": 0,
-                            "alias_count": 0,
                             "is_system": False,
                             "pending_restart": True,
                         }
@@ -338,7 +348,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "enabled": True,
                         "has_api_key": True,  # Ollama doesn't need API key
                         "model_count": len(provider.get_models()),
-                        "alias_count": 0,
                     }
                 ), 201
         else:
@@ -353,56 +362,77 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/providers/<provider_id>", methods=["PUT"])
     @require_auth_api
     def update_provider(provider_id: str):
-        """Update a provider (only Ollama providers can be updated via UI)."""
+        """Update a provider."""
         from db import OllamaInstance, Provider
         from providers import registry
+        from providers.loader import clear_config_cache
 
         data = request.get_json() or {}
 
-        # Check if this is a system provider (seeded from defaults)
-        with get_db_context() as db:
-            provider_record = (
-                db.query(Provider).filter(Provider.id == provider_id).first()
-            )
-            if provider_record and provider_record.source == "system":
-                return jsonify(
-                    {"error": "System providers cannot be modified via UI."}
-                ), 400
-
-        # Check if it's an Ollama instance in DB
+        # Check if it's an Ollama instance in DB (custom Ollama providers)
         with get_db_context() as db:
             instance = (
                 db.query(OllamaInstance)
                 .filter(OllamaInstance.name == provider_id)
                 .first()
             )
-            if not instance:
+            if instance:
+                # Update Ollama instance fields
+                if "base_url" in data:
+                    instance.base_url = data["base_url"].strip()
+                if "enabled" in data:
+                    instance.enabled = data["enabled"]
+
+                db.commit()
+
+                # Update the provider in registry if it exists
+                provider = registry.get_provider(provider_id)
+                if provider:
+                    provider.base_url = instance.base_url
+
+                return jsonify(
+                    {
+                        "id": provider_id,
+                        "type": "ollama",
+                        "base_url": instance.base_url,
+                        "enabled": instance.enabled,
+                        "has_api_key": True,
+                        "model_count": len(provider.get_models()) if provider else 0,
+                    }
+                )
+
+        # Check if it's a system/DB provider
+        with get_db_context() as db:
+            provider_record = (
+                db.query(Provider).filter(Provider.id == provider_id).first()
+            )
+            if not provider_record:
                 return jsonify({"error": f"Provider '{provider_id}' not found"}), 404
 
-            # Update fields
-            if "base_url" in data:
-                instance.base_url = data["base_url"].strip()
+            # Only allow updating enabled status for system providers
             if "enabled" in data:
-                instance.enabled = data["enabled"]
+                provider_record.enabled = data["enabled"]
+                db.commit()
 
-            db.commit()
+                # Clear config cache so changes take effect
+                clear_config_cache()
 
-            # Update the provider in registry if it exists
-            provider = registry.get_provider(provider_id)
-            if provider:
-                provider.base_url = instance.base_url
+                # Also update the provider instance in the registry immediately
+                provider_instance = registry.get_provider(provider_id)
+                if provider_instance:
+                    provider_instance.enabled = data["enabled"]
+
+                return jsonify(
+                    {
+                        "id": provider_id,
+                        "type": provider_record.type,
+                        "enabled": provider_record.enabled,
+                    }
+                )
 
             return jsonify(
-                {
-                    "id": provider_id,
-                    "type": "ollama",
-                    "base_url": instance.base_url,
-                    "enabled": instance.enabled,
-                    "has_api_key": True,
-                    "model_count": len(provider.get_models()) if provider else 0,
-                    "alias_count": 0,
-                }
-            )
+                {"error": "Only 'enabled' can be updated for system providers"}
+            ), 400
 
     @admin.route("/api/providers/<provider_id>", methods=["DELETE"])
     @require_auth_api
@@ -641,6 +671,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     override.description = (
                         data["description"] if data["description"] else None
                     )
+                # Provider quirks
+                if "use_max_completion_tokens" in data:
+                    override.use_max_completion_tokens = data[
+                        "use_max_completion_tokens"
+                    ]
+                if "supports_system_prompt" in data:
+                    override.supports_system_prompt = data["supports_system_prompt"]
+                if "unsupported_params" in data:
+                    override.unsupported_params = (
+                        data["unsupported_params"]
+                        if data["unsupported_params"]
+                        else None
+                    )
             else:
                 override = ModelOverride(
                     provider_id=provider_id,
@@ -653,7 +696,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     capabilities=data.get("capabilities"),
                     context_length=data.get("context_length"),
                     description=data.get("description"),
+                    use_max_completion_tokens=data.get("use_max_completion_tokens"),
+                    supports_system_prompt=data.get("supports_system_prompt"),
                 )
+                # Handle unsupported_params via setter
+                if data.get("unsupported_params"):
+                    override.unsupported_params = data["unsupported_params"]
                 db.add(override)
 
             db.commit()
@@ -789,162 +837,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"success": True})
 
     # -------------------------------------------------------------------------
-    # Alias API (Hybrid: System + Custom)
-    # -------------------------------------------------------------------------
-
-    @admin.route("/api/aliases", methods=["GET"])
-    @require_auth_api
-    def list_aliases():
-        """List all aliases (system + custom) with metadata."""
-        provider_id = request.args.get("provider")
-
-        if provider_id:
-            # Get aliases for specific provider
-            aliases = get_all_aliases_with_metadata(provider_id)
-            return jsonify(aliases)
-
-        # Get aliases for all providers (database + registry)
-        all_aliases = []
-        seen_providers = set()
-
-        # First, get database providers
-        for prov_name in get_all_provider_names():
-            all_aliases.extend(get_all_aliases_with_metadata(prov_name))
-            seen_providers.add(prov_name)
-
-        # Then, get any additional providers from registry (custom DB providers)
-        for provider in registry.get_all_providers():
-            if provider.name not in seen_providers:
-                all_aliases.extend(get_all_aliases_with_metadata(provider.name))
-
-        return jsonify(all_aliases)
-
-    @admin.route("/api/aliases/override", methods=["POST"])
-    @require_auth_api
-    def set_alias_override():
-        """Create or update an override for a system alias."""
-        data = request.get_json() or {}
-
-        required = ["provider_id", "alias"]
-        for field in required:
-            if field not in data:
-                return jsonify({"error": f"Missing required field: {field}"}), 400
-
-        provider_id = data["provider_id"]
-        alias = data["alias"]
-        disabled = data.get("disabled", True)
-
-        with get_db_context() as db:
-            # Find existing override or create new
-            override = (
-                db.query(AliasOverride)
-                .filter(
-                    AliasOverride.provider_id == provider_id,
-                    AliasOverride.alias == alias,
-                )
-                .first()
-            )
-
-            if override:
-                override.disabled = disabled
-            else:
-                override = AliasOverride(
-                    provider_id=provider_id,
-                    alias=alias,
-                    disabled=disabled,
-                )
-                db.add(override)
-
-            db.commit()
-            return jsonify(override.to_dict())
-
-    @admin.route("/api/aliases/override/<provider_id>/<alias>", methods=["DELETE"])
-    @require_auth_api
-    def delete_alias_override(provider_id: str, alias: str):
-        """Remove an override for a system alias (re-enables it)."""
-        with get_db_context() as db:
-            override = (
-                db.query(AliasOverride)
-                .filter(
-                    AliasOverride.provider_id == provider_id,
-                    AliasOverride.alias == alias,
-                )
-                .first()
-            )
-
-            if override:
-                db.delete(override)
-                db.commit()
-
-            return jsonify({"success": True})
-
-    @admin.route("/api/aliases/custom", methods=["POST"])
-    @require_auth_api
-    def create_custom_alias():
-        """Create a new custom alias."""
-        data = request.get_json() or {}
-
-        required = ["provider_id", "alias", "model_id"]
-        for field in required:
-            if field not in data:
-                return jsonify({"error": f"Missing required field: {field}"}), 400
-
-        with get_db_context() as db:
-            # Check if custom alias already exists
-            existing = (
-                db.query(CustomAlias)
-                .filter(
-                    CustomAlias.provider_id == data["provider_id"],
-                    CustomAlias.alias == data["alias"],
-                )
-                .first()
-            )
-            if existing:
-                return jsonify({"error": "Custom alias already exists"}), 409
-
-            alias_obj = CustomAlias(
-                provider_id=data["provider_id"],
-                alias=data["alias"],
-                model_id=data["model_id"],
-            )
-            db.add(alias_obj)
-            db.commit()
-
-            return jsonify(alias_obj.to_dict()), 201
-
-    @admin.route("/api/aliases/custom/<int:db_id>", methods=["PUT"])
-    @require_auth_api
-    def update_custom_alias(db_id: int):
-        """Update a custom alias."""
-        data = request.get_json() or {}
-
-        with get_db_context() as db:
-            alias_obj = db.query(CustomAlias).filter(CustomAlias.id == db_id).first()
-            if not alias_obj:
-                return jsonify({"error": "Custom alias not found"}), 404
-
-            if "alias" in data:
-                alias_obj.alias = data["alias"]
-            if "model_id" in data:
-                alias_obj.model_id = data["model_id"]
-
-            db.commit()
-            return jsonify(alias_obj.to_dict())
-
-    @admin.route("/api/aliases/custom/<int:db_id>", methods=["DELETE"])
-    @require_auth_api
-    def delete_custom_alias(db_id: int):
-        """Delete a custom alias."""
-        with get_db_context() as db:
-            alias_obj = db.query(CustomAlias).filter(CustomAlias.id == db_id).first()
-            if not alias_obj:
-                return jsonify({"error": "Custom alias not found"}), 404
-
-            db.delete(alias_obj)
-            db.commit()
-            return jsonify({"success": True})
-
-    # -------------------------------------------------------------------------
     # Settings API
     # -------------------------------------------------------------------------
 
@@ -1003,8 +895,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def export_config():
         """Export database configuration as JSON for backup/migration."""
         from db.models import (
-            AliasOverride,
-            CustomAlias,
             CustomModel,
             CustomProvider,
             ModelOverride,
@@ -1037,14 +927,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     }
                     for o in db.query(ModelOverride).all()
                 ],
-                "alias_overrides": [
-                    {
-                        "provider_id": o.provider_id,
-                        "alias": o.alias,
-                        "disabled": o.disabled,
-                    }
-                    for o in db.query(AliasOverride).all()
-                ],
                 "custom_models": [
                     {
                         "provider_id": m.provider_id,
@@ -1063,14 +945,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "cache_write_multiplier": m.cache_write_multiplier,
                     }
                     for m in db.query(CustomModel).all()
-                ],
-                "custom_aliases": [
-                    {
-                        "provider_id": a.provider_id,
-                        "alias": a.alias,
-                        "model_id": a.model_id,
-                    }
-                    for a in db.query(CustomAlias).all()
                 ],
                 "ollama_instances": [
                     {
@@ -1103,8 +977,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def import_config():
         """Import database configuration from JSON backup."""
         from db.models import (
-            AliasOverride,
-            CustomAlias,
             CustomModel,
             CustomProvider,
             ModelOverride,
@@ -1126,9 +998,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         stats = {
             "settings": 0,
             "model_overrides": 0,
-            "alias_overrides": 0,
             "custom_models": 0,
-            "custom_aliases": 0,
             "ollama_instances": 0,
             "custom_providers": 0,
         }
@@ -1180,28 +1050,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     db.add(override)
                 stats["model_overrides"] += 1
 
-            # Import alias overrides
-            for o in data.get("alias_overrides", []):
-                existing = (
-                    db.query(AliasOverride)
-                    .filter(
-                        AliasOverride.provider_id == o["provider_id"],
-                        AliasOverride.alias == o["alias"],
-                    )
-                    .first()
-                )
-                if existing:
-                    existing.disabled = o.get("disabled", False)
-                else:
-                    db.add(
-                        AliasOverride(
-                            provider_id=o["provider_id"],
-                            alias=o["alias"],
-                            disabled=o.get("disabled", False),
-                        )
-                    )
-                stats["alias_overrides"] += 1
-
             # Import custom models
             for m in data.get("custom_models", []):
                 existing = (
@@ -1250,28 +1098,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     model.unsupported_params = m.get("unsupported_params", [])
                     db.add(model)
                 stats["custom_models"] += 1
-
-            # Import custom aliases
-            for a in data.get("custom_aliases", []):
-                existing = (
-                    db.query(CustomAlias)
-                    .filter(
-                        CustomAlias.provider_id == a["provider_id"],
-                        CustomAlias.alias == a["alias"],
-                    )
-                    .first()
-                )
-                if existing:
-                    existing.model_id = a["model_id"]
-                else:
-                    db.add(
-                        CustomAlias(
-                            provider_id=a["provider_id"],
-                            alias=a["alias"],
-                            model_id=a["model_id"],
-                        )
-                    )
-                stats["custom_aliases"] += 1
 
             # Import Ollama instances
             for o in data.get("ollama_instances", []):
@@ -1339,27 +1165,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         from providers.loader import get_provider_config
         from providers.ollama_provider import OllamaProvider
 
-        # Count models and aliases from hybrid system
+        # Count models from hybrid system
         total_models = 0
         enabled_models = 0
         system_models = 0
         custom_models = 0
-        total_aliases = 0
-        system_aliases = 0
-        custom_aliases = 0
 
         for prov_name in get_all_provider_names():
             models = get_all_models_with_metadata(prov_name)
-            aliases = get_all_aliases_with_metadata(prov_name)
 
             total_models += len(models)
             enabled_models += sum(1 for m in models if m.get("enabled", True))
             system_models += sum(1 for m in models if m.get("is_system", True))
             custom_models += sum(1 for m in models if not m.get("is_system", True))
-
-            total_aliases += len(aliases)
-            system_aliases += sum(1 for a in aliases if a.get("is_system", True))
-            custom_aliases += sum(1 for a in aliases if not a.get("is_system", True))
 
         # Count providers from registry
         all_providers = registry.get_all_providers()
@@ -1392,11 +1210,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "enabled": enabled_models,
                     "system": system_models,
                     "custom": custom_models,
-                },
-                "aliases": {
-                    "total": total_aliases,
-                    "system": system_aliases,
-                    "custom": custom_aliases,
                 },
             }
         )
@@ -2353,6 +2166,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 func.count(RequestLog.id).label("requests"),
                 func.sum(RequestLog.input_tokens).label("input_tokens"),
                 func.sum(RequestLog.output_tokens).label("output_tokens"),
+                func.sum(RequestLog.cost).label("cost"),
             ).filter(RequestLog.timestamp >= filters["start_date"])
 
             if filters["end_date"]:
@@ -2391,7 +2205,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "input_tokens": r.input_tokens or 0,
                         "output_tokens": r.output_tokens or 0,
                         "total_tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
-                        "cost": 0,  # Cost requires model info, simplified for now
+                        "cost": round(r.cost or 0, 4),
                     }
                     for r in results
                 ]
@@ -2628,6 +2442,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         provider_filter = data.get("provider")
         update_existing = data.get("update_existing", False)
         add_new = data.get("add_new", False)
+        disable_deprecated = data.get("disable_deprecated", False)
+        # Optional: list of specific models to apply actions to
+        selected_models = data.get(
+            "selected_models", None
+        )  # ["provider/model_id", ...]
 
         try:
             # Fetch remote pricing data
@@ -2662,17 +2481,25 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             price_updates = [
                 d
                 for d in all_diffs
-                if d.field != "(new model)" and d.change_type != "info"
+                if d.field not in ("(new model)", "(deprecated)")
+                and d.change_type not in ("info", "removed")
             ]
             new_models = [d for d in all_diffs if d.field == "(new model)"]
+            deprecated_models = [d for d in all_diffs if d.field == "(deprecated)"]
+
+            # Count unique models with price updates
+            unique_price_update_models = set(
+                f"{d.provider}/{d.model_id}" for d in price_updates
+            )
 
             # Format results
             results = {
                 "total_remote_models": len(remote_models),
                 "providers_checked": providers,
                 "differences_found": len(all_diffs),
-                "price_update_count": len(price_updates),
+                "price_update_count": len(unique_price_update_models),
                 "new_model_count": len(new_models),
+                "deprecated_model_count": len(deprecated_models),
                 "diffs": [
                     {
                         "model_id": d.model_id,
@@ -2686,10 +2513,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 ],
             }
 
+            # Filter diffs by selected models if provided
+            diffs_to_apply = all_diffs
+            if selected_models:
+                selected_set = set(selected_models)
+                diffs_to_apply = [
+                    d for d in all_diffs if f"{d.provider}/{d.model_id}" in selected_set
+                ]
+
             # Apply changes if requested
-            if (update_existing or add_new) and all_diffs:
+            if (update_existing or add_new) and diffs_to_apply:
                 apply_result = apply_pricing_overrides(
-                    all_diffs,
+                    diffs_to_apply,
                     dry_run=False,
                     update_existing=update_existing,
                     add_new=add_new,
@@ -2697,6 +2532,43 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 results["overrides_created"] = apply_result["created"]
                 results["overrides_updated"] = apply_result["updated"]
                 results["new_models_added"] = apply_result["new_models_added"]
+
+            # Handle disabling deprecated models
+            if disable_deprecated and diffs_to_apply:
+                deprecated_to_disable = [
+                    d for d in diffs_to_apply if d.field == "(deprecated)"
+                ]
+                if deprecated_to_disable:
+                    disabled_count = 0
+                    with get_db_context() as db:
+                        for diff in deprecated_to_disable:
+                            model = (
+                                db.query(Model)
+                                .filter(
+                                    Model.provider_id == diff.provider,
+                                    Model.id == diff.model_id,
+                                )
+                                .first()
+                            )
+                            if model and model.enabled:
+                                model.enabled = False
+                                disabled_count += 1
+                        db.commit()
+                    results["models_disabled"] = disabled_count
+
+            # Re-apply YAML overrides after sync to ensure quirks are preserved
+            try:
+                from config.override_loader import apply_yaml_overrides_to_db
+
+                override_stats = apply_yaml_overrides_to_db()
+                results["yaml_overrides_applied"] = (
+                    override_stats["created"] + override_stats["updated"]
+                )
+
+                # Clear model cache so overrides take effect immediately
+                clear_config_cache()
+            except Exception as e:
+                logger.warning(f"Could not apply YAML overrides after sync: {e}")
 
             return jsonify(results)
 

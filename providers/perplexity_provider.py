@@ -57,7 +57,6 @@ class PerplexityProvider(OpenAICompatibleProvider):
         base_url: str | None = None,
         api_key_env: str | None = None,
         models: dict[str, ModelInfo] | None = None,
-        aliases: dict[str, str] | None = None,
     ):
         """Initialize the Perplexity provider."""
         super().__init__(
@@ -65,7 +64,6 @@ class PerplexityProvider(OpenAICompatibleProvider):
             base_url=base_url or self.base_url,
             api_key_env=api_key_env or self.api_key_env,
             models=models,
-            aliases=aliases,
         )
         self._last_stream_result: dict | None = None
 

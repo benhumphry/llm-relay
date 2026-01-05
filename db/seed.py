@@ -10,7 +10,7 @@ from datetime import datetime
 import requests
 
 from .connection import get_db_context
-from .models import Alias, Model, Provider
+from .models import Model, Provider
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ DEFAULT_PROVIDERS = [
         "id": "gemini",
         "type": "gemini",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "api_key_env": "GEMINI_API_KEY",
+        "api_key_env": "GOOGLE_API_KEY",
         "display_name": "Google Gemini",
     },
     {
@@ -144,6 +144,8 @@ LITELLM_PROVIDER_MAPPING = {
     "cerebras": "cerebras",
     "sambanova": "sambanova",
     "cohere": "cohere",
+    # Meta-providers (pricing is dynamic from API, but models are seeded for discovery)
+    "openrouter": "openrouter",
 }
 
 # Map LiteLLM capability flags to our capability names
@@ -162,49 +164,6 @@ INVALID_MODEL_NAMES = {
     "test",
     "sample",
 }
-
-# Default aliases for common model names
-DEFAULT_ALIASES = [
-    # Anthropic
-    {
-        "provider_id": "anthropic",
-        "alias": "claude",
-        "model_id": "claude-sonnet-4-20250514",
-    },
-    {
-        "provider_id": "anthropic",
-        "alias": "sonnet",
-        "model_id": "claude-sonnet-4-20250514",
-    },
-    {"provider_id": "anthropic", "alias": "opus", "model_id": "claude-opus-4-20250514"},
-    {
-        "provider_id": "anthropic",
-        "alias": "haiku",
-        "model_id": "claude-3-5-haiku-20241022",
-    },
-    # OpenAI
-    {"provider_id": "openai", "alias": "gpt4", "model_id": "gpt-4o"},
-    {"provider_id": "openai", "alias": "gpt4o", "model_id": "gpt-4o"},
-    {"provider_id": "openai", "alias": "gpt4-mini", "model_id": "gpt-4o-mini"},
-    {"provider_id": "openai", "alias": "o1", "model_id": "o1"},
-    {"provider_id": "openai", "alias": "o3", "model_id": "o3"},
-    {"provider_id": "openai", "alias": "o3-mini", "model_id": "o3-mini"},
-    # Gemini
-    {"provider_id": "gemini", "alias": "gemini", "model_id": "gemini-2.0-flash"},
-    {"provider_id": "gemini", "alias": "gemini-flash", "model_id": "gemini-2.0-flash"},
-    {
-        "provider_id": "gemini",
-        "alias": "gemini-pro",
-        "model_id": "gemini-2.5-pro-preview-06-05",
-    },
-    # DeepSeek
-    {"provider_id": "deepseek", "alias": "deepseek", "model_id": "deepseek-chat"},
-    {
-        "provider_id": "deepseek",
-        "alias": "deepseek-reasoner",
-        "model_id": "deepseek-reasoner",
-    },
-]
 
 
 def seed_providers() -> int:
@@ -235,41 +194,6 @@ def seed_providers() -> int:
 
     if created:
         logger.info(f"Seeded {created} default providers")
-    return created
-
-
-def seed_aliases() -> int:
-    """
-    Seed default aliases.
-
-    Returns:
-        Number of aliases created
-    """
-    created = 0
-    with get_db_context() as db:
-        for a in DEFAULT_ALIASES:
-            existing = (
-                db.query(Alias)
-                .filter(
-                    Alias.provider_id == a["provider_id"], Alias.alias == a["alias"]
-                )
-                .first()
-            )
-            if not existing:
-                alias = Alias(
-                    provider_id=a["provider_id"],
-                    alias=a["alias"],
-                    model_id=a["model_id"],
-                    source="system",
-                    enabled=True,
-                )
-                db.add(alias)
-                created += 1
-                logger.debug(f"Created alias: {a['alias']} -> {a['model_id']}")
-        db.commit()
-
-    if created:
-        logger.info(f"Seeded {created} default aliases")
     return created
 
 
@@ -513,16 +437,19 @@ def ensure_seeded() -> None:
 
     Called on application startup. Seeds providers (always works offline),
     then attempts to seed models from LiteLLM (graceful failure if offline).
+
+    This function is idempotent - it will add any missing providers
+    without duplicating existing ones, allowing for seamless upgrades when
+    new providers are added to DEFAULT_PROVIDERS.
     """
     with get_db_context() as db:
-        provider_count = db.query(Provider).count()
         model_count = db.query(Model).count()
 
-    # Always ensure providers exist
-    if provider_count == 0:
-        logger.info("No providers in database, seeding defaults...")
-        seed_providers()
-        seed_aliases()
+    # Always ensure all default providers exist (adds missing ones on upgrade)
+    providers_added = seed_providers()
+
+    if providers_added > 0:
+        logger.info(f"Seeded {providers_added} providers")
 
     # Seed models from LiteLLM if empty
     if model_count == 0:
@@ -532,3 +459,16 @@ def ensure_seeded() -> None:
         except Exception as e:
             logger.warning(f"Could not seed models from LiteLLM: {e}")
             logger.info("Models can be added manually or synced later via admin UI")
+
+    # Apply YAML-based model overrides (provider quirks, deprecated models)
+    try:
+        from config.override_loader import apply_yaml_overrides_to_db
+
+        apply_yaml_overrides_to_db()
+
+        # Clear the model cache so overrides take effect
+        from providers.loader import clear_config_cache
+
+        clear_config_cache()
+    except Exception as e:
+        logger.warning(f"Could not apply model overrides: {e}")

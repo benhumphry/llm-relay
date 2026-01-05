@@ -2,7 +2,7 @@
 SQLAlchemy models for ollama-llm-proxy.
 
 These models store provider configuration, model definitions, and settings
-that were previously stored in YAML files.
+in the database.
 """
 
 import json
@@ -68,9 +68,6 @@ class Provider(Base):
     models: Mapped[list["Model"]] = relationship(
         "Model", back_populates="provider", cascade="all, delete-orphan"
     )
-    aliases: Mapped[list["Alias"]] = relationship(
-        "Alias", back_populates="provider", cascade="all, delete-orphan"
-    )
 
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
@@ -92,7 +89,6 @@ class Provider(Base):
             "enabled": self.enabled,
             "display_order": self.display_order,
             "model_count": len(self.models) if self.models else 0,
-            "alias_count": len(self.aliases) if self.aliases else 0,
         }
 
 
@@ -197,45 +193,6 @@ class Model(Base):
         }
 
 
-class Alias(Base):
-    """
-    Model alias mapping.
-
-    Allows short names like 'claude' to map to 'claude-sonnet-4-5-20250929'
-    """
-
-    __tablename__ = "aliases"
-
-    alias: Mapped[str] = mapped_column(String(100), primary_key=True)
-    provider_id: Mapped[str] = mapped_column(
-        String(50), ForeignKey("providers.id"), primary_key=True
-    )
-    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
-
-    # Source tracking
-    source: Mapped[str] = mapped_column(
-        String(20), default="custom"
-    )  # "system", "custom"
-
-    # State
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    # Relationships
-    provider: Mapped["Provider"] = relationship("Provider", back_populates="aliases")
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for API responses."""
-        return {
-            "alias": self.alias,
-            "provider_id": self.provider_id,
-            "model_id": self.model_id,
-            "source": self.source,
-            "enabled": self.enabled,
-        }
-
-
 class Setting(Base):
     """
     Key-value settings storage.
@@ -265,10 +222,10 @@ class Setting(Base):
 
 class ModelOverride(Base):
     """
-    Override settings for system models (from YAML).
+    Override settings for LiteLLM-sourced models.
 
-    Allows users to disable system models or override specific properties
-    without modifying YAML files. System models auto-update with releases;
+    Allows users to disable models or override specific properties
+    like pricing. LiteLLM models auto-update with sync;
     overrides persist user preferences.
     """
 
@@ -294,6 +251,18 @@ class ModelOverride(Base):
     context_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # Provider quirks (API-specific behavior overrides)
+    # These persist across LiteLLM syncs since LiteLLM doesn't track them
+    use_max_completion_tokens: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True
+    )  # Use max_completion_tokens instead of max_tokens (OpenAI o1/o3/gpt-5)
+    supports_system_prompt: Mapped[Optional[bool]] = mapped_column(
+        Boolean, nullable=True
+    )  # Whether model supports system prompts
+    unsupported_params_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # JSON array of unsupported parameter names (e.g., ["temperature", "top_p"])
+
     @property
     def capabilities(self) -> list | None:
         """Get capabilities as a list."""
@@ -305,6 +274,18 @@ class ModelOverride(Base):
     def capabilities(self, value: list | None):
         """Set capabilities from a list."""
         self.capabilities_json = json.dumps(value) if value is not None else None
+
+    @property
+    def unsupported_params(self) -> list | None:
+        """Get unsupported_params as a list."""
+        if self.unsupported_params_json is None:
+            return None
+        return json.loads(self.unsupported_params_json)
+
+    @unsupported_params.setter
+    def unsupported_params(self, value: list | None):
+        """Set unsupported_params from a list."""
+        self.unsupported_params_json = json.dumps(value) if value is not None else None
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -328,36 +309,9 @@ class ModelOverride(Base):
             "capabilities": self.capabilities,
             "context_length": self.context_length,
             "description": self.description,
-        }
-
-
-class AliasOverride(Base):
-    """
-    Override settings for system aliases (from YAML).
-
-    Allows users to disable system aliases without modifying YAML files.
-    """
-
-    __tablename__ = "alias_overrides"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    provider_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    alias: Mapped[str] = mapped_column(String(100), nullable=False)
-    disabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
-
-    __table_args__ = ({"sqlite_autoincrement": True},)
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for API responses."""
-        return {
-            "id": self.id,
-            "provider_id": self.provider_id,
-            "alias": self.alias,
-            "disabled": self.disabled,
+            "use_max_completion_tokens": self.use_max_completion_tokens,
+            "supports_system_prompt": self.supports_system_prompt,
+            "unsupported_params": self.unsupported_params,
         }
 
 
@@ -365,8 +319,7 @@ class CustomModel(Base):
     """
     User-created custom models.
 
-    Unlike system models (from YAML), custom models are fully editable
-    and persist across updates.
+    Custom models are fully editable and persist across updates.
     """
 
     __tablename__ = "custom_models"
@@ -444,41 +397,11 @@ class CustomModel(Base):
         }
 
 
-class CustomAlias(Base):
-    """
-    User-created custom aliases.
-
-    Unlike system aliases (from YAML), custom aliases are fully editable
-    and persist across updates.
-    """
-
-    __tablename__ = "custom_aliases"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    provider_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    alias: Mapped[str] = mapped_column(String(100), nullable=False)
-    model_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = ({"sqlite_autoincrement": True},)
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for API responses."""
-        return {
-            "id": self.id,
-            "provider_id": self.provider_id,
-            "alias": self.alias,
-            "model_id": self.model_id,
-            "is_system": False,  # Always false for custom aliases
-        }
-
-
 class OllamaInstance(Base):
     """
     User-configured Ollama instances.
 
-    Allows users to add Ollama instances via the UI without editing YAML.
-    These are merged with any YAML-configured Ollama providers.
+    Allows users to add Ollama instances via the UI.
     """
 
     __tablename__ = "ollama_instances"
@@ -509,7 +432,7 @@ class CustomProvider(Base):
     """
     User-configured custom providers (Anthropic or OpenAI-compatible).
 
-    Allows users to add providers via the UI without editing YAML.
+    Allows users to add providers via the UI.
     """
 
     __tablename__ = "custom_providers"

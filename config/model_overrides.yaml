@@ -1,0 +1,242 @@
+# Model Overrides Configuration
+# =============================
+# This file defines provider-specific quirks and model status overrides.
+# These settings persist across LiteLLM pricing syncs.
+#
+# Structure:
+#   providers:
+#     <provider_id>:
+#       # Provider-wide defaults (applied to all models unless overridden)
+#       defaults:
+#         use_max_completion_tokens: true
+#         unsupported_params: [temperature, top_p]
+#
+#       # Model-specific overrides
+#       models:
+#         <model_id>:
+#           disabled: true  # Disable deprecated/obsolete models
+#           use_max_completion_tokens: true
+#           supports_system_prompt: false
+#           unsupported_params: [temperature, top_p]
+#
+#       # Pattern-based overrides (applied to models matching the pattern)
+#       patterns:
+#         - match: "gpt-5*"
+#           use_max_completion_tokens: true
+#         - match: "o1*"
+#           use_max_completion_tokens: true
+#           unsupported_params: [temperature, top_p]
+
+providers:
+  # ==========================================================================
+  # OpenAI
+  # ==========================================================================
+  # GPT-5.x, o1, o3, o4 models have special parameter handling.
+  # They require max_completion_tokens instead of max_tokens.
+  # Reasoning/Pro models don't support temperature, top_p, penalties, etc.
+  openai:
+    patterns:
+      # GPT-5.2 family
+      - match: "gpt-5.2*"
+        use_max_completion_tokens: true
+      - match: "gpt-5.2-pro*"
+        use_max_completion_tokens: true
+        supports_system_prompt: false
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+          - logit_bias
+
+      # GPT-5.1 family
+      - match: "gpt-5.1*"
+        use_max_completion_tokens: true
+
+      # GPT-5 family
+      - match: "gpt-5*"
+        use_max_completion_tokens: true
+      - match: "gpt-5-pro*"
+        use_max_completion_tokens: true
+        supports_system_prompt: false
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+          - logit_bias
+      - match: "gpt-5-nano*"
+        use_max_completion_tokens: true
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+          - logit_bias
+
+      # O4 reasoning models
+      - match: "o4*"
+        use_max_completion_tokens: true
+        supports_system_prompt: false
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+          - logit_bias
+
+      # O3 reasoning models
+      - match: "o3*"
+        use_max_completion_tokens: true
+        supports_system_prompt: false
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+          - logit_bias
+
+      # O1 reasoning models
+      - match: "o1*"
+        use_max_completion_tokens: true
+        supports_system_prompt: false
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+          - logit_bias
+
+  # ==========================================================================
+  # Anthropic
+  # ==========================================================================
+  # Anthropic models generally support all standard params
+  anthropic:
+    patterns: []
+
+  # ==========================================================================
+  # Google Gemini
+  # ==========================================================================
+  gemini:
+    patterns:
+      # Gemini 2.0 thinking models
+      - match: "gemini-2.0-flash-thinking*"
+        unsupported_params:
+          - temperature
+          - top_p
+          - top_k
+
+  # ==========================================================================
+  # DeepSeek
+  # ==========================================================================
+  # DeepSeek reasoner uses extended thinking (like o1)
+  # It doesn't support temperature/top_p during reasoning
+  deepseek:
+    patterns:
+      - match: "deepseek-reasoner*"
+        supports_system_prompt: false
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+
+      - match: "deepseek-r1*"
+        supports_system_prompt: false
+        unsupported_params:
+          - temperature
+          - top_p
+          - presence_penalty
+          - frequency_penalty
+          - logprobs
+          - top_logprobs
+
+  # ==========================================================================
+  # Perplexity
+  # ==========================================================================
+  # Perplexity models are search-augmented LLMs
+  # Note: sonar-reasoning was deprecated in January 2026
+  perplexity:
+    models:
+      # Deprecated reasoning model
+      sonar-reasoning:
+        disabled: true
+        reason: "Deprecated by Perplexity as of January 2026"
+
+      # Legacy pplx models
+      pplx-7b-chat:
+        disabled: true
+        reason: "Legacy model, use sonar instead"
+      pplx-7b-online:
+        disabled: true
+        reason: "Legacy model, use sonar instead"
+      pplx-70b-chat:
+        disabled: true
+        reason: "Legacy model, use sonar-pro instead"
+      pplx-70b-online:
+        disabled: true
+        reason: "Legacy model, use sonar-pro instead"
+
+      # Deprecated llama models on Perplexity
+      llama-2-70b-chat:
+        disabled: true
+        reason: "Deprecated, use llama-3.1 models instead"
+      codellama-34b-instruct:
+        disabled: true
+        reason: "Deprecated CodeLlama model"
+      codellama-70b-instruct:
+        disabled: true
+        reason: "Deprecated CodeLlama model"
+      mistral-7b-instruct:
+        disabled: true
+        reason: "Deprecated, use newer Mistral models"
+      mixtral-8x7b-instruct:
+        disabled: true
+        reason: "Deprecated, use newer Mistral models"
+
+  # ==========================================================================
+  # Groq
+  # ==========================================================================
+  # Groq models are optimized for speed
+  groq:
+    patterns: []
+
+  # ==========================================================================
+  # Mistral
+  # ==========================================================================
+  # Magistral models are thinking/reasoning models
+  mistral:
+    patterns:
+      - match: "magistral*"
+        unsupported_params:
+          - temperature
+          - top_p
+
+  # ==========================================================================
+  # xAI (Grok)
+  # ==========================================================================
+  xai:
+    patterns: []
+
+  # ==========================================================================
+  # OpenRouter
+  # ==========================================================================
+  # OpenRouter routes to various providers, quirks depend on underlying model
+  openrouter:
+    patterns: []
+# Note: Add new provider quirks and deprecated models here.
+# Run the sync or restart the proxy to apply changes.

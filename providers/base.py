@@ -60,24 +60,30 @@ class LLMProvider(ABC):
 
     name: str  # Provider identifier (e.g., "anthropic", "openai", "gemini")
 
-    # Whether this provider calculates costs dynamically (vs using static YAML rates)
+    # Whether this provider calculates costs dynamically (vs using static database rates)
     # Providers with custom cost calculation (Anthropic, Gemini, Perplexity, OpenRouter)
     # should set this to True. When True, cost overrides in the admin UI are hidden.
     has_custom_cost_calculation: bool = False
+
+    # Whether this provider is enabled (can be toggled via admin UI)
+    # Disabled providers still appear in the UI but won't be used for requests
+    enabled: bool = True
 
     @abstractmethod
     def is_configured(self) -> bool:
         """Check if this provider has valid API credentials configured."""
         pass
 
+    def is_available(self) -> bool:
+        """Check if this provider is available for API requests.
+
+        A provider is available if it's both enabled AND configured.
+        """
+        return self.enabled and self.is_configured()
+
     @abstractmethod
     def get_models(self) -> dict[str, ModelInfo]:
         """Return dict of model_id -> ModelInfo for this provider."""
-        pass
-
-    @abstractmethod
-    def get_aliases(self) -> dict[str, str]:
-        """Return dict of alias -> model_id for user-friendly names."""
         pass
 
     @abstractmethod
@@ -128,7 +134,6 @@ class LLMProvider(ABC):
         """
         Resolve a model name to a model ID for this provider.
 
-        Checks aliases first, then direct model IDs.
         Returns None if model not found in this provider.
         """
         name = model_name.lower().strip()
@@ -136,11 +141,6 @@ class LLMProvider(ABC):
         # Remove :latest suffix
         if name.endswith(":latest"):
             name = name[:-7]
-
-        # Check aliases
-        aliases = self.get_aliases()
-        if name in aliases:
-            return aliases[name]
 
         # Check direct model IDs
         models = self.get_models()
@@ -204,7 +204,6 @@ class OpenAICompatibleProvider(LLMProvider):
         base_url: str | None = None,
         api_key_env: str | None = None,
         models: dict[str, ModelInfo] | None = None,
-        aliases: dict[str, str] | None = None,
     ):
         """
         Initialize the provider.
@@ -214,7 +213,6 @@ class OpenAICompatibleProvider(LLMProvider):
             base_url: API endpoint URL (uses class attribute if not provided)
             api_key_env: Environment variable name (uses class attribute if not provided)
             models: Dict of model_id -> ModelInfo (uses class attribute if not provided)
-            aliases: Dict of alias -> model_id (uses class attribute if not provided)
         """
         # Use provided values or fall back to class attributes
         if name is not None:
@@ -224,12 +222,9 @@ class OpenAICompatibleProvider(LLMProvider):
         if api_key_env is not None:
             self.api_key_env = api_key_env
 
-        # Models and aliases - use instance attributes
+        # Models - use instance attributes
         self._models = (
             models if models is not None else getattr(self.__class__, "models", {})
-        )
-        self._aliases = (
-            aliases if aliases is not None else getattr(self.__class__, "aliases", {})
         )
 
     def is_configured(self) -> bool:
@@ -239,10 +234,6 @@ class OpenAICompatibleProvider(LLMProvider):
     def get_models(self) -> dict[str, ModelInfo]:
         """Return models dict."""
         return self._models
-
-    def get_aliases(self) -> dict[str, str]:
-        """Return aliases dict."""
-        return self._aliases
 
     def get_client(self) -> OpenAI:
         """Get or create OpenAI client."""
@@ -254,14 +245,35 @@ class OpenAICompatibleProvider(LLMProvider):
         return self._client
 
     def _get_model_info(self, model: str) -> ModelInfo | None:
-        """Get ModelInfo for a model, checking aliases if needed."""
+        """Get ModelInfo for a model."""
         if model in self._models:
             return self._models[model]
-        # Check if it's an alias
-        for alias, model_id in self._aliases.items():
-            if model == model_id and model_id in self._models:
-                return self._models[model_id]
         return None
+
+    def _convert_image_format(self, content: list) -> list:
+        """Convert Anthropic-style image format to OpenAI format.
+
+        Anthropic format: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+        OpenAI format: {"type": "image_url", "url": "data:image/jpeg;base64,..."}
+        """
+        converted = []
+        for block in content:
+            if block.get("type") == "image" and "source" in block:
+                source = block["source"]
+                if source.get("type") == "base64":
+                    media_type = source.get("media_type", "image/jpeg")
+                    data = source.get("data", "")
+                    converted.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media_type};base64,{data}"},
+                        }
+                    )
+                else:
+                    converted.append(block)
+            else:
+                converted.append(block)
+        return converted
 
     def _build_messages(
         self, model: str, messages: list[dict], system: str | None
@@ -284,13 +296,27 @@ class OpenAICompatibleProvider(LLMProvider):
                     if isinstance(content, str):
                         first_msg["content"] = f"{system}\n\n{content}"
                     result.append(first_msg)
-                    result.extend(messages[1:])
+                    result.extend(self._convert_messages_images(messages[1:]))
                     return result
             else:
                 result.append({"role": "system", "content": system})
 
-        result.extend(messages)
+        result.extend(self._convert_messages_images(messages))
         return result
+
+    def _convert_messages_images(self, messages: list[dict]) -> list[dict]:
+        """Convert image formats in messages to OpenAI format."""
+        converted = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                # Has content blocks - may contain images
+                new_msg = msg.copy()
+                new_msg["content"] = self._convert_image_format(content)
+                converted.append(new_msg)
+            else:
+                converted.append(msg)
+        return converted
 
     def _build_kwargs(self, model: str, options: dict) -> dict:
         """Build kwargs for OpenAI API call, filtering unsupported params."""
@@ -362,11 +388,19 @@ class OpenAICompatibleProvider(LLMProvider):
                 if details and hasattr(details, "reasoning_tokens"):
                     result["reasoning_tokens"] = details.reasoning_tokens
 
-            # OpenAI cached input tokens
+            # OpenAI cached input tokens (prompt_tokens_details.cached_tokens)
             if hasattr(response.usage, "prompt_tokens_details"):
                 details = response.usage.prompt_tokens_details
                 if details and hasattr(details, "cached_tokens"):
                     result["cached_input_tokens"] = details.cached_tokens
+
+            # DeepSeek uses a different format (prompt_cache_hit_tokens at top level)
+            # Only use this if we didn't already get cached tokens from OpenAI format
+            if "cached_input_tokens" not in result:
+                if hasattr(response.usage, "prompt_cache_hit_tokens"):
+                    cache_hit = response.usage.prompt_cache_hit_tokens
+                    if cache_hit:
+                        result["cached_input_tokens"] = cache_hit
 
         return result
 
@@ -383,9 +417,51 @@ class OpenAICompatibleProvider(LLMProvider):
         kwargs = self._build_kwargs(model, options)
         kwargs["messages"] = self._build_messages(model, messages, system)
         kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+
+        # Reset last stream result
+        self._last_stream_result = None
 
         stream = client.chat.completions.create(**kwargs)
 
         for chunk in stream:
+            # Yield content if present
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
+
+            # Capture usage from final chunk (when stream_options.include_usage is True)
+            if hasattr(chunk, "usage") and chunk.usage:
+                usage = chunk.usage
+                result = {
+                    "input_tokens": usage.prompt_tokens or 0,
+                    "output_tokens": usage.completion_tokens or 0,
+                }
+
+                # Extract reasoning tokens (OpenAI o1/o3/o4 models)
+                if hasattr(usage, "completion_tokens_details"):
+                    details = usage.completion_tokens_details
+                    if details and hasattr(details, "reasoning_tokens"):
+                        result["reasoning_tokens"] = details.reasoning_tokens
+
+                # Extract cached tokens (OpenAI format)
+                if hasattr(usage, "prompt_tokens_details"):
+                    details = usage.prompt_tokens_details
+                    if details and hasattr(details, "cached_tokens"):
+                        result["cached_input_tokens"] = details.cached_tokens
+
+                # DeepSeek format (prompt_cache_hit_tokens at top level)
+                if "cached_input_tokens" not in result:
+                    if hasattr(usage, "prompt_cache_hit_tokens"):
+                        cache_hit = usage.prompt_cache_hit_tokens
+                        if cache_hit:
+                            result["cached_input_tokens"] = cache_hit
+
+                self._last_stream_result = result
+
+    def get_last_stream_result(self) -> dict | None:
+        """Get the result from the last streaming call.
+
+        Returns dict with 'input_tokens', 'output_tokens', and optionally
+        'reasoning_tokens', 'cached_input_tokens' if available.
+        """
+        return getattr(self, "_last_stream_result", None)

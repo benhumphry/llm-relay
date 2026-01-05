@@ -1,17 +1,17 @@
-{% extends "base.html" %} {% block title %}Models{% endblock %} {% block content
-%}
-<div x-data="modelsPage()" x-init="init()">
+{% extends "base.html" %} {% block title %}Providers & Models{% endblock %} {%
+block content %}
+<div x-data="providersModelsPage()" x-init="init()">
     <!-- Header -->
     <div
         class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
     >
         <div>
-            <h1 class="text-2xl font-bold">Models</h1>
+            <h1 class="text-2xl font-bold">Providers & Models</h1>
             <p class="text-base-content/60">
-                Manage model configurations across providers
+                Manage LLM providers and their models
             </p>
         </div>
-        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+        <button @click="openAddProviderModal()" class="btn btn-primary btn-sm">
             <svg
                 xmlns="http://www.w3.org/2000/svg"
                 class="h-4 w-4 mr-1"
@@ -26,33 +26,8 @@
                     d="M12 4v16m8-8H4"
                 />
             </svg>
-            Add Custom Model
+            Add Provider
         </button>
-    </div>
-
-    <!-- Info Banner -->
-    <div class="alert alert-info mb-6">
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            class="stroke-current shrink-0 w-6 h-6"
-        >
-            <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            ></path>
-        </svg>
-        <div>
-            <span class="font-semibold">System models</span> update
-            automatically with releases.
-            <span class="font-semibold">Dynamic models</span> are discovered
-            from Ollama instances.
-            <span class="font-semibold">Custom models</span> you create are
-            fully editable and persist across updates.
-        </div>
     </div>
 
     <!-- Filters -->
@@ -60,300 +35,649 @@
         <div class="card-body py-4">
             <div class="flex flex-wrap gap-4 items-center">
                 <div class="form-control">
-                    <select
-                        x-model="filterProvider"
-                        @change="loadModels()"
-                        class="select select-bordered select-sm"
-                    >
-                        <option value="">All Providers</option>
-                        <template x-for="p in providers" :key="p.id">
-                            <option :value="p.id" x-text="p.id"></option>
-                        </template>
-                    </select>
-                </div>
-                <div class="form-control">
-                    <select
-                        x-model="filterType"
-                        class="select select-bordered select-sm"
-                    >
-                        <option value="">All Types</option>
-                        <option value="system">System Only</option>
-                        <option value="dynamic">Dynamic Only</option>
-                        <option value="custom">Custom Only</option>
-                    </select>
-                </div>
-                <div class="form-control">
                     <label class="label cursor-pointer gap-2">
                         <input
                             type="checkbox"
-                            x-model="filterActiveProviders"
+                            x-model="showConfiguredOnly"
                             class="checkbox checkbox-sm"
                         />
-                        <span class="label-text text-sm"
-                            >Active providers only</span
-                        >
+                        <span class="label-text text-sm">Configured only</span>
                     </label>
                 </div>
                 <div class="form-control flex-1 max-w-xs">
                     <input
                         type="text"
                         x-model="searchQuery"
-                        placeholder="Search models..."
+                        placeholder="Search providers or models..."
                         class="input input-bordered input-sm"
                     />
                 </div>
                 <div class="text-sm text-base-content/60">
-                    <span x-text="filteredModels.length"></span> models
-                    <template
-                        x-if="!filterActiveProviders && inactiveProviderCount > 0"
-                    >
-                        <span class="text-warning">
-                            (<span x-text="inactiveProviderModelsCount"></span>
-                            from inactive providers)
-                        </span>
-                    </template>
+                    <span x-text="filteredProviders.length"></span> providers,
+                    <span x-text="totalFilteredModels"></span> models
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Models Table -->
-    <div class="card bg-base-100 shadow-lg">
-        <div class="card-body p-0">
-            <div class="overflow-x-auto">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Model ID</th>
-                            <th>Provider</th>
-                            <th>Type</th>
-                            <th>Family</th>
-                            <th>Context</th>
-                            <th>Cost ($/M)</th>
-                            <th>Capabilities</th>
-                            <th>Status</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template
-                            x-for="model in filteredModels"
-                            :key="model.provider_id + '/' + model.id"
-                        >
-                            <tr
-                                class="hover"
-                                :class="{ 'opacity-50': model.disabled || !model.provider_active }"
+    <!-- Providers with Collapsible Models -->
+    <div class="space-y-4">
+        <template x-for="provider in filteredProviders" :key="provider.id">
+            <div class="card bg-base-100 shadow-lg">
+                <!-- Provider Header (always visible) -->
+                <div
+                    class="card-body py-4 cursor-pointer hover:bg-base-200/50 transition-colors"
+                    @click="toggleExpanded(provider.id)"
+                >
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4">
+                            <!-- Expand/Collapse Arrow -->
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5 transition-transform"
+                                :class="{ 'rotate-90': isExpanded(provider.id) }"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
                             >
-                                <td>
-                                    <div
-                                        class="font-medium"
-                                        x-text="model.id"
-                                    ></div>
-                                    <div
-                                        class="text-xs text-base-content/60 max-w-xs truncate"
-                                        x-text="model.description"
-                                    ></div>
-                                </td>
-                                <td>
-                                    <span
-                                        class="badge badge-ghost"
-                                        x-text="model.provider_id"
-                                    ></span>
-                                </td>
-                                <td>
-                                    <template x-if="model.source === 'system'">
-                                        <span class="badge badge-info badge-sm"
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M9 5l7 7-7 7"
+                                />
+                            </svg>
+
+                            <!-- Provider Info -->
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h3
+                                        class="font-bold text-lg"
+                                        x-text="provider.display_name || provider.id"
+                                    ></h3>
+                                    <template x-if="provider.is_system">
+                                        <span class="badge badge-ghost badge-sm"
                                             >System</span
                                         >
                                     </template>
-                                    <template x-if="model.source === 'dynamic'">
-                                        <span
-                                            class="badge badge-warning badge-sm"
-                                            >Dynamic</span
-                                        >
-                                    </template>
-                                    <template x-if="model.source === 'custom'">
-                                        <span
-                                            class="badge badge-success badge-sm"
-                                            >Custom</span
-                                        >
-                                    </template>
-                                </td>
-                                <td x-text="model.family"></td>
-                                <td>
-                                    <span
-                                        x-text="formatContext(model.context_length)"
-                                    ></span>
-                                </td>
-                                <td class="text-sm text-base-content/70">
-                                    <template x-if="model.input_cost != null">
-                                        <span
-                                            x-text="'$' + model.input_cost.toFixed(2) + ' / $' + (model.output_cost || 0).toFixed(2)"
-                                        ></span>
-                                    </template>
-                                    <template
-                                        x-if="model.input_cost == null && model.has_custom_cost"
-                                    >
-                                        <span class="badge badge-xs badge-info"
-                                            >Dynamic</span
-                                        >
-                                    </template>
-                                    <template
-                                        x-if="model.input_cost == null && !model.has_custom_cost"
-                                    >
-                                        <span class="text-base-content/40"
-                                            >-</span
-                                        >
-                                    </template>
-                                </td>
-                                <td>
-                                    <div class="flex flex-wrap gap-1">
-                                        <template
-                                            x-for="cap in model.capabilities?.slice(0, 3)"
-                                            :key="cap"
-                                        >
-                                            <span
-                                                class="badge badge-xs"
-                                                x-text="cap"
-                                            ></span>
-                                        </template>
-                                        <template
-                                            x-if="model.capabilities?.length > 3"
-                                        >
-                                            <span
-                                                class="badge badge-xs badge-ghost"
-                                                x-text="'+' + (model.capabilities.length - 3)"
-                                            ></span>
-                                        </template>
-                                    </div>
-                                </td>
-                                <td>
-                                    <template x-if="!model.provider_active">
-                                        <span
-                                            class="badge badge-warning badge-sm"
-                                            title="Provider API key not configured"
-                                            >No API Key</span
-                                        >
-                                    </template>
-                                    <template
-                                        x-if="model.provider_active && model.enabled && !model.disabled"
-                                    >
-                                        <span
-                                            class="badge badge-success badge-sm"
-                                            >Enabled</span
-                                        >
-                                    </template>
-                                    <template
-                                        x-if="model.provider_active && (!model.enabled || model.disabled)"
-                                    >
-                                        <span
-                                            class="badge badge-neutral badge-sm"
-                                            >Disabled</span
-                                        >
-                                    </template>
-                                </td>
-                                <td>
-                                    <div class="dropdown dropdown-end">
-                                        <label
-                                            tabindex="0"
-                                            class="btn btn-ghost btn-xs"
-                                        >
-                                            <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                class="h-4 w-4"
-                                                fill="none"
-                                                viewBox="0 0 24 24"
-                                                stroke="currentColor"
-                                            >
-                                                <path
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    stroke-width="2"
-                                                    d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
-                                                />
-                                            </svg>
-                                        </label>
-                                        <ul
-                                            tabindex="0"
-                                            class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-40 z-50 opacity-100"
-                                        >
-                                            <!-- System/Dynamic model actions -->
-                                            <template
-                                                x-if="model.source === 'system' || model.source === 'dynamic'"
-                                            >
-                                                <li>
-                                                    <a
-                                                        @click="openOverrideModal(model)"
-                                                        >Edit Override</a
-                                                    >
-                                                </li>
-                                            </template>
-                                            <template
-                                                x-if="model.source === 'system' || model.source === 'dynamic'"
-                                            >
-                                                <li>
-                                                    <a
-                                                        @click="toggleSystemModel(model)"
-                                                        x-text="model.disabled ? 'Enable' : 'Disable'"
-                                                    ></a>
-                                                </li>
-                                            </template>
-                                            <!-- Custom model actions (full CRUD) -->
-                                            <template
-                                                x-if="model.source === 'custom'"
-                                            >
-                                                <li>
-                                                    <a
-                                                        @click="openEditModal(model)"
-                                                        >Edit</a
-                                                    >
-                                                </li>
-                                            </template>
-                                            <template
-                                                x-if="model.source === 'custom'"
-                                            >
-                                                <li>
-                                                    <a
-                                                        @click="toggleCustomModel(model)"
-                                                        x-text="model.enabled ? 'Disable' : 'Enable'"
-                                                    ></a>
-                                                </li>
-                                            </template>
-                                            <template
-                                                x-if="model.source === 'custom'"
-                                            >
-                                                <li>
-                                                    <a
-                                                        @click="deleteCustomModel(model)"
-                                                        class="text-error"
-                                                        >Delete</a
-                                                    >
-                                                </li>
-                                            </template>
-                                        </ul>
-                                    </div>
-                                </td>
-                            </tr>
-                        </template>
-                    </tbody>
-                </table>
-            </div>
+                                </div>
+                                <p
+                                    class="text-sm text-base-content/60"
+                                    x-text="getProviderTypeLabel(provider)"
+                                ></p>
+                            </div>
+                        </div>
 
-            <!-- Empty state -->
-            <template x-if="filteredModels.length === 0 && !loading">
-                <div class="text-center py-12">
-                    <p class="text-base-content/60">No models found</p>
+                        <div class="flex items-center gap-4" @click.stop>
+                            <!-- Model Count -->
+                            <div class="text-sm text-base-content/60">
+                                <span
+                                    x-text="getProviderModelCount(provider.id)"
+                                ></span>
+                                models
+                            </div>
+
+                            <!-- Status Badge -->
+                            <template
+                                x-if="provider.enabled && (provider.has_api_key || provider.type === 'ollama')"
+                            >
+                                <span class="badge badge-success gap-1">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-3 w-3"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
+                                    </svg>
+                                    Active
+                                </span>
+                            </template>
+                            <template
+                                x-if="provider.enabled && !provider.has_api_key && provider.type !== 'ollama'"
+                            >
+                                <span class="badge badge-warning gap-1">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-3 w-3"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M12 9v2m0 4h.01"
+                                        />
+                                    </svg>
+                                    No API Key
+                                </span>
+                            </template>
+                            <template x-if="!provider.enabled">
+                                <span class="badge badge-neutral"
+                                    >Disabled</span
+                                >
+                            </template>
+
+                            <!-- Enable/Disable Toggle -->
+                            <input
+                                type="checkbox"
+                                class="toggle toggle-sm toggle-success"
+                                :checked="provider.enabled"
+                                @change="toggleProvider(provider.id, $event.target.checked)"
+                                title="Enable/disable provider"
+                            />
+
+                            <!-- Provider Actions -->
+                            <div class="dropdown dropdown-end">
+                                <label
+                                    tabindex="0"
+                                    class="btn btn-ghost btn-sm btn-circle"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-5 w-5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+                                        />
+                                    </svg>
+                                </label>
+                                <ul
+                                    tabindex="0"
+                                    class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-52 z-50"
+                                >
+                                    <li>
+                                        <a @click="testProvider(provider.id)">
+                                            Test Connection
+                                        </a>
+                                    </li>
+                                    <template x-if="!provider.is_system">
+                                        <li>
+                                            <a
+                                                @click="openEditProviderModal(provider)"
+                                            >
+                                                Edit Provider
+                                            </a>
+                                        </li>
+                                    </template>
+                                    <template x-if="!provider.is_system">
+                                        <li>
+                                            <a
+                                                @click="deleteProvider(provider.id)"
+                                                class="text-error"
+                                            >
+                                                Delete Provider
+                                            </a>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </template>
-        </div>
+
+                <!-- Collapsible Models Section -->
+                <div
+                    x-show="isExpanded(provider.id)"
+                    x-collapse
+                    class="border-t border-base-300"
+                >
+                    <div class="p-4">
+                        <!-- Add Custom Model button -->
+                        <div class="flex justify-end mb-4">
+                            <button
+                                @click="openAddModelModal(provider.id)"
+                                class="btn btn-outline btn-sm"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-4 w-4 mr-1"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M12 4v16m8-8H4"
+                                    />
+                                </svg>
+                                Add Custom Model
+                            </button>
+                        </div>
+
+                        <!-- Model search within provider -->
+                        <template
+                            x-if="getProviderModels(provider.id).length > 10"
+                        >
+                            <div class="mb-4">
+                                <input
+                                    type="text"
+                                    :placeholder="'Search ' + provider.id + ' models...'"
+                                    class="input input-bordered input-sm w-full max-w-xs"
+                                    x-model="providerSearch[provider.id]"
+                                />
+                            </div>
+                        </template>
+
+                        <!-- Models Table -->
+                        <div class="overflow-x-auto">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Model</th>
+                                        <th>Type</th>
+                                        <th>Family</th>
+                                        <th>Context</th>
+                                        <th>Cost ($/M)</th>
+                                        <th>Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <template
+                                        x-for="model in getFilteredProviderModels(provider.id)"
+                                        :key="model.id"
+                                    >
+                                        <tr
+                                            class="hover"
+                                            :class="{ 'opacity-50': model.disabled || !model.provider_active }"
+                                        >
+                                            <td>
+                                                <div
+                                                    class="font-medium"
+                                                    x-text="model.id"
+                                                ></div>
+                                                <div
+                                                    class="text-xs text-base-content/60 max-w-xs truncate"
+                                                    x-text="model.description"
+                                                ></div>
+                                            </td>
+                                            <td>
+                                                <template
+                                                    x-if="model.source === 'litellm'"
+                                                >
+                                                    <span
+                                                        class="badge badge-info badge-xs"
+                                                        >LiteLLM</span
+                                                    >
+                                                </template>
+                                                <template
+                                                    x-if="model.source === 'ollama'"
+                                                >
+                                                    <span
+                                                        class="badge badge-warning badge-xs"
+                                                        >Ollama</span
+                                                    >
+                                                </template>
+                                                <template
+                                                    x-if="model.source === 'custom'"
+                                                >
+                                                    <span
+                                                        class="badge badge-success badge-xs"
+                                                        >Custom</span
+                                                    >
+                                                </template>
+                                            </td>
+                                            <td
+                                                class="text-sm"
+                                                x-text="model.family"
+                                            ></td>
+                                            <td class="text-sm">
+                                                <span
+                                                    x-text="formatContext(model.context_length)"
+                                                ></span>
+                                            </td>
+                                            <td
+                                                class="text-sm text-base-content/70"
+                                            >
+                                                <template
+                                                    x-if="model.input_cost != null"
+                                                >
+                                                    <div
+                                                        class="flex items-center gap-1"
+                                                    >
+                                                        <span
+                                                            x-text="'$' + model.input_cost.toFixed(2) + ' / $' + (model.output_cost || 0).toFixed(2)"
+                                                        ></span>
+                                                        <template
+                                                            x-if="model.has_custom_cost"
+                                                        >
+                                                            <span
+                                                                class="badge badge-xs badge-info"
+                                                                title="Actual cost calculated from API response"
+                                                                >~</span
+                                                            >
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                                <template
+                                                    x-if="model.input_cost == null && model.has_custom_cost"
+                                                >
+                                                    <span
+                                                        class="badge badge-xs badge-info"
+                                                        title="Cost calculated from API response"
+                                                        >Dynamic</span
+                                                    >
+                                                </template>
+                                                <template
+                                                    x-if="model.input_cost == null && !model.has_custom_cost"
+                                                >
+                                                    <span
+                                                        class="text-base-content/40"
+                                                        >-</span
+                                                    >
+                                                </template>
+                                            </td>
+                                            <td>
+                                                <template
+                                                    x-if="model.provider_enabled === false"
+                                                >
+                                                    <span
+                                                        class="badge badge-neutral badge-xs"
+                                                        title="Provider is disabled"
+                                                        >Provider Off</span
+                                                    >
+                                                </template>
+                                                <template
+                                                    x-if="model.provider_enabled !== false && !model.provider_configured"
+                                                >
+                                                    <span
+                                                        class="badge badge-warning badge-xs"
+                                                        title="Provider API key not configured"
+                                                        >No API Key</span
+                                                    >
+                                                </template>
+                                                <template
+                                                    x-if="model.provider_active && model.enabled && !model.disabled"
+                                                >
+                                                    <span
+                                                        class="badge badge-success badge-xs"
+                                                        >Enabled</span
+                                                    >
+                                                </template>
+                                                <template
+                                                    x-if="model.provider_active && (!model.enabled || model.disabled)"
+                                                >
+                                                    <span
+                                                        class="badge badge-neutral badge-xs"
+                                                        >Disabled</span
+                                                    >
+                                                </template>
+                                            </td>
+                                            <td>
+                                                <div
+                                                    class="dropdown dropdown-end"
+                                                >
+                                                    <label
+                                                        tabindex="0"
+                                                        class="btn btn-ghost btn-xs"
+                                                    >
+                                                        <svg
+                                                            xmlns="http://www.w3.org/2000/svg"
+                                                            class="h-4 w-4"
+                                                            fill="none"
+                                                            viewBox="0 0 24 24"
+                                                            stroke="currentColor"
+                                                        >
+                                                            <path
+                                                                stroke-linecap="round"
+                                                                stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+                                                            />
+                                                        </svg>
+                                                    </label>
+                                                    <ul
+                                                        tabindex="0"
+                                                        class="dropdown-content menu p-2 shadow-lg bg-base-200 rounded-box w-48 z-50"
+                                                    >
+                                                        <li>
+                                                            <a
+                                                                @click="copyModelName(model.id)"
+                                                                >Copy Model
+                                                                Name</a
+                                                            >
+                                                        </li>
+                                                        <!-- LiteLLM/Ollama model actions -->
+                                                        <template
+                                                            x-if="model.source === 'litellm' || model.source === 'ollama'"
+                                                        >
+                                                            <li>
+                                                                <a
+                                                                    @click="openOverrideModal(model)"
+                                                                    >Edit
+                                                                    Override</a
+                                                                >
+                                                            </li>
+                                                        </template>
+                                                        <template
+                                                            x-if="model.source === 'litellm' || model.source === 'ollama'"
+                                                        >
+                                                            <li>
+                                                                <a
+                                                                    @click="toggleSystemModel(model)"
+                                                                    x-text="model.disabled ? 'Enable' : 'Disable'"
+                                                                ></a>
+                                                            </li>
+                                                        </template>
+                                                        <!-- Custom model actions -->
+                                                        <template
+                                                            x-if="model.source === 'custom'"
+                                                        >
+                                                            <li>
+                                                                <a
+                                                                    @click="openEditModelModal(model)"
+                                                                    >Edit</a
+                                                                >
+                                                            </li>
+                                                        </template>
+                                                        <template
+                                                            x-if="model.source === 'custom'"
+                                                        >
+                                                            <li>
+                                                                <a
+                                                                    @click="toggleCustomModel(model)"
+                                                                    x-text="model.enabled ? 'Disable' : 'Enable'"
+                                                                ></a>
+                                                            </li>
+                                                        </template>
+                                                        <template
+                                                            x-if="model.source === 'custom'"
+                                                        >
+                                                            <li>
+                                                                <a
+                                                                    @click="deleteCustomModel(model)"
+                                                                    class="text-error"
+                                                                    >Delete</a
+                                                                >
+                                                            </li>
+                                                        </template>
+                                                    </ul>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Empty state for models -->
+                        <template
+                            x-if="getFilteredProviderModels(provider.id).length === 0"
+                        >
+                            <div class="text-center py-8">
+                                <p class="text-base-content/60">
+                                    No models found
+                                </p>
+                            </div>
+                        </template>
+
+                        <!-- Show more link if many models -->
+                        <template
+                            x-if="getProviderModels(provider.id).length > 20 && !providerShowAll[provider.id]"
+                        >
+                            <div class="text-center pt-4">
+                                <button
+                                    @click="providerShowAll[provider.id] = true"
+                                    class="btn btn-ghost btn-sm"
+                                >
+                                    Show all
+                                    <span
+                                        x-text="getProviderModels(provider.id).length"
+                                    ></span>
+                                    models
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </template>
     </div>
 
+    <!-- Empty state -->
+    <template x-if="filteredProviders.length === 0 && !loading">
+        <div class="text-center py-12">
+            <p class="text-base-content/60">No providers found</p>
+        </div>
+    </template>
+
+    <!-- Add/Edit Provider Modal -->
+    <dialog
+        id="provider_modal"
+        class="modal"
+        :class="{ 'modal-open': showProviderModal }"
+    >
+        <div class="modal-box">
+            <h3
+                class="font-bold text-lg"
+                x-text="editingProvider ? 'Edit Provider' : 'Add Provider'"
+            ></h3>
+
+            <form @submit.prevent="saveProvider()" class="mt-4 space-y-4">
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Provider ID</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="providerForm.id"
+                        class="input input-bordered"
+                        placeholder="e.g., my-openai"
+                        :disabled="editingProvider"
+                        required
+                    />
+                </div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Type</span>
+                    </label>
+                    <select
+                        x-model="providerForm.type"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="openai-compatible">
+                            OpenAI Compatible
+                        </option>
+                        <option value="anthropic">Anthropic Compatible</option>
+                        <option value="ollama">Ollama Compatible</option>
+                    </select>
+                </div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Base URL</span>
+                    </label>
+                    <input
+                        type="url"
+                        x-model="providerForm.base_url"
+                        class="input input-bordered"
+                        :placeholder="providerForm.type === 'ollama' ? 'http://192.168.1.100:11434' : 'https://api.openai.com/v1 (optional)'"
+                        :required="providerForm.type === 'ollama'"
+                    />
+                </div>
+
+                <div
+                    class="form-control"
+                    x-show="providerForm.type !== 'ollama'"
+                >
+                    <label class="label">
+                        <span class="label-text"
+                            >API Key Environment Variable</span
+                        >
+                    </label>
+                    <input
+                        type="text"
+                        x-model="providerForm.api_key_env"
+                        class="input input-bordered"
+                        placeholder="e.g., OPENAI_API_KEY"
+                    />
+                </div>
+
+                <div class="form-control">
+                    <label class="label cursor-pointer justify-start gap-3">
+                        <input
+                            type="checkbox"
+                            x-model="providerForm.enabled"
+                            class="checkbox"
+                        />
+                        <span class="label-text">Enabled</span>
+                    </label>
+                </div>
+
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="closeProviderModal()"
+                        class="btn"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': savingProvider }"
+                    >
+                        <span
+                            x-text="editingProvider ? 'Save Changes' : 'Add Provider'"
+                        ></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button @click="closeProviderModal()">close</button>
+        </form>
+    </dialog>
+
     <!-- Add/Edit Custom Model Modal -->
-    <dialog id="model_modal" class="modal" :class="{ 'modal-open': showModal }">
+    <dialog
+        id="model_modal"
+        class="modal"
+        :class="{ 'modal-open': showModelModal }"
+    >
         <div class="modal-box max-w-2xl">
             <h3
                 class="font-bold text-lg"
-                x-text="editing ? 'Edit Custom Model' : 'Add Custom Model'"
+                x-text="editingModel ? 'Edit Custom Model' : 'Add Custom Model'"
             ></h3>
             <p class="text-sm text-base-content/60 mt-1">
                 Custom models are fully editable and persist across updates.
@@ -367,10 +691,10 @@
                         </label>
                         <input
                             type="text"
-                            x-model="form.model_id"
+                            x-model="modelForm.model_id"
                             class="input input-bordered"
                             placeholder="e.g., my-fine-tune-v1"
-                            :disabled="editing"
+                            :disabled="editingModel"
                             required
                         />
                     </div>
@@ -380,9 +704,9 @@
                             <span class="label-text">Provider</span>
                         </label>
                         <select
-                            x-model="form.provider_id"
+                            x-model="modelForm.provider_id"
                             class="select select-bordered"
-                            :disabled="editing"
+                            :disabled="editingModel"
                             required
                         >
                             <option value="">Select provider</option>
@@ -400,7 +724,7 @@
                         </label>
                         <input
                             type="text"
-                            x-model="form.family"
+                            x-model="modelForm.family"
                             class="input input-bordered"
                             placeholder="e.g., gpt-4"
                             required
@@ -413,7 +737,7 @@
                         </label>
                         <input
                             type="number"
-                            x-model.number="form.context_length"
+                            x-model.number="modelForm.context_length"
                             class="input input-bordered"
                             min="1"
                         />
@@ -421,7 +745,7 @@
                 </div>
 
                 <!-- Cost fields - hidden for providers with dynamic pricing -->
-                <template x-if="providerHasCustomCost(form.provider_id)">
+                <template x-if="providerHasCustomCost(modelForm.provider_id)">
                     <div class="alert alert-info py-2">
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
@@ -442,7 +766,7 @@
                         >
                     </div>
                 </template>
-                <template x-if="!providerHasCustomCost(form.provider_id)">
+                <template x-if="!providerHasCustomCost(modelForm.provider_id)">
                     <div class="space-y-4">
                         <div class="grid grid-cols-2 gap-4">
                             <div class="form-control">
@@ -453,7 +777,7 @@
                                 </label>
                                 <input
                                     type="number"
-                                    x-model.number="form.input_cost"
+                                    x-model.number="modelForm.input_cost"
                                     class="input input-bordered"
                                     placeholder="e.g., 3.00"
                                     min="0"
@@ -470,7 +794,7 @@
                                 </label>
                                 <input
                                     type="number"
-                                    x-model.number="form.output_cost"
+                                    x-model.number="modelForm.output_cost"
                                     class="input input-bordered"
                                     placeholder="e.g., 15.00"
                                     min="0"
@@ -492,7 +816,7 @@
                                 </label>
                                 <input
                                     type="number"
-                                    x-model.number="form.cache_read_multiplier"
+                                    x-model.number="modelForm.cache_read_multiplier"
                                     class="input input-bordered"
                                     placeholder="Leave empty for default"
                                     min="0"
@@ -512,7 +836,7 @@
                                 </label>
                                 <input
                                     type="number"
-                                    x-model.number="form.cache_write_multiplier"
+                                    x-model.number="modelForm.cache_write_multiplier"
                                     class="input input-bordered"
                                     placeholder="Leave empty for default"
                                     min="0"
@@ -528,7 +852,7 @@
                         <span class="label-text">Description</span>
                     </label>
                     <textarea
-                        x-model="form.description"
+                        x-model="modelForm.description"
                         class="textarea textarea-bordered"
                         rows="2"
                         placeholder="Brief description of the model"
@@ -550,8 +874,8 @@
                                 <input
                                     type="checkbox"
                                     class="checkbox checkbox-sm"
-                                    :checked="form.capabilities?.includes(cap)"
-                                    @change="toggleCapability(cap)"
+                                    :checked="modelForm.capabilities?.includes(cap)"
+                                    @change="toggleModelCapability(cap)"
                                 />
                                 <span class="label-text" x-text="cap"></span>
                             </label>
@@ -564,7 +888,7 @@
                         <label class="label cursor-pointer justify-start gap-3">
                             <input
                                 type="checkbox"
-                                x-model="form.supports_system_prompt"
+                                x-model="modelForm.supports_system_prompt"
                                 class="checkbox"
                             />
                             <span class="label-text"
@@ -577,7 +901,7 @@
                         <label class="label cursor-pointer justify-start gap-3">
                             <input
                                 type="checkbox"
-                                x-model="form.use_max_completion_tokens"
+                                x-model="modelForm.use_max_completion_tokens"
                                 class="checkbox"
                             />
                             <span class="label-text"
@@ -591,7 +915,7 @@
                     <label class="label cursor-pointer justify-start gap-3">
                         <input
                             type="checkbox"
-                            x-model="form.enabled"
+                            x-model="modelForm.enabled"
                             class="checkbox"
                         />
                         <span class="label-text">Enabled</span>
@@ -599,23 +923,27 @@
                 </div>
 
                 <div class="modal-action">
-                    <button type="button" @click="closeModal()" class="btn">
+                    <button
+                        type="button"
+                        @click="closeModelModal()"
+                        class="btn"
+                    >
                         Cancel
                     </button>
                     <button
                         type="submit"
                         class="btn btn-primary"
-                        :class="{ 'loading': saving }"
+                        :class="{ 'loading': savingModel }"
                     >
                         <span
-                            x-text="editing ? 'Save Changes' : 'Add Model'"
+                            x-text="editingModel ? 'Save Changes' : 'Add Model'"
                         ></span>
                     </button>
                 </div>
             </form>
         </div>
         <form method="dialog" class="modal-backdrop">
-            <button @click="closeModal()">close</button>
+            <button @click="closeModelModal()">close</button>
         </form>
     </dialog>
 
@@ -637,9 +965,9 @@
                 <!-- Model info (read-only) -->
                 <div class="grid grid-cols-2 gap-4">
                     <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">Model ID</span>
-                        </label>
+                        <label class="label"
+                            ><span class="label-text">Model ID</span></label
+                        >
                         <input
                             type="text"
                             :value="overrideForm.model_id"
@@ -648,9 +976,9 @@
                         />
                     </div>
                     <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">Provider</span>
-                        </label>
+                        <label class="label"
+                            ><span class="label-text">Provider</span></label
+                        >
                         <input
                             type="text"
                             :value="overrideForm.provider_id"
@@ -789,9 +1117,9 @@
 
                 <!-- Description override -->
                 <div class="form-control">
-                    <label class="label">
-                        <span class="label-text">Description</span>
-                    </label>
+                    <label class="label"
+                        ><span class="label-text">Description</span></label
+                    >
                     <textarea
                         x-model="overrideForm.description"
                         class="textarea textarea-bordered"
@@ -832,6 +1160,90 @@
                             <button
                                 type="button"
                                 @click="clearOverrideCapabilities()"
+                                class="link link-primary text-xs"
+                            >
+                                Clear (use system default)
+                            </button>
+                        </span>
+                    </label>
+                </div>
+
+                <!-- Provider Quirks -->
+                <div class="divider text-xs text-base-content/50">
+                    Provider Quirks
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                class="checkbox checkbox-sm"
+                                x-model="overrideForm.use_max_completion_tokens"
+                            />
+                            <div>
+                                <span class="label-text"
+                                    >Use max_completion_tokens</span
+                                >
+                                <p class="text-xs text-base-content/50">
+                                    Required for GPT-5, o1, o3, o4 models
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                class="checkbox checkbox-sm"
+                                x-model="overrideForm.supports_system_prompt"
+                            />
+                            <div>
+                                <span class="label-text"
+                                    >Supports system prompt</span
+                                >
+                                <p class="text-xs text-base-content/50">
+                                    Uncheck for reasoning models
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Unsupported Parameters</span>
+                        <span
+                            class="label-text-alt text-base-content/50"
+                            x-text="'System: ' + (overrideForm.system_unsupported_params?.join(', ') || 'None')"
+                        ></span>
+                    </label>
+                    <div class="flex flex-wrap gap-2">
+                        <template
+                            x-for="param in availableUnsupportedParams"
+                            :key="param"
+                        >
+                            <label
+                                class="label cursor-pointer gap-2 bg-base-200 px-3 py-1 rounded-lg"
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm"
+                                    :checked="overrideForm.unsupported_params?.includes(param)"
+                                    @change="toggleUnsupportedParam(param)"
+                                />
+                                <span
+                                    class="label-text font-mono text-xs"
+                                    x-text="param"
+                                ></span>
+                            </label>
+                        </template>
+                    </div>
+                    <label class="label">
+                        <span class="label-text-alt">
+                            <button
+                                type="button"
+                                @click="clearUnsupportedParams()"
                                 class="link link-primary text-xs"
                             >
                                 Clear (use system default)
@@ -886,20 +1298,16 @@
 </div>
 
 <script>
-    function modelsPage() {
+    function providersModelsPage() {
         return {
-            models: [],
             providers: [],
+            models: [],
             loading: true,
-            filterProvider: "",
-            filterType: "",
-            filterActiveProviders: true, // Default to showing only active providers
+            showConfiguredOnly: false,
             searchQuery: "",
-            showModal: false,
-            showOverrideModal: false,
-            editing: false,
-            saving: false,
-            savingOverride: false,
+            expandedProviders: {},
+            providerSearch: {},
+            providerShowAll: {},
             toasts: [],
             availableCapabilities: [
                 "vision",
@@ -910,7 +1318,24 @@
                 "tools",
                 "search",
             ],
-            form: {
+
+            // Provider modal state
+            showProviderModal: false,
+            editingProvider: false,
+            savingProvider: false,
+            providerForm: {
+                id: "",
+                type: "openai-compatible",
+                base_url: "",
+                api_key_env: "",
+                enabled: true,
+            },
+
+            // Model modal state
+            showModelModal: false,
+            editingModel: false,
+            savingModel: false,
+            modelForm: {
                 model_id: "",
                 provider_id: "",
                 family: "",
@@ -925,6 +1350,20 @@
                 cache_read_multiplier: null,
                 cache_write_multiplier: null,
             },
+
+            // Override modal state
+            showOverrideModal: false,
+            savingOverride: false,
+            availableUnsupportedParams: [
+                "temperature",
+                "top_p",
+                "presence_penalty",
+                "frequency_penalty",
+                "logprobs",
+                "top_logprobs",
+                "logit_bias",
+                "max_tokens",
+            ],
             overrideForm: {
                 model_id: "",
                 provider_id: "",
@@ -935,6 +1374,9 @@
                 context_length: null,
                 description: "",
                 capabilities: null,
+                use_max_completion_tokens: false,
+                supports_system_prompt: true,
+                unsupported_params: null,
                 has_override: false,
                 has_custom_cost: false,
                 system_input_cost: null,
@@ -944,6 +1386,9 @@
                 system_context_length: null,
                 system_description: "",
                 system_capabilities: [],
+                system_use_max_completion_tokens: false,
+                system_supports_system_prompt: true,
+                system_unsupported_params: [],
             },
 
             async init() {
@@ -965,11 +1410,7 @@
             async loadModels() {
                 this.loading = true;
                 try {
-                    let url = "/api/models";
-                    if (this.filterProvider) {
-                        url += `?provider=${this.filterProvider}`;
-                    }
-                    const res = await fetch(url);
+                    const res = await fetch("/api/models");
                     if (res.ok) {
                         this.models = await res.json();
                     }
@@ -980,51 +1421,117 @@
                 }
             },
 
-            get filteredModels() {
-                let result = this.models;
+            get filteredProviders() {
+                let result = this.providers;
 
-                // Filter by active providers
-                if (this.filterActiveProviders) {
-                    result = result.filter((m) => m.provider_active);
+                if (this.showConfiguredOnly) {
+                    result = result.filter(
+                        (p) => p.has_api_key || p.type === "ollama",
+                    );
                 }
 
-                // Filter by type/source
-                if (this.filterType) {
-                    result = result.filter((m) => m.source === this.filterType);
-                }
-
-                // Filter by search query
                 if (this.searchQuery) {
                     const query = this.searchQuery.toLowerCase();
-                    result = result.filter(
-                        (m) =>
-                            m.id.toLowerCase().includes(query) ||
-                            m.family.toLowerCase().includes(query) ||
-                            m.description?.toLowerCase().includes(query),
-                    );
+                    result = result.filter((p) => {
+                        // Check provider name
+                        if (p.id.toLowerCase().includes(query)) return true;
+                        if (p.display_name?.toLowerCase().includes(query))
+                            return true;
+                        // Check if any models match
+                        const providerModels = this.models.filter(
+                            (m) => m.provider_id === p.id,
+                        );
+                        return providerModels.some(
+                            (m) =>
+                                m.id.toLowerCase().includes(query) ||
+                                m.family?.toLowerCase().includes(query),
+                        );
+                    });
                 }
 
                 return result;
             },
 
-            get inactiveProviderCount() {
-                const inactiveProviders = new Set(
-                    this.models
-                        .filter((m) => !m.provider_active)
-                        .map((m) => m.provider_id),
-                );
-                return inactiveProviders.size;
+            get totalFilteredModels() {
+                let count = 0;
+                for (const p of this.filteredProviders) {
+                    count += this.getProviderModels(p.id).length;
+                }
+                return count;
             },
 
-            get inactiveProviderModelsCount() {
-                return this.models.filter((m) => !m.provider_active).length;
+            getProviderModels(providerId) {
+                return this.models.filter((m) => m.provider_id === providerId);
+            },
+
+            getProviderModelCount(providerId) {
+                return this.getProviderModels(providerId).length;
+            },
+
+            getFilteredProviderModels(providerId) {
+                let models = this.getProviderModels(providerId);
+
+                // Apply provider-specific search
+                const providerQuery = this.providerSearch[providerId];
+                if (providerQuery) {
+                    const query = providerQuery.toLowerCase();
+                    models = models.filter(
+                        (m) =>
+                            m.id.toLowerCase().includes(query) ||
+                            m.family?.toLowerCase().includes(query) ||
+                            m.description?.toLowerCase().includes(query),
+                    );
+                }
+
+                // Also apply global search within provider
+                if (this.searchQuery) {
+                    const query = this.searchQuery.toLowerCase();
+                    models = models.filter(
+                        (m) =>
+                            m.id.toLowerCase().includes(query) ||
+                            m.family?.toLowerCase().includes(query) ||
+                            m.description?.toLowerCase().includes(query),
+                    );
+                }
+
+                // Limit display unless showAll
+                if (!this.providerShowAll[providerId] && models.length > 20) {
+                    return models.slice(0, 20);
+                }
+
+                return models;
+            },
+
+            toggleExpanded(providerId) {
+                this.expandedProviders[providerId] =
+                    !this.expandedProviders[providerId];
+            },
+
+            isExpanded(providerId) {
+                return this.expandedProviders[providerId] || false;
             },
 
             formatContext(length) {
+                if (!length) return "-";
                 if (length >= 1000000)
                     return (length / 1000000).toFixed(1) + "M";
                 if (length >= 1000) return (length / 1000).toFixed(0) + "K";
                 return length;
+            },
+
+            getProviderTypeLabel(provider) {
+                let baseType;
+                if (provider.type === "ollama") {
+                    baseType = "Ollama";
+                } else if (provider.type === "anthropic") {
+                    baseType = "Anthropic Compatible";
+                } else {
+                    baseType = "OpenAI Compatible";
+                }
+
+                return provider.has_custom_cost
+                    ? `${baseType} (Dynamic Pricing)`
+                    : baseType;
             },
 
             providerHasCustomCost(providerId) {
@@ -1035,11 +1542,132 @@
                 return provider ? provider.has_custom_cost : false;
             },
 
-            openAddModal() {
-                this.editing = false;
-                this.form = {
+            // Provider actions
+            async toggleProvider(providerId, enabled) {
+                try {
+                    const res = await fetch(`/api/providers/${providerId}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ enabled }),
+                    });
+                    if (res.ok) {
+                        this.showToast(
+                            `Provider ${enabled ? "enabled" : "disabled"}`,
+                        );
+                        await this.loadProviders();
+                    } else {
+                        this.showToast("Failed to update provider", "error");
+                        await this.loadProviders();
+                    }
+                } catch (err) {
+                    this.showToast("Failed to update provider", "error");
+                    await this.loadProviders();
+                }
+            },
+
+            async testProvider(providerId) {
+                try {
+                    const res = await fetch(
+                        `/api/providers/${providerId}/test`,
+                        { method: "POST" },
+                    );
+                    const data = await res.json();
+
+                    if (data.success) {
+                        this.showToast(data.message || "Connection OK");
+                    } else {
+                        this.showToast(data.error || "Test failed", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Test failed", "error");
+                }
+            },
+
+            openAddProviderModal() {
+                this.editingProvider = false;
+                this.providerForm = {
+                    id: "",
+                    type: "openai-compatible",
+                    base_url: "",
+                    api_key_env: "",
+                    enabled: true,
+                };
+                this.showProviderModal = true;
+            },
+
+            openEditProviderModal(provider) {
+                this.editingProvider = true;
+                this.providerForm = { ...provider };
+                this.showProviderModal = true;
+            },
+
+            closeProviderModal() {
+                this.showProviderModal = false;
+            },
+
+            async saveProvider() {
+                this.savingProvider = true;
+                try {
+                    const url = this.editingProvider
+                        ? `/api/providers/${this.providerForm.id}`
+                        : "/api/providers";
+                    const method = this.editingProvider ? "PUT" : "POST";
+
+                    const res = await fetch(url, {
+                        method,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(this.providerForm),
+                    });
+
+                    if (res.ok) {
+                        this.showToast(
+                            this.editingProvider
+                                ? "Provider updated"
+                                : "Provider added",
+                        );
+                        this.closeProviderModal();
+                        await this.loadProviders();
+                    } else {
+                        const data = await res.json();
+                        this.showToast(data.error || "Failed to save", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to save provider", "error");
+                } finally {
+                    this.savingProvider = false;
+                }
+            },
+
+            async deleteProvider(providerId) {
+                if (
+                    !confirm(
+                        `Delete provider "${providerId}" and all its custom models?`,
+                    )
+                )
+                    return;
+
+                try {
+                    const res = await fetch(`/api/providers/${providerId}`, {
+                        method: "DELETE",
+                    });
+                    if (res.ok) {
+                        this.showToast("Provider deleted");
+                        await this.loadProviders();
+                        await this.loadModels();
+                    } else {
+                        this.showToast("Failed to delete", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to delete provider", "error");
+                }
+            },
+
+            // Model actions
+            openAddModelModal(providerId) {
+                this.editingModel = false;
+                this.modelForm = {
                     model_id: "",
-                    provider_id: "",
+                    provider_id: providerId || "",
                     family: "",
                     description: "",
                     context_length: 128000,
@@ -1052,12 +1680,12 @@
                     cache_read_multiplier: null,
                     cache_write_multiplier: null,
                 };
-                this.showModal = true;
+                this.showModelModal = true;
             },
 
-            openEditModal(model) {
-                this.editing = true;
-                this.form = {
+            openEditModelModal(model) {
+                this.editingModel = true;
+                this.modelForm = {
                     db_id: model.db_id,
                     model_id: model.id,
                     provider_id: model.provider_id,
@@ -1073,42 +1701,43 @@
                     cache_read_multiplier: model.cache_read_multiplier,
                     cache_write_multiplier: model.cache_write_multiplier,
                 };
-                this.showModal = true;
+                this.showModelModal = true;
             },
 
-            closeModal() {
-                this.showModal = false;
+            closeModelModal() {
+                this.showModelModal = false;
             },
 
-            toggleCapability(cap) {
-                if (!this.form.capabilities) this.form.capabilities = [];
-                const idx = this.form.capabilities.indexOf(cap);
+            toggleModelCapability(cap) {
+                if (!this.modelForm.capabilities)
+                    this.modelForm.capabilities = [];
+                const idx = this.modelForm.capabilities.indexOf(cap);
                 if (idx >= 0) {
-                    this.form.capabilities.splice(idx, 1);
+                    this.modelForm.capabilities.splice(idx, 1);
                 } else {
-                    this.form.capabilities.push(cap);
+                    this.modelForm.capabilities.push(cap);
                 }
             },
 
             async saveModel() {
-                this.saving = true;
+                this.savingModel = true;
                 try {
-                    const url = this.editing
-                        ? `/api/models/custom/${this.form.db_id}`
+                    const url = this.editingModel
+                        ? `/api/models/custom/${this.modelForm.db_id}`
                         : "/api/models/custom";
-                    const method = this.editing ? "PUT" : "POST";
+                    const method = this.editingModel ? "PUT" : "POST";
 
                     const res = await fetch(url, {
                         method,
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(this.form),
+                        body: JSON.stringify(this.modelForm),
                     });
 
                     if (res.ok) {
                         this.showToast(
-                            this.editing ? "Model updated" : "Model added",
+                            this.editingModel ? "Model updated" : "Model added",
                         );
-                        this.closeModal();
+                        this.closeModelModal();
                         await this.loadModels();
                     } else {
                         const data = await res.json();
@@ -1117,7 +1746,7 @@
                 } catch (err) {
                     this.showToast("Failed to save model", "error");
                 } finally {
-                    this.saving = false;
+                    this.savingModel = false;
                 }
             },
 
@@ -1172,9 +1801,7 @@
                 try {
                     const res = await fetch(
                         `/api/models/custom/${model.db_id}`,
-                        {
-                            method: "DELETE",
-                        },
+                        { method: "DELETE" },
                     );
                     if (res.ok) {
                         this.showToast("Model deleted");
@@ -1187,15 +1814,13 @@
                 }
             },
 
-            // Override modal functions for system/dynamic models
+            // Override modal functions
             openOverrideModal(model) {
-                // Check if current values differ from system defaults (indicating an override exists)
                 const hasOverride = model.has_override || false;
 
                 this.overrideForm = {
                     model_id: model.id,
                     provider_id: model.provider_id,
-                    // Current values (may be overridden or system defaults)
                     input_cost:
                         hasOverride &&
                         model.input_cost !== model.system_input_cost
@@ -1234,8 +1859,16 @@
                             JSON.stringify(model.system_capabilities)
                             ? [...model.capabilities]
                             : null,
+                    // Provider quirks - use current values (may come from YAML override or DB)
+                    use_max_completion_tokens:
+                        model.use_max_completion_tokens || false,
+                    supports_system_prompt:
+                        model.supports_system_prompt !== false,
+                    unsupported_params:
+                        model.unsupported_params?.length > 0
+                            ? [...model.unsupported_params]
+                            : null,
                     has_override: hasOverride,
-                    // System defaults for display
                     system_input_cost: model.system_input_cost,
                     system_output_cost: model.system_output_cost,
                     system_cache_read_multiplier:
@@ -1245,6 +1878,12 @@
                     system_context_length: model.system_context_length,
                     system_description: model.system_description,
                     system_capabilities: model.system_capabilities || [],
+                    system_use_max_completion_tokens:
+                        model.system_use_max_completion_tokens || false,
+                    system_supports_system_prompt:
+                        model.system_supports_system_prompt !== false,
+                    system_unsupported_params:
+                        model.system_unsupported_params || [],
                     has_custom_cost: model.has_custom_cost || false,
                 };
                 this.showOverrideModal = true;
@@ -1255,7 +1894,6 @@
             },
 
             toggleOverrideCapability(cap) {
-                // Initialize capabilities array if null (means use system default)
                 if (this.overrideForm.capabilities === null) {
                     this.overrideForm.capabilities = [
                         ...(this.overrideForm.system_capabilities || []),
@@ -1271,6 +1909,24 @@
 
             clearOverrideCapabilities() {
                 this.overrideForm.capabilities = null;
+            },
+
+            toggleUnsupportedParam(param) {
+                if (this.overrideForm.unsupported_params === null) {
+                    this.overrideForm.unsupported_params = [
+                        ...(this.overrideForm.system_unsupported_params || []),
+                    ];
+                }
+                const idx = this.overrideForm.unsupported_params.indexOf(param);
+                if (idx >= 0) {
+                    this.overrideForm.unsupported_params.splice(idx, 1);
+                } else {
+                    this.overrideForm.unsupported_params.push(param);
+                }
+            },
+
+            clearUnsupportedParams() {
+                this.overrideForm.unsupported_params = null;
             },
 
             async saveOverride() {
@@ -1289,6 +1945,13 @@
                             this.overrideForm.context_length || null,
                         description: this.overrideForm.description || null,
                         capabilities: this.overrideForm.capabilities,
+                        // Provider quirks
+                        use_max_completion_tokens:
+                            this.overrideForm.use_max_completion_tokens,
+                        supports_system_prompt:
+                            this.overrideForm.supports_system_prompt,
+                        unsupported_params:
+                            this.overrideForm.unsupported_params,
                     };
 
                     const res = await fetch("/api/models/override", {
@@ -1333,6 +1996,11 @@
                 } catch (err) {
                     this.showToast("Failed to clear override", "error");
                 }
+            },
+
+            copyModelName(modelId) {
+                navigator.clipboard.writeText(modelId);
+                this.showToast("Model name copied");
             },
 
             showToast(message, type = "success") {

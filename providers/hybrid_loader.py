@@ -7,7 +7,6 @@ the new database-driven configuration system.
 In the new system:
 - All providers are in the Provider table
 - All models are in the Model table (source: litellm, custom, ollama)
-- All aliases are in the Alias table
 - No more separate Override tables needed
 """
 
@@ -15,7 +14,7 @@ import logging
 import os
 from typing import Any
 
-from db import Alias, Model, Provider
+from db import Model, Provider
 from db.connection import check_db_initialized, get_db_context, init_db, run_migrations
 
 from .base import ModelInfo
@@ -83,9 +82,9 @@ def _ensure_db_initialized():
 
 def load_hybrid_models(
     provider_name: str,
-) -> tuple[dict[str, ModelInfo], dict[str, str]]:
+) -> dict[str, ModelInfo]:
     """
-    Load models and aliases for a provider from the database.
+    Load models for a provider from the database.
 
     This is now just a wrapper around load_models_for_provider since
     all models are stored in the database.
@@ -94,7 +93,7 @@ def load_hybrid_models(
         provider_name: Name of the provider (e.g., 'openai', 'anthropic')
 
     Returns:
-        Tuple of (models dict, aliases dict)
+        Dict of model_id -> ModelInfo
     """
     _ensure_db_initialized()
     return load_models_for_provider(provider_name)
@@ -125,16 +124,43 @@ def get_all_models_with_metadata(
         and provider.has_custom_cost_calculation
     )
 
-    # Check if provider is active (has API key configured)
-    provider_active = is_provider_active(provider_name)
+    # Check if provider is enabled (toggled on in admin UI)
+    provider_enabled = provider and getattr(provider, "enabled", True)
+
+    # Check if provider is configured (has API key)
+    provider_configured = is_provider_active(provider_name)
+
+    # Provider is "active" for model usage if it's both enabled AND configured
+    provider_active = provider_enabled and provider_configured
 
     result = []
 
     with get_db_context() as db:
+        from db import ModelOverride
+
         # Load all models for this provider (including disabled)
         db_models = db.query(Model).filter(Model.provider_id == provider_name).all()
 
+        # Load overrides for this provider (keyed by model_id)
+        overrides = {
+            o.model_id: o
+            for o in db.query(ModelOverride)
+            .filter(ModelOverride.provider_id == provider_name)
+            .all()
+        }
+
         for m in db_models:
+            override = overrides.get(m.id)
+            has_override = override is not None
+
+            # Get effective values (override takes precedence)
+            def get_effective(field, system_val):
+                if override:
+                    override_val = getattr(override, field, None)
+                    if override_val is not None:
+                        return override_val
+                return system_val
+
             result.append(
                 {
                     "id": m.id,
@@ -142,22 +168,49 @@ def get_all_models_with_metadata(
                     "source": m.source,
                     "last_synced": m.last_synced.isoformat() if m.last_synced else None,
                     "family": m.family,
-                    "description": m.description,
-                    "context_length": m.context_length,
-                    "capabilities": m.capabilities,
-                    "unsupported_params": m.unsupported_params,
-                    "supports_system_prompt": m.supports_system_prompt,
-                    "use_max_completion_tokens": m.use_max_completion_tokens,
-                    "input_cost": m.input_cost,
-                    "output_cost": m.output_cost,
-                    "cache_read_multiplier": m.cache_read_multiplier,
-                    "cache_write_multiplier": m.cache_write_multiplier,
-                    "enabled": m.enabled,
-                    "disabled": not m.enabled,  # For backwards compatibility
+                    # Effective values (with override if present)
+                    "description": get_effective("description", m.description),
+                    "context_length": get_effective("context_length", m.context_length),
+                    "capabilities": get_effective("capabilities", m.capabilities),
+                    "unsupported_params": get_effective(
+                        "unsupported_params", m.unsupported_params
+                    )
+                    or [],
+                    "supports_system_prompt": get_effective(
+                        "supports_system_prompt", m.supports_system_prompt
+                    ),
+                    "use_max_completion_tokens": get_effective(
+                        "use_max_completion_tokens", m.use_max_completion_tokens
+                    ),
+                    "input_cost": get_effective("input_cost", m.input_cost),
+                    "output_cost": get_effective("output_cost", m.output_cost),
+                    "cache_read_multiplier": get_effective(
+                        "cache_read_multiplier", m.cache_read_multiplier
+                    ),
+                    "cache_write_multiplier": get_effective(
+                        "cache_write_multiplier", m.cache_write_multiplier
+                    ),
+                    # System values (from base model, before override)
+                    "system_description": m.description,
+                    "system_context_length": m.context_length,
+                    "system_capabilities": m.capabilities or [],
+                    "system_unsupported_params": m.unsupported_params or [],
+                    "system_supports_system_prompt": m.supports_system_prompt,
+                    "system_use_max_completion_tokens": m.use_max_completion_tokens,
+                    "system_input_cost": m.input_cost,
+                    "system_output_cost": m.output_cost,
+                    "system_cache_read_multiplier": m.cache_read_multiplier,
+                    "system_cache_write_multiplier": m.cache_write_multiplier,
+                    # Status flags
+                    "enabled": m.enabled and not (override and override.disabled),
+                    "disabled": not m.enabled or (override and override.disabled),
+                    "has_override": has_override,
                     "is_system": m.source == "litellm",
                     "is_dynamic": m.source == "ollama",
                     "has_custom_cost": has_custom_cost,
                     "provider_active": provider_active,
+                    "provider_enabled": provider_enabled,
+                    "provider_configured": provider_configured,
                 }
             )
 
@@ -192,69 +245,12 @@ def get_all_models_with_metadata(
                             "is_dynamic": True,
                             "has_custom_cost": False,
                             "provider_active": provider_active,
+                            "provider_enabled": provider_enabled,
+                            "provider_configured": provider_configured,
                         }
                     )
         except Exception as e:
             logger.warning(f"Failed to get dynamic models for {provider_name}: {e}")
-
-    return result
-
-
-def get_all_aliases_with_metadata(
-    provider_name: str,
-) -> list[dict[str, Any]]:
-    """
-    Get all aliases for a provider with metadata for the admin UI.
-
-    Returns a list of alias dicts with source, enabled status, etc.
-    """
-    from . import registry
-
-    _ensure_db_initialized()
-
-    # Get provider from registry
-    provider = registry.get_provider(provider_name)
-
-    # Check if provider is active
-    provider_active = is_provider_active(provider_name)
-
-    result = []
-
-    with get_db_context() as db:
-        # Load all aliases for this provider (including disabled)
-        db_aliases = db.query(Alias).filter(Alias.provider_id == provider_name).all()
-
-        for a in db_aliases:
-            result.append(
-                {
-                    "alias": a.alias,
-                    "model_id": a.model_id,
-                    "provider_id": a.provider_id,
-                    "source": a.source,
-                    "enabled": a.enabled,
-                    "disabled": not a.enabled,  # For backwards compatibility
-                    "is_system": a.source == "system",
-                    "provider_active": provider_active,
-                }
-            )
-
-    # For Ollama providers with dynamic aliases
-    if provider and hasattr(provider, "aliases") and provider.aliases:
-        existing_aliases = {a["alias"] for a in result}
-        for alias, model_id in provider.aliases.items():
-            if alias not in existing_aliases:
-                result.append(
-                    {
-                        "alias": alias,
-                        "model_id": model_id,
-                        "provider_id": provider_name,
-                        "source": "dynamic",
-                        "enabled": True,
-                        "disabled": False,
-                        "is_system": False,
-                        "provider_active": provider_active,
-                    }
-                )
 
     return result
 
@@ -264,11 +260,6 @@ def get_all_aliases_with_metadata(
 
 
 def get_model_overrides(provider_id: str) -> dict[str, dict]:
-    """Legacy function - returns empty dict since overrides are no longer used."""
-    return {}
-
-
-def get_alias_overrides(provider_id: str) -> dict[str, dict]:
     """Legacy function - returns empty dict since overrides are no longer used."""
     return {}
 
@@ -283,15 +274,3 @@ def get_custom_models(provider_id: str) -> list[dict]:
             .all()
         )
         return [m.to_dict() for m in models]
-
-
-def get_custom_aliases(provider_id: str) -> list[dict]:
-    """Legacy function - returns aliases with source='custom' from Alias table."""
-    _ensure_db_initialized()
-    with get_db_context() as db:
-        aliases = (
-            db.query(Alias)
-            .filter(Alias.provider_id == provider_id, Alias.source == "custom")
-            .all()
-        )
-        return [a.to_dict() for a in aliases]

@@ -58,16 +58,17 @@ def _create_provider(provider_name: str, config: dict) -> LLMProvider | None:
         Provider instance or None if creation failed
     """
     provider_type = config.get("type", provider_name)
+    is_enabled = config.get("enabled", True)
 
     # Special handling for Ollama - models are discovered dynamically
     if provider_type == "ollama":
         base_url = config.get("base_url", "http://localhost:11434")
-        # Load only aliases from YAML, models come from Ollama API
-        _, aliases = load_hybrid_models(provider_name)
-        return OllamaProvider(name=provider_name, base_url=base_url, aliases=aliases)
+        provider = OllamaProvider(name=provider_name, base_url=base_url)
+        provider.enabled = is_enabled
+        return provider
 
-    # Load models and aliases using hybrid loader (YAML + DB overrides)
-    models, aliases = load_hybrid_models(provider_name)
+    # Load models using hybrid loader (DB + overrides)
+    models = load_hybrid_models(provider_name)
 
     # Note: We no longer skip providers with no enabled models.
     # This allows providers to appear in the admin UI even when all models are disabled.
@@ -79,7 +80,9 @@ def _create_provider(provider_name: str, config: dict) -> LLMProvider | None:
     # Check if this provider needs a custom class (non-OpenAI SDK)
     if provider_name in CUSTOM_PROVIDER_CLASSES:
         provider_class = CUSTOM_PROVIDER_CLASSES[provider_name]
-        return provider_class(models=models, aliases=aliases)
+        provider = provider_class(models=models)
+        provider.enabled = is_enabled
+        return provider
 
     # OpenAI-compatible providers are created directly from config
     if provider_type == "openai-compatible":
@@ -90,13 +93,14 @@ def _create_provider(provider_name: str, config: dict) -> LLMProvider | None:
             logger.error(f"Provider '{provider_name}' missing base_url or api_key_env")
             return None
 
-        return OpenAICompatibleProvider(
+        provider = OpenAICompatibleProvider(
             name=provider_name,
             base_url=base_url,
             api_key_env=api_key_env,
             models=models,
-            aliases=aliases,
         )
+        provider.enabled = is_enabled
+        return provider
 
     logger.error(f"Unknown provider type '{provider_type}' for '{provider_name}'")
     return None
@@ -118,7 +122,7 @@ def _register_db_ollama_instances():
             )
 
             for inst in instances:
-                # Skip if already registered (e.g., from YAML)
+                # Skip if already registered (e.g., from database)
                 if registry.get_provider(inst.name):
                     logger.debug(
                         f"Ollama instance '{inst.name}' already registered, skipping DB entry"
@@ -135,8 +139,12 @@ def _register_db_ollama_instances():
         logger.warning(f"Failed to load Ollama instances from DB: {e}")
 
 
-def _register_providers():
-    """Load and register all providers from config."""
+def register_all_providers():
+    """Load and register all providers from config.
+
+    IMPORTANT: This must be called AFTER ensure_seeded() so that
+    YAML-based model overrides are applied to the database first.
+    """
     provider_names = get_all_provider_names()
 
     for provider_name in provider_names:
@@ -158,11 +166,13 @@ def _register_providers():
     logger.info(f"Default: {default_provider}/{default_model}")
 
 
-# Register all providers on module import
-_register_providers()
+# Note: Providers are registered lazily via register_all_providers()
+# This must be called AFTER ensure_seeded() so that YAML overrides are applied first.
+# See proxy.py create_api_app() for the correct startup sequence.
 
 __all__ = [
     "registry",
+    "register_all_providers",
     "LLMProvider",
     "OpenAICompatibleProvider",
     "ModelInfo",

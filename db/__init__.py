@@ -13,10 +13,7 @@ from .connection import (
     run_migrations,
 )
 from .models import (
-    Alias,
-    AliasOverride,
     Base,
-    CustomAlias,
     CustomModel,
     CustomProvider,
     DailyStats,
@@ -29,7 +26,6 @@ from .models import (
 )
 from .seed import (
     ensure_seeded,
-    seed_aliases,
     seed_models_from_litellm,
     seed_providers,
 )
@@ -45,14 +41,11 @@ __all__ = [
     # Core models
     "Provider",
     "Model",
-    "Alias",
     "Setting",
     "Base",
-    # Legacy models (to be removed in future)
+    # Override/custom models
     "ModelOverride",
-    "AliasOverride",
     "CustomModel",
-    "CustomAlias",
     "OllamaInstance",
     "CustomProvider",
     # Usage tracking
@@ -61,6 +54,5 @@ __all__ = [
     # Seeding
     "ensure_seeded",
     "seed_providers",
-    "seed_aliases",
     "seed_models_from_litellm",
 ]

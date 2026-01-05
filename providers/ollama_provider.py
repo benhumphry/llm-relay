@@ -26,10 +26,13 @@ class OllamaProvider(LLMProvider):
     Provider for local Ollama instance with dynamic model discovery.
 
     Unlike other providers, Ollama models are discovered dynamically from
-    the local Ollama API rather than being defined in YAML configuration.
+    the local Ollama API rather than being pre-defined in the database.
 
     Multiple Ollama instances can be configured with different names and URLs.
     """
+
+    # Provider type identifier for dynamic model discovery
+    type = "ollama"
 
     # How often to refresh the model list (seconds)
     REFRESH_INTERVAL = 60
@@ -41,7 +44,6 @@ class OllamaProvider(LLMProvider):
         self,
         name: str = "ollama",
         base_url: str = "http://localhost:11434",
-        aliases: dict[str, str] | None = None,
     ):
         """
         Initialize the Ollama provider.
@@ -49,11 +51,9 @@ class OllamaProvider(LLMProvider):
         Args:
             name: Provider name (allows multiple Ollama instances)
             base_url: Ollama API URL (e.g., http://192.168.1.100:11434)
-            aliases: Optional dict of alias -> model_id mappings
         """
         self.name = name
         self.base_url = base_url.rstrip("/")
-        self._aliases = aliases or {}
         self._models: dict[str, ModelInfo] = {}
         self._last_refresh: float = 0
         self._client: OpenAI | None = None
@@ -174,10 +174,6 @@ class OllamaProvider(LLMProvider):
         if self._should_refresh():
             self._refresh_models()
         return self._models
-
-    def get_aliases(self) -> dict[str, str]:
-        """Return aliases dict."""
-        return self._aliases
 
     def get_raw_models(self) -> list[dict[str, Any]]:
         """
@@ -303,6 +299,76 @@ class OllamaProvider(LLMProvider):
             return model[: -len(self.THINKING_SUFFIX)]
         return model
 
+    def _convert_to_ollama_messages(self, messages: list[dict]) -> list[dict]:
+        """Convert internal message format to Ollama's native format.
+
+        Ollama expects images as base64 strings in an 'images' array on the message,
+        not as content blocks like Anthropic/OpenAI.
+
+        Internal format: {"role": "user", "content": [{"type": "image", "source": {...}}, {"type": "text", "text": "..."}]}
+        Ollama format: {"role": "user", "content": "...", "images": ["base64data1", "base64data2"]}
+        """
+        converted = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                # Has content blocks - extract images and text
+                images = []
+                text_parts = []
+                for block in content:
+                    if block.get("type") == "image" and "source" in block:
+                        source = block["source"]
+                        if source.get("type") == "base64":
+                            images.append(source.get("data", ""))
+                    elif block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+
+                new_msg = {"role": msg["role"], "content": " ".join(text_parts)}
+                if images:
+                    new_msg["images"] = images
+                converted.append(new_msg)
+            else:
+                converted.append(msg)
+        return converted
+
+    def _convert_to_openai_messages(self, messages: list[dict]) -> list[dict]:
+        """Convert internal message format to OpenAI format for streaming.
+
+        Ollama's OpenAI-compatible API expects OpenAI image format.
+
+        Internal format: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+        OpenAI format: {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+        """
+        converted = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                new_content = []
+                for block in content:
+                    if block.get("type") == "image" and "source" in block:
+                        source = block["source"]
+                        if source.get("type") == "base64":
+                            media_type = source.get("media_type", "image/jpeg")
+                            data = source.get("data", "")
+                            new_content.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{media_type};base64,{data}"
+                                    },
+                                }
+                            )
+                        else:
+                            new_content.append(block)
+                    else:
+                        new_content.append(block)
+                new_msg = msg.copy()
+                new_msg["content"] = new_content
+                converted.append(new_msg)
+            else:
+                converted.append(msg)
+        return converted
+
     def chat_completion(
         self,
         model: str,
@@ -318,11 +384,11 @@ class OllamaProvider(LLMProvider):
         enable_thinking = self._wants_thinking(model)
         actual_model = self._strip_thinking_suffix(model)
 
-        # Build messages with system prompt
+        # Build messages with system prompt and convert image format
         api_messages = []
         if system:
             api_messages.append({"role": "system", "content": system})
-        api_messages.extend(messages)
+        api_messages.extend(self._convert_to_ollama_messages(messages))
 
         # Build request body
         body = {
@@ -418,11 +484,11 @@ class OllamaProvider(LLMProvider):
                 f"Streaming mode: thinking not supported, using {actual_model} without thinking"
             )
 
-        # Build messages with system prompt
+        # Build messages with system prompt and convert to OpenAI format
         api_messages = []
         if system:
             api_messages.append({"role": "system", "content": system})
-        api_messages.extend(messages)
+        api_messages.extend(self._convert_to_openai_messages(messages))
 
         # Build kwargs
         kwargs = {

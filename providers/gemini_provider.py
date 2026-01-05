@@ -74,7 +74,7 @@ class GeminiProvider(OpenAICompatibleProvider):
     }
 
     # Models with flat pricing (no tiered input)
-    # These use the standard input_cost/output_cost from YAML
+    # These use the standard input_cost/output_cost from database
 
     # Context cache pricing (per 1M tokens)
     # Default cache multiplier for models without specific cache pricing
@@ -92,7 +92,6 @@ class GeminiProvider(OpenAICompatibleProvider):
         base_url: str | None = None,
         api_key_env: str | None = None,
         models: dict[str, ModelInfo] | None = None,
-        aliases: dict[str, str] | None = None,
     ):
         """Initialize the Gemini provider."""
         super().__init__(
@@ -100,7 +99,6 @@ class GeminiProvider(OpenAICompatibleProvider):
             base_url=base_url or self.base_url,
             api_key_env=api_key_env or self.api_key_env,
             models=models,
-            aliases=aliases,
         )
         self._last_stream_result: dict | None = None
 
@@ -376,7 +374,7 @@ class GeminiProvider(OpenAICompatibleProvider):
 
             logger.debug(
                 f"Gemini streaming completed: {usage_data.get('prompt_tokens', 0)} in, "
-                f"{usage_data.get('completion_tokens', 0)} out, cost=${cost:.6f if cost else 0}"
+                f"{usage_data.get('completion_tokens', 0)} out, cost=${cost or 0:.6f}"
             )
         else:
             logger.warning(

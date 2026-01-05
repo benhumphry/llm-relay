@@ -41,6 +41,13 @@ class ProviderRegistry:
         """Return list of providers that have valid API credentials."""
         return [p for p in self._providers.values() if p.is_configured()]
 
+    def get_available_providers(self) -> list["LLMProvider"]:
+        """Return list of providers that are available for API requests.
+
+        A provider is available if it's both enabled AND has valid credentials.
+        """
+        return [p for p in self._providers.values() if p.is_available()]
+
     def get_all_providers(self) -> list["LLMProvider"]:
         """Return all registered providers."""
         return list(self._providers.values())
@@ -56,7 +63,7 @@ class ProviderRegistry:
 
         Resolution order:
         1. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        2. Check each configured provider's aliases and models
+        2. Check each configured provider's models
         3. Fall back to default provider/model
 
         Args:
@@ -76,7 +83,7 @@ class ProviderRegistry:
 
         # Check for provider prefix (e.g., "openai-gpt-4o")
         for provider_name, provider in self._providers.items():
-            if not provider.is_configured():
+            if not provider.is_available():
                 continue
 
             prefix = f"{provider_name}-"
@@ -90,8 +97,8 @@ class ProviderRegistry:
                 if resolved:
                     return provider, resolved
 
-        # Check each configured provider
-        for provider in self.get_configured_providers():
+        # Check each available provider (enabled + configured)
+        for provider in self.get_available_providers():
             resolved = provider.resolve_model(name)
             if resolved:
                 return provider, resolved
@@ -99,7 +106,7 @@ class ProviderRegistry:
         # Fall back to default
         if self._default_provider and self._default_model:
             default = self._providers.get(self._default_provider)
-            if default and default.is_configured():
+            if default and default.is_available():
                 logger.warning(
                     f'Unknown model "{model_name}", using default: '
                     f"{self._default_provider}/{self._default_model}"
@@ -107,21 +114,21 @@ class ProviderRegistry:
                 return default, self._default_model
 
         raise ValueError(
-            f'Model "{model_name}" not found in any configured provider. '
-            f"Configured providers: {[p.name for p in self.get_configured_providers()]}"
+            f'Model "{model_name}" not found in any available provider. '
+            f"Available providers: {[p.name for p in self.get_available_providers()]}"
         )
 
     def list_all_models(self) -> list[dict]:
         """
-        Get combined model list from all configured providers.
+        Get combined model list from all available providers.
 
         Returns list of model info dicts suitable for /api/tags response.
-        Models and aliases are already filtered for enabled status in load_models_for_provider().
+        Models are already filtered for enabled status in load_models_for_provider().
         """
         models = []
         seen = set()
 
-        for provider in self.get_configured_providers():
+        for provider in self.get_available_providers():
             for model_id, info in provider.get_models().items():
                 if model_id in seen:
                     continue
@@ -145,35 +152,6 @@ class ProviderRegistry:
                     }
                 )
 
-            # Also add aliases as separate entries for discoverability
-            for alias, model_id in provider.get_aliases().items():
-                # Skip if alias matches provider-model format already added
-                full_name = f"{provider.name}-{model_id}"
-                if alias == full_name or alias in seen:
-                    continue
-
-                info = provider.get_models().get(model_id)
-                if not info:
-                    continue
-
-                seen.add(alias)
-                models.append(
-                    {
-                        "name": alias,
-                        "model": alias,
-                        "provider": provider.name,
-                        "details": {
-                            "family": info.family,
-                            "parameter_size": info.parameter_size,
-                            "quantization_level": info.quantization_level,
-                        },
-                        "description": info.description,
-                        "context_length": info.context_length,
-                        "capabilities": info.capabilities,
-                        "alias_for": f"{provider.name}-{model_id}",
-                    }
-                )
-
         return models
 
     def list_openai_models(self) -> list[dict]:
@@ -181,12 +159,12 @@ class ProviderRegistry:
         Get combined model list in OpenAI format.
 
         Returns list of model info dicts suitable for /v1/models response.
-        Models and aliases are already filtered for enabled status in load_models_for_provider().
+        Models are already filtered for enabled status in load_models_for_provider().
         """
         models = []
         seen = set()
 
-        for provider in self.get_configured_providers():
+        for provider in self.get_available_providers():
             for model_id, info in provider.get_models().items():
                 full_name = f"{provider.name}-{model_id}"
                 if full_name in seen:
@@ -197,21 +175,6 @@ class ProviderRegistry:
                 models.append(
                     {
                         "id": full_name,
-                        "object": "model",
-                        "owned_by": provider.name,
-                    }
-                )
-
-            # Add key aliases
-            for alias, model_id in provider.get_aliases().items():
-                if alias in seen:
-                    continue
-
-                seen.add(alias)
-
-                models.append(
-                    {
-                        "id": alias,
                         "object": "model",
                         "owned_by": provider.name,
                     }

@@ -217,6 +217,19 @@ def _run_migrations(engine) -> None:
             migrations.append(
                 "ALTER TABLE model_overrides ADD COLUMN cache_write_multiplier REAL"
             )
+        # v3.0.1: Provider quirks (API-specific behavior)
+        if "use_max_completion_tokens" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN use_max_completion_tokens BOOLEAN"
+            )
+        if "supports_system_prompt" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN supports_system_prompt BOOLEAN"
+            )
+        if "unsupported_params_json" not in existing_columns:
+            migrations.append(
+                "ALTER TABLE model_overrides ADD COLUMN unsupported_params_json TEXT"
+            )
 
         if migrations:
             logger.info(
@@ -402,36 +415,6 @@ def _run_migrations(engine) -> None:
 
         if migrations:
             logger.info(f"Running {len(migrations)} migration(s) for providers table")
-            with engine.connect() as conn:
-                for col_name, sql in migrations:
-                    logger.debug(f"Adding column: {col_name}")
-                    conn.execute(text(sql))
-                conn.commit()
-
-    # Migration: Add columns to aliases table
-    if "aliases" in inspector.get_table_names():
-        existing_columns = {col["name"] for col in inspector.get_columns("aliases")}
-
-        migrations = []
-
-        # v3.0: Source tracking and enabled flag
-        if "source" not in existing_columns:
-            migrations.append(
-                (
-                    "source",
-                    "ALTER TABLE aliases ADD COLUMN source VARCHAR(20) DEFAULT 'custom'",
-                )
-            )
-        if "enabled" not in existing_columns:
-            migrations.append(
-                (
-                    "enabled",
-                    "ALTER TABLE aliases ADD COLUMN enabled BOOLEAN DEFAULT 1",
-                )
-            )
-
-        if migrations:
-            logger.info(f"Running {len(migrations)} migration(s) for aliases table")
             with engine.connect() as conn:
                 for col_name, sql in migrations:
                     logger.debug(f"Adding column: {col_name}")

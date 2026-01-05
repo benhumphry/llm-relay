@@ -371,7 +371,7 @@ class UsageTracker:
         """
         Calculate estimated cost for a request.
 
-        Reads cost from the hybrid model loader (YAML + custom models).
+        Reads cost from the database model loader.
         Accounts for different token types with different pricing:
         - Reasoning tokens (o1/o3): billed at output rate
         - Cached input tokens (OpenAI): 50% discount on input rate
@@ -394,8 +394,8 @@ class UsageTracker:
         try:
             from providers.hybrid_loader import load_hybrid_models
 
-            # Load models from YAML/hybrid system
-            models, _ = load_hybrid_models(provider_id)
+            # Load models from database
+            models = load_hybrid_models(provider_id)
             model_info = models.get(model_id)
 
             if model_info and model_info.input_cost is not None:

@@ -174,8 +174,8 @@ content %}
                     <!-- Export -->
                     <div>
                         <p class="text-sm mb-2">
-                            Export custom models, aliases, providers, overrides,
-                            and settings.
+                            Export custom models, providers, overrides, and
+                            settings.
                         </p>
                         <a
                             href="/api/config/export"
@@ -398,6 +398,15 @@ content %}
                                     :class="syncResults.new_model_count > 0 ? 'text-info font-semibold' : 'text-success'"
                                 ></span>
                             </div>
+                            <div class="text-sm">
+                                <span class="text-base-content/60"
+                                    >Deprecated models:</span
+                                >
+                                <span
+                                    x-text="syncResults.deprecated_model_count || 0"
+                                    :class="syncResults.deprecated_model_count > 0 ? 'text-warning font-semibold' : 'text-success'"
+                                ></span>
+                            </div>
 
                             <template x-if="syncResults.differences_found > 0">
                                 <div class="mt-4">
@@ -486,6 +495,14 @@ content %}
                                                             x-text="'(info) ' + diff.remote_value"
                                                         ></span>
                                                     </template>
+                                                    <template
+                                                        x-if="diff.change_type === 'removed'"
+                                                    >
+                                                        <span
+                                                            class="text-warning"
+                                                            x-text="'(deprecated) ' + diff.local_value"
+                                                        ></span>
+                                                    </template>
                                                 </div>
                                             </template>
                                         </div>
@@ -497,26 +514,119 @@ content %}
                                         <template
                                             x-if="syncResults.price_update_count > 0 && !syncResults.updates_applied"
                                         >
-                                            <div
-                                                class="flex items-center gap-2"
-                                            >
-                                                <button
-                                                    @click="applyModelSync('update_existing')"
-                                                    class="btn btn-primary btn-sm"
-                                                    :class="{ 'loading': applyingSync }"
-                                                    :disabled="applyingSync"
+                                            <div class="space-y-2">
+                                                <div
+                                                    class="flex items-center gap-2"
                                                 >
-                                                    Update Existing
-                                                </button>
-                                                <span
-                                                    class="text-xs text-base-content/60"
-                                                >
-                                                    Update prices for
+                                                    <button
+                                                        @click="showPriceUpdateSelection = !showPriceUpdateSelection"
+                                                        class="btn btn-primary btn-sm"
+                                                    >
+                                                        <span
+                                                            x-text="showPriceUpdateSelection ? 'Hide Selection' : 'Select Price Updates'"
+                                                        ></span>
+                                                        <span
+                                                            class="badge badge-sm ml-1"
+                                                            x-text="syncResults.price_update_count"
+                                                        ></span>
+                                                    </button>
                                                     <span
-                                                        x-text="syncResults.price_update_count"
-                                                    ></span>
-                                                    existing models
-                                                </span>
+                                                        class="text-xs text-base-content/60"
+                                                    >
+                                                        Choose which prices to
+                                                        update
+                                                    </span>
+                                                </div>
+
+                                                <!-- Price update selection list -->
+                                                <template
+                                                    x-if="showPriceUpdateSelection"
+                                                >
+                                                    <div
+                                                        class="bg-base-200 rounded p-3 space-y-2"
+                                                    >
+                                                        <!-- Select all / none -->
+                                                        <div
+                                                            class="flex gap-2 mb-2 pb-2 border-b border-base-300"
+                                                        >
+                                                            <button
+                                                                @click="selectAllPriceUpdates()"
+                                                                class="btn btn-xs btn-ghost"
+                                                            >
+                                                                Select All
+                                                            </button>
+                                                            <button
+                                                                @click="selectNoPriceUpdates()"
+                                                                class="btn btn-xs btn-ghost"
+                                                            >
+                                                                Select None
+                                                            </button>
+                                                            <span
+                                                                class="text-xs text-base-content/60 ml-auto"
+                                                            >
+                                                                <span
+                                                                    x-text="selectedPriceUpdates.length"
+                                                                ></span>
+                                                                selected
+                                                            </span>
+                                                        </div>
+
+                                                        <!-- Model checkboxes -->
+                                                        <div
+                                                            class="max-h-48 overflow-y-auto space-y-1"
+                                                        >
+                                                            <template
+                                                                x-for="diff in getPriceUpdateDiffs()"
+                                                                :key="diff.provider + '/' + diff.model_id"
+                                                            >
+                                                                <label
+                                                                    class="flex items-center gap-2 cursor-pointer hover:bg-base-300 rounded px-2 py-1"
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        class="checkbox checkbox-sm checkbox-primary"
+                                                                        :value="diff.provider + '/' + diff.model_id"
+                                                                        x-model="selectedPriceUpdates"
+                                                                    />
+                                                                    <span
+                                                                        class="text-xs font-mono flex-1"
+                                                                    >
+                                                                        <span
+                                                                            class="text-primary"
+                                                                            x-text="diff.provider + '/'"
+                                                                        ></span>
+                                                                        <span
+                                                                            x-text="diff.model_id"
+                                                                        ></span>
+                                                                    </span>
+                                                                    <span
+                                                                        class="text-xs text-base-content/60"
+                                                                        x-text="diff.changesSummary"
+                                                                    ></span>
+                                                                </label>
+                                                            </template>
+                                                        </div>
+
+                                                        <!-- Apply button -->
+                                                        <div
+                                                            class="pt-2 border-t border-base-300"
+                                                        >
+                                                            <button
+                                                                @click="applySelectedPriceUpdates()"
+                                                                class="btn btn-primary btn-sm"
+                                                                :class="{ 'loading': applyingSync }"
+                                                                :disabled="applyingSync || selectedPriceUpdates.length === 0"
+                                                            >
+                                                                Update Selected
+                                                                Prices
+                                                                <span
+                                                                    class="badge badge-sm ml-1"
+                                                                    x-text="selectedPriceUpdates.length"
+                                                                ></span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </template>
                                             </div>
                                         </template>
 
@@ -524,26 +634,239 @@ content %}
                                         <template
                                             x-if="syncResults.new_model_count > 0 && !syncResults.new_models_applied"
                                         >
-                                            <div
-                                                class="flex items-center gap-2"
-                                            >
-                                                <button
-                                                    @click="applyModelSync('add_new')"
-                                                    class="btn btn-secondary btn-sm"
-                                                    :class="{ 'loading': applyingSync }"
-                                                    :disabled="applyingSync"
+                                            <div class="space-y-2">
+                                                <div
+                                                    class="flex items-center gap-2"
                                                 >
-                                                    Add New Models
-                                                </button>
-                                                <span
-                                                    class="text-xs text-base-content/60"
-                                                >
-                                                    Add
+                                                    <button
+                                                        @click="showNewModelSelection = !showNewModelSelection"
+                                                        class="btn btn-secondary btn-sm"
+                                                    >
+                                                        <span
+                                                            x-text="showNewModelSelection ? 'Hide Selection' : 'Select New Models'"
+                                                        ></span>
+                                                        <span
+                                                            class="badge badge-sm ml-1"
+                                                            x-text="syncResults.new_model_count"
+                                                        ></span>
+                                                    </button>
                                                     <span
-                                                        x-text="syncResults.new_model_count"
-                                                    ></span>
-                                                    new models as custom models
-                                                </span>
+                                                        class="text-xs text-base-content/60"
+                                                    >
+                                                        Choose which models to
+                                                        add
+                                                    </span>
+                                                </div>
+
+                                                <!-- Model selection list -->
+                                                <template
+                                                    x-if="showNewModelSelection"
+                                                >
+                                                    <div
+                                                        class="bg-base-200 rounded p-3 space-y-2"
+                                                    >
+                                                        <!-- Select all / none -->
+                                                        <div
+                                                            class="flex gap-2 mb-2 pb-2 border-b border-base-300"
+                                                        >
+                                                            <button
+                                                                @click="selectAllNewModels()"
+                                                                class="btn btn-xs btn-ghost"
+                                                            >
+                                                                Select All
+                                                            </button>
+                                                            <button
+                                                                @click="selectNoNewModels()"
+                                                                class="btn btn-xs btn-ghost"
+                                                            >
+                                                                Select None
+                                                            </button>
+                                                            <span
+                                                                class="text-xs text-base-content/60 ml-auto"
+                                                            >
+                                                                <span
+                                                                    x-text="selectedNewModels.length"
+                                                                ></span>
+                                                                selected
+                                                            </span>
+                                                        </div>
+
+                                                        <!-- Model checkboxes -->
+                                                        <div
+                                                            class="max-h-48 overflow-y-auto space-y-1"
+                                                        >
+                                                            <template
+                                                                x-for="diff in getNewModelDiffs()"
+                                                                :key="diff.provider + '/' + diff.model_id"
+                                                            >
+                                                                <label
+                                                                    class="flex items-center gap-2 cursor-pointer hover:bg-base-300 rounded px-2 py-1"
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        class="checkbox checkbox-sm checkbox-primary"
+                                                                        :value="diff.provider + '/' + diff.model_id"
+                                                                        x-model="selectedNewModels"
+                                                                    />
+                                                                    <span
+                                                                        class="text-xs font-mono flex-1"
+                                                                    >
+                                                                        <span
+                                                                            class="text-primary"
+                                                                            x-text="diff.provider + '/'"
+                                                                        ></span>
+                                                                        <span
+                                                                            x-text="diff.model_id"
+                                                                        ></span>
+                                                                    </span>
+                                                                    <span
+                                                                        class="text-xs text-base-content/60"
+                                                                        x-text="diff.remote_value"
+                                                                    ></span>
+                                                                </label>
+                                                            </template>
+                                                        </div>
+
+                                                        <!-- Add selected button -->
+                                                        <div
+                                                            class="pt-2 border-t border-base-300"
+                                                        >
+                                                            <button
+                                                                @click="applySelectedNewModels()"
+                                                                class="btn btn-primary btn-sm"
+                                                                :class="{ 'loading': applyingSync }"
+                                                                :disabled="applyingSync || selectedNewModels.length === 0"
+                                                            >
+                                                                Add Selected
+                                                                Models
+                                                                <span
+                                                                    class="badge badge-sm ml-1"
+                                                                    x-text="selectedNewModels.length"
+                                                                ></span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+
+                                        <!-- Disable Deprecated Models -->
+                                        <template
+                                            x-if="syncResults.deprecated_model_count > 0 && !syncResults.deprecated_applied"
+                                        >
+                                            <div class="space-y-2">
+                                                <div
+                                                    class="flex items-center gap-2"
+                                                >
+                                                    <button
+                                                        @click="showDeprecatedSelection = !showDeprecatedSelection"
+                                                        class="btn btn-warning btn-sm"
+                                                    >
+                                                        <span
+                                                            x-text="showDeprecatedSelection ? 'Hide Selection' : 'Select Deprecated Models'"
+                                                        ></span>
+                                                        <span
+                                                            class="badge badge-sm ml-1"
+                                                            x-text="syncResults.deprecated_model_count"
+                                                        ></span>
+                                                    </button>
+                                                    <span
+                                                        class="text-xs text-base-content/60"
+                                                    >
+                                                        Choose which models to
+                                                        disable
+                                                    </span>
+                                                </div>
+
+                                                <!-- Deprecated model selection list -->
+                                                <template
+                                                    x-if="showDeprecatedSelection"
+                                                >
+                                                    <div
+                                                        class="bg-base-200 rounded p-3 space-y-2"
+                                                    >
+                                                        <!-- Select all / none -->
+                                                        <div
+                                                            class="flex gap-2 mb-2 pb-2 border-b border-base-300"
+                                                        >
+                                                            <button
+                                                                @click="selectAllDeprecated()"
+                                                                class="btn btn-xs btn-ghost"
+                                                            >
+                                                                Select All
+                                                            </button>
+                                                            <button
+                                                                @click="selectNoDeprecated()"
+                                                                class="btn btn-xs btn-ghost"
+                                                            >
+                                                                Select None
+                                                            </button>
+                                                            <span
+                                                                class="text-xs text-base-content/60 ml-auto"
+                                                            >
+                                                                <span
+                                                                    x-text="selectedDeprecated.length"
+                                                                ></span>
+                                                                selected
+                                                            </span>
+                                                        </div>
+
+                                                        <!-- Model checkboxes -->
+                                                        <div
+                                                            class="max-h-48 overflow-y-auto space-y-1"
+                                                        >
+                                                            <template
+                                                                x-for="diff in getDeprecatedDiffs()"
+                                                                :key="diff.provider + '/' + diff.model_id"
+                                                            >
+                                                                <label
+                                                                    class="flex items-center gap-2 cursor-pointer hover:bg-base-300 rounded px-2 py-1"
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        class="checkbox checkbox-sm checkbox-warning"
+                                                                        :value="diff.provider + '/' + diff.model_id"
+                                                                        x-model="selectedDeprecated"
+                                                                    />
+                                                                    <span
+                                                                        class="text-xs font-mono flex-1"
+                                                                    >
+                                                                        <span
+                                                                            class="text-primary"
+                                                                            x-text="diff.provider + '/'"
+                                                                        ></span>
+                                                                        <span
+                                                                            x-text="diff.model_id"
+                                                                        ></span>
+                                                                    </span>
+                                                                    <span
+                                                                        class="text-xs text-warning"
+                                                                        x-text="diff.local_value"
+                                                                    ></span>
+                                                                </label>
+                                                            </template>
+                                                        </div>
+
+                                                        <!-- Disable button -->
+                                                        <div
+                                                            class="pt-2 border-t border-base-300"
+                                                        >
+                                                            <button
+                                                                @click="applySelectedDeprecated()"
+                                                                class="btn btn-warning btn-sm"
+                                                                :class="{ 'loading': applyingSync }"
+                                                                :disabled="applyingSync || selectedDeprecated.length === 0"
+                                                            >
+                                                                Disable Selected
+                                                                Models
+                                                                <span
+                                                                    class="badge badge-sm ml-1"
+                                                                    x-text="selectedDeprecated.length"
+                                                                ></span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </template>
                                             </div>
                                         </template>
                                     </div>
@@ -552,7 +875,7 @@ content %}
 
                             <!-- Applied confirmation -->
                             <template
-                                x-if="syncResults.updates_applied || syncResults.new_models_applied"
+                                x-if="syncResults.updates_applied || syncResults.new_models_applied || syncResults.deprecated_applied"
                             >
                                 <div class="alert alert-success mt-4">
                                     <svg
@@ -594,6 +917,16 @@ content %}
                                                 ></span>
                                             </span>
                                         </template>
+                                        <template
+                                            x-if="syncResults.deprecated_applied"
+                                        >
+                                            <span>
+                                                Models disabled:
+                                                <span
+                                                    x-text="syncResults.models_disabled || 0"
+                                                ></span>
+                                            </span>
+                                        </template>
                                     </div>
                                 </div>
                             </template>
@@ -623,10 +956,6 @@ content %}
                     <div class="flex justify-between">
                         <span class="text-base-content/60">Models:</span>
                         <span x-text="stats.models?.total || '-'"></span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-base-content/60">Aliases:</span>
-                        <span x-text="stats.aliases?.total || '-'"></span>
                     </div>
                     <div class="flex justify-between">
                         <span class="text-base-content/60"
@@ -678,6 +1007,194 @@ content %}
             applyingSync: false,
             syncResults: null,
             showSyncDiffs: false,
+            showNewModelSelection: false,
+            selectedNewModels: [],
+            showPriceUpdateSelection: false,
+            selectedPriceUpdates: [],
+            showDeprecatedSelection: false,
+            selectedDeprecated: [],
+
+            // Helper to get diffs by change type
+            getNewModelDiffs() {
+                if (!this.syncResults || !this.syncResults.diffs) return [];
+                return this.syncResults.diffs.filter(
+                    (d) => d.change_type === "added",
+                );
+            },
+
+            getPriceUpdateDiffs() {
+                if (!this.syncResults || !this.syncResults.diffs) return [];
+                // Get unique models with price changes (dedupe by provider/model_id)
+                const changedDiffs = this.syncResults.diffs.filter(
+                    (d) => d.change_type === "changed",
+                );
+                const seen = new Set();
+                const uniqueModels = [];
+                for (const d of changedDiffs) {
+                    const key = d.provider + "/" + d.model_id;
+                    if (!seen.has(key)) {
+                        seen.add(key);
+                        // Collect all changes for this model
+                        const modelChanges = changedDiffs.filter(
+                            (x) =>
+                                x.provider === d.provider &&
+                                x.model_id === d.model_id,
+                        );
+                        uniqueModels.push({
+                            ...d,
+                            changes: modelChanges,
+                            changesSummary: modelChanges
+                                .map((x) => x.field)
+                                .join(", "),
+                        });
+                    }
+                }
+                return uniqueModels;
+            },
+
+            getDeprecatedDiffs() {
+                if (!this.syncResults || !this.syncResults.diffs) return [];
+                return this.syncResults.diffs.filter(
+                    (d) => d.change_type === "removed",
+                );
+            },
+
+            // Selection helpers for new models
+            selectAllNewModels() {
+                this.selectedNewModels = this.getNewModelDiffs().map(
+                    (d) => d.provider + "/" + d.model_id,
+                );
+            },
+
+            selectNoNewModels() {
+                this.selectedNewModels = [];
+            },
+
+            // Selection helpers for price updates
+            selectAllPriceUpdates() {
+                this.selectedPriceUpdates = this.getPriceUpdateDiffs().map(
+                    (d) => d.provider + "/" + d.model_id,
+                );
+            },
+
+            selectNoPriceUpdates() {
+                this.selectedPriceUpdates = [];
+            },
+
+            // Selection helpers for deprecated models
+            selectAllDeprecated() {
+                this.selectedDeprecated = this.getDeprecatedDiffs().map(
+                    (d) => d.provider + "/" + d.model_id,
+                );
+            },
+
+            selectNoDeprecated() {
+                this.selectedDeprecated = [];
+            },
+
+            // Apply selected new models
+            async applySelectedNewModels() {
+                if (this.selectedNewModels.length === 0) return;
+                await this.applyModelSyncWithSelection(
+                    "add_new",
+                    this.selectedNewModels,
+                );
+            },
+
+            // Apply selected price updates
+            async applySelectedPriceUpdates() {
+                if (this.selectedPriceUpdates.length === 0) return;
+                await this.applyModelSyncWithSelection(
+                    "update_existing",
+                    this.selectedPriceUpdates,
+                );
+            },
+
+            // Apply selected deprecated (disable them)
+            async applySelectedDeprecated() {
+                if (this.selectedDeprecated.length === 0) return;
+                await this.applyModelSyncWithSelection(
+                    "disable_deprecated",
+                    this.selectedDeprecated,
+                );
+            },
+
+            // Unified method to apply sync with selection
+            async applyModelSyncWithSelection(action, selectedModels) {
+                this.applyingSync = true;
+
+                try {
+                    const body = {
+                        selected_models: selectedModels,
+                    };
+                    if (this.syncProvider) {
+                        body.provider = this.syncProvider;
+                    }
+
+                    if (action === "update_existing") {
+                        body.update_existing = true;
+                    } else if (action === "add_new") {
+                        body.add_new = true;
+                    } else if (action === "disable_deprecated") {
+                        body.disable_deprecated = true;
+                    }
+
+                    const res = await fetch("/api/models/sync", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    });
+
+                    if (res.ok) {
+                        const result = await res.json();
+
+                        if (action === "update_existing") {
+                            this.syncResults.updates_applied = true;
+                            this.syncResults.overrides_created =
+                                result.overrides_created || 0;
+                            this.syncResults.overrides_updated =
+                                result.overrides_updated || 0;
+                            const total =
+                                (result.overrides_created || 0) +
+                                (result.overrides_updated || 0);
+                            this.showToast(`Updated ${total} model prices`);
+                            this.showPriceUpdateSelection = false;
+                            this.selectedPriceUpdates = [];
+                        } else if (action === "add_new") {
+                            this.syncResults.new_models_applied = true;
+                            this.syncResults.new_models_added =
+                                result.new_models_added || 0;
+                            this.showToast(
+                                `Added ${result.new_models_added || 0} new models`,
+                            );
+                            this.showNewModelSelection = false;
+                            this.selectedNewModels = [];
+                        } else if (action === "disable_deprecated") {
+                            this.syncResults.deprecated_applied = true;
+                            this.syncResults.models_disabled =
+                                result.models_disabled || 0;
+                            this.showToast(
+                                `Disabled ${result.models_disabled || 0} deprecated models`,
+                            );
+                            this.showDeprecatedSelection = false;
+                            this.selectedDeprecated = [];
+                        }
+                    } else {
+                        const error = await res.json();
+                        this.showToast(
+                            error.error || "Failed to apply changes",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast(
+                        "Failed to apply changes: " + err.message,
+                        "error",
+                    );
+                } finally {
+                    this.applyingSync = false;
+                }
+            },
 
             setTheme(theme) {
                 this.currentTheme = theme;

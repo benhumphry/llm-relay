@@ -5,8 +5,8 @@
 <h1 align="center">Multi-Provider LLM Proxy</h1>
 
 <p align="center">
-<strong>A self-hosted alternative to OpenRouter</strong><br>
-Unified API for cloud and local LLMs with comprehensive cost tracking and flexible attribution.
+<strong>A lightweight, self-hosted alternative to OpenRouter</strong><br>
+Simple unified API for cloud and local LLMs with cost tracking and flexible attribution.
 </p>
 
 <p align="center">
@@ -19,6 +19,16 @@ Unified API for cloud and local LLMs with comprehensive cost tracking and flexib
 </p>
 
 ---
+
+## Design Philosophy
+
+This proxy is built around three principles:
+
+1. **Lightweight** — Single container, minimal dependencies, SQLite by default
+2. **Simple** — Works out of the box, sensible defaults, no complex configuration
+3. **Easy to use** — Clean web UI, familiar APIs (Ollama + OpenAI), straightforward setup
+
+Point your existing Ollama or OpenAI clients at the proxy and everything just works.
 
 ## Why This Proxy?
 
@@ -80,7 +90,7 @@ client.chat.completions.create(model="llama3.2", messages=[...])
 
 Both **Ollama API** (`/api/chat`) and **OpenAI API** (`/v1/chat/completions`) formats are supported. Works with Open WebUI, Cursor, Continue, and any Ollama or OpenAI-compatible client.
 
-### 10+ Providers, 400+ Models
+### 10+ Providers, 700+ Models
 
 | Provider | Models | Highlights |
 |----------|--------|------------|
@@ -103,11 +113,11 @@ The proxy calculates costs with the same precision as your provider bills:
 
 **Token-level tracking:**
 - Input and output tokens
-- Reasoning tokens (o1, o3, DeepSeek-R1)
-- Cache read/write tokens (Anthropic, OpenAI, xAI, Groq)
+- Reasoning tokens (o1, o3, o4, DeepSeek-R1)
+- Cache read/write tokens (Anthropic, OpenAI, DeepSeek, xAI, Groq)
 
 **Provider-specific pricing:**
-- **Static rates** from pre-configured pricing (updated with releases)
+- **Static rates** from LiteLLM pricing database (sync from Admin UI)
 - **Dynamic pricing** from OpenRouter (actual cost per request)
 - **Tiered pricing** for Gemini (rates change above 200k tokens)
 - **Complex pricing** for Perplexity (per-request fees + search costs)
@@ -137,23 +147,32 @@ Tags appear in the usage dashboard with breakdowns by cost, tokens, and request 
 
 ### Web Admin UI
 
-A polished interface for configuration and analytics:
+A clean, intuitive interface for configuration and analytics:
 
-- **Dashboard** — Provider status, connection testing
-- **Providers** — Add/remove providers, configure Ollama instances
-- **Models** — Browse all models, override pricing, enable/disable
-- **Aliases** — Create shortcuts (e.g., `claude` → `claude-sonnet-4-5-20250929`)
-- **Usage** — Charts, breakdowns by tag/provider/model, request logs
-- **Settings** — Default model, admin password, data retention
+- **Dashboard** — Overview stats, top providers/models/clients/tags at a glance
+- **Providers & Models** — Configure providers, browse models, set overrides
+- **Ollama Instances** — Manage local Ollama servers, pull/delete models
+- **Usage Analytics** — Interactive charts, breakdowns, request logs, filtering
+- **Settings** — Default model, admin password, data retention, pricing sync
+
+### Provider Quirks Handling
+
+Automatic handling of provider-specific requirements:
+
+- **Reasoning models** (o1, o3, o4, DeepSeek-R1) — Uses `max_completion_tokens`, filters unsupported parameters
+- **Vision models** — Automatic image format conversion between providers
+- **System prompts** — Handled correctly for models that don't support them
+- **Streaming** — Works with all providers, captures accurate token counts
+
+Configure model-specific quirks via YAML or the Admin UI.
 
 ### Additional Capabilities
 
-- **Streaming** — NDJSON (Ollama) and SSE (OpenAI) formats
-- **Vision** — Pass images to any vision-capable model
-- **Reasoning models** — Automatic parameter handling for o1/o3/o4/DeepSeek-R1
-- **Local Ollama** — Connect multiple instances, auto-discover models
+- **Streaming** — NDJSON (Ollama) and SSE (OpenAI) formats with accurate token tracking
+- **Vision** — Pass images to any vision-capable model, automatic format conversion
+- **Multiple Ollama instances** — Connect several servers, models namespaced by instance
 - **Docker secrets** — `*_FILE` suffix for secure key injection
-- **PostgreSQL** — Optional external database for production
+- **PostgreSQL** — Optional external database for production deployments
 
 ## Cost Tracking
 
@@ -166,7 +185,7 @@ Every request is logged with:
 | `input_tokens` | Prompt tokens |
 | `output_tokens` | Response tokens |
 | `reasoning_tokens` | Thinking tokens (reasoning models) |
-| `cached_input_tokens` | Cache hits (OpenAI, xAI, Groq) |
+| `cached_input_tokens` | Cache hits (OpenAI, DeepSeek, xAI, Groq) |
 | `cache_read_tokens` | Cache reads (Anthropic) |
 | `cache_creation_tokens` | Cache writes (Anthropic) |
 | `cost` | Calculated or provider-reported cost |
@@ -178,7 +197,7 @@ The proxy uses model-specific rates and multipliers:
 
 ```yaml
 # Example: Anthropic Claude Sonnet
-claude-sonnet-4-5-20250929:
+claude-sonnet-4-20250514:
   input_cost: 3.00           # $ per million tokens
   output_cost: 15.00
   cache_read_multiplier: 0.1  # Cache reads at 10% of input cost
@@ -204,16 +223,15 @@ Total:          $0.0465
 | **Anthropic** | Separate cache read/write multipliers |
 | **Others** | Standard token × rate calculation |
 
-### Usage Dashboard
+### Syncing Pricing Data
 
-View costs in the Admin UI:
+Keep pricing up to date:
 
-- **Summary** — Total requests, tokens, and cost for the period
-- **Time series** — Cost trends over days/weeks/months
-- **Breakdowns** — By tag, provider, model, or client
-- **Recent requests** — Individual request logs with cost
+1. Go to **Settings** in the Admin UI
+2. Click **Sync Pricing from LiteLLM**
+3. Pricing for all providers is updated from the LiteLLM database
 
-Filter by date range, tag, provider, or model. Click any row to drill down.
+Model overrides you've created are preserved across syncs.
 
 ## Tagging
 
@@ -223,9 +241,9 @@ Tags enable cost attribution across any dimension you need.
 
 | Method | Example | Priority |
 |--------|---------|----------|
-| Bearer token | `Authorization: Bearer alice` | 1 (highest) |
-| Header | `X-Proxy-Tag: alice` | 2 |
-| Model suffix | `model: claude@alice` | 3 |
+| Header | `X-Proxy-Tag: alice` | 1 (highest) |
+| Model suffix | `model: claude@alice` | 2 |
+| Bearer token | `Authorization: Bearer alice` | 3 |
 | Default tag | Configured in Settings | 4 (lowest) |
 
 ### Multiple Tags
@@ -233,7 +251,7 @@ Tags enable cost attribution across any dimension you need.
 Assign multiple tags to track across dimensions:
 
 ```bash
-curl -H "Authorization: Bearer alice,project-x,q1-2025" \
+curl -H "X-Proxy-Tag: alice,project-x,q1-2025" \
   -d '{"model": "claude-sonnet", "messages": [...]}' \
   http://localhost:11434/v1/chat/completions
 ```
@@ -263,59 +281,49 @@ Access the Admin UI at port 8080 (password protected).
 
 ### Dashboard
 
-Overview of all providers with:
-- Connection status indicators
-- Quick test buttons to verify API connectivity
-- Model and alias counts
+At-a-glance overview:
+- Provider and model counts
+- Today's requests, tokens, and cost
+- Top 5 providers, models, clients, and tags
+- Quick links to all sections
 
-### Providers
+### Providers & Models
 
-Manage provider connections:
-- View system providers (from configuration)
-- Add custom Ollama instances
-- Add OpenAI-compatible endpoints
-- Add Anthropic-compatible endpoints
-- Test connections
-- Enable/disable providers
+Manage all your LLM providers:
+- View connection status for each provider
+- Test API connectivity
+- Browse all available models (700+)
+- Create model overrides for pricing or capabilities
+- Enable/disable individual models
 
-### Models
+### Ollama Instances
 
-Browse and configure models:
-- **System models** — Pre-configured, update with releases
-- **Dynamic models** — Auto-discovered from Ollama instances
-- **Custom models** — Create your own definitions
+Dedicated management for local Ollama servers:
+- Connect multiple Ollama instances
+- View models on each instance
+- Pull new models from Ollama library
+- Delete unused models
+- Copy model names for easy use
 
-**Override system models** without editing files:
-- Input/output cost
-- Context length
-- Capabilities
-- Description
+### Usage Analytics
 
-### Aliases
-
-Create shortcuts for model names:
-- `claude` → `claude-sonnet-4-5-20250929`
-- `gpt` → `gpt-5.2`
-- `fast` → `llama-3.1-8b-instant`
-
-### Usage
-
-Analytics dashboard with:
-- Summary cards (requests, tokens, cost)
-- Time series charts
-- Breakdowns by tag, provider, model, client
-- Recent request logs
-- Export capabilities
+Comprehensive usage tracking:
+- **Summary cards** — Requests, tokens, cost, success/error rates
+- **Time series chart** — Visualize trends over time
+- **Breakdowns** — By tag, provider, model, or client
+- **Recent requests** — Full request log with details
+- **Filtering** — Date range, tag, provider, model filters
 
 ### Settings
 
-Configure:
+Configure proxy behavior:
 - Default model for unknown requests
 - Default tag for untagged requests
 - Admin password
 - DNS resolution for client hostnames
 - Usage tracking toggle
 - Data retention period
+- Pricing sync from LiteLLM
 
 ## Providers
 
@@ -339,18 +347,18 @@ Set the corresponding environment variable to enable:
 
 Connect to local or remote Ollama servers:
 
-1. Go to **Providers** → **Add Provider**
-2. Select **Ollama Compatible**
-3. Enter base URL (e.g., `http://192.168.1.100:11434`)
-4. Models are automatically discovered
+1. Go to **Ollama Instances** in the Admin UI
+2. Click **Add Instance**
+3. Enter a name and base URL (e.g., `http://192.168.1.100:11434`)
+4. Models are automatically discovered and namespaced (e.g., `myserver-llama3.2`)
 
 ### Adding Custom Providers
 
 Add any OpenAI-compatible or Anthropic-compatible endpoint:
 
-1. Go to **Providers** → **Add Provider**
-2. Select provider type
-3. Enter base URL and API key environment variable
+1. Go to **Providers & Models** → **Add Provider**
+2. Select provider type (OpenAI Compatible or Anthropic Compatible)
+3. Enter name, base URL, and API key environment variable
 4. Add models manually or let the proxy discover them
 
 ## Installation
@@ -384,11 +392,15 @@ volumes:
 | `ADMIN_ENABLED` | true | Enable Admin UI |
 | `DATABASE_URL` | SQLite | PostgreSQL connection URL |
 
-All API keys support `_FILE` suffix for Docker secrets.
+All API keys support `_FILE` suffix for Docker secrets:
+```yaml
+environment:
+  - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_key
+```
 
 ### PostgreSQL (Production)
 
-For multi-instance deployments:
+For multi-instance deployments or better performance:
 
 ```yaml
 environment:
@@ -501,8 +513,6 @@ curl http://localhost:11434/api/chat \
 └───────────────┘   └───────────────┘   └───────────────────┘
 ```
 
-**Admin UI** runs on port 8080, sharing the same database for configuration and usage data.
-
 ## Comparison with OpenRouter
 
 | Feature | This Proxy | OpenRouter |
@@ -511,7 +521,7 @@ curl http://localhost:11434/api/chat \
 | Local models | Yes (Ollama) | No |
 | Multiple Ollama instances | Yes | No |
 | Cost tracking granularity | Token-level with cache/reasoning | Basic |
-| Tag-based attribution | Multi-tag, 4 methods | Limited |
+| Tag-based attribution | Multi-tag, flexible | Limited |
 | Custom providers | Full UI support | No |
 | Model overrides | Per-model via UI | No |
 | Data ownership | 100% yours | SaaS |

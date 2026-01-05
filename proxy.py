@@ -29,8 +29,8 @@ from flask import Flask, Response, jsonify, request
 from db import ensure_seeded, init_db
 from db.connection import get_db_context
 
-# Import the provider registry
-from providers import registry
+# Import the provider registry and registration function
+from providers import register_all_providers, registry
 
 # Import usage tracking
 from tracking import extract_tag, get_client_ip, resolve_hostname, tracker
@@ -46,9 +46,12 @@ def create_api_app():
     """Create the API Flask application (Ollama/OpenAI compatible endpoints)."""
     application = Flask(__name__)
 
-    # Initialize database and seed default data
+    # Initialize database and seed default data (including YAML overrides)
     init_db()
     ensure_seeded()
+
+    # Register providers AFTER seeding so YAML overrides are applied first
+    register_all_providers()
 
     return application
 
@@ -61,9 +64,8 @@ def create_admin_app():
     # Disable default static folder to avoid conflict with blueprint's static route
     application = Flask(__name__, static_folder=None)
 
-    # Initialize database and seed default data (idempotent)
+    # Initialize database (idempotent - providers already registered by create_api_app)
     init_db()
-    ensure_seeded()
 
     # Configure session for admin authentication
     application.secret_key = get_session_secret()
@@ -463,7 +465,10 @@ def stream_ollama_response(
                 else output_chars // 4
             )
             cost = stream_result.get("cost") if stream_result else None
-            on_complete(input_tokens, output_tokens, cost=cost)
+            # Pass the full stream_result for extended token info
+            on_complete(
+                input_tokens, output_tokens, cost=cost, stream_result=stream_result
+            )
 
     except Exception as e:
         logger.error(f"Provider error during streaming: {e}")
@@ -531,14 +536,17 @@ def stream_openai_response(
                 else output_chars // 4
             )
             cost = stream_result.get("cost") if stream_result else None
-            on_complete(input_tokens, output_tokens, cost=cost)
+            # Pass the full stream_result for extended token info
+            on_complete(
+                input_tokens, output_tokens, cost=cost, stream_result=stream_result
+            )
 
     except Exception as e:
         logger.error(f"Provider error during streaming: {e}")
         error_chunk = {"error": {"message": str(e), "type": "api_error"}}
         yield f"data: {json.dumps(error_chunk)}\n\n"
         if on_complete:
-            on_complete(0, 0, error=str(e))
+            on_complete(0, 0, error=str(e), stream_result=None)
 
 
 # ============================================================================
@@ -644,8 +652,11 @@ def chat():
 
     model_name = data.get("model", "claude-sonnet")
 
+    # Extract tag early so we use clean model name for resolution
+    tag, clean_model_name = extract_tag(request, model_name)
+
     try:
-        provider, model_id = registry.resolve_model(model_name)
+        provider, model_id = registry.resolve_model(clean_model_name)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -684,12 +695,14 @@ def chat():
 
             start_time = getattr(g, "start_time", time.time())
             client_ip = getattr(g, "client_ip", "unknown")
-            tag, _ = extract_tag(request, model_name)
+            # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name  # Capture for closure
 
             # Create callback to track after stream completes
-            def on_stream_complete(input_tokens, output_tokens, error=None, cost=None):
+            def on_stream_complete(
+                input_tokens, output_tokens, error=None, cost=None, stream_result=None
+            ):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
                     f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
@@ -709,6 +722,18 @@ def chat():
                     error_message=error,
                     is_streaming=True,
                     cost=cost,
+                    reasoning_tokens=stream_result.get("reasoning_tokens")
+                    if stream_result
+                    else None,
+                    cached_input_tokens=stream_result.get("cached_input_tokens")
+                    if stream_result
+                    else None,
+                    cache_creation_tokens=stream_result.get("cache_creation_tokens")
+                    if stream_result
+                    else None,
+                    cache_read_tokens=stream_result.get("cache_read_tokens")
+                    if stream_result
+                    else None,
                 )
 
             return Response(
@@ -779,8 +804,11 @@ def generate():
 
     model_name = data.get("model", "claude-sonnet")
 
+    # Extract tag early so we use clean model name for resolution
+    tag, clean_model_name = extract_tag(request, model_name)
+
     try:
-        provider, model_id = registry.resolve_model(model_name)
+        provider, model_id = registry.resolve_model(clean_model_name)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -831,12 +859,14 @@ def generate():
 
             start_time = getattr(g, "start_time", time.time())
             client_ip = getattr(g, "client_ip", "unknown")
-            tag, _ = extract_tag(request, model_name)
+            # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name
 
             # Create callback to track after stream completes
-            def on_stream_complete(input_tokens, output_tokens, error=None, cost=None):
+            def on_stream_complete(
+                input_tokens, output_tokens, error=None, cost=None, stream_result=None
+            ):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
                     f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
@@ -856,6 +886,18 @@ def generate():
                     error_message=error,
                     is_streaming=True,
                     cost=cost,
+                    reasoning_tokens=stream_result.get("reasoning_tokens")
+                    if stream_result
+                    else None,
+                    cached_input_tokens=stream_result.get("cached_input_tokens")
+                    if stream_result
+                    else None,
+                    cache_creation_tokens=stream_result.get("cache_creation_tokens")
+                    if stream_result
+                    else None,
+                    cache_read_tokens=stream_result.get("cache_read_tokens")
+                    if stream_result
+                    else None,
                 )
 
             return Response(
@@ -1004,8 +1046,11 @@ def openai_chat_completions():
 
     model_name = data.get("model", "claude-sonnet")
 
+    # Extract tag early so we use clean model name for resolution
+    tag, clean_model_name = extract_tag(request, model_name)
+
     try:
-        provider, model_id = registry.resolve_model(model_name)
+        provider, model_id = registry.resolve_model(clean_model_name)
     except ValueError as e:
         return jsonify(
             {
@@ -1062,12 +1107,14 @@ def openai_chat_completions():
 
             start_time = getattr(g, "start_time", time.time())
             client_ip = getattr(g, "client_ip", "unknown")
-            tag, _ = extract_tag(request, model_name)
+            # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name
 
             # Create callback to track after stream completes
-            def on_stream_complete(input_tokens, output_tokens, error=None, cost=None):
+            def on_stream_complete(
+                input_tokens, output_tokens, error=None, cost=None, stream_result=None
+            ):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
                     f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
@@ -1087,6 +1134,18 @@ def openai_chat_completions():
                     error_message=error,
                     is_streaming=True,
                     cost=cost,
+                    reasoning_tokens=stream_result.get("reasoning_tokens")
+                    if stream_result
+                    else None,
+                    cached_input_tokens=stream_result.get("cached_input_tokens")
+                    if stream_result
+                    else None,
+                    cache_creation_tokens=stream_result.get("cache_creation_tokens")
+                    if stream_result
+                    else None,
+                    cache_read_tokens=stream_result.get("cache_read_tokens")
+                    if stream_result
+                    else None,
                 )
 
             return Response(
@@ -1183,8 +1242,11 @@ def openai_completions():
 
     model_name = data.get("model", "claude-sonnet")
 
+    # Extract tag early so we use clean model name for resolution
+    tag, clean_model_name = extract_tag(request, model_name)
+
     try:
-        provider, model_id = registry.resolve_model(model_name)
+        provider, model_id = registry.resolve_model(clean_model_name)
     except ValueError as e:
         return jsonify(
             {
@@ -1227,7 +1289,7 @@ def openai_completions():
 
             start_time = getattr(g, "start_time", time.time())
             client_ip = getattr(g, "client_ip", "unknown")
-            tag, _ = extract_tag(request, model_name)
+            # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name  # Capture for closure
             captured_model_id = model_id  # Capture for closure
@@ -1263,6 +1325,23 @@ def openai_completions():
                     yield f"data: {json.dumps(final_chunk)}\n\n"
                     yield "data: [DONE]\n\n"
 
+                    # Get streaming result (actual tokens, cost) if provider supports it
+                    stream_result = None
+                    if hasattr(provider, "get_last_stream_result"):
+                        stream_result = provider.get_last_stream_result()
+
+                    # Use actual tokens if available, fall back to char estimation
+                    actual_input = (
+                        stream_result.get("input_tokens")
+                        if stream_result and stream_result.get("input_tokens")
+                        else input_chars // 4
+                    )
+                    actual_output = (
+                        stream_result.get("output_tokens")
+                        if stream_result and stream_result.get("output_tokens")
+                        else output_chars // 4
+                    )
+
                     # Track after stream completes using captured context
                     response_time_ms = int((time.time() - start_time) * 1000)
                     logger.info(
@@ -1276,12 +1355,25 @@ def openai_completions():
                         provider_id=prov_name,
                         model_id=captured_model_id,
                         endpoint="/v1/completions",
-                        input_tokens=input_chars // 4,
-                        output_tokens=output_chars // 4,
+                        input_tokens=actual_input,
+                        output_tokens=actual_output,
                         response_time_ms=response_time_ms,
                         status_code=200,
                         error_message=None,
                         is_streaming=True,
+                        cost=stream_result.get("cost") if stream_result else None,
+                        reasoning_tokens=stream_result.get("reasoning_tokens")
+                        if stream_result
+                        else None,
+                        cached_input_tokens=stream_result.get("cached_input_tokens")
+                        if stream_result
+                        else None,
+                        cache_creation_tokens=stream_result.get("cache_creation_tokens")
+                        if stream_result
+                        else None,
+                        cache_read_tokens=stream_result.get("cache_read_tokens")
+                        if stream_result
+                        else None,
                     )
 
                 except Exception as e:
@@ -1418,9 +1510,8 @@ if __name__ == "__main__":
 
     debug = os.environ.get("DEBUG", "false").lower() == "true"
 
-    # Note: Models and aliases now load directly from YAML via hybrid loader.
-    # The database stores only overrides and custom models/aliases.
-    # No auto-import needed - YAML is the source of truth for system models.
+    # Note: Models load from database via hybrid loader.
+    # Initial seeding happens on first startup from LiteLLM data.
 
     # Initialize admin password
     from admin import init_admin_password
@@ -1453,10 +1544,7 @@ if __name__ == "__main__":
         logger.info(f"Configured providers: {', '.join(provider_names)}")
         for provider in configured:
             model_count = len(provider.get_models())
-            alias_count = len(provider.get_aliases())
-            logger.info(
-                f"  {provider.name}: {model_count} models, {alias_count} aliases"
-            )
+            logger.info(f"  {provider.name}: {model_count} models")
     else:
         logger.info("No providers configured - use Admin UI to configure")
 

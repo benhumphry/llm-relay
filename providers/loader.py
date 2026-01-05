@@ -14,12 +14,15 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_db_ready():
-    """Ensure database tables exist and migrations are run before querying."""
+    """Ensure database tables exist, migrations run, and data seeded before querying."""
+    from db import ensure_seeded
     from db.connection import check_db_initialized, init_db, run_migrations
 
     if not check_db_initialized():
         logger.info("Database not initialized, creating tables...")
         init_db()
+        # Seed default providers and models on first run
+        ensure_seeded()
     else:
         run_migrations()
 
@@ -48,22 +51,49 @@ def clear_config_cache(provider_name: str | None = None) -> None:
         logger.debug(f"Cleared configuration cache for {provider_name}")
 
 
-def _db_model_to_model_info(model) -> ModelInfo:
-    """Convert a database Model object to a ModelInfo dataclass."""
+def _db_model_to_model_info(model, override=None) -> ModelInfo:
+    """Convert a database Model object to a ModelInfo dataclass.
+
+    Args:
+        model: The Model database object
+        override: Optional ModelOverride with user-defined settings that
+                  take precedence over base model values. Used for provider
+                  quirks (use_max_completion_tokens, unsupported_params) and
+                  pricing overrides.
+
+    Returns:
+        ModelInfo with base values overridden by any non-null override values
+    """
+
+    # Helper to get value from override if set, otherwise from model
+    def get_value(field_name, default=None):
+        if override is not None:
+            override_val = getattr(override, field_name, None)
+            if override_val is not None:
+                return override_val
+        model_val = getattr(model, field_name, None)
+        return model_val if model_val is not None else default
+
     return ModelInfo(
         family=model.family,
-        description=model.description or model.id,
-        context_length=model.context_length,
-        capabilities=model.capabilities or [],
+        description=get_value("description") or model.id,
+        context_length=get_value("context_length") or model.context_length,
+        capabilities=get_value("capabilities") or model.capabilities or [],
         parameter_size="?B",  # Not stored in DB
         quantization_level="none",  # Not stored in DB
-        unsupported_params=set(model.unsupported_params or []),
-        supports_system_prompt=model.supports_system_prompt,
-        use_max_completion_tokens=model.use_max_completion_tokens,
-        input_cost=model.input_cost,
-        output_cost=model.output_cost,
-        cache_read_multiplier=model.cache_read_multiplier,
-        cache_write_multiplier=model.cache_write_multiplier,
+        unsupported_params=set(
+            get_value("unsupported_params") or model.unsupported_params or []
+        ),
+        supports_system_prompt=get_value(
+            "supports_system_prompt", model.supports_system_prompt
+        ),
+        use_max_completion_tokens=get_value(
+            "use_max_completion_tokens", model.use_max_completion_tokens
+        ),
+        input_cost=get_value("input_cost"),
+        output_cost=get_value("output_cost"),
+        cache_read_multiplier=get_value("cache_read_multiplier"),
+        cache_write_multiplier=get_value("cache_write_multiplier"),
     )
 
 
@@ -90,8 +120,8 @@ def load_providers_config() -> dict[str, Any]:
     default_model = "claude-sonnet-4-20250514"
 
     with get_db_context() as db:
-        # Load all providers
-        providers = db.query(Provider).filter(Provider.enabled == True).all()
+        # Load all providers (including disabled - they should still appear in admin UI)
+        providers = db.query(Provider).all()
         for p in providers:
             providers_dict[p.id] = {
                 "type": p.type,
@@ -99,6 +129,7 @@ def load_providers_config() -> dict[str, Any]:
                 "api_key_env": p.api_key_env,
                 "display_name": p.display_name,
                 "source": p.source,
+                "enabled": p.enabled,
             }
 
         # Load default settings
@@ -129,8 +160,12 @@ def load_providers_config() -> dict[str, Any]:
 
 def load_models_for_provider(
     provider_name: str,
-) -> tuple[dict[str, ModelInfo], dict[str, str]]:
-    """Load and parse models and aliases for a provider from database.
+) -> dict[str, ModelInfo]:
+    """Load and parse models for a provider from database.
+
+    Loads base model data from Model table and applies any overrides
+    from ModelOverride table. Overrides persist across LiteLLM syncs
+    and are used for provider quirks like use_max_completion_tokens.
 
     Results are cached in memory.
 
@@ -138,7 +173,7 @@ def load_models_for_provider(
         provider_name: Name of the provider
 
     Returns:
-        Tuple of (models dict, aliases dict)
+        Dict of model_id -> ModelInfo
     """
     global _models_cache
 
@@ -149,10 +184,9 @@ def load_models_for_provider(
     # Ensure DB is ready before querying
     _ensure_db_ready()
 
-    from db import Alias, Model, get_db_context
+    from db import Model, ModelOverride, get_db_context
 
     models: dict[str, ModelInfo] = {}
-    aliases: dict[str, str] = {}
 
     with get_db_context() as db:
         # Load enabled models for this provider
@@ -162,35 +196,31 @@ def load_models_for_provider(
             .all()
         )
 
-        for m in db_models:
-            models[m.id] = _db_model_to_model_info(m)
-
-        # Load enabled aliases for this provider
-        db_aliases = (
-            db.query(Alias)
-            .filter(Alias.provider_id == provider_name, Alias.enabled == True)
+        # Load overrides for this provider (keyed by model_id for fast lookup)
+        overrides = {
+            o.model_id: o
+            for o in db.query(ModelOverride)
+            .filter(ModelOverride.provider_id == provider_name)
             .all()
-        )
+        }
 
-        for a in db_aliases:
-            # Only include alias if target model exists
-            if a.model_id in models:
-                aliases[a.alias] = a.model_id
-            else:
-                logger.warning(
-                    f"Alias '{a.alias}' points to unknown model '{a.model_id}' "
-                    f"in {provider_name}, skipping"
-                )
+        for m in db_models:
+            # Check if there's an override for this model
+            override = overrides.get(m.id)
+
+            # Skip disabled models (via override)
+            if override and override.disabled:
+                continue
+
+            models[m.id] = _db_model_to_model_info(m, override)
 
     if models:
-        logger.debug(
-            f"Loaded {len(models)} models and {len(aliases)} aliases for {provider_name}"
-        )
+        logger.debug(f"Loaded {len(models)} models for {provider_name}")
 
     # Cache the result
-    _models_cache[provider_name] = (models, aliases)
+    _models_cache[provider_name] = models
 
-    return models, aliases
+    return models
 
 
 def get_provider_config(provider_name: str) -> dict[str, Any]:
@@ -246,9 +276,9 @@ def load_models_config(provider_name: str) -> dict[str, Any]:
     """Legacy function - loads models config in old format.
 
     This is kept for backwards compatibility with code that
-    expects the old YAML-style dict format.
+    expects the old dict format for compatibility.
     """
-    models, aliases = load_models_for_provider(provider_name)
+    models = load_models_for_provider(provider_name)
 
     # Convert ModelInfo objects back to dicts
     models_dict = {}
@@ -269,7 +299,6 @@ def load_models_config(provider_name: str) -> dict[str, Any]:
 
     return {
         "models": models_dict,
-        "aliases": aliases,
     }
 
 
