@@ -10,7 +10,7 @@ Unified API for cloud and local LLMs with cost tracking, attribution and smart r
 </p>
 
 <p align="center">
-  <img src="screenshot-usage.png" alt="Usage tracking with cost attribution by tag" width="800">
+  <img src="screenshot-dashboard.png" alt="LLM Relay Dashboard" width="800">
 </p>
 
 ---
