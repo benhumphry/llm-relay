@@ -9,6 +9,10 @@
 Unified API for cloud and local LLMs with cost tracking, attribution and smart routing.
 </p>
 
+<p align="center">
+  <img src="screenshot-usage.png" alt="Usage tracking with cost attribution by tag" width="800">
+</p>
+
 ---
 
 ## What is LLM Relay?
@@ -78,6 +82,10 @@ Works with Open WebUI, Cursor, Continue, and any Ollama or OpenAI-compatible cli
 
 Plus: connect local Ollama instances and add custom OpenAI-compatible providers through the Admin UI.
 
+<p align="center">
+  <img src="screenshot-providers.png" alt="Providers and models management" width="800">
+</p>
+
 ### Cost Tracking
 
 Every request is logged with input tokens, output tokens, reasoning tokens, cache tokens, and calculated cost. View breakdowns by provider, model, tag, or client in the Admin UI.
@@ -112,6 +120,10 @@ Create friendly names for models:
 ### Smart Routers
 
 Let an LLM pick the best model for each request. Configure candidate models, and a fast designator model routes requests based on query content.
+
+<p align="center">
+  <img src="screenshot-routers.png" alt="Smart router configuration" width="800">
+</p>
 
 ### Admin UI
 
