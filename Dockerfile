@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 LABEL maintainer="Ben Sherlock"
 LABEL description="LLM Relay - Multi-provider proxy with Ollama and OpenAI API compatibility"
-LABEL version="1.0.0"
+LABEL version="1.0.2"
 
 # Install gosu for stepping down from root
 RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/*
