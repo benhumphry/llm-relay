@@ -5,8 +5,8 @@
 <h1 align="center">LLM Relay</h1>
 
 <p align="center">
-<strong>A lightweight, self-hosted alternative to OpenRouter</strong><br>
-Unified API for cloud and local LLMs with cost tracking and attribution.
+<strong>A lightweight, self-hosted LLM Proxy and Smart Router</strong><br>
+Unified API for cloud and local LLMs with cost tracking, attribution and smart routing.
 </p>
 
 ---
@@ -19,6 +19,7 @@ A single self-hosted proxy that puts all your LLM providers behind one API:
 - **Accurate cost tracking** — Token-level tracking with cache and reasoning tokens
 - **Flexible attribution** — Tag requests by user, project, or team
 - **Works with any client** — Ollama and OpenAI API compatible
+- **Smart routing** — Route requests to the best model for the job
 
 ## Quick Start
 
