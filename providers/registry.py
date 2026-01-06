@@ -274,26 +274,71 @@ class ProviderRegistry:
 
     def list_all_models(self) -> list[dict]:
         """
-        Get combined model list from all available providers.
+        Get combined model list from all available providers, aliases, and smart routers.
 
         Returns list of model info dicts suitable for /api/tags response.
         Models are already filtered for enabled status in load_models_for_provider().
         """
+        from db import get_enabled_aliases, get_enabled_smart_routers
+
         models = []
         seen = set()
 
+        # Add aliases first (user-defined shortcuts)
+        aliases = get_enabled_aliases()
+        for alias_name, alias in aliases.items():
+            seen.add(alias_name)
+            models.append(
+                {
+                    "name": alias_name,
+                    "model": alias_name,
+                    "provider": "alias",
+                    "details": {
+                        "family": "alias",
+                        "parameter_size": "",
+                        "quantization_level": "",
+                    },
+                    "description": alias.description
+                    or f"Alias for {alias.target_model}",
+                    "context_length": 0,
+                    "capabilities": [],
+                }
+            )
+
+        # Add smart routers
+        routers = get_enabled_smart_routers()
+        for router_name, router in routers.items():
+            seen.add(router_name)
+            models.append(
+                {
+                    "name": router_name,
+                    "model": router_name,
+                    "provider": "smart-router",
+                    "details": {
+                        "family": "smart-router",
+                        "parameter_size": "",
+                        "quantization_level": "",
+                    },
+                    "description": router.description or router.purpose,
+                    "context_length": 0,
+                    "capabilities": [],
+                }
+            )
+
+        # Add provider models
         for provider in self.get_available_providers():
             for model_id, info in provider.get_models().items():
-                if model_id in seen:
+                full_name = f"{provider.name}-{model_id}"
+                if full_name in seen:
                     continue
 
-                seen.add(model_id)
+                seen.add(full_name)
 
                 # Create Ollama-compatible model entry
                 models.append(
                     {
-                        "name": f"{provider.name}-{model_id}",
-                        "model": f"{provider.name}-{model_id}",
+                        "name": full_name,
+                        "model": full_name,
                         "provider": provider.name,
                         "details": {
                             "family": info.family,
@@ -313,11 +358,38 @@ class ProviderRegistry:
         Get combined model list in OpenAI format.
 
         Returns list of model info dicts suitable for /v1/models response.
-        Models are already filtered for enabled status in load_models_for_provider().
+        Includes aliases, smart routers, and provider models.
         """
+        from db import get_enabled_aliases, get_enabled_smart_routers
+
         models = []
         seen = set()
 
+        # Add aliases first (user-defined shortcuts)
+        aliases = get_enabled_aliases()
+        for alias_name in aliases.keys():
+            seen.add(alias_name)
+            models.append(
+                {
+                    "id": alias_name,
+                    "object": "model",
+                    "owned_by": "alias",
+                }
+            )
+
+        # Add smart routers
+        routers = get_enabled_smart_routers()
+        for router_name in routers.keys():
+            seen.add(router_name)
+            models.append(
+                {
+                    "id": router_name,
+                    "object": "model",
+                    "owned_by": "smart-router",
+                }
+            )
+
+        # Add provider models
         for provider in self.get_available_providers():
             for model_id, info in provider.get_models().items():
                 full_name = f"{provider.name}-{model_id}"
