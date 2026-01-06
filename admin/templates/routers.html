@@ -1,0 +1,779 @@
+{% extends "base.html" %} {% block title %}Smart Routers{% endblock %} {% block
+content %}
+<div x-data="routersPage()" x-init="init()">
+    <!-- Header -->
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
+        <div>
+            <h1 class="text-2xl font-bold">Smart Routers</h1>
+            <p class="text-base-content/60">
+                Intelligently route requests to the best model based on query
+                content
+            </p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                />
+            </svg>
+            Add Router
+        </button>
+    </div>
+
+    <!-- Loading State -->
+    <template x-if="loading">
+        <div class="flex justify-center py-12">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    </template>
+
+    <!-- No Routers Configured -->
+    <template x-if="!loading && routers.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-base-content/30"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium">
+                    No Smart Routers Configured
+                </h3>
+                <p class="mt-2 text-base-content/60 max-w-md mx-auto">
+                    Smart routers use a designator LLM to analyze incoming
+                    requests and route them to the most appropriate model from a
+                    pool of candidates.
+                </p>
+                <button @click="openAddModal()" class="btn btn-primary mt-4">
+                    Create Your First Router
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Router Cards -->
+    <template x-if="!loading && routers.length > 0">
+        <div class="grid gap-4">
+            <template x-for="router in routers" :key="router.id">
+                <div class="card bg-base-100 shadow-lg">
+                    <div class="card-body">
+                        <div
+                            class="flex flex-col lg:flex-row justify-between gap-4"
+                        >
+                            <!-- Router Info -->
+                            <div class="flex-1">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <h2
+                                        class="card-title font-mono"
+                                        x-text="router.name"
+                                    ></h2>
+                                    <span
+                                        class="badge"
+                                        :class="router.enabled ? 'badge-success' : 'badge-ghost'"
+                                        x-text="router.enabled ? 'Enabled' : 'Disabled'"
+                                    ></span>
+                                    <span
+                                        class="badge badge-outline"
+                                        x-text="router.strategy === 'per_session' ? 'Per Session' : 'Per Request'"
+                                    ></span>
+                                </div>
+                                <p
+                                    class="text-base-content/60 text-sm mb-3"
+                                    x-text="router.description || router.purpose"
+                                ></p>
+
+                                <!-- Designator & Fallback -->
+                                <div
+                                    class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm"
+                                >
+                                    <div>
+                                        <span class="text-base-content/50"
+                                            >Designator:</span
+                                        >
+                                        <span
+                                            class="font-mono ml-2"
+                                            x-text="router.designator_model"
+                                        ></span>
+                                    </div>
+                                    <div>
+                                        <span class="text-base-content/50"
+                                            >Fallback:</span
+                                        >
+                                        <span
+                                            class="font-mono ml-2"
+                                            x-text="router.fallback_model"
+                                        ></span>
+                                    </div>
+                                </div>
+
+                                <!-- Candidates -->
+                                <div class="mt-3">
+                                    <span class="text-base-content/50 text-sm"
+                                        >Candidates:</span
+                                    >
+                                    <div class="flex flex-wrap gap-2 mt-1">
+                                        <template
+                                            x-for="candidate in router.candidates"
+                                            :key="candidate.model"
+                                        >
+                                            <div
+                                                class="badge badge-outline font-mono text-xs"
+                                                x-text="candidate.model"
+                                            ></div>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- Tags -->
+                                <template
+                                    x-if="router.tags && router.tags.length > 0"
+                                >
+                                    <div class="mt-3">
+                                        <span
+                                            class="text-base-content/50 text-sm"
+                                            >Tags:</span
+                                        >
+                                        <div class="flex flex-wrap gap-1 mt-1">
+                                            <template
+                                                x-for="tag in router.tags"
+                                                :key="tag"
+                                            >
+                                                <span
+                                                    class="badge badge-sm badge-primary badge-outline"
+                                                    x-text="tag"
+                                                ></span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+
+                            <!-- Actions -->
+                            <div class="flex lg:flex-col gap-2">
+                                <button
+                                    @click="openEditModal(router)"
+                                    class="btn btn-ghost btn-sm"
+                                    title="Edit router"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                        />
+                                    </svg>
+                                    Edit
+                                </button>
+                                <button
+                                    @click="confirmDelete(router)"
+                                    class="btn btn-ghost btn-sm text-error"
+                                    title="Delete router"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                        />
+                                    </svg>
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </template>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal" :class="{ 'modal-open': showModal }">
+        <div class="modal-box max-w-2xl">
+            <h3
+                class="font-bold text-lg"
+                x-text="editingRouter ? 'Edit Smart Router' : 'Add Smart Router'"
+            ></h3>
+            <form @submit.prevent="saveRouter()">
+                <!-- Basic Info -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Router Name</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.name"
+                            class="input input-bordered font-mono"
+                            :class="{ 'input-error': formErrors.name }"
+                            placeholder="e.g., smart-coder, best-model"
+                            required
+                            :disabled="editingRouter"
+                        />
+                        <label class="label" x-show="formErrors.name">
+                            <span
+                                class="label-text-alt text-error"
+                                x-text="formErrors.name"
+                            ></span>
+                        </label>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Strategy</span>
+                        </label>
+                        <select
+                            x-model="form.strategy"
+                            class="select select-bordered"
+                        >
+                            <option value="per_request">Per Request</option>
+                            <option value="per_session">Per Session</option>
+                        </select>
+                        <label class="label">
+                            <span
+                                class="label-text-alt"
+                                x-text="form.strategy === 'per_session' ? 'Cache routing decision for session' : 'Route each request independently'"
+                            ></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Purpose</span>
+                    </label>
+                    <textarea
+                        x-model="form.purpose"
+                        class="textarea textarea-bordered"
+                        placeholder="Describe when to use which model. E.g., 'Route coding tasks to Claude, general questions to GPT-4, and complex reasoning to o1.'"
+                        rows="2"
+                        required
+                    ></textarea>
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >This helps the designator make routing
+                            decisions</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Designator Model -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Designator Model</span>
+                    </label>
+                    <select
+                        x-model="form.designator_model"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="">Select a model...</option>
+                        <template
+                            x-for="model in availableModels"
+                            :key="model.id"
+                        >
+                            <option
+                                :value="model.id"
+                                x-text="`${model.id}`"
+                            ></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Fast/cheap model that decides which candidate to
+                            use</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Candidates -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Candidate Models</span>
+                        <button
+                            type="button"
+                            @click="addCandidate()"
+                            class="btn btn-ghost btn-xs"
+                        >
+                            + Add
+                        </button>
+                    </label>
+                    <div class="space-y-2">
+                        <template
+                            x-for="(candidate, index) in form.candidates"
+                            :key="index"
+                        >
+                            <div class="flex gap-2 items-start">
+                                <select
+                                    x-model="form.candidates[index].model"
+                                    class="select select-bordered select-sm flex-1"
+                                    required
+                                >
+                                    <option value="">Select model...</option>
+                                    <template
+                                        x-for="model in availableModels"
+                                        :key="model.id"
+                                    >
+                                        <option
+                                            :value="model.id"
+                                            x-text="model.id"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <input
+                                    type="text"
+                                    x-model="form.candidates[index].notes"
+                                    class="input input-bordered input-sm flex-1"
+                                    placeholder="Notes (optional)"
+                                />
+                                <button
+                                    type="button"
+                                    @click="removeCandidate(index)"
+                                    class="btn btn-ghost btn-sm text-error"
+                                    :disabled="form.candidates.length <= 2"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
+                                    </svg>
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                    <label class="label" x-show="formErrors.candidates">
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.candidates"
+                        ></span>
+                    </label>
+                </div>
+
+                <!-- Fallback Model -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Fallback Model</span>
+                    </label>
+                    <select
+                        x-model="form.fallback_model"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="">Select a model...</option>
+                        <template
+                            x-for="model in availableModels"
+                            :key="model.id"
+                        >
+                            <option
+                                :value="model.id"
+                                x-text="model.id"
+                            ></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Used when designator fails or returns invalid
+                            response</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Tags & Description -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Tags (optional)</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.tagsInput"
+                            class="input input-bordered"
+                            placeholder="e.g., project-a, team-1"
+                        />
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >Session TTL (seconds)</span
+                            >
+                        </label>
+                        <input
+                            type="number"
+                            x-model.number="form.session_ttl"
+                            class="input input-bordered"
+                            min="60"
+                            max="86400"
+                        />
+                    </div>
+                </div>
+
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Description (optional)</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.description"
+                        class="input input-bordered"
+                        placeholder="Human-readable description"
+                    />
+                </div>
+
+                <div class="form-control mt-4">
+                    <label class="label cursor-pointer justify-start gap-3">
+                        <input
+                            type="checkbox"
+                            x-model="form.enabled"
+                            class="toggle toggle-primary"
+                        />
+                        <span class="label-text">Enabled</span>
+                    </label>
+                </div>
+
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="closeModal()"
+                        class="btn btn-ghost"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                        :disabled="saving"
+                    >
+                        <span
+                            x-text="editingRouter ? 'Save Changes' : 'Create Router'"
+                        ></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop" @click="closeModal()"></div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal" :class="{ 'modal-open': showDeleteModal }">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg">Delete Smart Router</h3>
+            <p class="py-4">
+                Are you sure you want to delete the router
+                <span
+                    class="font-mono font-bold"
+                    x-text="deletingRouter?.name"
+                ></span
+                >? This action cannot be undone.
+            </p>
+            <div class="modal-action">
+                <button @click="showDeleteModal = false" class="btn btn-ghost">
+                    Cancel
+                </button>
+                <button
+                    @click="deleteRouter()"
+                    class="btn btn-error"
+                    :class="{ 'loading': deleting }"
+                    :disabled="deleting"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop" @click="showDeleteModal = false"></div>
+    </div>
+</div>
+
+<script>
+    function routersPage() {
+        return {
+            loading: true,
+            routers: [],
+            availableModels: [],
+            showModal: false,
+            showDeleteModal: false,
+            editingRouter: null,
+            deletingRouter: null,
+            saving: false,
+            deleting: false,
+            form: {
+                name: "",
+                designator_model: "",
+                purpose: "",
+                candidates: [
+                    { model: "", notes: "" },
+                    { model: "", notes: "" },
+                ],
+                fallback_model: "",
+                strategy: "per_request",
+                session_ttl: 3600,
+                tagsInput: "",
+                description: "",
+                enabled: true,
+            },
+            formErrors: {},
+
+            async init() {
+                await Promise.all([
+                    this.loadRouters(),
+                    this.loadAvailableModels(),
+                ]);
+                this.loading = false;
+            },
+
+            async loadRouters() {
+                try {
+                    const response = await fetch("/api/routers");
+                    if (response.ok) {
+                        this.routers = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load routers:", error);
+                }
+            },
+
+            async loadAvailableModels() {
+                try {
+                    const response = await fetch("/api/routers/models");
+                    if (response.ok) {
+                        this.availableModels = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load available models:", error);
+                }
+            },
+
+            openAddModal() {
+                this.editingRouter = null;
+                this.form = {
+                    name: "",
+                    designator_model: "",
+                    purpose: "",
+                    candidates: [
+                        { model: "", notes: "" },
+                        { model: "", notes: "" },
+                    ],
+                    fallback_model: "",
+                    strategy: "per_request",
+                    session_ttl: 3600,
+                    tagsInput: "",
+                    description: "",
+                    enabled: true,
+                };
+                this.formErrors = {};
+                this.showModal = true;
+            },
+
+            async openEditModal(router) {
+                // Ensure models are loaded before opening
+                if (this.availableModels.length === 0) {
+                    await this.loadAvailableModels();
+                }
+
+                this.editingRouter = router;
+
+                // Deep clone candidates via JSON to ensure reactivity
+                const candidates = JSON.parse(
+                    JSON.stringify(router.candidates || []),
+                ).map((c) => ({
+                    model: c.model || "",
+                    notes: c.notes || "",
+                }));
+
+                // Ensure at least 2 candidates
+                while (candidates.length < 2) {
+                    candidates.push({ model: "", notes: "" });
+                }
+
+                // First set form with empty selects so the options render
+                this.form = {
+                    name: router.name,
+                    designator_model: "",
+                    purpose: router.purpose,
+                    candidates: candidates.map((c) => ({
+                        model: "",
+                        notes: c.notes,
+                    })),
+                    fallback_model: "",
+                    strategy: router.strategy,
+                    session_ttl: router.session_ttl,
+                    tagsInput: (router.tags || []).join(", "),
+                    description: router.description || "",
+                    enabled: router.enabled,
+                };
+                this.formErrors = {};
+                this.showModal = true;
+
+                // Then populate select values after DOM renders with options
+                this.$nextTick(() => {
+                    this.form.designator_model = router.designator_model;
+                    this.form.fallback_model = router.fallback_model;
+                    // Update only the model field, preserving notes already set
+                    candidates.forEach((c, i) => {
+                        this.form.candidates[i].model = c.model;
+                    });
+                });
+            },
+
+            closeModal() {
+                this.showModal = false;
+                this.editingRouter = null;
+                this.formErrors = {};
+            },
+
+            addCandidate() {
+                this.form.candidates.push({ model: "", notes: "" });
+            },
+
+            removeCandidate(index) {
+                if (this.form.candidates.length > 2) {
+                    this.form.candidates.splice(index, 1);
+                }
+            },
+
+            async saveRouter() {
+                this.formErrors = {};
+                this.saving = true;
+
+                // Parse tags from comma-separated input
+                const tags = this.form.tagsInput
+                    .split(",")
+                    .map((t) => t.trim().toLowerCase())
+                    .filter((t) => t.length > 0);
+
+                // Filter out empty candidates
+                const candidates = this.form.candidates
+                    .filter((c) => c.model)
+                    .map((c) => ({ model: c.model, notes: c.notes || null }));
+
+                if (candidates.length < 2) {
+                    this.formErrors.candidates =
+                        "At least 2 candidates are required";
+                    this.saving = false;
+                    return;
+                }
+
+                const payload = {
+                    name: this.form.name.toLowerCase().trim(),
+                    designator_model: this.form.designator_model,
+                    purpose: this.form.purpose,
+                    candidates: candidates,
+                    fallback_model: this.form.fallback_model,
+                    strategy: this.form.strategy,
+                    session_ttl: this.form.session_ttl,
+                    tags: tags,
+                    description: this.form.description || null,
+                    enabled: this.form.enabled,
+                };
+
+                try {
+                    const url = this.editingRouter
+                        ? `/api/routers/${this.editingRouter.id}`
+                        : "/api/routers";
+                    const method = this.editingRouter ? "PUT" : "POST";
+
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        if (data.error && data.error.includes("name")) {
+                            this.formErrors.name = data.error;
+                        } else {
+                            alert(data.error || "Failed to save router");
+                        }
+                        return;
+                    }
+
+                    await this.loadRouters();
+                    this.closeModal();
+                } catch (error) {
+                    console.error("Failed to save router:", error);
+                    alert("Failed to save router");
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            confirmDelete(router) {
+                this.deletingRouter = router;
+                this.showDeleteModal = true;
+            },
+
+            async deleteRouter() {
+                if (!this.deletingRouter) return;
+
+                this.deleting = true;
+                try {
+                    const response = await fetch(
+                        `/api/routers/${this.deletingRouter.id}`,
+                        {
+                            method: "DELETE",
+                        },
+                    );
+
+                    if (response.ok) {
+                        await this.loadRouters();
+                        this.showDeleteModal = false;
+                        this.deletingRouter = null;
+                    } else {
+                        const data = await response.json();
+                        alert(data.error || "Failed to delete router");
+                    }
+                } catch (error) {
+                    console.error("Failed to delete router:", error);
+                    alert("Failed to delete router");
+                } finally {
+                    this.deleting = false;
+                }
+            },
+        };
+    }
+</script>
+{% endblock %}

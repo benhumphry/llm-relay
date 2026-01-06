@@ -244,7 +244,6 @@ Tags enable cost attribution across any dimension you need.
 | Header | `X-Proxy-Tag: alice` | 1 (highest) |
 | Model suffix | `model: claude@alice` | 2 |
 | Bearer token | `Authorization: Bearer alice` | 3 |
-| Default tag | Configured in Settings | 4 (lowest) |
 
 ### Multiple Tags
 
@@ -318,7 +317,6 @@ Comprehensive usage tracking:
 
 Configure proxy behavior:
 - Default model for unknown requests
-- Default tag for untagged requests
 - Admin password
 - DNS resolution for client hostnames
 - Usage tracking toggle

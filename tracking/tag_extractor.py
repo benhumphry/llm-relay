@@ -5,14 +5,12 @@ Extracts usage tags from requests using multiple strategies:
 1. X-Proxy-Tag header (supports comma-separated tags)
 2. Model name suffix (model@tag or model@tag1,tag2)
 3. Authorization Bearer token (for apps like Open WebUI)
-4. Default tag from settings
 
 Multiple tags can be specified with commas: "alice,project-x"
+Requests without tags will have an empty tag string.
 """
 
 from flask import Request
-
-from db import Setting, get_db_context
 
 
 def extract_tag(request: Request, model_name: str) -> tuple[str, str]:
@@ -23,10 +21,10 @@ def extract_tag(request: Request, model_name: str) -> tuple[str, str]:
     1. X-Proxy-Tag header - explicit tag specification
     2. Model name suffix - model@tag format
     3. Authorization Bearer token - use token value as tag
-    4. Default tag from settings
 
     Multiple tags can be comma-separated: "alice,project-x"
     Tags are normalized (trimmed, deduplicated, sorted) and stored as comma-separated.
+    Requests without explicit tags will have an empty tag string.
 
     Args:
         request: Flask request object
@@ -34,7 +32,7 @@ def extract_tag(request: Request, model_name: str) -> tuple[str, str]:
 
     Returns:
         Tuple of (tag_string, cleaned_model_name)
-        tag_string may contain multiple comma-separated tags
+        tag_string may contain multiple comma-separated tags, or empty string if no tags
     """
     raw_tag = None
     clean_model = model_name
@@ -74,9 +72,8 @@ def extract_tag(request: Request, model_name: str) -> tuple[str, str]:
         if normalized:
             return normalized, clean_model
 
-    # Priority 4: Default tag from settings
-    default_tag = get_default_tag()
-    return default_tag, clean_model
+    # No tag found - return empty string
+    return "", clean_model
 
 
 def normalize_tags(tag_string: str) -> str:
@@ -100,17 +97,3 @@ def normalize_tags(tag_string: str) -> str:
             unique_tags.append(tag)
     unique_tags.sort()
     return ",".join(unique_tags)
-
-
-def get_default_tag() -> str:
-    """Get the default tag from settings."""
-    try:
-        with get_db_context() as db:
-            setting = (
-                db.query(Setting).filter(Setting.key == Setting.KEY_DEFAULT_TAG).first()
-            )
-            if setting and setting.value:
-                return setting.value
-    except Exception:
-        pass
-    return "default"

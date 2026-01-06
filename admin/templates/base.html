@@ -128,6 +128,7 @@
 
                     <!-- Navigation -->
                     <ul class="menu p-4 gap-1">
+                        <!-- Dashboard -->
                         <li>
                             <a
                                 href="{{ url_for('admin.dashboard') }}"
@@ -149,6 +150,11 @@
                                 </svg>
                                 Dashboard
                             </a>
+                        </li>
+
+                        <!-- Model Management -->
+                        <li class="menu-title mt-4">
+                            <span>Model Management</span>
                         </li>
                         <li>
                             <a
@@ -174,6 +180,82 @@
                         </li>
                         <li>
                             <a
+                                href="{{ url_for('admin.ollama_page') }}"
+                                class="{% if request.endpoint == 'admin.ollama_page' %}active{% endif %}"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"
+                                    />
+                                </svg>
+                                Local Servers
+                            </a>
+                        </li>
+
+                        <!-- Routing -->
+                        <li class="menu-title mt-4">
+                            <span>Routing</span>
+                        </li>
+                        <li>
+                            <a
+                                href="{{ url_for('admin.aliases_page') }}"
+                                class="{% if request.endpoint == 'admin.aliases_page' %}active{% endif %}"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"
+                                    />
+                                </svg>
+                                Aliases
+                            </a>
+                        </li>
+                        <li>
+                            <a
+                                href="{{ url_for('admin.routers_page') }}"
+                                class="{% if request.endpoint == 'admin.routers_page' %}active{% endif %}"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                                    />
+                                </svg>
+                                Smart Routers
+                            </a>
+                        </li>
+
+                        <!-- Usage -->
+                        <li class="menu-title mt-4">
+                            <span>Usage</span>
+                        </li>
+                        <li>
+                            <a
                                 href="{{ url_for('admin.usage') }}"
                                 class="{% if request.endpoint == 'admin.usage' %}active{% endif %}"
                             >
@@ -191,17 +273,13 @@
                                         d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                                     />
                                 </svg>
-                                Usage
+                                Statistics
                             </a>
-                        </li>
-
-                        <li class="menu-title mt-4">
-                            <span>Local</span>
                         </li>
                         <li>
                             <a
-                                href="{{ url_for('admin.ollama_page') }}"
-                                class="{% if request.endpoint == 'admin.ollama_page' %}active{% endif %}"
+                                href="{{ url_for('admin.requests_page') }}"
+                                class="{% if request.endpoint == 'admin.requests_page' %}active{% endif %}"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -214,13 +292,14 @@
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                         stroke-width="2"
-                                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
                                     />
                                 </svg>
-                                Ollama
+                                Request Log
                             </a>
                         </li>
 
+                        <!-- System -->
                         <li class="menu-title mt-4">
                             <span>System</span>
                         </li>

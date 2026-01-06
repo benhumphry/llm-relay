@@ -5,15 +5,55 @@ The registry handles:
 - Provider registration and discovery
 - Model resolution across all providers
 - Aggregating model lists for API responses
+- Alias resolution (v3.1)
 """
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .base import LLMProvider, ModelInfo
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ResolvedModel:
+    """Result of model resolution, including alias information."""
+
+    provider: "LLMProvider"
+    model_id: str
+    alias_name: str | None = None
+    alias_tags: list[str] | None = None
+    # Internal: routing result from smart router (set dynamically)
+    _routing_result: "object | None" = None
+    # Track if this resolution used the default fallback
+    is_default_fallback: bool = False
+
+    @property
+    def has_alias(self) -> bool:
+        """Check if this resolution came from an alias."""
+        return self.alias_name is not None
+
+    @property
+    def has_router(self) -> bool:
+        """Check if this resolution came from a smart router."""
+        return self._routing_result is not None
+
+    @property
+    def router_name(self) -> str | None:
+        """Get the router name if this came from a smart router."""
+        if self._routing_result:
+            return self._routing_result.router_name
+        return None
+
+    @property
+    def designator_usage(self) -> dict | None:
+        """Get designator usage info if this came from a smart router."""
+        if self._routing_result:
+            return self._routing_result.designator_usage
+        return None
 
 
 class ProviderRegistry:
@@ -57,29 +97,123 @@ class ProviderRegistry:
         self._default_provider = provider_name
         self._default_model = model_id
 
-    def resolve_model(self, model_name: str) -> tuple["LLMProvider", str]:
+    def resolve_model(
+        self,
+        model_name: str,
+        messages: list[dict] | None = None,
+        system: str | None = None,
+        session_key: str | None = None,
+    ) -> ResolvedModel:
         """
         Resolve a model name to a provider and model ID.
 
         Resolution order:
-        1. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        2. Check each configured provider's models
-        3. Fall back to default provider/model
+        1. Check if it's a smart router (v3.2) - requires messages
+        2. Check if it's an alias (v3.1)
+        3. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        4. Check each configured provider's models
+        5. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
+            messages: Optional message list (required for smart router)
+            system: Optional system prompt (for smart router context)
+            session_key: Optional session key (for per_session routing)
 
         Returns:
-            Tuple of (provider, model_id)
+            ResolvedModel with provider, model_id, and optional alias info
 
         Raises:
             ValueError: If model not found and no default configured
+        """
+        from db import get_alias_by_name, get_smart_router_by_name
+        from routing import SmartRouterEngine
+
+        name = model_name.lower().strip()
+
+        # Remove :latest suffix
+        if name.endswith(":latest"):
+            name = name[:-7]
+
+        # Step 1: Check if it's a smart router (v3.2)
+        router = get_smart_router_by_name(name)
+        if router and router.enabled:
+            if messages is not None:
+                # Use smart routing
+                logger.debug(f"Using smart router '{name}'")
+                engine = SmartRouterEngine(router, self)
+                result = engine.route(messages, system, session_key)
+                # Store routing metadata for later use
+                result.resolved._routing_result = result
+                return result.resolved
+            else:
+                # No messages provided - fall back to router's fallback model
+                logger.debug(
+                    f"Smart router '{name}' called without messages, using fallback"
+                )
+                try:
+                    target_result = self._resolve_actual_model(router.fallback_model)
+                    return ResolvedModel(
+                        provider=target_result.provider,
+                        model_id=target_result.model_id,
+                        alias_name=router.name,
+                        alias_tags=router.tags or [],
+                    )
+                except ValueError:
+                    pass  # Fall through to normal resolution
+
+        # Step 2: Check if it's an alias (v3.1)
+        alias = get_alias_by_name(name)
+        if alias and alias.enabled:
+            logger.debug(f"Resolving alias '{name}' -> '{alias.target_model}'")
+            # Resolve the target model
+            try:
+                target_result = self._resolve_actual_model(alias.target_model)
+                return ResolvedModel(
+                    provider=target_result.provider,
+                    model_id=target_result.model_id,
+                    alias_name=alias.name,
+                    alias_tags=alias.tags or [],
+                )
+            except ValueError:
+                # Target model not available, fall back to default
+                logger.warning(
+                    f"Alias '{name}' target '{alias.target_model}' not available, "
+                    "falling back to default"
+                )
+                if self._default_provider and self._default_model:
+                    default = self._providers.get(self._default_provider)
+                    if default and default.is_available():
+                        return ResolvedModel(
+                            provider=default,
+                            model_id=self._default_model,
+                            alias_name=alias.name,
+                            alias_tags=alias.tags or [],
+                        )
+
+        # Step 3-5: Normal model resolution
+        return self._resolve_actual_model(name)
+
+    def _resolve_actual_model(self, model_name: str) -> ResolvedModel:
+        """
+        Internal method to resolve a model name without alias checking.
+
+        Used by resolve_model for both direct lookups and alias target resolution.
         """
         name = model_name.lower().strip()
 
         # Remove :latest suffix
         if name.endswith(":latest"):
             name = name[:-7]
+
+        # Check for explicit provider/model format (e.g., "gemini/gemini-2.5-pro")
+        if "/" in name:
+            provider_name, model_part = name.split("/", 1)
+            provider = self._providers.get(provider_name)
+            if provider and provider.is_available():
+                resolved = provider.resolve_model(model_part)
+                if resolved:
+                    return ResolvedModel(provider=provider, model_id=resolved)
 
         # Check for provider prefix (e.g., "openai-gpt-4o")
         for provider_name, provider in self._providers.items():
@@ -91,17 +225,17 @@ class ProviderRegistry:
                 model_part = name[len(prefix) :]
                 resolved = provider.resolve_model(model_part)
                 if resolved:
-                    return provider, resolved
+                    return ResolvedModel(provider=provider, model_id=resolved)
                 # Also try the full name without prefix removal
                 resolved = provider.resolve_model(name)
                 if resolved:
-                    return provider, resolved
+                    return ResolvedModel(provider=provider, model_id=resolved)
 
         # Check each available provider (enabled + configured)
         for provider in self.get_available_providers():
             resolved = provider.resolve_model(name)
             if resolved:
-                return provider, resolved
+                return ResolvedModel(provider=provider, model_id=resolved)
 
         # Fall back to default
         if self._default_provider and self._default_model:
@@ -111,12 +245,32 @@ class ProviderRegistry:
                     f'Unknown model "{model_name}", using default: '
                     f"{self._default_provider}/{self._default_model}"
                 )
-                return default, self._default_model
+                return ResolvedModel(
+                    provider=default,
+                    model_id=self._default_model,
+                    is_default_fallback=True,
+                )
 
         raise ValueError(
             f'Model "{model_name}" not found in any available provider. '
             f"Available providers: {[p.name for p in self.get_available_providers()]}"
         )
+
+    def _get_default_model(self) -> ResolvedModel:
+        """
+        Get the default model.
+
+        Used by SmartRouterEngine as ultimate fallback.
+
+        Raises:
+            ValueError: If no default configured or available
+        """
+        if self._default_provider and self._default_model:
+            default = self._providers.get(self._default_provider)
+            if default and default.is_available():
+                return ResolvedModel(provider=default, model_id=self._default_model)
+
+        raise ValueError("No default model configured or available")
 
     def list_all_models(self) -> list[dict]:
         """

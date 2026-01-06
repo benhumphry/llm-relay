@@ -32,6 +32,9 @@ from db.connection import get_db_context
 # Import the provider registry and registration function
 from providers import register_all_providers, registry
 
+# Import routing utilities for smart routers
+from routing import get_session_key
+
 # Import usage tracking
 from tracking import extract_tag, get_client_ip, resolve_hostname, tracker
 
@@ -209,6 +212,12 @@ def track_completion(
     cached_input_tokens: int | None = None,
     cache_creation_tokens: int | None = None,
     cache_read_tokens: int | None = None,
+    # Alias tracking (v3.1)
+    tag: str | None = None,
+    alias: str | None = None,
+    # Smart router tracking (v3.2)
+    is_designator: bool = False,
+    router_name: str | None = None,
 ):
     """
     Track a completed request.
@@ -228,6 +237,10 @@ def track_completion(
         cached_input_tokens: OpenAI cached prompt tokens
         cache_creation_tokens: Anthropic cache creation tokens
         cache_read_tokens: Anthropic cache read tokens
+        tag: Pre-computed tag (with alias tags merged) - if None, extracted from request
+        alias: Alias name if request used an alias (v3.1)
+        is_designator: Whether this was a designator call (v3.2)
+        router_name: Smart router name if request used a router (v3.2)
     """
     from flask import g
 
@@ -243,8 +256,9 @@ def track_completion(
 
     client_ip = getattr(g, "client_ip", "unknown")
 
-    # Extract tag from request
-    tag, _ = extract_tag(request, model_name)
+    # Extract tag from request if not provided
+    if tag is None:
+        tag, _ = extract_tag(request, model_name)
 
     # Resolve hostname (cached)
     hostname = resolve_hostname(client_ip)
@@ -263,11 +277,62 @@ def track_completion(
         status_code=status_code,
         error_message=error_message,
         is_streaming=is_streaming,
+        alias=alias,
         cost=cost,
         reasoning_tokens=reasoning_tokens,
         cached_input_tokens=cached_input_tokens,
         cache_creation_tokens=cache_creation_tokens,
         cache_read_tokens=cache_read_tokens,
+        is_designator=is_designator,
+        router_name=router_name,
+    )
+
+
+def log_designator_usage(resolved, endpoint: str):
+    """
+    Log designator usage for smart router requests.
+
+    This logs the designator LLM call separately from the main request,
+    allowing tracking of routing overhead costs.
+    """
+    if not resolved.has_router or not resolved.designator_usage:
+        return
+
+    usage = resolved.designator_usage
+    if not usage.get("input_tokens") and not usage.get("output_tokens"):
+        return
+
+    from flask import g
+
+    client_ip = getattr(g, "client_ip", "unknown")
+    hostname = resolve_hostname(client_ip)
+
+    # Parse designator model to get provider/model
+    designator_model = resolved._routing_result.designator_model or ""
+    if "/" in designator_model:
+        des_provider, des_model = designator_model.split("/", 1)
+    else:
+        des_provider = "designator"
+        des_model = designator_model or resolved._routing_result.router_name
+
+    # Log the designator call as a separate request entry
+    tracker.log_request(
+        timestamp=datetime.now(timezone.utc),
+        client_ip=client_ip,
+        hostname=hostname,
+        tag="",
+        provider_id=des_provider,
+        model_id=des_model,
+        endpoint=endpoint,
+        input_tokens=usage.get("input_tokens", 0),
+        output_tokens=usage.get("output_tokens", 0),
+        response_time_ms=0,  # Not tracked separately
+        status_code=200,
+        error_message=None,
+        is_streaming=False,
+        cost=usage.get("cost"),
+        is_designator=True,
+        router_name=resolved.router_name,
     )
 
 
@@ -699,7 +764,8 @@ def show_model():
     model_name = data.get("name", data.get("model", ""))
 
     try:
-        provider, model_id = registry.resolve_model(model_name)
+        resolved = registry.resolve_model(model_name)
+        provider, model_id = resolved.provider, resolved.model_id
         info = provider.get_models().get(model_id)
 
         if info:
@@ -749,13 +815,39 @@ def chat():
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
 
+    # Convert messages for resolution (needed for smart routers)
+    ollama_messages = data.get("messages", [])
+    system_prompt, messages = convert_ollama_messages(ollama_messages)
+
+    # Generate session key for smart router caching
+    from flask import g
+
+    client_ip = getattr(g, "client_ip", get_client_ip(request))
+    user_agent = request.headers.get("User-Agent", "")
+    session_key = get_session_key(client_ip, user_agent)
+
     try:
-        provider, model_id = registry.resolve_model(clean_model_name)
+        resolved = registry.resolve_model(
+            clean_model_name,
+            messages=messages,
+            system=system_prompt,
+            session_key=session_key,
+        )
+        provider, model_id = resolved.provider, resolved.model_id
+        alias_name = resolved.alias_name
+        alias_tags = resolved.alias_tags or []
+        router_name = resolved.router_name  # Smart router tracking (v3.2)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    ollama_messages = data.get("messages", [])
-    system_prompt, messages = convert_ollama_messages(ollama_messages)
+    # Log designator usage for smart routers (v3.2)
+    log_designator_usage(resolved, "/api/chat")
+
+    # Merge alias tags with request tags (v3.1)
+    if alias_tags:
+        existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+        all_tags = list(set(existing_tags + alias_tags))
+        tag = ",".join(all_tags)
 
     # Filter out images if provider doesn't support vision
     if not provider_supports_vision(provider, model_id):
@@ -792,6 +884,8 @@ def chat():
             # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name  # Capture for closure
+            captured_alias = alias_name  # Capture alias for closure (v3.1)
+            captured_router = router_name  # Capture router for closure (v3.2)
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -828,6 +922,8 @@ def chat():
                     cache_read_tokens=stream_result.get("cache_read_tokens")
                     if stream_result
                     else None,
+                    alias=captured_alias,
+                    router_name=captured_router,
                 )
 
             return Response(
@@ -877,6 +973,9 @@ def chat():
                 cached_input_tokens=result.get("cached_input_tokens"),
                 cache_creation_tokens=result.get("cache_creation_tokens"),
                 cache_read_tokens=result.get("cache_read_tokens"),
+                tag=tag,
+                alias=alias_name,
+                router_name=router_name,
             )
             return jsonify(response_obj)
 
@@ -892,6 +991,9 @@ def chat():
             output_tokens=0,
             status_code=500,
             error_message=str(e),
+            tag=tag,
+            alias=alias_name,
+            router_name=router_name,
         )
         return jsonify({"error": str(e)}), 500
 
@@ -906,15 +1008,44 @@ def generate():
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
 
-    try:
-        provider, model_id = registry.resolve_model(clean_model_name)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-
     prompt = data.get("prompt", "")
     system = data.get("system", None)
 
-    # Build messages
+    # Build messages for resolution (needed for smart routers)
+    # We build a simple message list first, then potentially add images after resolution
+    messages_for_resolution = [{"role": "user", "content": prompt}]
+
+    # Generate session key for smart router caching
+    from flask import g
+
+    client_ip = getattr(g, "client_ip", get_client_ip(request))
+    user_agent = request.headers.get("User-Agent", "")
+    session_key = get_session_key(client_ip, user_agent)
+
+    try:
+        resolved = registry.resolve_model(
+            clean_model_name,
+            messages=messages_for_resolution,
+            system=system,
+            session_key=session_key,
+        )
+        provider, model_id = resolved.provider, resolved.model_id
+        alias_name = resolved.alias_name
+        alias_tags = resolved.alias_tags or []
+        router_name = resolved.router_name  # Smart router tracking (v3.2)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    # Log designator usage for smart routers (v3.2)
+    log_designator_usage(resolved, "/api/generate")
+
+    # Merge alias tags with request tags (v3.1)
+    if alias_tags:
+        existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+        all_tags = list(set(existing_tags + alias_tags))
+        tag = ",".join(all_tags)
+
+    # Build actual messages (may include images)
     if "images" in data and data["images"]:
         # Check if provider supports vision
         if provider_supports_vision(provider, model_id):
@@ -961,6 +1092,8 @@ def generate():
             # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name
+            captured_alias = alias_name  # Capture alias for closure (v3.1)
+            captured_router = router_name  # Capture router for closure (v3.2)
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -997,6 +1130,8 @@ def generate():
                     cache_read_tokens=stream_result.get("cache_read_tokens")
                     if stream_result
                     else None,
+                    alias=captured_alias,
+                    router_name=captured_router,
                 )
 
             return Response(
@@ -1044,6 +1179,9 @@ def generate():
                 cached_input_tokens=result.get("cached_input_tokens"),
                 cache_creation_tokens=result.get("cache_creation_tokens"),
                 cache_read_tokens=result.get("cache_read_tokens"),
+                tag=tag,
+                alias=alias_name,
+                router_name=router_name,
             )
             return jsonify(response_obj)
 
@@ -1059,6 +1197,9 @@ def generate():
             output_tokens=0,
             status_code=500,
             error_message=str(e),
+            tag=tag,
+            alias=alias_name,
+            router_name=router_name,
         )
         return jsonify({"error": str(e)}), 500
 
@@ -1153,8 +1294,28 @@ def openai_chat_completions():
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
 
+    # Convert messages for resolution (needed for smart routers)
+    openai_messages = data.get("messages", [])
+    system_prompt, messages = convert_openai_messages(openai_messages)
+
+    # Generate session key for smart router caching
+    from flask import g
+
+    client_ip = getattr(g, "client_ip", get_client_ip(request))
+    user_agent = request.headers.get("User-Agent", "")
+    session_key = get_session_key(client_ip, user_agent)
+
     try:
-        provider, model_id = registry.resolve_model(clean_model_name)
+        resolved = registry.resolve_model(
+            clean_model_name,
+            messages=messages,
+            system=system_prompt,
+            session_key=session_key,
+        )
+        provider, model_id = resolved.provider, resolved.model_id
+        alias_name = resolved.alias_name
+        alias_tags = resolved.alias_tags or []
+        router_name = resolved.router_name  # Smart router tracking (v3.2)
     except ValueError as e:
         return jsonify(
             {
@@ -1166,8 +1327,14 @@ def openai_chat_completions():
             }
         ), 400
 
-    openai_messages = data.get("messages", [])
-    system_prompt, messages = convert_openai_messages(openai_messages)
+    # Log designator usage for smart routers (v3.2)
+    log_designator_usage(resolved, "/v1/chat/completions")
+
+    # Merge alias tags with request tags (v3.1)
+    if alias_tags:
+        existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+        all_tags = list(set(existing_tags + alias_tags))
+        tag = ",".join(all_tags)
 
     # Filter out images if provider doesn't support vision
     if not provider_supports_vision(provider, model_id):
@@ -1214,6 +1381,8 @@ def openai_chat_completions():
             # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name
+            captured_alias = alias_name  # Capture alias for closure (v3.1)
+            captured_router = router_name  # Capture router for closure (v3.2)
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -1250,6 +1419,8 @@ def openai_chat_completions():
                     cache_read_tokens=stream_result.get("cache_read_tokens")
                     if stream_result
                     else None,
+                    alias=captured_alias,
+                    router_name=captured_router,
                 )
 
             return Response(
@@ -1316,6 +1487,9 @@ def openai_chat_completions():
                 cached_input_tokens=result.get("cached_input_tokens"),
                 cache_creation_tokens=result.get("cache_creation_tokens"),
                 cache_read_tokens=result.get("cache_read_tokens"),
+                tag=tag,
+                alias=alias_name,
+                router_name=router_name,
             )
 
             return jsonify(response_obj)
@@ -1332,6 +1506,9 @@ def openai_chat_completions():
             output_tokens=0,
             status_code=500,
             error_message=str(e),
+            tag=tag,
+            alias=alias_name,
+            router_name=router_name,
         )
         return jsonify(
             {
@@ -1354,8 +1531,30 @@ def openai_completions():
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
 
+    prompt = data.get("prompt", "")
+    if isinstance(prompt, list):
+        prompt = prompt[0] if prompt else ""
+
+    messages = [{"role": "user", "content": prompt}]
+
+    # Generate session key for smart router caching
+    from flask import g
+
+    client_ip = getattr(g, "client_ip", get_client_ip(request))
+    user_agent = request.headers.get("User-Agent", "")
+    session_key = get_session_key(client_ip, user_agent)
+
     try:
-        provider, model_id = registry.resolve_model(clean_model_name)
+        resolved = registry.resolve_model(
+            clean_model_name,
+            messages=messages,
+            system=None,
+            session_key=session_key,
+        )
+        provider, model_id = resolved.provider, resolved.model_id
+        alias_name = resolved.alias_name
+        alias_tags = resolved.alias_tags or []
+        router_name = resolved.router_name  # Smart router tracking (v3.2)
     except ValueError as e:
         return jsonify(
             {
@@ -1367,11 +1566,14 @@ def openai_completions():
             }
         ), 400
 
-    prompt = data.get("prompt", "")
-    if isinstance(prompt, list):
-        prompt = prompt[0] if prompt else ""
+    # Log designator usage for smart routers (v3.2)
+    log_designator_usage(resolved, "/v1/completions")
 
-    messages = [{"role": "user", "content": prompt}]
+    # Merge alias tags with request tags (v3.1)
+    if alias_tags:
+        existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+        all_tags = list(set(existing_tags + alias_tags))
+        tag = ",".join(all_tags)
 
     # Build options
     options = {"max_tokens": data.get("max_tokens", 4096)}
@@ -1402,6 +1604,8 @@ def openai_completions():
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name  # Capture for closure
             captured_model_id = model_id  # Capture for closure
+            captured_alias = alias_name  # Capture alias for closure (v3.1)
+            captured_router = router_name  # Capture router for closure (v3.2)
 
             def stream_completions():
                 response_id = generate_openai_id("cmpl")
@@ -1495,6 +1699,8 @@ def openai_completions():
                         cache_read_tokens=stream_result.get("cache_read_tokens")
                         if stream_result
                         else None,
+                        alias=captured_alias,
+                        router_name=captured_router,
                     )
 
                 except Exception as e:
@@ -1517,6 +1723,8 @@ def openai_completions():
                         status_code=500,
                         error_message=str(e),
                         is_streaming=True,
+                        alias=captured_alias,
+                        router_name=captured_router,
                     )
 
             return Response(
@@ -1563,6 +1771,9 @@ def openai_completions():
                 cached_input_tokens=result.get("cached_input_tokens"),
                 cache_creation_tokens=result.get("cache_creation_tokens"),
                 cache_read_tokens=result.get("cache_read_tokens"),
+                tag=tag,
+                alias=alias_name,
+                router_name=router_name,
             )
 
             return jsonify(response_obj)
@@ -1579,6 +1790,9 @@ def openai_completions():
             output_tokens=0,
             status_code=500,
             error_message=str(e),
+            tag=tag,
+            alias=alias_name,
+            router_name=router_name,
         )
         return jsonify(
             {

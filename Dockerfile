@@ -19,6 +19,7 @@ COPY providers/ ./providers/
 COPY db/ ./db/
 COPY admin/ ./admin/
 COPY tracking/ ./tracking/
+COPY routing/ ./routing/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
 

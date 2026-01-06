@@ -206,6 +206,34 @@
                 ></span>
             </button>
 
+            <!-- Alias Filter Button -->
+            <button
+                @click="expandedFilter = expandedFilter === 'aliases' ? null : 'aliases'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'aliases' ? 'btn-accent' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                    />
+                </svg>
+                Aliases
+                <span
+                    x-show="filters.aliases.length > 0"
+                    class="badge badge-accent badge-xs"
+                    x-text="filters.aliases.length"
+                ></span>
+            </button>
+
             <!-- Clear Filters -->
             <button
                 x-show="hasActiveFilters()"
@@ -335,6 +363,34 @@
                     >
                 </div>
             </div>
+
+            <!-- Aliases Panel -->
+            <div x-show="expandedFilter === 'aliases'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="alias in filterOptions.aliases"
+                        :key="alias"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.aliases.includes(alias)"
+                                @change="toggleFilter('aliases', alias)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-accent peer-checked:text-accent-content hover:opacity-80 transition-opacity"
+                                x-text="alias"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.aliases.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No aliases available</span
+                    >
+                </div>
+            </div>
         </div>
 
         <!-- Active Filters Display -->
@@ -386,6 +442,17 @@
                     <span x-text="client"></span>
                     <button
                         @click="removeFilter('clients', client)"
+                        class="hover:text-error"
+                    >
+                        ×
+                    </button>
+                </span>
+            </template>
+            <template x-for="alias in filters.aliases" :key="'alias-' + alias">
+                <span class="badge badge-accent gap-1">
+                    <span x-text="alias"></span>
+                    <button
+                        @click="removeFilter('aliases', alias)"
                         class="hover:text-error"
                     >
                         ×
@@ -508,12 +575,6 @@
     <!-- Tabs for breakdown tables -->
     <div class="tabs tabs-boxed mb-4 bg-base-100 p-1">
         <a
-            @click="switchTab('recent')"
-            :class="{'tab-active': activeTab === 'recent'}"
-            class="tab"
-            >Recent Requests</a
-        >
-        <a
             @click="switchTab('tags')"
             :class="{'tab-active': activeTab === 'tags'}"
             class="tab"
@@ -538,10 +599,10 @@
             >By Client</a
         >
         <a
-            @click="switchTab('settings')"
-            :class="{'tab-active': activeTab === 'settings'}"
+            @click="switchTab('aliases')"
+            :class="{'tab-active': activeTab === 'aliases'}"
             class="tab"
-            >Settings</a
+            >By Alias</a
         >
     </div>
 
@@ -999,194 +1060,111 @@
         </div>
     </div>
 
-    <!-- Recent Requests Table -->
-    <div x-show="activeTab === 'recent'" class="card bg-base-100 shadow">
+    <!-- By Alias Table -->
+    <div x-show="activeTab === 'aliases'" class="card bg-base-100 shadow">
         <div class="card-body">
-            <div class="flex justify-between items-center mb-2">
-                <h3 class="card-title">Recent Requests</h3>
-                <button @click="loadRecent()" class="btn btn-sm btn-ghost">
-                    Refresh
-                </button>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="table table-zebra table-sm">
-                    <thead>
-                        <tr>
-                            <th>Time</th>
-                            <th>Client</th>
-                            <th>Tag</th>
-                            <th>Provider</th>
-                            <th>Model</th>
-                            <th>Endpoint</th>
-                            <th class="text-right">Tokens</th>
-                            <th>Mode</th>
-                            <th class="text-right">Cost</th>
-                            <th class="text-right">Time (ms)</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <template x-for="log in recentRequests" :key="log.id">
+            <h3 class="card-title">Usage by Alias</h3>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <!-- Breakdown Chart -->
+                <div id="alias-chart" style="height: 300px">
+                    <div
+                        x-show="byAlias.length === 0"
+                        class="flex items-center justify-center h-full text-base-content/60"
+                    >
+                        No data available
+                    </div>
+                </div>
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra table-sm">
+                        <thead>
                             <tr>
-                                <td
-                                    class="whitespace-nowrap text-xs"
-                                    x-text="formatTime(log.timestamp)"
-                                ></td>
-                                <td class="text-xs">
+                                <th
+                                    @click="setSortColumn('alias', 'alias')"
+                                    class="cursor-pointer hover:bg-base-200"
+                                >
+                                    Alias
                                     <span
-                                        x-text="log.hostname || log.client_ip"
+                                        x-show="sortColumn === 'alias'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
                                     ></span>
-                                </td>
-                                <td>
-                                    <template
-                                        x-for="tag in log.tag.split(',')"
-                                        :key="tag"
-                                    >
+                                </th>
+                                <th
+                                    @click="setSortColumn('alias', 'requests')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Requests
+                                    <span
+                                        x-show="sortColumn === 'requests'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th class="text-right">%</th>
+                                <th
+                                    @click="setSortColumn('alias', 'total_tokens')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Tokens
+                                    <span
+                                        x-show="sortColumn === 'total_tokens'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                                <th
+                                    @click="setSortColumn('alias', 'cost')"
+                                    class="text-right cursor-pointer hover:bg-base-200"
+                                >
+                                    Cost
+                                    <span
+                                        x-show="sortColumn === 'cost'"
+                                        x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
+                                    ></span>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template
+                                x-for="row in getSortedData(byAlias, 'alias')"
+                                :key="row.alias"
+                            >
+                                <tr
+                                    @click="drillDown('aliases', row.alias)"
+                                    class="cursor-pointer hover:bg-accent/10"
+                                >
+                                    <td>
                                         <span
-                                            class="badge badge-outline badge-xs mr-1"
-                                            x-text="tag.trim()"
+                                            class="badge badge-accent badge-outline"
+                                            x-text="row.alias"
                                         ></span>
-                                    </template>
-                                </td>
+                                    </td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatNumber(row.requests)"
+                                    ></td>
+                                    <td
+                                        class="text-right text-base-content/60"
+                                        x-text="getPercentage(row.requests, getTotalRequests(byAlias)) + '%'"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatTokens(row.total_tokens)"
+                                    ></td>
+                                    <td
+                                        class="text-right"
+                                        x-text="'$' + row.cost.toFixed(4)"
+                                    ></td>
+                                </tr>
+                            </template>
+                            <tr x-show="byAlias.length === 0">
                                 <td
-                                    class="text-xs"
-                                    x-text="log.provider_id"
-                                ></td>
-                                <td
-                                    class="font-mono text-xs max-w-32 truncate"
-                                    x-text="log.model_id"
-                                ></td>
-                                <td class="text-xs" x-text="log.endpoint"></td>
-                                <td class="text-right text-xs">
-                                    <div
-                                        class="tooltip tooltip-left"
-                                        :data-tip="formatTokenTooltip(log)"
-                                    >
-                                        <span
-                                            x-text="log.input_tokens + '/' + log.output_tokens"
-                                        ></span>
-                                        <span
-                                            x-show="hasExtendedTokens(log)"
-                                            class="text-info ml-1"
-                                            >*</span
-                                        >
-                                    </div>
-                                </td>
-                                <td class="text-xs">
-                                    <span
-                                        class="badge badge-ghost badge-xs"
-                                        x-text="log.is_streaming ? 'stream' : 'sync'"
-                                    ></span>
-                                </td>
-                                <td class="text-right text-xs">
-                                    <span
-                                        x-show="log.cost !== null"
-                                        x-text="'$' + log.cost.toFixed(6)"
-                                    ></span>
-                                    <span
-                                        x-show="log.cost === null"
-                                        class="text-base-content/40"
-                                        >-</span
-                                    >
-                                </td>
-                                <td
-                                    class="text-right text-xs"
-                                    x-text="log.response_time_ms"
-                                ></td>
-                                <td>
-                                    <span
-                                        :class="{
-                                        'badge-success': log.status_code >= 200 && log.status_code < 300,
-                                        'badge-warning': log.status_code >= 300 && log.status_code < 400,
-                                        'badge-error': log.status_code >= 400
-                                    }"
-                                        class="badge badge-xs"
-                                        x-text="log.status_code"
-                                    ></span>
+                                    colspan="5"
+                                    class="text-center text-base-content/60"
+                                >
+                                    No data available
                                 </td>
                             </tr>
-                        </template>
-                        <tr x-show="recentRequests.length === 0">
-                            <td
-                                colspan="9"
-                                class="text-center text-base-content/60"
-                            >
-                                No requests logged yet
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- Settings Panel -->
-    <div x-show="activeTab === 'settings'" class="card bg-base-100 shadow mb-8">
-        <div class="card-body">
-            <h3 class="card-title mb-4">Tracking Settings</h3>
-            <div class="space-y-4 max-w-md">
-                <div class="form-control">
-                    <label class="label cursor-pointer">
-                        <span class="label-text">Enable Usage Tracking</span>
-                        <input
-                            type="checkbox"
-                            x-model="settings.tracking_enabled"
-                            class="toggle toggle-primary"
-                        />
-                    </label>
-                    <span class="text-xs text-base-content/60 ml-1"
-                        >Log all proxy requests for usage analysis</span
-                    >
-                </div>
-                <div class="form-control">
-                    <label class="label">
-                        <span class="label-text">Default Tag</span>
-                    </label>
-                    <input
-                        type="text"
-                        x-model="settings.default_tag"
-                        class="input input-bordered input-sm"
-                        placeholder="default"
-                    />
-                    <span class="text-xs text-base-content/60 mt-1"
-                        >Used when no tag is specified in request</span
-                    >
-                </div>
-                <div class="form-control">
-                    <label class="label cursor-pointer">
-                        <span class="label-text">Enable DNS Resolution</span>
-                        <input
-                            type="checkbox"
-                            x-model="settings.dns_resolution_enabled"
-                            class="toggle toggle-primary"
-                        />
-                    </label>
-                    <span class="text-xs text-base-content/60 ml-1"
-                        >Resolve client IP to hostname (cached)</span
-                    >
-                </div>
-                <div class="form-control">
-                    <label class="label">
-                        <span class="label-text">Data Retention (days)</span>
-                    </label>
-                    <input
-                        type="number"
-                        x-model="settings.retention_days"
-                        class="input input-bordered input-sm w-24"
-                        min="1"
-                        max="365"
-                    />
-                    <span class="text-xs text-base-content/60 mt-1"
-                        >How long to keep detailed request logs</span
-                    >
-                </div>
-                <div class="pt-2">
-                    <button
-                        @click="saveSettings()"
-                        class="btn btn-primary btn-sm"
-                    >
-                        Save Settings
-                    </button>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -1215,12 +1193,14 @@
                 providers: [],
                 models: [],
                 clients: [],
+                aliases: [],
             },
             filterOptions: {
                 tags: [],
                 providers: [],
                 models: [],
                 clients: [],
+                aliases: [],
             },
             expandedFilter: null, // 'tags', 'providers', 'models', 'clients', or null
 
@@ -1243,21 +1223,16 @@
             byProvider: [],
             byModel: [],
             byClient: [],
-            recentRequests: [],
-            settings: {
-                tracking_enabled: true,
-                default_tag: "default",
-                dns_resolution_enabled: true,
-                retention_days: 90,
-            },
+            byAlias: [],
 
             // UI state
-            activeTab: "recent",
+            activeTab: "tags",
             chartMetric: "requests",
             chart: null,
             tagChart: null,
             providerChart: null,
             modelChart: null,
+            aliasChart: null,
             toast: { show: false, message: "", type: "info" },
 
             async init() {
@@ -1273,7 +1248,6 @@
 
                 await this.loadFilterOptions();
                 await this.loadData();
-                await this.loadSettings();
             },
 
             // Date range methods
@@ -1316,6 +1290,9 @@
                 }
                 if (this.filters.clients.length > 0) {
                     params.set("clients", this.filters.clients.join(","));
+                }
+                if (this.filters.aliases.length > 0) {
+                    params.set("aliases", this.filters.aliases.join(","));
                 }
 
                 return params.toString();
@@ -1365,6 +1342,7 @@
                 this.filters.providers = [];
                 this.filters.models = [];
                 this.filters.clients = [];
+                this.filters.aliases = [];
                 this.loadData();
             },
 
@@ -1373,7 +1351,8 @@
                     this.filters.tags.length > 0 ||
                     this.filters.providers.length > 0 ||
                     this.filters.models.length > 0 ||
-                    this.filters.clients.length > 0
+                    this.filters.clients.length > 0 ||
+                    this.filters.aliases.length > 0
                 );
             },
 
@@ -1443,7 +1422,7 @@
                     this.loadByProvider(),
                     this.loadByModel(),
                     this.loadByClient(),
-                    this.loadRecent(),
+                    this.loadByAlias(),
                 ]);
                 this.renderChart();
                 this.renderBreakdownCharts();
@@ -1515,38 +1494,14 @@
                 }
             },
 
-            async loadRecent() {
+            async loadByAlias() {
                 try {
-                    const res = await fetch("/api/usage/recent?limit=100");
-                    if (res.ok) this.recentRequests = await res.json();
+                    const res = await fetch(
+                        `/api/usage/by-alias?${this.buildQueryParams()}`,
+                    );
+                    if (res.ok) this.byAlias = await res.json();
                 } catch (e) {
-                    console.error("Error loading recent:", e);
-                }
-            },
-
-            async loadSettings() {
-                try {
-                    const res = await fetch("/api/usage/settings");
-                    if (res.ok) this.settings = await res.json();
-                } catch (e) {
-                    console.error("Error loading settings:", e);
-                }
-            },
-
-            async saveSettings() {
-                try {
-                    const res = await fetch("/api/usage/settings", {
-                        method: "PUT",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(this.settings),
-                    });
-                    if (res.ok) {
-                        this.showToast("Settings saved", "success");
-                    } else {
-                        this.showToast("Failed to save settings", "error");
-                    }
-                } catch (e) {
-                    this.showToast("Error saving settings", "error");
+                    console.error("Error loading by-alias:", e);
                 }
             },
 
@@ -1684,6 +1639,15 @@
                         "client-chart",
                         this.byClient,
                         "client",
+                        metricField,
+                        metricColor,
+                    );
+                }
+                if (this.activeTab === "aliases") {
+                    this.renderBreakdownChart(
+                        "alias-chart",
+                        this.byAlias,
+                        "alias",
                         metricField,
                         metricColor,
                     );

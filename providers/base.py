@@ -331,7 +331,8 @@ class OpenAICompatibleProvider(LLMProvider):
         }
 
         # Handle max_tokens - reasoning models use max_completion_tokens instead
-        max_tokens_value = options.get("max_tokens", 4096)
+        # Default to 16384 to avoid truncation on models with higher limits
+        max_tokens_value = options.get("max_tokens", 16384)
         if use_max_completion_tokens:
             kwargs["max_completion_tokens"] = max_tokens_value
         elif "max_tokens" not in unsupported:

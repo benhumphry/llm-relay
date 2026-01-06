@@ -269,6 +269,20 @@ class GeminiProvider(OpenAICompatibleProvider):
         response = client.chat.completions.create(**kwargs)
 
         content = response.choices[0].message.content or ""
+        finish_reason = response.choices[0].finish_reason
+
+        # Log finish reason for debugging
+        logger.info(
+            f"Gemini {model} response: finish_reason='{finish_reason}', "
+            f"content_length={len(content)} chars"
+        )
+
+        # Log if response was truncated
+        if finish_reason and finish_reason != "stop":
+            logger.warning(
+                f"Gemini {model} finished with reason '{finish_reason}' "
+                f"(output may be truncated)"
+            )
 
         result = {
             "content": content,

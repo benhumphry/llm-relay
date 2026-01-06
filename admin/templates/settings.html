@@ -129,38 +129,6 @@ content %}
             </div>
         </div>
 
-        <!-- Configuration Reload -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body">
-                <h2 class="card-title text-lg">Configuration</h2>
-                <p class="text-sm text-base-content/60 mb-4">
-                    Reload configuration to pick up database changes
-                </p>
-
-                <button
-                    @click="reloadConfig()"
-                    class="btn btn-outline"
-                    :class="{ 'loading': reloading }"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-4 w-4 mr-1"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                    >
-                        <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                        />
-                    </svg>
-                    Reload Config
-                </button>
-            </div>
-        </div>
-
         <!-- Backup & Restore -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
@@ -174,8 +142,8 @@ content %}
                     <!-- Export -->
                     <div>
                         <p class="text-sm mb-2">
-                            Export custom models, providers, overrides, and
-                            settings.
+                            Export models, providers, aliases, smart routers,
+                            and settings.
                         </p>
                         <a
                             href="/api/config/export"
@@ -968,6 +936,80 @@ content %}
                 </div>
             </div>
         </div>
+
+        <!-- Usage Tracking -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Usage Tracking</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Configure request logging and analytics
+                </p>
+
+                <div class="space-y-4">
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="trackingSettings.tracking_enabled"
+                                class="toggle toggle-primary"
+                            />
+                            <div>
+                                <span class="label-text"
+                                    >Enable Usage Tracking</span
+                                >
+                                <p class="text-xs text-base-content/60">
+                                    Log all proxy requests for usage analysis
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="trackingSettings.dns_resolution_enabled"
+                                class="toggle toggle-primary"
+                            />
+                            <div>
+                                <span class="label-text"
+                                    >Enable DNS Resolution</span
+                                >
+                                <p class="text-xs text-base-content/60">
+                                    Resolve client IP to hostname (cached)
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >Data Retention (days)</span
+                            >
+                        </label>
+                        <input
+                            type="number"
+                            x-model="trackingSettings.retention_days"
+                            class="input input-bordered input-sm w-24"
+                            min="1"
+                            max="365"
+                        />
+                        <p class="text-xs text-base-content/60 mt-1">
+                            How long to keep detailed request logs
+                        </p>
+                    </div>
+
+                    <button
+                        @click="saveTrackingSettings()"
+                        class="btn btn-primary btn-sm"
+                        :class="{ 'loading': savingTracking }"
+                    >
+                        Save Tracking Settings
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Debug Log Viewer (full width) -->
@@ -1151,7 +1193,6 @@ content %}
             newPassword: "",
             confirmPassword: "",
             changingPassword: false,
-            reloading: false,
             importing: false,
             toasts: [],
             currentTheme: localStorage.getItem("theme") || "system",
@@ -1167,6 +1208,14 @@ content %}
             selectedPriceUpdates: [],
             showDeprecatedSelection: false,
             selectedDeprecated: [],
+            // Usage tracking settings
+            trackingSettings: {
+                tracking_enabled: true,
+                dns_resolution_enabled: true,
+                retention_days: 90,
+            },
+            savingTracking: false,
+
             // Debug log viewer
             debugLogs: [],
             debugLogsEnabled: false,
@@ -1408,11 +1457,13 @@ content %}
                         providersRes,
                         statsRes,
                         syncProvidersRes,
+                        trackingRes,
                     ] = await Promise.all([
                         fetch("/api/settings"),
                         fetch("/api/providers"),
                         fetch("/api/stats"),
                         fetch("/api/models/sync/providers"),
+                        fetch("/api/usage/settings"),
                     ]);
 
                     if (providersRes.ok) {
@@ -1424,6 +1475,13 @@ content %}
                     if (syncProvidersRes.ok) {
                         const data = await syncProvidersRes.json();
                         this.syncProviders = data.providers || [];
+                    }
+                    if (trackingRes.ok) {
+                        const loaded = await trackingRes.json();
+                        this.trackingSettings = {
+                            ...this.trackingSettings,
+                            ...loaded,
+                        };
                     }
 
                     // Load settings and merge with defaults
@@ -1493,6 +1551,30 @@ content %}
                 }
             },
 
+            async saveTrackingSettings() {
+                this.savingTracking = true;
+                try {
+                    const res = await fetch("/api/usage/settings", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(this.trackingSettings),
+                    });
+
+                    if (res.ok) {
+                        this.showToast("Tracking settings saved");
+                    } else {
+                        this.showToast(
+                            "Failed to save tracking settings",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast("Failed to save tracking settings", "error");
+                } finally {
+                    this.savingTracking = false;
+                }
+            },
+
             async changePassword() {
                 if (this.newPassword !== this.confirmPassword) {
                     this.showToast("Passwords do not match", "error");
@@ -1532,28 +1614,6 @@ content %}
                     this.showToast("Failed to change password", "error");
                 } finally {
                     this.changingPassword = false;
-                }
-            },
-
-            async reloadConfig() {
-                this.reloading = true;
-                try {
-                    const res = await fetch("/api/config/reload", {
-                        method: "POST",
-                    });
-
-                    if (res.ok) {
-                        this.showToast("Configuration reloaded");
-                    } else {
-                        this.showToast(
-                            "Failed to reload configuration",
-                            "error",
-                        );
-                    }
-                } catch (err) {
-                    this.showToast("Failed to reload configuration", "error");
-                } finally {
-                    this.reloading = false;
                 }
             },
 

@@ -215,7 +215,6 @@ class Setting(Base):
     KEY_SESSION_SECRET = "session_secret"
     # Usage tracking settings (v2.1)
     KEY_TRACKING_ENABLED = "tracking_enabled"
-    KEY_DEFAULT_TAG = "default_tag"
     KEY_DNS_RESOLUTION_ENABLED = "dns_resolution_enabled"
     KEY_RETENTION_DAYS = "retention_days"
 
@@ -492,6 +491,15 @@ class RequestLog(Base):
     hostname: Mapped[Optional[str]] = mapped_column(String(255))  # Reverse DNS
     tag: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
+    # Alias tracking (v3.1)
+    alias: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+
+    # Smart router tracking (v3.2)
+    is_designator: Mapped[bool] = mapped_column(Boolean, default=False)
+    router_name: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+
     # Request details
     provider_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -535,6 +543,9 @@ class RequestLog(Base):
             "client_ip": self.client_ip,
             "hostname": self.hostname,
             "tag": self.tag,
+            "alias": self.alias,
+            "is_designator": self.is_designator,
+            "router_name": self.router_name,
             "provider_id": self.provider_id,
             "model_id": self.model_id,
             "endpoint": self.endpoint,
@@ -603,6 +614,8 @@ class DailyStats(Base):
     tag: Mapped[Optional[str]] = mapped_column(String(100), index=True)
     provider_id: Mapped[Optional[str]] = mapped_column(String(50), index=True)
     model_id: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    alias: Mapped[Optional[str]] = mapped_column(String(100), index=True)  # v3.1
+    router_name: Mapped[Optional[str]] = mapped_column(String(100), index=True)  # v3.2
 
     # Aggregated metrics
     request_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -623,6 +636,8 @@ class DailyStats(Base):
             "tag": self.tag,
             "provider_id": self.provider_id,
             "model_id": self.model_id,
+            "alias": self.alias,
+            "router_name": self.router_name,
             "request_count": self.request_count,
             "success_count": self.success_count,
             "error_count": self.error_count,
@@ -635,6 +650,156 @@ class DailyStats(Base):
                 if self.request_count > 0
                 else 0
             ),
+        }
+
+
+# ============================================================================
+# Alias Model (v3.1)
+# ============================================================================
+
+
+class Alias(Base):
+    """
+    Model aliases that map a user-defined name to an actual model.
+
+    Aliases allow users to create shortcuts like "gpt4" that point to
+    "openai/gpt-4-turbo", with optional tag assignment for usage tracking.
+    """
+
+    __tablename__ = "aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+    target_model: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # "provider_id/model_id"
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")  # JSON array of tags
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        return json.loads(self.tags_json) if self.tags_json else []
+
+    @tags.setter
+    def tags(self, value: list[str]):
+        """Set tags from a list."""
+        self.tags_json = json.dumps(value) if value else "[]"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "target_model": self.target_model,
+            "tags": self.tags,
+            "description": self.description,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ============================================================================
+# Smart Router Model (v3.2)
+# ============================================================================
+
+
+class SmartRouter(Base):
+    """
+    Smart routers that intelligently select models based on query analysis.
+
+    A smart router uses a designator LLM to analyze incoming requests and
+    route them to the most appropriate model from a pool of candidates.
+    """
+
+    __tablename__ = "smart_routers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+
+    # Designator configuration
+    designator_model: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # "provider_id/model_id"
+    purpose: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # User-provided context for routing decisions
+
+    # Candidate models: JSON array of {"model": "provider/model", "notes": "optional"}
+    candidates_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Routing behavior
+    strategy: Mapped[str] = mapped_column(
+        String(20), default="per_request"
+    )  # "per_request" | "per_session"
+    fallback_model: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # Used if designator fails
+    session_ttl: Mapped[int] = mapped_column(
+        Integer, default=3600
+    )  # Session cache TTL in seconds
+
+    # Optional tags for usage tracking
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        return json.loads(self.tags_json) if self.tags_json else []
+
+    @tags.setter
+    def tags(self, value: list[str]):
+        """Set tags from a list."""
+        self.tags_json = json.dumps(value) if value else "[]"
+
+    @property
+    def candidates(self) -> list[dict]:
+        """Get candidates as a list of dicts."""
+        return json.loads(self.candidates_json) if self.candidates_json else []
+
+    @candidates.setter
+    def candidates(self, value: list[dict]):
+        """Set candidates from a list of dicts."""
+        self.candidates_json = json.dumps(value) if value else "[]"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "designator_model": self.designator_model,
+            "purpose": self.purpose,
+            "candidates": self.candidates,
+            "strategy": self.strategy,
+            "fallback_model": self.fallback_model,
+            "session_ttl": self.session_ttl,
+            "tags": self.tags,
+            "description": self.description,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

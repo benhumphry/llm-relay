@@ -15,6 +15,7 @@ from pathlib import Path
 from flask import (
     Blueprint,
     jsonify,
+    make_response,
     redirect,
     render_template,
     request,
@@ -163,6 +164,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def ollama_page():
         """Ollama management page."""
         return render_template("ollama.html")
+
+    @admin.route("/aliases")
+    @require_auth
+    def aliases_page():
+        """Aliases management page."""
+        return render_template("aliases.html")
 
     # -------------------------------------------------------------------------
     # Provider API
@@ -895,16 +902,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def export_config():
         """Export database configuration as JSON for backup/migration."""
         from db.models import (
+            Alias,
             CustomModel,
             CustomProvider,
             ModelOverride,
             OllamaInstance,
             Setting,
+            SmartRouter,
         )
 
         with get_db_context() as db:
             export_data = {
-                "version": "2.3",
+                "version": "3.3",
                 "exported_at": datetime.utcnow().isoformat(),
                 "settings": [
                     {"key": s.key, "value": s.value}
@@ -964,6 +973,31 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     }
                     for p in db.query(CustomProvider).all()
                 ],
+                "aliases": [
+                    {
+                        "name": a.name,
+                        "target_model": a.target_model,
+                        "tags": a.tags,
+                        "description": a.description,
+                        "enabled": a.enabled,
+                    }
+                    for a in db.query(Alias).all()
+                ],
+                "smart_routers": [
+                    {
+                        "name": r.name,
+                        "designator_model": r.designator_model,
+                        "purpose": r.purpose,
+                        "candidates": r.candidates,
+                        "strategy": r.strategy,
+                        "fallback_model": r.fallback_model,
+                        "session_ttl": r.session_ttl,
+                        "tags": r.tags,
+                        "description": r.description,
+                        "enabled": r.enabled,
+                    }
+                    for r in db.query(SmartRouter).all()
+                ],
             }
 
         response = jsonify(export_data)
@@ -977,20 +1011,22 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def import_config():
         """Import database configuration from JSON backup."""
         from db.models import (
+            Alias,
             CustomModel,
             CustomProvider,
             ModelOverride,
             OllamaInstance,
             Setting,
+            SmartRouter,
         )
 
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        # Validate version
+        # Validate version (support 2.x and 3.x)
         version = data.get("version", "")
-        if not version.startswith("2."):
+        if not (version.startswith("2.") or version.startswith("3.")):
             return jsonify(
                 {"success": False, "error": f"Unsupported export version: {version}"}
             ), 400
@@ -1001,6 +1037,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "custom_models": 0,
             "ollama_instances": 0,
             "custom_providers": 0,
+            "aliases": 0,
+            "smart_routers": 0,
         }
 
         with get_db_context() as db:
@@ -1143,15 +1181,57 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
                 stats["custom_providers"] += 1
 
-        return jsonify({"success": True, "stats": stats})
+            # Import aliases (v3.1+)
+            for a in data.get("aliases", []):
+                existing = db.query(Alias).filter(Alias.name == a["name"]).first()
+                if existing:
+                    existing.target_model = a["target_model"]
+                    existing.tags = a.get("tags", [])
+                    existing.description = a.get("description")
+                    existing.enabled = a.get("enabled", True)
+                else:
+                    alias = Alias(
+                        name=a["name"],
+                        target_model=a["target_model"],
+                        description=a.get("description"),
+                        enabled=a.get("enabled", True),
+                    )
+                    alias.tags = a.get("tags", [])
+                    db.add(alias)
+                stats["aliases"] += 1
 
-    @admin.route("/api/config/reload", methods=["POST"])
-    @require_auth_api
-    def reload_config():
-        """Reload provider configuration."""
-        # This will be implemented when we update the provider loading
-        # For now, return success
-        return jsonify({"success": True, "message": "Configuration reload requested"})
+            # Import smart routers (v3.2+)
+            for r in data.get("smart_routers", []):
+                existing = (
+                    db.query(SmartRouter).filter(SmartRouter.name == r["name"]).first()
+                )
+                if existing:
+                    existing.designator_model = r["designator_model"]
+                    existing.purpose = r["purpose"]
+                    existing.candidates_json = json.dumps(r.get("candidates", []))
+                    existing.strategy = r.get("strategy", "per_request")
+                    existing.fallback_model = r["fallback_model"]
+                    existing.session_ttl = r.get("session_ttl", 3600)
+                    existing.tags = r.get("tags", [])
+                    existing.description = r.get("description")
+                    existing.enabled = r.get("enabled", True)
+                else:
+                    router = SmartRouter(
+                        name=r["name"],
+                        designator_model=r["designator_model"],
+                        purpose=r["purpose"],
+                        candidates_json=json.dumps(r.get("candidates", [])),
+                        strategy=r.get("strategy", "per_request"),
+                        fallback_model=r["fallback_model"],
+                        session_ttl=r.get("session_ttl", 3600),
+                        description=r.get("description"),
+                        enabled=r.get("enabled", True),
+                    )
+                    router.tags = r.get("tags", [])
+                    db.add(router)
+                stats["smart_routers"] += 1
+
+        return jsonify({"success": True, "stats": stats})
 
     # -------------------------------------------------------------------------
     # Dashboard Stats API
@@ -1575,6 +1655,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Usage statistics page."""
         return render_template("usage.html")
 
+    @admin.route("/requests")
+    @require_auth
+    def requests_page():
+        """Request log page."""
+        return render_template("requests.html")
+
     def parse_usage_filters():
         """Parse common filter parameters from request args.
 
@@ -1636,6 +1722,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             else None
         )
 
+        # Alias filter
+        aliases_param = request.args.get("aliases")
+        aliases = (
+            [a.strip() for a in aliases_param.split(",") if a.strip()]
+            if aliases_param
+            else None
+        )
+
         return {
             "start_date": start_date,
             "end_date": end_date,
@@ -1643,6 +1737,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "providers": providers,
             "models": models,
             "clients": clients,
+            "aliases": aliases,
         }
 
     @admin.route("/api/usage/filters", methods=["GET"])
@@ -1696,12 +1791,22 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             )
             clients = [r[0] for r in client_results if r[0]]
 
+            # Get distinct aliases (v3.1)
+            aliases = [
+                r[0]
+                for r in db.query(distinct(DailyStats.alias))
+                .filter(DailyStats.alias.isnot(None))
+                .order_by(DailyStats.alias)
+                .all()
+            ]
+
             return jsonify(
                 {
                     "tags": tags,
                     "providers": providers,
                     "models": models,
                     "clients": clients,
+                    "aliases": aliases,
                 }
             )
 
@@ -1716,14 +1821,24 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         with get_db_context() as db:
             # Build base query - use RequestLog for filtered queries
             # since DailyStats pre-aggregation doesn't support arbitrary filters
-            if filters["tags"] or filters["providers"] or filters["models"]:
+            has_filters = (
+                filters["tags"]
+                or filters["providers"]
+                or filters["models"]
+                or filters["clients"]
+                or filters["aliases"]
+            )
+            if has_filters:
                 # Query from RequestLog for filtered results
+                from sqlalchemy import or_
+
                 query = db.query(
                     func.count(RequestLog.id),
                     func.sum(RequestLog.input_tokens),
                     func.sum(RequestLog.output_tokens),
                     func.count(RequestLog.id).filter(RequestLog.status_code < 400),
                     func.count(RequestLog.id).filter(RequestLog.status_code >= 400),
+                    func.sum(RequestLog.cost),
                 ).filter(RequestLog.timestamp >= filters["start_date"])
 
                 if filters["end_date"]:
@@ -1731,8 +1846,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 if filters["tags"]:
                     # Support multi-tag filtering (tag column may contain comma-separated tags)
-                    from sqlalchemy import or_
-
                     tag_conditions = []
                     for tag in filters["tags"]:
                         tag_conditions.append(RequestLog.tag == tag)
@@ -1749,40 +1862,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 if filters["models"]:
                     query = query.filter(RequestLog.model_id.in_(filters["models"]))
 
+                if filters["clients"]:
+                    # Filter by client (hostname or IP)
+                    client_conditions = []
+                    for client in filters["clients"]:
+                        client_conditions.append(RequestLog.hostname == client)
+                        client_conditions.append(RequestLog.client_ip == client)
+                    query = query.filter(or_(*client_conditions))
+
+                if filters["aliases"]:
+                    query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
                 stats = query.first()
-
-                # Calculate cost from RequestLog (need to join with cost data or estimate)
-                # For now, use a simpler cost query
-                cost_query = db.query(
-                    func.sum(RequestLog.input_tokens),
-                    func.sum(RequestLog.output_tokens),
-                ).filter(RequestLog.timestamp >= filters["start_date"])
-
-                if filters["end_date"]:
-                    cost_query = cost_query.filter(
-                        RequestLog.timestamp <= filters["end_date"]
-                    )
-                if filters["tags"]:
-                    from sqlalchemy import or_
-
-                    tag_conditions = []
-                    for tag in filters["tags"]:
-                        tag_conditions.append(RequestLog.tag == tag)
-                        tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
-                        tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
-                        tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
-                    cost_query = cost_query.filter(or_(*tag_conditions))
-                if filters["providers"]:
-                    cost_query = cost_query.filter(
-                        RequestLog.provider_id.in_(filters["providers"])
-                    )
-                if filters["models"]:
-                    cost_query = cost_query.filter(
-                        RequestLog.model_id.in_(filters["models"])
-                    )
-
-                # Estimate cost (simplified - ideally would join with model costs)
-                estimated_cost = 0.0
 
                 return jsonify(
                     {
@@ -1791,7 +1882,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "total_input_tokens": stats[1] or 0,
                         "total_output_tokens": stats[2] or 0,
                         "total_tokens": (stats[1] or 0) + (stats[2] or 0),
-                        "estimated_cost": estimated_cost,
+                        "estimated_cost": round(stats[5] or 0, 4),
                         "success_count": stats[3] or 0,
                         "error_count": stats[4] or 0,
                     }
@@ -1840,13 +1931,20 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         with get_db_context() as db:
             # Use RequestLog for filtered queries, DailyStats for unfiltered
-            if filters["providers"] or filters["models"]:
-                # Query from RequestLog when filtering by provider/model
+            has_filters = (
+                filters["providers"]
+                or filters["models"]
+                or filters["clients"]
+                or filters["aliases"]
+            )
+            if has_filters:
+                # Query from RequestLog when filtering
                 query = db.query(
                     RequestLog.tag,
                     func.count(RequestLog.id).label("requests"),
                     func.sum(RequestLog.input_tokens).label("input_tokens"),
                     func.sum(RequestLog.output_tokens).label("output_tokens"),
+                    func.sum(RequestLog.cost).label("cost"),
                 ).filter(
                     RequestLog.timestamp >= filters["start_date"],
                     RequestLog.tag.isnot(None),
@@ -1863,6 +1961,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 if filters["models"]:
                     query = query.filter(RequestLog.model_id.in_(filters["models"]))
 
+                if filters["clients"]:
+                    client_conditions = []
+                    for client in filters["clients"]:
+                        client_conditions.append(RequestLog.hostname == client)
+                        client_conditions.append(RequestLog.client_ip == client)
+                    query = query.filter(or_(*client_conditions))
+
+                if filters["aliases"]:
+                    query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
                 results = (
                     query.group_by(RequestLog.tag)
                     .order_by(func.count(RequestLog.id).desc())
@@ -1878,7 +1986,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                             "output_tokens": r.output_tokens or 0,
                             "total_tokens": (r.input_tokens or 0)
                             + (r.output_tokens or 0),
-                            "cost": 0,  # Cost requires model info, simplified for now
+                            "cost": round(r.cost or 0, 4),
                         }
                         for r in results
                     ]
@@ -1936,13 +2044,20 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         with get_db_context() as db:
             # Use RequestLog for filtered queries, DailyStats for unfiltered
-            if filters["tags"] or filters["models"]:
-                # Query from RequestLog when filtering by tag/model
+            has_filters = (
+                filters["tags"]
+                or filters["models"]
+                or filters["clients"]
+                or filters["aliases"]
+            )
+            if has_filters:
+                # Query from RequestLog when filtering
                 query = db.query(
                     RequestLog.provider_id,
                     func.count(RequestLog.id).label("requests"),
                     func.sum(RequestLog.input_tokens).label("input_tokens"),
                     func.sum(RequestLog.output_tokens).label("output_tokens"),
+                    func.sum(RequestLog.cost).label("cost"),
                 ).filter(
                     RequestLog.timestamp >= filters["start_date"],
                     RequestLog.provider_id.isnot(None),
@@ -1963,6 +2078,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 if filters["models"]:
                     query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+                if filters["clients"]:
+                    client_conditions = []
+                    for client in filters["clients"]:
+                        client_conditions.append(RequestLog.hostname == client)
+                        client_conditions.append(RequestLog.client_ip == client)
+                    query = query.filter(or_(*client_conditions))
+
+                if filters["aliases"]:
+                    query = query.filter(RequestLog.alias.in_(filters["aliases"]))
 
                 # If provider filter is provided, filter to those providers
                 if filters["providers"]:
@@ -1985,7 +2110,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                             "output_tokens": r.output_tokens or 0,
                             "total_tokens": (r.input_tokens or 0)
                             + (r.output_tokens or 0),
-                            "cost": 0,  # Cost requires model info, simplified for now
+                            "cost": round(r.cost or 0, 4),
                         }
                         for r in results
                     ]
@@ -2045,14 +2170,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         with get_db_context() as db:
             # Use RequestLog for filtered queries, DailyStats for unfiltered
-            if filters["tags"]:
-                # Query from RequestLog when filtering by tag
+            has_filters = filters["tags"] or filters["clients"] or filters["aliases"]
+            if has_filters:
+                # Query from RequestLog when filtering
                 query = db.query(
                     RequestLog.provider_id,
                     RequestLog.model_id,
                     func.count(RequestLog.id).label("requests"),
                     func.sum(RequestLog.input_tokens).label("input_tokens"),
                     func.sum(RequestLog.output_tokens).label("output_tokens"),
+                    func.sum(RequestLog.cost).label("cost"),
                 ).filter(
                     RequestLog.timestamp >= filters["start_date"],
                     RequestLog.provider_id.isnot(None),
@@ -2062,14 +2189,25 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 if filters["end_date"]:
                     query = query.filter(RequestLog.timestamp <= filters["end_date"])
 
-                # Support multi-tag filtering
-                tag_conditions = []
-                for tag in filters["tags"]:
-                    tag_conditions.append(RequestLog.tag == tag)
-                    tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
-                    tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
-                    tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
-                query = query.filter(or_(*tag_conditions))
+                if filters["tags"]:
+                    # Support multi-tag filtering
+                    tag_conditions = []
+                    for tag in filters["tags"]:
+                        tag_conditions.append(RequestLog.tag == tag)
+                        tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                    query = query.filter(or_(*tag_conditions))
+
+                if filters["clients"]:
+                    client_conditions = []
+                    for client in filters["clients"]:
+                        client_conditions.append(RequestLog.hostname == client)
+                        client_conditions.append(RequestLog.client_ip == client)
+                    query = query.filter(or_(*client_conditions))
+
+                if filters["aliases"]:
+                    query = query.filter(RequestLog.alias.in_(filters["aliases"]))
 
                 if filters["providers"]:
                     query = query.filter(
@@ -2095,7 +2233,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                             "output_tokens": r.output_tokens or 0,
                             "total_tokens": (r.input_tokens or 0)
                             + (r.output_tokens or 0),
-                            "cost": 0,  # Cost requires model info, simplified for now
+                            "cost": round(r.cost or 0, 4),
                         }
                         for r in results
                     ]
@@ -2189,7 +2327,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 query = query.filter(RequestLog.model_id.in_(filters["models"]))
 
             if filters["clients"]:
-                query = query.filter(client_col.in_(filters["clients"]))
+                client_conditions = []
+                for client in filters["clients"]:
+                    client_conditions.append(RequestLog.hostname == client)
+                    client_conditions.append(RequestLog.client_ip == client)
+                query = query.filter(or_(*client_conditions))
+
+            if filters["aliases"]:
+                query = query.filter(RequestLog.alias.in_(filters["aliases"]))
 
             results = (
                 query.group_by(client_col)
@@ -2211,6 +2356,128 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 ]
             )
 
+    @admin.route("/api/usage/by-alias", methods=["GET"])
+    @require_auth_api
+    def get_usage_by_alias():
+        """Get usage breakdown by alias (v3.1)."""
+        from sqlalchemy import func, or_
+
+        filters = parse_usage_filters()
+
+        with get_db_context() as db:
+            # Use RequestLog for filtered queries, DailyStats for unfiltered
+            has_filters = (
+                filters["tags"]
+                or filters["providers"]
+                or filters["models"]
+                or filters["clients"]
+            )
+            if has_filters:
+                # Query from RequestLog when filtering
+                query = db.query(
+                    RequestLog.alias,
+                    func.count(RequestLog.id).label("requests"),
+                    func.sum(RequestLog.input_tokens).label("input_tokens"),
+                    func.sum(RequestLog.output_tokens).label("output_tokens"),
+                    func.sum(RequestLog.cost).label("cost"),
+                ).filter(
+                    RequestLog.timestamp >= filters["start_date"],
+                    RequestLog.alias.isnot(None),
+                )
+
+                if filters["end_date"]:
+                    query = query.filter(RequestLog.timestamp <= filters["end_date"])
+
+                if filters["tags"]:
+                    tag_conditions = []
+                    for tag in filters["tags"]:
+                        tag_conditions.append(RequestLog.tag == tag)
+                        tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                        tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                    query = query.filter(or_(*tag_conditions))
+
+                if filters["providers"]:
+                    query = query.filter(
+                        RequestLog.provider_id.in_(filters["providers"])
+                    )
+
+                if filters["models"]:
+                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+
+                if filters["clients"]:
+                    client_conditions = []
+                    for client in filters["clients"]:
+                        client_conditions.append(RequestLog.hostname == client)
+                        client_conditions.append(RequestLog.client_ip == client)
+                    query = query.filter(or_(*client_conditions))
+
+                if filters["aliases"]:
+                    query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
+                results = (
+                    query.group_by(RequestLog.alias)
+                    .order_by(func.count(RequestLog.id).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "alias": r.alias,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": round(r.cost or 0, 4),
+                        }
+                        for r in results
+                    ]
+                )
+            else:
+                # Use pre-aggregated DailyStats for performance
+                query = db.query(
+                    DailyStats.alias,
+                    func.sum(DailyStats.request_count).label("requests"),
+                    func.sum(DailyStats.input_tokens).label("input_tokens"),
+                    func.sum(DailyStats.output_tokens).label("output_tokens"),
+                    func.sum(DailyStats.estimated_cost).label("cost"),
+                ).filter(
+                    DailyStats.date >= filters["start_date"],
+                    DailyStats.alias.isnot(None),
+                    DailyStats.tag.is_(None),  # Get alias-level aggregation only
+                    DailyStats.provider_id.is_(None),
+                    DailyStats.model_id.is_(None),
+                )
+
+                if filters["end_date"]:
+                    query = query.filter(DailyStats.date <= filters["end_date"])
+
+                if filters["aliases"]:
+                    query = query.filter(DailyStats.alias.in_(filters["aliases"]))
+
+                results = (
+                    query.group_by(DailyStats.alias)
+                    .order_by(func.sum(DailyStats.request_count).desc())
+                    .all()
+                )
+
+                return jsonify(
+                    [
+                        {
+                            "alias": r.alias,
+                            "requests": r.requests or 0,
+                            "input_tokens": r.input_tokens or 0,
+                            "output_tokens": r.output_tokens or 0,
+                            "total_tokens": (r.input_tokens or 0)
+                            + (r.output_tokens or 0),
+                            "cost": round(r.cost or 0, 4),
+                        }
+                        for r in results
+                    ]
+                )
+
     @admin.route("/api/usage/timeseries", methods=["GET"])
     @require_auth_api
     def get_usage_timeseries():
@@ -2221,7 +2488,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         with get_db_context() as db:
             # Use RequestLog for filtered queries, DailyStats for unfiltered
-            if filters["tags"] or filters["providers"] or filters["models"]:
+            has_filters = (
+                filters["tags"]
+                or filters["providers"]
+                or filters["models"]
+                or filters["clients"]
+                or filters["aliases"]
+            )
+            if has_filters:
                 # Query from RequestLog when filtering
                 # Use func.date() for SQLite compatibility (works with datetime columns)
                 date_expr = func.date(RequestLog.timestamp)
@@ -2230,6 +2504,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     func.count(RequestLog.id).label("requests"),
                     func.sum(RequestLog.input_tokens).label("input_tokens"),
                     func.sum(RequestLog.output_tokens).label("output_tokens"),
+                    func.sum(RequestLog.cost).label("cost"),
                 ).filter(RequestLog.timestamp >= filters["start_date"])
 
                 if filters["end_date"]:
@@ -2253,6 +2528,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 if filters["models"]:
                     query = query.filter(RequestLog.model_id.in_(filters["models"]))
 
+                if filters["clients"]:
+                    client_conditions = []
+                    for client in filters["clients"]:
+                        client_conditions.append(RequestLog.hostname == client)
+                        client_conditions.append(RequestLog.client_ip == client)
+                    query = query.filter(or_(*client_conditions))
+
+                if filters["aliases"]:
+                    query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
                 results = query.group_by(date_expr).order_by(date_expr).all()
 
                 return jsonify(
@@ -2264,7 +2549,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                             else (r.date.strftime("%Y-%m-%d") if r.date else None),
                             "requests": r.requests or 0,
                             "tokens": (r.input_tokens or 0) + (r.output_tokens or 0),
-                            "cost": 0,  # Cost requires model info, simplified for now
+                            "cost": round(r.cost or 0, 4),
                         }
                         for r in results
                     ]
@@ -2321,6 +2606,241 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
             return jsonify([log.to_dict() for log in logs])
 
+    @admin.route("/api/usage/export", methods=["GET"])
+    @require_auth_api
+    def export_request_logs():
+        """Export request logs as CSV."""
+        import csv
+        import io
+        from datetime import datetime, timedelta
+
+        # Parse date filters
+        start_date_str = request.args.get("start_date")
+        end_date_str = request.args.get("end_date")
+
+        # Default to last 30 days if no dates specified
+        if start_date_str:
+            # Handle YYYY-MM-DD format - start of day
+            start_date = datetime.strptime(start_date_str[:10], "%Y-%m-%d")
+        else:
+            start_date = datetime.utcnow().replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) - timedelta(days=30)
+
+        if end_date_str:
+            # Handle YYYY-MM-DD format - end of day (23:59:59)
+            end_date = datetime.strptime(end_date_str[:10], "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, microsecond=999999
+            )
+        else:
+            end_date = datetime.utcnow()
+
+        # Optional filters
+        tags = request.args.getlist("tag")
+        providers = request.args.getlist("provider")
+        models = request.args.getlist("model")
+
+        with get_db_context() as db:
+            query = db.query(RequestLog).filter(
+                RequestLog.timestamp >= start_date,
+                RequestLog.timestamp <= end_date,
+            )
+
+            # Apply optional filters
+            if tags:
+                from sqlalchemy import or_
+
+                tag_conditions = []
+                for tag in tags:
+                    tag_conditions.append(RequestLog.tag == tag)
+                    tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                query = query.filter(or_(*tag_conditions))
+
+            if providers:
+                query = query.filter(RequestLog.provider_id.in_(providers))
+
+            if models:
+                query = query.filter(RequestLog.model_id.in_(models))
+
+            logs = query.order_by(RequestLog.timestamp.desc()).all()
+
+            # Create CSV in memory
+            output = io.StringIO()
+            writer = csv.writer(output)
+
+            # Write header
+            writer.writerow(
+                [
+                    "timestamp",
+                    "client_ip",
+                    "hostname",
+                    "tag",
+                    "alias",
+                    "router_name",
+                    "is_designator",
+                    "provider_id",
+                    "model_id",
+                    "endpoint",
+                    "input_tokens",
+                    "output_tokens",
+                    "reasoning_tokens",
+                    "cached_input_tokens",
+                    "cache_creation_tokens",
+                    "cache_read_tokens",
+                    "cost",
+                    "response_time_ms",
+                    "status_code",
+                    "is_streaming",
+                    "error_message",
+                ]
+            )
+
+            # Write data rows
+            for log in logs:
+                writer.writerow(
+                    [
+                        log.timestamp.isoformat() if log.timestamp else "",
+                        log.client_ip or "",
+                        log.hostname or "",
+                        log.tag or "",
+                        log.alias or "",
+                        log.router_name or "",
+                        "true" if log.is_designator else "false",
+                        log.provider_id or "",
+                        log.model_id or "",
+                        log.endpoint or "",
+                        log.input_tokens or 0,
+                        log.output_tokens or 0,
+                        log.reasoning_tokens or "",
+                        log.cached_input_tokens or "",
+                        log.cache_creation_tokens or "",
+                        log.cache_read_tokens or "",
+                        f"{log.cost:.6f}" if log.cost else "",
+                        log.response_time_ms or 0,
+                        log.status_code or "",
+                        "true" if log.is_streaming else "false",
+                        log.error_message or "",
+                    ]
+                )
+
+            # Generate filename with date range
+            filename = f"request_logs_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
+
+            # Return as downloadable CSV
+            response = make_response(output.getvalue())
+            response.headers["Content-Type"] = "text/csv"
+            response.headers["Content-Disposition"] = f"attachment; filename={filename}"
+            return response
+
+    @admin.route("/api/usage/requests", methods=["GET"])
+    @require_auth_api
+    def get_paginated_requests():
+        """Get paginated request logs with filtering and sorting."""
+        from datetime import datetime, timedelta
+
+        # Parse date filters
+        start_date_str = request.args.get("start_date")
+        end_date_str = request.args.get("end_date")
+
+        if start_date_str:
+            start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
+        else:
+            start_date = datetime.utcnow() - timedelta(days=30)
+
+        if end_date_str:
+            # Add a day to include the full end date
+            end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+            end_date = end_date.replace(hour=23, minute=59, second=59)
+        else:
+            end_date = datetime.utcnow()
+
+        # Pagination
+        limit = min(int(request.args.get("limit", 100)), 500)
+        offset = int(request.args.get("offset", 0))
+
+        # Sorting
+        sort_column = request.args.get("sort", "timestamp")
+        sort_order = request.args.get("order", "desc")
+
+        # Filters
+        tags = request.args.getlist("tag")
+        providers = request.args.getlist("provider")
+        models = request.args.getlist("model")
+        clients = request.args.getlist("client")
+        aliases = request.args.getlist("alias")
+        status_filter = request.args.get("status")
+
+        with get_db_context() as db:
+            from sqlalchemy import or_
+
+            # Build base query
+            query = db.query(RequestLog).filter(
+                RequestLog.timestamp >= start_date,
+                RequestLog.timestamp <= end_date,
+            )
+
+            # Apply filters
+            if tags:
+                tag_conditions = []
+                for tag in tags:
+                    tag_conditions.append(RequestLog.tag == tag)
+                    tag_conditions.append(RequestLog.tag.like(f"{tag},%"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag}"))
+                    tag_conditions.append(RequestLog.tag.like(f"%,{tag},%"))
+                query = query.filter(or_(*tag_conditions))
+
+            if providers:
+                query = query.filter(RequestLog.provider_id.in_(providers))
+
+            if models:
+                query = query.filter(RequestLog.model_id.in_(models))
+
+            if clients:
+                client_conditions = []
+                for client in clients:
+                    client_conditions.append(RequestLog.hostname == client)
+                    client_conditions.append(RequestLog.client_ip == client)
+                query = query.filter(or_(*client_conditions))
+
+            if aliases:
+                query = query.filter(RequestLog.alias.in_(aliases))
+
+            if status_filter == "success":
+                query = query.filter(RequestLog.status_code < 400)
+            elif status_filter == "error":
+                query = query.filter(RequestLog.status_code >= 400)
+
+            # Get total count before pagination
+            total_count = query.count()
+
+            # Apply sorting
+            sort_col_map = {
+                "timestamp": RequestLog.timestamp,
+                "input_tokens": RequestLog.input_tokens,
+                "output_tokens": RequestLog.output_tokens,
+                "cost": RequestLog.cost,
+                "response_time_ms": RequestLog.response_time_ms,
+            }
+            sort_col = sort_col_map.get(sort_column, RequestLog.timestamp)
+            if sort_order == "asc":
+                query = query.order_by(sort_col.asc())
+            else:
+                query = query.order_by(sort_col.desc())
+
+            # Apply pagination
+            logs = query.offset(offset).limit(limit).all()
+
+            return jsonify(
+                {
+                    "requests": [log.to_dict() for log in logs],
+                    "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                }
+            )
+
     @admin.route("/api/usage/settings", methods=["GET"])
     @require_auth_api
     def get_usage_settings():
@@ -2330,9 +2850,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 db.query(Setting)
                 .filter(Setting.key == Setting.KEY_TRACKING_ENABLED)
                 .first()
-            )
-            default_tag = (
-                db.query(Setting).filter(Setting.key == Setting.KEY_DEFAULT_TAG).first()
             )
             dns_resolution = (
                 db.query(Setting)
@@ -2352,7 +2869,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         if tracking_enabled
                         else True
                     ),
-                    "default_tag": default_tag.value if default_tag else "default",
                     "dns_resolution_enabled": (
                         dns_resolution.value.lower() == "true"
                         if dns_resolution
@@ -2378,7 +2894,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     Setting.KEY_TRACKING_ENABLED,
                     lambda v: "true" if v else "false",
                 ),
-                "default_tag": (Setting.KEY_DEFAULT_TAG, str),
                 "dns_resolution_enabled": (
                     Setting.KEY_DNS_RESOLUTION_ENABLED,
                     lambda v: "true" if v else "false",
@@ -2671,5 +3186,452 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         debug_log_buffer.clear()
         return jsonify({"success": True})
+
+    # -------------------------------------------------------------------------
+    # Aliases API (v3.1)
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/aliases", methods=["GET"])
+    @require_auth_api
+    def list_aliases():
+        """List all aliases."""
+        from db import get_all_aliases
+
+        aliases = get_all_aliases()
+        return jsonify([a.to_dict() for a in aliases])
+
+    @admin.route("/api/aliases/<int:alias_id>", methods=["GET"])
+    @require_auth_api
+    def get_alias(alias_id: int):
+        """Get a single alias by ID."""
+        from db import get_alias_by_id
+
+        alias = get_alias_by_id(alias_id)
+        if not alias:
+            return jsonify({"error": "Alias not found"}), 404
+        return jsonify(alias.to_dict())
+
+    @admin.route("/api/aliases", methods=["POST"])
+    @require_auth_api
+    def create_alias_endpoint():
+        """Create a new alias."""
+        from db import alias_name_available, create_alias
+
+        data = request.get_json() or {}
+
+        # Validate required fields
+        if not data.get("name"):
+            return jsonify({"error": "Name is required"}), 400
+        if not data.get("target_model"):
+            return jsonify({"error": "Target model is required"}), 400
+
+        name = data["name"].lower().strip()
+
+        # Check if name is available
+        if not alias_name_available(name):
+            return jsonify({"error": f"Alias name '{name}' is already in use"}), 409
+
+        # Check if name conflicts with an existing model
+        try:
+            from providers import registry
+
+            resolved = registry.resolve_model(name)
+            # If we get here without using an alias or default fallback,
+            # the name matches a real model
+            if not resolved.has_alias and not resolved.is_default_fallback:
+                return jsonify(
+                    {"error": f"Name '{name}' conflicts with an existing model"}
+                ), 409
+        except ValueError:
+            # Model not found - that's fine, the name is available
+            pass
+
+        try:
+            alias = create_alias(
+                name=name,
+                target_model=data["target_model"],
+                tags=data.get("tags", []),
+                description=data.get("description"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(alias.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/aliases/<int:alias_id>", methods=["PUT"])
+    @require_auth_api
+    def update_alias_endpoint(alias_id: int):
+        """Update an existing alias."""
+        from db import alias_name_available, get_alias_by_id, update_alias
+
+        data = request.get_json() or {}
+
+        # Check alias exists
+        existing = get_alias_by_id(alias_id)
+        if not existing:
+            return jsonify({"error": "Alias not found"}), 404
+
+        # If name is being changed, validate it
+        new_name = data.get("name")
+        if new_name and new_name.lower().strip() != existing.name:
+            new_name = new_name.lower().strip()
+            if not alias_name_available(new_name, exclude_id=alias_id):
+                return jsonify(
+                    {"error": f"Alias name '{new_name}' is already in use"}
+                ), 409
+
+            # Check if new name conflicts with an existing model
+            try:
+                from providers import registry
+
+                resolved = registry.resolve_model(new_name)
+                if not resolved.has_alias and not resolved.is_default_fallback:
+                    return jsonify(
+                        {"error": f"Name '{new_name}' conflicts with an existing model"}
+                    ), 409
+            except ValueError:
+                pass
+
+        try:
+            alias = update_alias(
+                alias_id=alias_id,
+                name=data.get("name"),
+                target_model=data.get("target_model"),
+                tags=data.get("tags"),
+                description=data.get("description"),
+                enabled=data.get("enabled"),
+            )
+            if not alias:
+                return jsonify({"error": "Alias not found"}), 404
+            return jsonify(alias.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/aliases/<int:alias_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_alias_endpoint(alias_id: int):
+        """Delete an alias."""
+        from db import delete_alias
+
+        if delete_alias(alias_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Alias not found"}), 404
+
+    @admin.route("/api/aliases/validate/<name>", methods=["GET"])
+    @require_auth_api
+    def validate_alias_name(name: str):
+        """Check if an alias name is available."""
+        from db import alias_name_available
+
+        name = name.lower().strip()
+        exclude_id = request.args.get("exclude_id", type=int)
+
+        # Check if name is taken by another alias
+        if not alias_name_available(name, exclude_id=exclude_id):
+            return jsonify(
+                {"available": False, "reason": "Name is already used by another alias"}
+            )
+
+        # Check if name conflicts with an existing model
+        try:
+            from providers import registry
+
+            resolved = registry.resolve_model(name)
+            if not resolved.has_alias and not resolved.is_default_fallback:
+                return jsonify(
+                    {
+                        "available": False,
+                        "reason": "Name conflicts with an existing model",
+                    }
+                )
+        except ValueError:
+            pass
+
+        return jsonify({"available": True})
+
+    @admin.route("/api/aliases/models", methods=["GET"])
+    @require_auth_api
+    def list_available_models_for_alias():
+        """List all available models that can be used as alias targets."""
+        models = []
+        for provider in registry.get_available_providers():
+            for model_id, info in provider.get_models().items():
+                models.append(
+                    {
+                        "id": f"{provider.name}/{model_id}",
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "family": info.family,
+                        "description": info.description,
+                    }
+                )
+        return jsonify(models)
+
+    # -------------------------------------------------------------------------
+    # Smart Router API (v3.2)
+    # -------------------------------------------------------------------------
+
+    @admin.route("/routers")
+    @require_auth
+    def routers_page():
+        """Smart Routers management page."""
+        return render_template("routers.html")
+
+    @admin.route("/api/routers", methods=["GET"])
+    @require_auth_api
+    def list_routers():
+        """List all smart routers."""
+        from db import get_all_smart_routers
+
+        routers = get_all_smart_routers()
+        return jsonify([r.to_dict() for r in routers])
+
+    @admin.route("/api/routers/<int:router_id>", methods=["GET"])
+    @require_auth_api
+    def get_router(router_id: int):
+        """Get a single smart router by ID."""
+        from db import get_smart_router_by_id
+
+        router = get_smart_router_by_id(router_id)
+        if not router:
+            return jsonify({"error": "Router not found"}), 404
+        return jsonify(router.to_dict())
+
+    @admin.route("/api/routers", methods=["POST"])
+    @require_auth_api
+    def create_router_endpoint():
+        """Create a new smart router."""
+        from db import create_smart_router, router_name_available
+
+        data = request.get_json() or {}
+
+        # Validate required fields
+        if not data.get("name"):
+            return jsonify({"error": "Name is required"}), 400
+        if not data.get("designator_model"):
+            return jsonify({"error": "Designator model is required"}), 400
+        if not data.get("purpose"):
+            return jsonify({"error": "Purpose is required"}), 400
+        if not data.get("candidates") or len(data["candidates"]) < 2:
+            return jsonify({"error": "At least 2 candidates are required"}), 400
+        if not data.get("fallback_model"):
+            return jsonify({"error": "Fallback model is required"}), 400
+
+        name = data["name"].lower().strip()
+
+        # Check if name is available
+        if not router_name_available(name):
+            return jsonify({"error": f"Router name '{name}' is already in use"}), 409
+
+        # Check if name conflicts with an existing model or alias
+        try:
+            from providers import registry
+
+            resolved = registry.resolve_model(name)
+            # If we get here without using default fallback, the name matches something
+            if not resolved.is_default_fallback:
+                return jsonify(
+                    {
+                        "error": f"Name '{name}' conflicts with an existing model or alias"
+                    }
+                ), 409
+        except ValueError:
+            # Model not found - that's fine, the name is available
+            pass
+
+        try:
+            router = create_smart_router(
+                name=name,
+                designator_model=data["designator_model"],
+                purpose=data["purpose"],
+                candidates=data["candidates"],
+                fallback_model=data["fallback_model"],
+                strategy=data.get("strategy", "per_request"),
+                session_ttl=data.get("session_ttl", 3600),
+                tags=data.get("tags", []),
+                description=data.get("description"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(router.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/routers/<int:router_id>", methods=["PUT"])
+    @require_auth_api
+    def update_router_endpoint(router_id: int):
+        """Update an existing smart router."""
+        from db import (
+            get_smart_router_by_id,
+            router_name_available,
+            update_smart_router,
+        )
+
+        data = request.get_json() or {}
+
+        # Check router exists
+        existing = get_smart_router_by_id(router_id)
+        if not existing:
+            return jsonify({"error": "Router not found"}), 404
+
+        # If name is being changed, validate it
+        new_name = data.get("name")
+        if new_name and new_name.lower().strip() != existing.name:
+            new_name = new_name.lower().strip()
+            if not router_name_available(new_name, exclude_id=router_id):
+                return jsonify(
+                    {"error": f"Router name '{new_name}' is already in use"}
+                ), 409
+
+            # Check if new name conflicts with an existing model or alias
+            try:
+                from providers import registry
+
+                resolved = registry.resolve_model(new_name)
+                if not resolved.is_default_fallback:
+                    return jsonify(
+                        {
+                            "error": f"Name '{new_name}' conflicts with an existing model or alias"
+                        }
+                    ), 409
+            except ValueError:
+                pass
+
+        try:
+            router = update_smart_router(
+                router_id=router_id,
+                name=data.get("name"),
+                designator_model=data.get("designator_model"),
+                purpose=data.get("purpose"),
+                candidates=data.get("candidates"),
+                fallback_model=data.get("fallback_model"),
+                strategy=data.get("strategy"),
+                session_ttl=data.get("session_ttl"),
+                tags=data.get("tags"),
+                description=data.get("description"),
+                enabled=data.get("enabled"),
+            )
+            if not router:
+                return jsonify({"error": "Router not found"}), 404
+            return jsonify(router.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/routers/<int:router_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_router_endpoint(router_id: int):
+        """Delete a smart router."""
+        from db import delete_smart_router
+
+        if delete_smart_router(router_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Router not found"}), 404
+
+    @admin.route("/api/routers/validate/<name>", methods=["GET"])
+    @require_auth_api
+    def validate_router_name(name: str):
+        """Check if a router name is available."""
+        from db import router_name_available
+
+        name = name.lower().strip()
+        exclude_id = request.args.get("exclude_id", type=int)
+
+        # Check if name is taken by another router
+        if not router_name_available(name, exclude_id=exclude_id):
+            return jsonify(
+                {"available": False, "reason": "Name is already used by another router"}
+            )
+
+        # Check if name conflicts with an existing model or alias
+        try:
+            from providers import registry
+
+            resolved = registry.resolve_model(name)
+            if not resolved.is_default_fallback:
+                return jsonify(
+                    {
+                        "available": False,
+                        "reason": "Name conflicts with an existing model or alias",
+                    }
+                )
+        except ValueError:
+            pass
+
+        return jsonify({"available": True})
+
+    @admin.route("/api/routers/models", methods=["GET"])
+    @require_auth_api
+    def list_available_models_for_router():
+        """List all available models that can be used as router candidates/designators."""
+        models = []
+        for provider in registry.get_available_providers():
+            for model_id, info in provider.get_models().items():
+                models.append(
+                    {
+                        "id": f"{provider.name}/{model_id}",
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "family": info.family,
+                        "description": info.description,
+                        "context_length": info.context_length,
+                        "capabilities": info.capabilities,
+                        "input_cost": info.input_cost,
+                        "output_cost": info.output_cost,
+                    }
+                )
+        return jsonify(models)
+
+    @admin.route("/api/usage/by-router", methods=["GET"])
+    @require_auth_api
+    def usage_by_router():
+        """Get usage statistics grouped by smart router."""
+        from datetime import datetime, timedelta
+
+        from sqlalchemy import func
+
+        # Parse date range
+        days = request.args.get("days", 7, type=int)
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+
+        with get_db_context() as db:
+            # Query daily stats grouped by router
+            stats = (
+                db.query(
+                    DailyStats.router_name,
+                    func.sum(DailyStats.request_count).label("requests"),
+                    func.sum(DailyStats.input_tokens).label("input_tokens"),
+                    func.sum(DailyStats.output_tokens).label("output_tokens"),
+                    func.sum(DailyStats.estimated_cost).label("cost"),
+                    func.sum(DailyStats.success_count).label("success"),
+                    func.sum(DailyStats.error_count).label("errors"),
+                )
+                .filter(
+                    DailyStats.date >= start_date,
+                    DailyStats.router_name.isnot(None),
+                    # Only get router-level totals (no other dimensions)
+                    DailyStats.tag.is_(None),
+                    DailyStats.provider_id.is_(None),
+                    DailyStats.model_id.is_(None),
+                    DailyStats.alias.is_(None),
+                )
+                .group_by(DailyStats.router_name)
+                .all()
+            )
+
+            result = []
+            for stat in stats:
+                result.append(
+                    {
+                        "router_name": stat.router_name,
+                        "requests": stat.requests or 0,
+                        "input_tokens": stat.input_tokens or 0,
+                        "output_tokens": stat.output_tokens or 0,
+                        "cost": float(stat.cost or 0),
+                        "success": stat.success or 0,
+                        "errors": stat.errors or 0,
+                    }
+                )
+
+            return jsonify(result)
 
     return admin

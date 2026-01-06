@@ -421,6 +421,77 @@ def _run_migrations(engine) -> None:
                     conn.execute(text(sql))
                 conn.commit()
 
+    # Migration: Add alias column to request_logs table (v3.1)
+    if "request_logs" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("request_logs")
+        }
+
+        if "alias" not in existing_columns:
+            logger.info("Adding alias column to request_logs table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE request_logs ADD COLUMN alias VARCHAR(100)")
+                )
+                conn.commit()
+
+    # Migration: Add alias column to daily_stats table (v3.1)
+    if "daily_stats" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("daily_stats")}
+
+        if "alias" not in existing_columns:
+            logger.info("Adding alias column to daily_stats table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE daily_stats ADD COLUMN alias VARCHAR(100)")
+                )
+                conn.commit()
+
+    # Migration: Add smart router tracking columns to request_logs (v3.2)
+    if "request_logs" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("request_logs")
+        }
+
+        migrations = []
+
+        if "is_designator" not in existing_columns:
+            migrations.append(
+                (
+                    "is_designator",
+                    "ALTER TABLE request_logs ADD COLUMN is_designator BOOLEAN DEFAULT 0",
+                )
+            )
+        if "router_name" not in existing_columns:
+            migrations.append(
+                (
+                    "router_name",
+                    "ALTER TABLE request_logs ADD COLUMN router_name VARCHAR(100)",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for request_logs table (v3.2)"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add router_name column to daily_stats table (v3.2)
+    if "daily_stats" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("daily_stats")}
+
+        if "router_name" not in existing_columns:
+            logger.info("Adding router_name column to daily_stats table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE daily_stats ADD COLUMN router_name VARCHAR(100)")
+                )
+                conn.commit()
+
 
 def init_db(drop_all: bool = False) -> None:
     """

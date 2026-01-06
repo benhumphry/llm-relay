@@ -72,6 +72,11 @@ class UsageTracker:
         cached_input_tokens: Optional[int] = None,
         cache_creation_tokens: Optional[int] = None,
         cache_read_tokens: Optional[int] = None,
+        # Alias tracking (v3.1)
+        alias: Optional[str] = None,
+        # Smart router tracking (v3.2)
+        is_designator: bool = False,
+        router_name: Optional[str] = None,
     ):
         """
         Queue a request log entry.
@@ -95,6 +100,9 @@ class UsageTracker:
             cached_input_tokens: OpenAI cached prompt tokens
             cache_creation_tokens: Anthropic cache creation tokens
             cache_read_tokens: Anthropic cache read tokens
+            alias: Alias name if request used an alias (v3.1)
+            is_designator: Whether this was a designator call (v3.2)
+            router_name: Smart router name if request used a router (v3.2)
         """
         if not self._is_tracking_enabled():
             return
@@ -119,6 +127,9 @@ class UsageTracker:
                 "cached_input_tokens": cached_input_tokens,
                 "cache_creation_tokens": cache_creation_tokens,
                 "cache_read_tokens": cache_read_tokens,
+                "alias": alias,
+                "is_designator": is_designator,
+                "router_name": router_name,
             }
         )
 
@@ -177,6 +188,7 @@ class UsageTracker:
                     client_ip=entry["client_ip"],
                     hostname=entry["hostname"],
                     tag=entry["tag"],
+                    alias=entry.get("alias"),  # v3.1
                     provider_id=entry["provider_id"],
                     model_id=entry["model_id"],
                     endpoint=entry["endpoint"],
@@ -191,6 +203,8 @@ class UsageTracker:
                     error_message=entry["error_message"],
                     is_streaming=entry["is_streaming"],
                     cost=cost,
+                    is_designator=entry.get("is_designator", False),  # v3.2
+                    router_name=entry.get("router_name"),  # v3.2
                 )
                 db.add(log)
         except Exception as e:
@@ -206,6 +220,8 @@ class UsageTracker:
         3. Per-provider totals
         4. Per-model totals
         5. Full dimension combination (tag + provider + model)
+        6. Per-alias totals (v3.1)
+        7. Per-router totals (v3.2)
 
         For multi-tag entries like "alice,project-x", creates separate DailyStats
         rows for each tag so filtering by either "alice" OR "project-x" works.
@@ -213,6 +229,8 @@ class UsageTracker:
         try:
             entry_date = entry["timestamp"].date()
             is_success = 200 <= entry["status_code"] < 400
+            alias = entry.get("alias")
+            router_name = entry.get("router_name")
 
             # Use provider-returned cost if available (e.g., OpenRouter),
             # otherwise calculate from static pricing
@@ -231,17 +249,23 @@ class UsageTracker:
             if not individual_tags:
                 individual_tags = [raw_tag]  # Fallback to original if no valid splits
 
-            # Define base aggregation levels (tag-independent)
+            # Define base aggregation levels (tag-independent, alias-independent)
             base_aggregations = [
                 # Overall totals
-                {"tag": None, "provider_id": None, "model_id": None},
+                {"tag": None, "provider_id": None, "model_id": None, "alias": None},
                 # Per-provider
-                {"tag": None, "provider_id": entry["provider_id"], "model_id": None},
+                {
+                    "tag": None,
+                    "provider_id": entry["provider_id"],
+                    "model_id": None,
+                    "alias": None,
+                },
                 # Per-model
                 {
                     "tag": None,
                     "provider_id": entry["provider_id"],
                     "model_id": entry["model_id"],
+                    "alias": None,
                 },
             ]
 
@@ -254,6 +278,7 @@ class UsageTracker:
                         dims["tag"],
                         dims["provider_id"],
                         dims["model_id"],
+                        dims["alias"],
                         entry["input_tokens"],
                         entry["output_tokens"],
                         entry["response_time_ms"],
@@ -270,6 +295,7 @@ class UsageTracker:
                         tag,
                         None,
                         None,
+                        None,  # alias
                         entry["input_tokens"],
                         entry["output_tokens"],
                         entry["response_time_ms"],
@@ -283,11 +309,76 @@ class UsageTracker:
                         tag,
                         entry["provider_id"],
                         entry["model_id"],
+                        None,  # alias
                         entry["input_tokens"],
                         entry["output_tokens"],
                         entry["response_time_ms"],
                         is_success,
                         estimated_cost,
+                    )
+
+                # Update per-alias aggregation if alias was used (v3.1)
+                if alias:
+                    # Per-alias total
+                    self._upsert_daily_stat(
+                        db,
+                        entry_date,
+                        None,  # tag
+                        None,  # provider_id
+                        None,  # model_id
+                        alias,
+                        entry["input_tokens"],
+                        entry["output_tokens"],
+                        entry["response_time_ms"],
+                        is_success,
+                        estimated_cost,
+                    )
+                    # Alias + model combination
+                    self._upsert_daily_stat(
+                        db,
+                        entry_date,
+                        None,  # tag
+                        entry["provider_id"],
+                        entry["model_id"],
+                        alias,
+                        entry["input_tokens"],
+                        entry["output_tokens"],
+                        entry["response_time_ms"],
+                        is_success,
+                        estimated_cost,
+                    )
+
+                # Update per-router aggregation if router was used (v3.2)
+                if router_name:
+                    # Per-router total
+                    self._upsert_daily_stat(
+                        db,
+                        entry_date,
+                        None,  # tag
+                        None,  # provider_id
+                        None,  # model_id
+                        None,  # alias
+                        entry["input_tokens"],
+                        entry["output_tokens"],
+                        entry["response_time_ms"],
+                        is_success,
+                        estimated_cost,
+                        router_name=router_name,
+                    )
+                    # Router + model combination
+                    self._upsert_daily_stat(
+                        db,
+                        entry_date,
+                        None,  # tag
+                        entry["provider_id"],
+                        entry["model_id"],
+                        None,  # alias
+                        entry["input_tokens"],
+                        entry["output_tokens"],
+                        entry["response_time_ms"],
+                        is_success,
+                        estimated_cost,
+                        router_name=router_name,
                     )
 
         except Exception as e:
@@ -300,11 +391,13 @@ class UsageTracker:
         tag: Optional[str],
         provider_id: Optional[str],
         model_id: Optional[str],
+        alias: Optional[str],
         input_tokens: int,
         output_tokens: int,
         response_time_ms: int,
         is_success: bool,
         estimated_cost: float,
+        router_name: Optional[str] = None,
     ):
         """Insert or update a daily stats record."""
         # Find existing record
@@ -327,6 +420,16 @@ class UsageTracker:
         else:
             query = query.filter(DailyStats.model_id == model_id)
 
+        if alias is None:
+            query = query.filter(DailyStats.alias.is_(None))
+        else:
+            query = query.filter(DailyStats.alias == alias)
+
+        if router_name is None:
+            query = query.filter(DailyStats.router_name.is_(None))
+        else:
+            query = query.filter(DailyStats.router_name == router_name)
+
         stat = query.first()
 
         if stat:
@@ -347,6 +450,8 @@ class UsageTracker:
                 tag=tag,
                 provider_id=provider_id,
                 model_id=model_id,
+                alias=alias,
+                router_name=router_name,
                 request_count=1,
                 success_count=1 if is_success else 0,
                 error_count=0 if is_success else 1,

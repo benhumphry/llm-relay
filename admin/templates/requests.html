@@ -1,0 +1,1104 @@
+{% extends "base.html" %} {% block title %}Request Log{% endblock %} {% block
+content %}
+<div x-data="requestsPage()" x-init="init()">
+    <!-- Header -->
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4"
+    >
+        <div>
+            <h1 class="text-2xl font-bold">Request Log</h1>
+            <p class="text-base-content/60">
+                View and export individual request logs
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+            <!-- Date Range -->
+            <div class="join">
+                <button
+                    @click="setDatePreset('today')"
+                    :class="{'btn-active': dateMode === 'today'}"
+                    class="btn btn-sm join-item"
+                >
+                    Today
+                </button>
+                <button
+                    @click="setDatePreset(7)"
+                    :class="{'btn-active': dateMode === 7}"
+                    class="btn btn-sm join-item"
+                >
+                    7d
+                </button>
+                <button
+                    @click="setDatePreset(30)"
+                    :class="{'btn-active': dateMode === 30}"
+                    class="btn btn-sm join-item"
+                >
+                    30d
+                </button>
+                <button
+                    @click="setDatePreset(90)"
+                    :class="{'btn-active': dateMode === 90}"
+                    class="btn btn-sm join-item"
+                >
+                    90d
+                </button>
+                <button
+                    @click="toggleCustomDate()"
+                    :class="{'btn-active': dateMode === 'custom'}"
+                    class="btn btn-sm join-item"
+                >
+                    Custom
+                </button>
+            </div>
+            <button @click="loadData()" class="btn btn-sm btn-outline">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                </svg>
+                Refresh
+            </button>
+            <button @click="exportCSV()" class="btn btn-sm btn-primary">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                </svg>
+                Export CSV
+            </button>
+        </div>
+    </div>
+
+    <!-- Custom Date Range Picker -->
+    <div
+        x-show="dateMode === 'custom'"
+        x-transition
+        class="mb-4 flex flex-wrap gap-2 items-center"
+    >
+        <label class="text-sm text-base-content/60">From:</label>
+        <input
+            type="date"
+            x-model="customStartDate"
+            @change="loadData()"
+            class="input input-bordered input-sm"
+        />
+        <label class="text-sm text-base-content/60">To:</label>
+        <input
+            type="date"
+            x-model="customEndDate"
+            @change="loadData()"
+            class="input input-bordered input-sm"
+        />
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="mb-4">
+        <div class="flex flex-wrap gap-2 items-center">
+            <!-- Tag Filter -->
+            <button
+                @click="expandedFilter = expandedFilter === 'tags' ? null : 'tags'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'tags' ? 'btn-primary' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                    />
+                </svg>
+                Tags
+                <span
+                    x-show="filters.tags.length > 0"
+                    class="badge badge-primary badge-xs"
+                    x-text="filters.tags.length"
+                ></span>
+            </button>
+
+            <!-- Provider Filter -->
+            <button
+                @click="expandedFilter = expandedFilter === 'providers' ? null : 'providers'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'providers' ? 'btn-info' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"
+                    />
+                </svg>
+                Providers
+                <span
+                    x-show="filters.providers.length > 0"
+                    class="badge badge-info badge-xs"
+                    x-text="filters.providers.length"
+                ></span>
+            </button>
+
+            <!-- Model Filter -->
+            <button
+                @click="expandedFilter = expandedFilter === 'models' ? null : 'models'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'models' ? 'btn-secondary' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                </svg>
+                Models
+                <span
+                    x-show="filters.models.length > 0"
+                    class="badge badge-secondary badge-xs"
+                    x-text="filters.models.length"
+                ></span>
+            </button>
+
+            <!-- Client Filter -->
+            <button
+                @click="expandedFilter = expandedFilter === 'clients' ? null : 'clients'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'clients' ? 'btn-warning' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                </svg>
+                Clients
+                <span
+                    x-show="filters.clients.length > 0"
+                    class="badge badge-warning badge-xs"
+                    x-text="filters.clients.length"
+                ></span>
+            </button>
+
+            <!-- Alias Filter -->
+            <button
+                @click="expandedFilter = expandedFilter === 'aliases' ? null : 'aliases'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'aliases' ? 'btn-accent' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                    />
+                </svg>
+                Aliases
+                <span
+                    x-show="filters.aliases.length > 0"
+                    class="badge badge-accent badge-xs"
+                    x-text="filters.aliases.length"
+                ></span>
+            </button>
+
+            <!-- Status Filter -->
+            <div class="join">
+                <button
+                    @click="filters.status = null; loadData()"
+                    :class="{'btn-active': filters.status === null}"
+                    class="btn btn-sm join-item"
+                >
+                    All
+                </button>
+                <button
+                    @click="filters.status = 'success'; loadData()"
+                    :class="{'btn-active': filters.status === 'success'}"
+                    class="btn btn-sm join-item btn-success btn-outline"
+                >
+                    Success
+                </button>
+                <button
+                    @click="filters.status = 'error'; loadData()"
+                    :class="{'btn-active': filters.status === 'error'}"
+                    class="btn btn-sm join-item btn-error btn-outline"
+                >
+                    Errors
+                </button>
+            </div>
+
+            <!-- Clear Filters -->
+            <button
+                x-show="hasActiveFilters()"
+                @click="clearFilters()"
+                class="btn btn-sm btn-ghost text-error"
+            >
+                Clear All
+            </button>
+        </div>
+
+        <!-- Expanded Filter Panel -->
+        <div
+            x-show="expandedFilter"
+            x-transition
+            class="mt-3 p-3 bg-base-200 rounded-lg"
+        >
+            <!-- Tags Panel -->
+            <div x-show="expandedFilter === 'tags'">
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="tag in filterOptions.tags" :key="tag">
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.tags.includes(tag)"
+                                @change="toggleFilter('tags', tag)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-primary peer-checked:text-primary-content hover:opacity-80"
+                                x-text="tag"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.tags.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No tags available</span
+                    >
+                </div>
+            </div>
+
+            <!-- Providers Panel -->
+            <div x-show="expandedFilter === 'providers'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="provider in filterOptions.providers"
+                        :key="provider"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.providers.includes(provider)"
+                                @change="toggleFilter('providers', provider)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-info peer-checked:text-info-content hover:opacity-80"
+                                x-text="provider"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.providers.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No providers available</span
+                    >
+                </div>
+            </div>
+
+            <!-- Models Panel -->
+            <div x-show="expandedFilter === 'models'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="model in filterOptions.models"
+                        :key="model.provider + '/' + model.model"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.models.includes(model.model)"
+                                @change="toggleFilter('models', model.model)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-secondary peer-checked:text-secondary-content hover:opacity-80"
+                            >
+                                <span
+                                    class="opacity-60"
+                                    x-text="model.provider + '/'"
+                                ></span
+                                ><span x-text="model.model"></span>
+                            </span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.models.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No models available</span
+                    >
+                </div>
+            </div>
+
+            <!-- Clients Panel -->
+            <div x-show="expandedFilter === 'clients'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="client in filterOptions.clients"
+                        :key="client"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.clients.includes(client)"
+                                @change="toggleFilter('clients', client)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-warning peer-checked:text-warning-content hover:opacity-80"
+                                x-text="client"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.clients.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No clients available</span
+                    >
+                </div>
+            </div>
+
+            <!-- Aliases Panel -->
+            <div x-show="expandedFilter === 'aliases'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="alias in filterOptions.aliases"
+                        :key="alias"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.aliases.includes(alias)"
+                                @change="toggleFilter('aliases', alias)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-accent peer-checked:text-accent-content hover:opacity-80"
+                                x-text="alias"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.aliases.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No aliases available</span
+                    >
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Filters Display -->
+        <div x-show="hasActiveFilters()" class="flex flex-wrap gap-2 mt-3">
+            <span class="text-sm text-base-content/60 self-center"
+                >Active:</span
+            >
+            <template x-for="tag in filters.tags" :key="'tag-' + tag">
+                <span class="badge badge-primary gap-1">
+                    <span x-text="tag"></span>
+                    <button
+                        @click="removeFilter('tags', tag)"
+                        class="hover:text-error"
+                    >
+                        x
+                    </button>
+                </span>
+            </template>
+            <template
+                x-for="provider in filters.providers"
+                :key="'provider-' + provider"
+            >
+                <span class="badge badge-info gap-1">
+                    <span x-text="provider"></span>
+                    <button
+                        @click="removeFilter('providers', provider)"
+                        class="hover:text-error"
+                    >
+                        x
+                    </button>
+                </span>
+            </template>
+            <template x-for="model in filters.models" :key="'model-' + model">
+                <span class="badge badge-secondary gap-1">
+                    <span x-text="model"></span>
+                    <button
+                        @click="removeFilter('models', model)"
+                        class="hover:text-error"
+                    >
+                        x
+                    </button>
+                </span>
+            </template>
+            <template
+                x-for="client in filters.clients"
+                :key="'client-' + client"
+            >
+                <span class="badge badge-warning gap-1">
+                    <span x-text="client"></span>
+                    <button
+                        @click="removeFilter('clients', client)"
+                        class="hover:text-error"
+                    >
+                        x
+                    </button>
+                </span>
+            </template>
+            <template x-for="alias in filters.aliases" :key="'alias-' + alias">
+                <span class="badge badge-accent gap-1">
+                    <span x-text="alias"></span>
+                    <button
+                        @click="removeFilter('aliases', alias)"
+                        class="hover:text-error"
+                    >
+                        x
+                    </button>
+                </span>
+            </template>
+            <span
+                x-show="filters.status"
+                class="badge gap-1"
+                :class="filters.status === 'success' ? 'badge-success' : 'badge-error'"
+            >
+                <span x-text="filters.status"></span>
+                <button
+                    @click="filters.status = null; loadData()"
+                    class="hover:text-error"
+                >
+                    x
+                </button>
+            </span>
+        </div>
+    </div>
+
+    <!-- Summary Bar -->
+    <div class="stats shadow mb-4 w-full">
+        <div class="stat py-2">
+            <div class="stat-title text-xs">Total Requests</div>
+            <div class="stat-value text-lg" x-text="formatNumber(totalCount)">
+                -
+            </div>
+        </div>
+        <div class="stat py-2">
+            <div class="stat-title text-xs">Showing</div>
+            <div class="stat-value text-lg" x-text="requests.length">-</div>
+        </div>
+        <div class="stat py-2">
+            <div class="stat-title text-xs">Page</div>
+            <div
+                class="stat-value text-lg"
+                x-text="currentPage + ' / ' + totalPages"
+            >
+                -
+            </div>
+        </div>
+    </div>
+
+    <!-- Request Table -->
+    <div class="card bg-base-100 shadow">
+        <div class="card-body p-4">
+            <div class="overflow-x-auto">
+                <table class="table table-zebra table-sm">
+                    <thead>
+                        <tr>
+                            <th
+                                class="cursor-pointer hover:bg-base-200"
+                                @click="toggleSort('timestamp')"
+                            >
+                                Time
+                                <span
+                                    x-show="sortColumn === 'timestamp'"
+                                    x-text="sortDirection === 'asc' ? ' ^' : ' v'"
+                                ></span>
+                            </th>
+                            <th>Client</th>
+                            <th>Tag</th>
+                            <th>Alias</th>
+                            <th>Router</th>
+                            <th>Provider</th>
+                            <th>Model</th>
+                            <th>Endpoint</th>
+                            <th
+                                class="text-right cursor-pointer hover:bg-base-200"
+                                @click="toggleSort('input_tokens')"
+                            >
+                                In
+                                <span
+                                    x-show="sortColumn === 'input_tokens'"
+                                    x-text="sortDirection === 'asc' ? ' ^' : ' v'"
+                                ></span>
+                            </th>
+                            <th
+                                class="text-right cursor-pointer hover:bg-base-200"
+                                @click="toggleSort('output_tokens')"
+                            >
+                                Out
+                                <span
+                                    x-show="sortColumn === 'output_tokens'"
+                                    x-text="sortDirection === 'asc' ? ' ^' : ' v'"
+                                ></span>
+                            </th>
+                            <th>Mode</th>
+                            <th
+                                class="text-right cursor-pointer hover:bg-base-200"
+                                @click="toggleSort('cost')"
+                            >
+                                Cost
+                                <span
+                                    x-show="sortColumn === 'cost'"
+                                    x-text="sortDirection === 'asc' ? ' ^' : ' v'"
+                                ></span>
+                            </th>
+                            <th
+                                class="text-right cursor-pointer hover:bg-base-200"
+                                @click="toggleSort('response_time_ms')"
+                            >
+                                Time (ms)
+                                <span
+                                    x-show="sortColumn === 'response_time_ms'"
+                                    x-text="sortDirection === 'asc' ? ' ^' : ' v'"
+                                ></span>
+                            </th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="log in requests" :key="log.id">
+                            <tr
+                                :class="{'bg-error/10': log.status_code >= 400}"
+                            >
+                                <td
+                                    class="whitespace-nowrap text-xs"
+                                    x-text="formatTime(log.timestamp)"
+                                ></td>
+                                <td class="text-xs">
+                                    <span
+                                        x-text="log.hostname || log.client_ip"
+                                    ></span>
+                                </td>
+                                <td>
+                                    <template
+                                        x-for="tag in (log.tag || '').split(',').filter(t => t.trim())"
+                                        :key="tag"
+                                    >
+                                        <span
+                                            class="badge badge-outline badge-xs mr-1"
+                                            x-text="tag.trim()"
+                                        ></span>
+                                    </template>
+                                    <span
+                                        x-show="!log.tag"
+                                        class="text-base-content/40"
+                                        >-</span
+                                    >
+                                </td>
+                                <td>
+                                    <span
+                                        x-show="log.alias"
+                                        class="badge badge-accent badge-outline badge-xs"
+                                        x-text="log.alias"
+                                    ></span>
+                                    <span
+                                        x-show="!log.alias"
+                                        class="text-base-content/40"
+                                        >-</span
+                                    >
+                                </td>
+                                <td>
+                                    <span
+                                        x-show="log.router_name"
+                                        class="badge badge-warning badge-outline badge-xs"
+                                        x-text="log.router_name"
+                                    ></span>
+                                    <span
+                                        x-show="log.is_designator"
+                                        class="badge badge-ghost badge-xs ml-1"
+                                        >D</span
+                                    >
+                                    <span
+                                        x-show="!log.router_name"
+                                        class="text-base-content/40"
+                                        >-</span
+                                    >
+                                </td>
+                                <td
+                                    class="text-xs"
+                                    x-text="log.provider_id"
+                                ></td>
+                                <td
+                                    class="font-mono text-xs max-w-32 truncate"
+                                    x-text="log.model_id"
+                                ></td>
+                                <td class="text-xs" x-text="log.endpoint"></td>
+                                <td class="text-right text-xs">
+                                    <div
+                                        class="tooltip tooltip-left"
+                                        :data-tip="formatTokenTooltip(log)"
+                                    >
+                                        <span x-text="log.input_tokens"></span>
+                                        <span
+                                            x-show="hasExtendedTokens(log)"
+                                            class="text-info ml-1"
+                                            >*</span
+                                        >
+                                    </div>
+                                </td>
+                                <td
+                                    class="text-right text-xs"
+                                    x-text="log.output_tokens"
+                                ></td>
+                                <td class="text-xs">
+                                    <span
+                                        class="badge badge-ghost badge-xs"
+                                        x-text="log.is_streaming ? 'stream' : 'sync'"
+                                    ></span>
+                                </td>
+                                <td class="text-right text-xs">
+                                    <span
+                                        x-show="log.cost !== null"
+                                        x-text="'$' + log.cost.toFixed(6)"
+                                    ></span>
+                                    <span
+                                        x-show="log.cost === null"
+                                        class="text-base-content/40"
+                                        >-</span
+                                    >
+                                </td>
+                                <td
+                                    class="text-right text-xs"
+                                    x-text="log.response_time_ms"
+                                ></td>
+                                <td>
+                                    <span
+                                        :class="{
+                                            'badge-success': log.status_code >= 200 && log.status_code < 300,
+                                            'badge-warning': log.status_code >= 300 && log.status_code < 400,
+                                            'badge-error': log.status_code >= 400
+                                        }"
+                                        class="badge badge-xs"
+                                        x-text="log.status_code"
+                                    ></span>
+                                </td>
+                            </tr>
+                        </template>
+                        <tr x-show="requests.length === 0 && !loading">
+                            <td
+                                colspan="14"
+                                class="text-center text-base-content/60 py-8"
+                            >
+                                No requests found for the selected filters
+                            </td>
+                        </tr>
+                        <tr x-show="loading">
+                            <td colspan="14" class="text-center py-8">
+                                <span
+                                    class="loading loading-spinner loading-md"
+                                ></span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex justify-between items-center mt-4">
+                <div class="text-sm text-base-content/60">
+                    Showing
+                    <span x-text="((currentPage - 1) * pageSize) + 1"></span> -
+                    <span
+                        x-text="Math.min(currentPage * pageSize, totalCount)"
+                    ></span>
+                    of
+                    <span x-text="formatNumber(totalCount)"></span>
+                </div>
+                <div class="join">
+                    <button
+                        class="join-item btn btn-sm"
+                        :disabled="currentPage <= 1"
+                        @click="goToPage(1)"
+                    >
+                        First
+                    </button>
+                    <button
+                        class="join-item btn btn-sm"
+                        :disabled="currentPage <= 1"
+                        @click="goToPage(currentPage - 1)"
+                    >
+                        Prev
+                    </button>
+                    <button
+                        class="join-item btn btn-sm btn-active"
+                        x-text="currentPage"
+                    ></button>
+                    <button
+                        class="join-item btn btn-sm"
+                        :disabled="currentPage >= totalPages"
+                        @click="goToPage(currentPage + 1)"
+                    >
+                        Next
+                    </button>
+                    <button
+                        class="join-item btn btn-sm"
+                        :disabled="currentPage >= totalPages"
+                        @click="goToPage(totalPages)"
+                    >
+                        Last
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-base-content/60">Per page:</span>
+                    <select
+                        x-model="pageSize"
+                        @change="loadData()"
+                        class="select select-bordered select-sm w-20"
+                    >
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="250">250</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div x-show="toast.show" x-transition class="toast toast-end" x-cloak>
+        <div :class="'alert alert-' + toast.type">
+            <span x-text="toast.message"></span>
+        </div>
+    </div>
+</div>
+
+<script>
+    function requestsPage() {
+        return {
+            // Date range
+            dateMode: 30,
+            dateRange: 30,
+            customStartDate: "",
+            customEndDate: "",
+
+            // Filters
+            filters: {
+                tags: [],
+                providers: [],
+                models: [],
+                clients: [],
+                aliases: [],
+                status: null,
+            },
+            filterOptions: {
+                tags: [],
+                providers: [],
+                models: [],
+                clients: [],
+                aliases: [],
+            },
+            expandedFilter: null,
+
+            // Sorting
+            sortColumn: "timestamp",
+            sortDirection: "desc",
+
+            // Pagination
+            currentPage: 1,
+            pageSize: 100,
+            totalCount: 0,
+            totalPages: 1,
+
+            // Data
+            requests: [],
+            loading: false,
+
+            // UI
+            toast: { show: false, message: "", type: "info" },
+
+            async init() {
+                const today = new Date();
+                const thirtyDaysAgo = new Date(
+                    today - 30 * 24 * 60 * 60 * 1000,
+                );
+                this.customEndDate = today.toISOString().split("T")[0];
+                this.customStartDate = thirtyDaysAgo
+                    .toISOString()
+                    .split("T")[0];
+
+                await this.loadFilterOptions();
+                await this.loadData();
+            },
+
+            setDatePreset(preset) {
+                this.dateMode = preset;
+                if (preset === "today") {
+                    this.dateRange = 1;
+                } else if (typeof preset === "number") {
+                    this.dateRange = preset;
+                }
+                this.currentPage = 1;
+                this.loadData();
+            },
+
+            toggleCustomDate() {
+                this.dateMode = "custom";
+            },
+
+            buildQueryParams() {
+                const params = new URLSearchParams();
+
+                // Date params
+                if (this.dateMode === "custom") {
+                    if (this.customStartDate)
+                        params.set("start_date", this.customStartDate);
+                    if (this.customEndDate)
+                        params.set("end_date", this.customEndDate);
+                } else if (this.dateMode === "today") {
+                    const today = new Date().toISOString().split("T")[0];
+                    params.set("start_date", today);
+                    params.set("end_date", today);
+                } else {
+                    const end = new Date();
+                    const start = new Date(
+                        end - this.dateRange * 24 * 60 * 60 * 1000,
+                    );
+                    params.set("start_date", start.toISOString().split("T")[0]);
+                    params.set("end_date", end.toISOString().split("T")[0]);
+                }
+
+                // Filters
+                this.filters.tags.forEach((t) => params.append("tag", t));
+                this.filters.providers.forEach((p) =>
+                    params.append("provider", p),
+                );
+                this.filters.models.forEach((m) => params.append("model", m));
+                this.filters.clients.forEach((c) => params.append("client", c));
+                this.filters.aliases.forEach((a) => params.append("alias", a));
+                if (this.filters.status)
+                    params.set("status", this.filters.status);
+
+                // Pagination
+                params.set("limit", this.pageSize);
+                params.set("offset", (this.currentPage - 1) * this.pageSize);
+
+                // Sorting
+                params.set("sort", this.sortColumn);
+                params.set("order", this.sortDirection);
+
+                return params.toString();
+            },
+
+            async loadFilterOptions() {
+                try {
+                    const res = await fetch("/api/usage/filters");
+                    if (res.ok) {
+                        this.filterOptions = await res.json();
+                    }
+                } catch (e) {
+                    console.error("Error loading filter options:", e);
+                }
+            },
+
+            async loadData() {
+                this.loading = true;
+                try {
+                    const res = await fetch(
+                        `/api/usage/requests?${this.buildQueryParams()}`,
+                    );
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.requests = data.requests;
+                        this.totalCount = data.total;
+                        this.totalPages =
+                            Math.ceil(data.total / this.pageSize) || 1;
+                    }
+                } catch (e) {
+                    console.error("Error loading requests:", e);
+                    this.showToast("Error loading requests", "error");
+                }
+                this.loading = false;
+            },
+
+            toggleFilter(type, value) {
+                const idx = this.filters[type].indexOf(value);
+                if (idx === -1) {
+                    this.filters[type].push(value);
+                } else {
+                    this.filters[type].splice(idx, 1);
+                }
+                this.currentPage = 1;
+                this.loadData();
+            },
+
+            removeFilter(type, value) {
+                const idx = this.filters[type].indexOf(value);
+                if (idx !== -1) {
+                    this.filters[type].splice(idx, 1);
+                    this.currentPage = 1;
+                    this.loadData();
+                }
+            },
+
+            clearFilters() {
+                this.filters.tags = [];
+                this.filters.providers = [];
+                this.filters.models = [];
+                this.filters.clients = [];
+                this.filters.aliases = [];
+                this.filters.status = null;
+                this.expandedFilter = null;
+                this.currentPage = 1;
+                this.loadData();
+            },
+
+            hasActiveFilters() {
+                return (
+                    this.filters.tags.length > 0 ||
+                    this.filters.providers.length > 0 ||
+                    this.filters.models.length > 0 ||
+                    this.filters.clients.length > 0 ||
+                    this.filters.aliases.length > 0 ||
+                    this.filters.status !== null
+                );
+            },
+
+            toggleSort(column) {
+                if (this.sortColumn === column) {
+                    this.sortDirection =
+                        this.sortDirection === "asc" ? "desc" : "asc";
+                } else {
+                    this.sortColumn = column;
+                    this.sortDirection = "desc";
+                }
+                this.loadData();
+            },
+
+            goToPage(page) {
+                if (page >= 1 && page <= this.totalPages) {
+                    this.currentPage = page;
+                    this.loadData();
+                }
+            },
+
+            async exportCSV() {
+                const params = new URLSearchParams();
+
+                // Date params
+                if (this.dateMode === "custom") {
+                    if (this.customStartDate)
+                        params.set("start_date", this.customStartDate);
+                    if (this.customEndDate)
+                        params.set("end_date", this.customEndDate);
+                } else {
+                    const end = new Date();
+                    const start = new Date(
+                        end - this.dateRange * 24 * 60 * 60 * 1000,
+                    );
+                    params.set("start_date", start.toISOString().split("T")[0]);
+                    params.set("end_date", end.toISOString().split("T")[0]);
+                }
+
+                // Filters
+                this.filters.tags.forEach((t) => params.append("tag", t));
+                this.filters.providers.forEach((p) =>
+                    params.append("provider", p),
+                );
+                this.filters.models.forEach((m) => params.append("model", m));
+
+                // Trigger download
+                window.location.href = `/api/usage/export?${params.toString()}`;
+                this.showToast("Downloading CSV...", "info");
+            },
+
+            formatNumber(n) {
+                if (n === undefined || n === null) return "-";
+                return n.toLocaleString();
+            },
+
+            formatTime(iso) {
+                if (!iso) return "-";
+                const d = new Date(iso);
+                return d.toLocaleString();
+            },
+
+            hasExtendedTokens(log) {
+                return (
+                    log.reasoning_tokens ||
+                    log.cached_input_tokens ||
+                    log.cache_creation_tokens ||
+                    log.cache_read_tokens
+                );
+            },
+
+            formatTokenTooltip(log) {
+                let parts = [
+                    `In: ${log.input_tokens}`,
+                    `Out: ${log.output_tokens}`,
+                ];
+                if (log.reasoning_tokens)
+                    parts.push(`Reasoning: ${log.reasoning_tokens}`);
+                if (log.cached_input_tokens)
+                    parts.push(`Cached: ${log.cached_input_tokens}`);
+                if (log.cache_creation_tokens)
+                    parts.push(`Cache Write: ${log.cache_creation_tokens}`);
+                if (log.cache_read_tokens)
+                    parts.push(`Cache Read: ${log.cache_read_tokens}`);
+                return parts.join(" | ");
+            },
+
+            showToast(message, type = "info") {
+                this.toast = { show: true, message, type };
+                setTimeout(() => {
+                    this.toast.show = false;
+                }, 3000);
+            },
+        };
+    }
+</script>
+{% endblock %}
