@@ -1,5 +1,5 @@
 """
-Routing module for ollama-llm-proxy.
+Routing module for LLM Relay.
 
 Provides smart routing capabilities that use LLM-based designators
 to intelligently route requests to the most appropriate model.

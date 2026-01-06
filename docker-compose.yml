@@ -1,4 +1,4 @@
-# Multi-Provider LLM Proxy
+# LLM Relay
 # Standalone Docker Compose configuration
 #
 # Ports:
@@ -13,8 +13,8 @@
 # For Docker Swarm deployments, use docker-compose.swarm.yml instead.
 
 services:
-  llm-proxy:
-    image: ghcr.io/benhumphry/ollama-llm-proxy:latest
+  llm-relay:
+    image: ghcr.io/benhumphry/llm-relay:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -22,7 +22,7 @@ services:
       - "11434:11434" # API server (Ollama/OpenAI compatible)
       - "8080:8080" # Admin UI
     volumes:
-      - llm-proxy-data:/data # Persist database
+      - llm-relay-data:/data # Persist database
     env_file:
       - .env
     environment:
@@ -46,4 +46,4 @@ services:
       start_period: 10s
 
 volumes:
-  llm-proxy-data:
+  llm-relay-data:

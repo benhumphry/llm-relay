@@ -1,5 +1,5 @@
 """
-Smart Router CRUD operations for ollama-llm-proxy.
+Smart Router CRUD operations for LLM Relay.
 
 Provides functions to create, read, update, and delete smart routers.
 """

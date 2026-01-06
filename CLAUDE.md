@@ -4,7 +4,7 @@ This file provides guidance for Claude Code when working on this codebase.
 
 ## Project Overview
 
-Multi-Provider LLM Proxy - A self-hosted proxy that unifies multiple LLM providers (Anthropic, OpenAI, Google, Perplexity, OpenRouter, Ollama) behind Ollama and OpenAI-compatible APIs with usage tracking and cost attribution.
+LLM Relay - A self-hosted proxy that unifies multiple LLM providers (Anthropic, OpenAI, Google, Perplexity, OpenRouter, Ollama) behind Ollama and OpenAI-compatible APIs with usage tracking and cost attribution.
 
 ## Tech Stack
 

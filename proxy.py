@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-Provider LLM Proxy
+LLM Relay - Multi-Provider Proxy
 
 Presents multiple LLM providers (Anthropic, OpenAI, Google Gemini, Perplexity, etc.)
 via both Ollama and OpenAI-compatible API interfaces.
@@ -1867,7 +1867,7 @@ if __name__ == "__main__":
     provider_names = [p.name for p in configured]
 
     logger.info("=" * 60)
-    logger.info("Multi-Provider LLM Proxy v3.0")
+    logger.info("LLM Relay v1.0")
     logger.info("=" * 60)
     logger.info(f"API server:   http://{api_host}:{api_port}")
 

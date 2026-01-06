@@ -1,5 +1,5 @@
 """
-Usage tracking module for ollama-llm-proxy.
+Usage tracking module for LLM Relay.
 
 Provides request logging, tag extraction, and usage statistics.
 """

@@ -1,5 +1,5 @@
 """
-Database connection management for ollama-llm-proxy.
+Database connection management for LLM Relay.
 
 Handles SQLite (default) and PostgreSQL connections.
 """

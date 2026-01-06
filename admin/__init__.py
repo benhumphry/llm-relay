@@ -1,5 +1,5 @@
 """
-Admin module for ollama-llm-proxy.
+Admin module for LLM Relay.
 
 Provides web UI and API for managing providers, models, and settings.
 """

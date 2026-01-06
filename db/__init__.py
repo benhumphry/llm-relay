@@ -1,5 +1,5 @@
 """
-Database layer for ollama-llm-proxy.
+Database layer for LLM Relay.
 
 Provides SQLAlchemy models and database connection management.
 """

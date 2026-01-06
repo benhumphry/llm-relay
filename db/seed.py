@@ -1,5 +1,5 @@
 """
-Database seeding for ollama-llm-proxy.
+Database seeding for LLM Relay.
 
 Seeds the database with default providers and models from LiteLLM on first run.
 """

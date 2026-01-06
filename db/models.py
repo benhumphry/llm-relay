@@ -1,5 +1,5 @@
 """
-SQLAlchemy models for ollama-llm-proxy.
+SQLAlchemy models for LLM Relay.
 
 These models store provider configuration, model definitions, and settings
 in the database.

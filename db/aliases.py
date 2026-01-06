@@ -1,5 +1,5 @@
 """
-Alias CRUD operations for ollama-llm-proxy.
+Alias CRUD operations for LLM Relay.
 
 Provides functions to create, read, update, and delete model aliases.
 """

@@ -1,4 +1,4 @@
-# Multi-Provider LLM Proxy
+# LLM Relay
 # Docker Swarm configuration
 #
 # Supported providers (set at least one API key secret):
@@ -15,17 +15,17 @@
 #   echo "pplx-..." | docker secret create perplexity_api_key -
 #
 #   # Deploy stack
-#   docker stack deploy -c docker-compose.swarm.yml llm-proxy
+#   docker stack deploy -c docker-compose.swarm.yml llm-relay
 #
 # For standalone Docker Compose, use docker-compose.yml instead.
 
 version: "3.8"
 
 services:
-  llm-proxy:
-    image: ghcr.io/benhumphry/ollama-llm-proxy:latest
+  llm-relay:
+    image: ghcr.io/benhumphry/llm-relay:latest
     volumes:
-      - llm-proxy-data:/data # Persist database
+      - llm-relay-data:/data # Persist database
     environment:
       - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_api_key
       - OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
@@ -57,11 +57,11 @@ services:
         # Traefik labels for external access (optional)
         # Uncomment and configure for your domain
         # - "traefik.enable=true"
-        # - "traefik.http.routers.llm-proxy.rule=Host(`llm-proxy.example.com`)"
-        # - "traefik.http.routers.llm-proxy.entrypoints=https"
-        # - "traefik.http.routers.llm-proxy.tls=true"
-        # - "traefik.http.routers.llm-proxy.tls.certresolver=letsencrypt"
-        # - "traefik.http.services.llm-proxy.loadbalancer.server.port=11434"
+        # - "traefik.http.routers.llm-relay.rule=Host(`llm-relay.example.com`)"
+        # - "traefik.http.routers.llm-relay.entrypoints=https"
+        # - "traefik.http.routers.llm-relay.tls=true"
+        # - "traefik.http.routers.llm-relay.tls.certresolver=letsencrypt"
+        # - "traefik.http.services.llm-relay.loadbalancer.server.port=11434"
         - "traefik.enable=false"
       update_config:
         parallelism: 1
@@ -103,4 +103,4 @@ networks:
     name: internal
 
 volumes:
-  llm-proxy-data:
+  llm-relay-data:

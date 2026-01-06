@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="logo.png" alt="LLM Proxy" width="128" height="128">
+  <img src="logo.png" alt="LLM Relay" width="128" height="128">
 </p>
 
-<h1 align="center">Multi-Provider LLM Proxy</h1>
+<h1 align="center">LLM Relay</h1>
 
 <p align="center">
 <strong>A lightweight, self-hosted alternative to OpenRouter</strong><br>
@@ -47,8 +47,8 @@ Think of it as running your own OpenRouter—but self-hosted, with granular cost
 
 ```bash
 # 1. Clone and configure
-git clone https://github.com/benhumphry/ollama-llm-proxy.git
-cd ollama-llm-proxy
+git clone https://github.com/benhumphry/llm-relay.git
+cd llm-relay
 cp .env.example .env
 # Edit .env with your API keys
 
@@ -365,19 +365,19 @@ Add any OpenAI-compatible or Anthropic-compatible endpoint:
 
 ```yaml
 services:
-  llm-proxy:
-    image: ghcr.io/benhumphry/ollama-llm-proxy:latest
+  llm-relay:
+    image: ghcr.io/benhumphry/llm-relay:latest
     ports:
       - "11434:11434"  # API
       - "8080:8080"    # Admin UI
     volumes:
-      - llm-proxy-data:/data
+      - llm-relay-data:/data
     env_file:
       - .env
     restart: unless-stopped
 
 volumes:
-  llm-proxy-data:
+  llm-relay-data:
 ```
 
 ### Environment Variables
@@ -458,7 +458,7 @@ print(response.choices[0].message.content)
 
 ```yaml
 environment:
-  - OLLAMA_BASE_URL=http://llm-proxy:11434
+  - OLLAMA_BASE_URL=http://llm-relay:11434
 ```
 
 All models from all providers appear in the model selector.
@@ -491,7 +491,7 @@ curl http://localhost:11434/api/chat \
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     LLM Proxy (:11434)                       │
+│                     LLM Relay (:11434)                       │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │ Ollama API  │  │ OpenAI API  │  │ Cost Tracking       │  │
 │  │ /api/chat   │  │ /v1/chat    │  │ Tokens, Tags, Rates │  │

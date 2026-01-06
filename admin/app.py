@@ -1,5 +1,5 @@
 """
-Admin Flask blueprint for ollama-llm-proxy.
+Admin Flask blueprint for LLM Relay.
 
 Provides:
 - Web UI for managing providers, models, and settings
@@ -913,7 +913,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         with get_db_context() as db:
             export_data = {
-                "version": "3.3",
+                "version": "1.0",
                 "exported_at": datetime.utcnow().isoformat(),
                 "settings": [
                     {"key": s.key, "value": s.value}
@@ -1002,7 +1002,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         response = jsonify(export_data)
         response.headers["Content-Disposition"] = (
-            f"attachment; filename=llm-proxy-config-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
+            f"attachment; filename=llm-relay-config-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.json"
         )
         return response
 
