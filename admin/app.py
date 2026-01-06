@@ -2594,4 +2594,82 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         except ImportError:
             return jsonify({"providers": []})
 
+    # -------------------------------------------------------------------------
+    # Debug Log Streaming API
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/debug/logs", methods=["GET"])
+    @require_auth_api
+    def get_debug_logs():
+        """Get recent debug logs."""
+        from .debug_logs import debug_log_buffer
+
+        count = min(int(request.args.get("count", 100)), 500)
+        entries = debug_log_buffer.get_recent(count)
+        return jsonify(
+            {
+                "enabled": debug_log_buffer.is_enabled(),
+                "logs": [e.to_dict() for e in entries],
+            }
+        )
+
+    @admin.route("/api/debug/logs/stream", methods=["GET"])
+    @require_auth_api
+    def stream_debug_logs():
+        """Stream debug logs via Server-Sent Events (SSE)."""
+        import json
+
+        from flask import Response, stream_with_context
+
+        from .debug_logs import debug_log_buffer
+
+        def generate():
+            # Send initial connection message
+            yield f"data: {json.dumps({'type': 'connected', 'enabled': debug_log_buffer.is_enabled()})}\n\n"
+
+            # Stream new log entries
+            for entry in debug_log_buffer.stream():
+                data = {
+                    "type": "log",
+                    "entry": entry.to_dict(),
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+
+        return Response(
+            stream_with_context(generate()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @admin.route("/api/debug/logs/enable", methods=["POST"])
+    @require_auth_api
+    def enable_debug_logs():
+        """Enable debug log capture."""
+        from .debug_logs import debug_log_buffer
+
+        debug_log_buffer.enable()
+        return jsonify({"success": True, "enabled": True})
+
+    @admin.route("/api/debug/logs/disable", methods=["POST"])
+    @require_auth_api
+    def disable_debug_logs():
+        """Disable debug log capture."""
+        from .debug_logs import debug_log_buffer
+
+        debug_log_buffer.disable()
+        return jsonify({"success": True, "enabled": False})
+
+    @admin.route("/api/debug/logs/clear", methods=["POST"])
+    @require_auth_api
+    def clear_debug_logs():
+        """Clear all captured debug logs."""
+        from .debug_logs import debug_log_buffer
+
+        debug_log_buffer.clear()
+        return jsonify({"success": True})
+
     return admin

@@ -947,7 +947,7 @@ content %}
                 <div class="space-y-3 text-sm">
                     <div class="flex justify-between">
                         <span class="text-base-content/60">Version:</span>
-                        <span class="font-mono">2.1.0</span>
+                        <span class="font-mono">3.0.0</span>
                     </div>
                     <div class="flex justify-between">
                         <span class="text-base-content/60">Providers:</span>
@@ -965,6 +965,160 @@ content %}
                             x-text="stats.providers?.configured || '-'"
                         ></span>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Log Viewer (full width) -->
+    <div class="mt-6">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="card-title text-lg">Debug Logs</h2>
+                        <p class="text-sm text-base-content/60">
+                            Real-time debug log stream from the proxy
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <!-- Connection status -->
+                        <div class="flex items-center gap-1 text-sm">
+                            <div
+                                class="w-2 h-2 rounded-full"
+                                :class="debugStreamConnected ? 'bg-success' : 'bg-error'"
+                            ></div>
+                            <span
+                                class="text-base-content/60"
+                                x-text="debugStreamConnected ? 'Connected' : 'Disconnected'"
+                            ></span>
+                        </div>
+                        <!-- Log count -->
+                        <span
+                            class="badge badge-ghost"
+                            x-text="debugLogs.length + ' logs'"
+                        ></span>
+                        <!-- Clear button -->
+                        <button
+                            @click="clearDebugLogs()"
+                            class="btn btn-ghost btn-sm"
+                            title="Clear logs"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                            </svg>
+                        </button>
+                        <!-- Toggle button -->
+                        <button
+                            @click="toggleDebugLogs()"
+                            class="btn btn-sm"
+                            :class="debugLogsEnabled ? 'btn-error' : 'btn-success'"
+                        >
+                            <span
+                                x-text="debugLogsEnabled ? 'Stop Capture' : 'Start Capture'"
+                            ></span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filter controls -->
+                <div class="flex gap-2 mb-3">
+                    <select
+                        x-model="debugLogFilter"
+                        class="select select-bordered select-sm"
+                    >
+                        <option value="all">All Levels</option>
+                        <option value="DEBUG">DEBUG</option>
+                        <option value="INFO">INFO</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR</option>
+                    </select>
+                    <input
+                        type="text"
+                        x-model="debugLogSearch"
+                        placeholder="Search logs..."
+                        class="input input-bordered input-sm flex-1"
+                    />
+                    <label class="label cursor-pointer gap-2">
+                        <span class="label-text text-sm">Auto-scroll</span>
+                        <input
+                            type="checkbox"
+                            x-model="debugAutoScroll"
+                            class="checkbox checkbox-sm"
+                        />
+                    </label>
+                </div>
+
+                <!-- Log viewer -->
+                <div
+                    x-ref="debugLogContainer"
+                    class="bg-base-200 rounded-lg p-3 h-96 overflow-y-auto font-mono text-xs"
+                >
+                    <template x-if="filteredDebugLogs.length === 0">
+                        <div class="text-base-content/50 text-center py-8">
+                            <template x-if="!debugLogsEnabled">
+                                <span
+                                    >Click "Start Capture" to begin capturing
+                                    logs</span
+                                >
+                            </template>
+                            <template
+                                x-if="debugLogsEnabled && debugLogs.length === 0"
+                            >
+                                <span>Waiting for logs...</span>
+                            </template>
+                            <template
+                                x-if="debugLogsEnabled && debugLogs.length > 0"
+                            >
+                                <span>No logs match your filter</span>
+                            </template>
+                        </div>
+                    </template>
+                    <template
+                        x-for="(log, index) in filteredDebugLogs"
+                        :key="index"
+                    >
+                        <div
+                            class="py-0.5 border-b border-base-300 last:border-0 hover:bg-base-300/50"
+                            :class="{
+                                'text-error': log.level === 'ERROR',
+                                'text-warning': log.level === 'WARNING',
+                                'text-info': log.level === 'DEBUG',
+                            }"
+                        >
+                            <span
+                                class="text-base-content/50"
+                                x-text="log.timestamp.split('T')[1]?.substring(0, 12) || ''"
+                            ></span>
+                            <span
+                                class="inline-block w-16 font-semibold"
+                                :class="{
+                                    'text-error': log.level === 'ERROR',
+                                    'text-warning': log.level === 'WARNING',
+                                    'text-info': log.level === 'DEBUG',
+                                    'text-success': log.level === 'INFO',
+                                }"
+                                x-text="log.level"
+                            ></span>
+                            <span
+                                class="text-primary"
+                                x-text="log.logger"
+                            ></span>
+                            <span class="text-base-content/50">-</span>
+                            <span x-text="log.message"></span>
+                        </div>
+                    </template>
                 </div>
             </div>
         </div>
@@ -1013,6 +1167,36 @@ content %}
             selectedPriceUpdates: [],
             showDeprecatedSelection: false,
             selectedDeprecated: [],
+            // Debug log viewer
+            debugLogs: [],
+            debugLogsEnabled: false,
+            debugStreamConnected: false,
+            debugEventSource: null,
+            debugLogFilter: "all",
+            debugLogSearch: "",
+            debugAutoScroll: true,
+
+            // Computed property for filtered logs
+            get filteredDebugLogs() {
+                return this.debugLogs.filter((log) => {
+                    // Filter by level
+                    if (
+                        this.debugLogFilter !== "all" &&
+                        log.level !== this.debugLogFilter
+                    ) {
+                        return false;
+                    }
+                    // Filter by search text
+                    if (this.debugLogSearch) {
+                        const searchLower = this.debugLogSearch.toLowerCase();
+                        return (
+                            log.message.toLowerCase().includes(searchLower) ||
+                            log.logger.toLowerCase().includes(searchLower)
+                        );
+                    }
+                    return true;
+                });
+            },
 
             // Helper to get diffs by change type
             getNewModelDiffs() {
@@ -1252,6 +1436,9 @@ content %}
                     if (this.settings.default_provider) {
                         await this.loadProviderModels();
                     }
+
+                    // Initialize debug log viewer
+                    await this.initDebugLogs();
                 } catch (err) {
                     this.showToast("Failed to load settings", "error");
                 }
@@ -1526,6 +1713,123 @@ content %}
                 setTimeout(() => {
                     this.toasts = this.toasts.filter((t) => t.id !== id);
                 }, 3000);
+            },
+
+            // Debug log methods
+            async initDebugLogs() {
+                // Check current state
+                try {
+                    const res = await fetch("/api/debug/logs");
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.debugLogsEnabled = data.enabled;
+                        this.debugLogs = data.logs || [];
+
+                        // If enabled, start streaming
+                        if (this.debugLogsEnabled) {
+                            this.startDebugStream();
+                        }
+                    }
+                } catch (err) {
+                    console.error("Failed to init debug logs:", err);
+                }
+            },
+
+            async toggleDebugLogs() {
+                const endpoint = this.debugLogsEnabled
+                    ? "/api/debug/logs/disable"
+                    : "/api/debug/logs/enable";
+
+                try {
+                    const res = await fetch(endpoint, { method: "POST" });
+                    if (res.ok) {
+                        const data = await res.json();
+                        this.debugLogsEnabled = data.enabled;
+
+                        if (this.debugLogsEnabled) {
+                            this.startDebugStream();
+                            this.showToast("Debug log capture started");
+                        } else {
+                            this.stopDebugStream();
+                            this.showToast("Debug log capture stopped");
+                        }
+                    }
+                } catch (err) {
+                    this.showToast("Failed to toggle debug logs", "error");
+                }
+            },
+
+            startDebugStream() {
+                // Close existing connection if any
+                this.stopDebugStream();
+
+                // Create new EventSource for SSE
+                this.debugEventSource = new EventSource(
+                    "/api/debug/logs/stream",
+                );
+
+                this.debugEventSource.onopen = () => {
+                    this.debugStreamConnected = true;
+                };
+
+                this.debugEventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === "connected") {
+                            this.debugStreamConnected = true;
+                        } else if (data.type === "log") {
+                            this.debugLogs.push(data.entry);
+                            // Limit buffer size
+                            if (this.debugLogs.length > 2000) {
+                                this.debugLogs = this.debugLogs.slice(-1500);
+                            }
+                            // Auto-scroll
+                            if (this.debugAutoScroll) {
+                                this.$nextTick(() => {
+                                    const container =
+                                        this.$refs.debugLogContainer;
+                                    if (container) {
+                                        container.scrollTop =
+                                            container.scrollHeight;
+                                    }
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Failed to parse debug log:", err);
+                    }
+                };
+
+                this.debugEventSource.onerror = () => {
+                    this.debugStreamConnected = false;
+                    // Attempt to reconnect after a delay
+                    setTimeout(() => {
+                        if (
+                            this.debugLogsEnabled &&
+                            !this.debugStreamConnected
+                        ) {
+                            this.startDebugStream();
+                        }
+                    }, 3000);
+                };
+            },
+
+            stopDebugStream() {
+                if (this.debugEventSource) {
+                    this.debugEventSource.close();
+                    this.debugEventSource = null;
+                }
+                this.debugStreamConnected = false;
+            },
+
+            async clearDebugLogs() {
+                try {
+                    await fetch("/api/debug/logs/clear", { method: "POST" });
+                    this.debugLogs = [];
+                    this.showToast("Debug logs cleared");
+                } catch (err) {
+                    this.showToast("Failed to clear logs", "error");
+                }
             },
         };
     }

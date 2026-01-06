@@ -91,10 +91,15 @@
     </div>
 
     <!-- Filter Bar -->
-    <div class="flex flex-wrap gap-2 items-center mb-4">
-        <!-- Tag Filter -->
-        <div class="dropdown">
-            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+    <div class="mb-4">
+        <!-- Filter Buttons -->
+        <div class="flex flex-wrap gap-2 items-center">
+            <!-- Tag Filter Button -->
+            <button
+                @click="expandedFilter = expandedFilter === 'tags' ? null : 'tags'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'tags' ? 'btn-primary' : 'btn-outline'"
+            >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
                     class="h-4 w-4"
@@ -115,34 +120,14 @@
                     class="badge badge-primary badge-xs"
                     x-text="filters.tags.length"
                 ></span>
-            </label>
-            <div
-                tabindex="0"
-                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52 max-h-60 overflow-y-auto"
-            >
-                <template x-for="tag in filterOptions.tags" :key="tag">
-                    <label class="label cursor-pointer py-1">
-                        <span class="label-text text-sm" x-text="tag"></span>
-                        <input
-                            type="checkbox"
-                            :checked="filters.tags.includes(tag)"
-                            @change="toggleFilter('tags', tag)"
-                            class="checkbox checkbox-sm checkbox-primary"
-                        />
-                    </label>
-                </template>
-                <div
-                    x-show="filterOptions.tags.length === 0"
-                    class="text-sm text-base-content/60 p-2"
-                >
-                    No tags available
-                </div>
-            </div>
-        </div>
+            </button>
 
-        <!-- Provider Filter -->
-        <div class="dropdown">
-            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+            <!-- Provider Filter Button -->
+            <button
+                @click="expandedFilter = expandedFilter === 'providers' ? null : 'providers'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'providers' ? 'btn-info' : 'btn-outline'"
+            >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
                     class="h-4 w-4"
@@ -163,40 +148,14 @@
                     class="badge badge-info badge-xs"
                     x-text="filters.providers.length"
                 ></span>
-            </label>
-            <div
-                tabindex="0"
-                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52 max-h-60 overflow-y-auto"
-            >
-                <template
-                    x-for="provider in filterOptions.providers"
-                    :key="provider"
-                >
-                    <label class="label cursor-pointer py-1">
-                        <span
-                            class="label-text text-sm"
-                            x-text="provider"
-                        ></span>
-                        <input
-                            type="checkbox"
-                            :checked="filters.providers.includes(provider)"
-                            @change="toggleFilter('providers', provider)"
-                            class="checkbox checkbox-sm checkbox-info"
-                        />
-                    </label>
-                </template>
-                <div
-                    x-show="filterOptions.providers.length === 0"
-                    class="text-sm text-base-content/60 p-2"
-                >
-                    No providers available
-                </div>
-            </div>
-        </div>
+            </button>
 
-        <!-- Model Filter -->
-        <div class="dropdown">
-            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+            <!-- Model Filter Button -->
+            <button
+                @click="expandedFilter = expandedFilter === 'models' ? null : 'models'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'models' ? 'btn-secondary' : 'btn-outline'"
+            >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
                     class="h-4 w-4"
@@ -217,43 +176,14 @@
                     class="badge badge-secondary badge-xs"
                     x-text="filters.models.length"
                 ></span>
-            </label>
-            <div
-                tabindex="0"
-                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-64 max-h-60 overflow-y-auto"
-            >
-                <template
-                    x-for="model in getFilteredModels()"
-                    :key="model.provider + '/' + model.model"
-                >
-                    <label class="label cursor-pointer py-1">
-                        <span class="label-text text-sm">
-                            <span
-                                class="text-base-content/60"
-                                x-text="model.provider + '/'"
-                            ></span>
-                            <span x-text="model.model"></span>
-                        </span>
-                        <input
-                            type="checkbox"
-                            :checked="filters.models.includes(model.model)"
-                            @change="toggleFilter('models', model.model)"
-                            class="checkbox checkbox-sm checkbox-secondary"
-                        />
-                    </label>
-                </template>
-                <div
-                    x-show="getFilteredModels().length === 0"
-                    class="text-sm text-base-content/60 p-2"
-                >
-                    No models available
-                </div>
-            </div>
-        </div>
+            </button>
 
-        <!-- Client Filter -->
-        <div class="dropdown">
-            <label tabindex="0" class="btn btn-sm btn-outline gap-1">
+            <!-- Client Filter Button -->
+            <button
+                @click="expandedFilter = expandedFilter === 'clients' ? null : 'clients'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'clients' ? 'btn-warning' : 'btn-outline'"
+            >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
                     class="h-4 w-4"
@@ -274,91 +204,195 @@
                     class="badge badge-warning badge-xs"
                     x-text="filters.clients.length"
                 ></span>
-            </label>
-            <div
-                tabindex="0"
-                class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-64 max-h-60 overflow-y-auto"
+            </button>
+
+            <!-- Clear Filters -->
+            <button
+                x-show="hasActiveFilters()"
+                @click="clearFilters(); expandedFilter = null"
+                class="btn btn-sm btn-ghost text-error"
             >
-                <template x-for="client in filterOptions.clients" :key="client">
-                    <label class="label cursor-pointer py-1">
-                        <span
-                            class="label-text text-sm truncate"
-                            x-text="client"
-                        ></span>
-                        <input
-                            type="checkbox"
-                            :checked="filters.clients.includes(client)"
-                            @change="toggleFilter('clients', client)"
-                            class="checkbox checkbox-sm checkbox-warning"
-                        />
-                    </label>
-                </template>
-                <div
-                    x-show="filterOptions.clients.length === 0"
-                    class="text-sm text-base-content/60 p-2"
-                >
-                    No clients available
+                Clear All
+            </button>
+        </div>
+
+        <!-- Expanded Filter Panel -->
+        <div
+            x-show="expandedFilter"
+            x-transition
+            class="mt-3 p-3 bg-base-200 rounded-lg"
+        >
+            <!-- Tags Panel -->
+            <div x-show="expandedFilter === 'tags'">
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="tag in filterOptions.tags" :key="tag">
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.tags.includes(tag)"
+                                @change="toggleFilter('tags', tag)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-primary peer-checked:text-primary-content hover:opacity-80 transition-opacity"
+                                x-text="tag"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.tags.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No tags available</span
+                    >
+                </div>
+            </div>
+
+            <!-- Providers Panel -->
+            <div x-show="expandedFilter === 'providers'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="provider in filterOptions.providers"
+                        :key="provider"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.providers.includes(provider)"
+                                @change="toggleFilter('providers', provider)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-info peer-checked:text-info-content hover:opacity-80 transition-opacity"
+                                x-text="provider"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.providers.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No providers available</span
+                    >
+                </div>
+            </div>
+
+            <!-- Models Panel -->
+            <div x-show="expandedFilter === 'models'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="model in getFilteredModels()"
+                        :key="model.provider + '/' + model.model"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.models.includes(model.model)"
+                                @change="toggleFilter('models', model.model)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-secondary peer-checked:text-secondary-content hover:opacity-80 transition-opacity"
+                            >
+                                <span
+                                    class="opacity-60"
+                                    x-text="model.provider + '/'"
+                                ></span
+                                ><span x-text="model.model"></span>
+                            </span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="getFilteredModels().length === 0"
+                        class="text-sm text-base-content/60"
+                        >No models available</span
+                    >
+                </div>
+            </div>
+
+            <!-- Clients Panel -->
+            <div x-show="expandedFilter === 'clients'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="client in filterOptions.clients"
+                        :key="client"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.clients.includes(client)"
+                                @change="toggleFilter('clients', client)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-warning peer-checked:text-warning-content hover:opacity-80 transition-opacity"
+                                x-text="client"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.clients.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No clients available</span
+                    >
                 </div>
             </div>
         </div>
 
         <!-- Active Filters Display -->
-        <template x-for="tag in filters.tags" :key="'tag-' + tag">
-            <span class="badge badge-primary gap-1">
-                <span x-text="tag"></span>
-                <button
-                    @click="removeFilter('tags', tag)"
-                    class="hover:text-error"
-                >
-                    x
-                </button>
-            </span>
-        </template>
-        <template
-            x-for="provider in filters.providers"
-            :key="'provider-' + provider"
-        >
-            <span class="badge badge-info gap-1">
-                <span x-text="provider"></span>
-                <button
-                    @click="removeFilter('providers', provider)"
-                    class="hover:text-error"
-                >
-                    x
-                </button>
-            </span>
-        </template>
-        <template x-for="model in filters.models" :key="'model-' + model">
-            <span class="badge badge-secondary gap-1">
-                <span x-text="model"></span>
-                <button
-                    @click="removeFilter('models', model)"
-                    class="hover:text-error"
-                >
-                    x
-                </button>
-            </span>
-        </template>
-        <template x-for="client in filters.clients" :key="'client-' + client">
-            <span class="badge badge-warning gap-1">
-                <span x-text="client"></span>
-                <button
-                    @click="removeFilter('clients', client)"
-                    class="hover:text-error"
-                >
-                    x
-                </button>
-            </span>
-        </template>
-
-        <!-- Clear Filters -->
-        <button
-            x-show="hasActiveFilters()"
-            @click="clearFilters()"
-            class="btn btn-sm btn-ghost text-error"
-        >
-            Clear All
-        </button>
+        <div x-show="hasActiveFilters()" class="flex flex-wrap gap-2 mt-3">
+            <span class="text-sm text-base-content/60 self-center"
+                >Active:</span
+            >
+            <template x-for="tag in filters.tags" :key="'tag-' + tag">
+                <span class="badge badge-primary gap-1">
+                    <span x-text="tag"></span>
+                    <button
+                        @click="removeFilter('tags', tag)"
+                        class="hover:text-error"
+                    >
+                        ×
+                    </button>
+                </span>
+            </template>
+            <template
+                x-for="provider in filters.providers"
+                :key="'provider-' + provider"
+            >
+                <span class="badge badge-info gap-1">
+                    <span x-text="provider"></span>
+                    <button
+                        @click="removeFilter('providers', provider)"
+                        class="hover:text-error"
+                    >
+                        ×
+                    </button>
+                </span>
+            </template>
+            <template x-for="model in filters.models" :key="'model-' + model">
+                <span class="badge badge-secondary gap-1">
+                    <span x-text="model"></span>
+                    <button
+                        @click="removeFilter('models', model)"
+                        class="hover:text-error"
+                    >
+                        ×
+                    </button>
+                </span>
+            </template>
+            <template
+                x-for="client in filters.clients"
+                :key="'client-' + client"
+            >
+                <span class="badge badge-warning gap-1">
+                    <span x-text="client"></span>
+                    <button
+                        @click="removeFilter('clients', client)"
+                        class="hover:text-error"
+                    >
+                        ×
+                    </button>
+                </span>
+            </template>
+        </div>
     </div>
 
     <!-- Summary Cards -->
@@ -1188,6 +1222,7 @@
                 models: [],
                 clients: [],
             },
+            expandedFilter: null, // 'tags', 'providers', 'models', 'clients', or null
 
             // Sorting state
             sortColumn: "requests",

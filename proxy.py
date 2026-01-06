@@ -41,6 +41,78 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Install debug log handler for admin UI streaming
+from admin.debug_logs import install_debug_handler
+
+install_debug_handler()
+
+# Debug mode for response comparison
+DEBUG_RESPONSES = os.environ.get("DEBUG_RESPONSES", "false").lower() == "true"
+
+
+def debug_compare_response(endpoint: str, llm_response: str, client_response: str):
+    """Compare LLM response with what we send to client, showing diff if different."""
+    if not DEBUG_RESPONSES:
+        return
+
+    logger.info("=" * 80)
+    logger.info(f"DEBUG RESPONSE COMPARISON [{endpoint}]")
+    logger.info("=" * 80)
+
+    # Show raw LLM response
+    logger.info("--- RAW LLM RESPONSE ---")
+    logger.info(llm_response[:2000] if len(llm_response) > 2000 else llm_response)
+    if len(llm_response) > 2000:
+        logger.info(f"... (truncated, total length: {len(llm_response)} chars)")
+
+    logger.info("")
+    logger.info("--- CLIENT RESPONSE ---")
+    logger.info(
+        client_response[:2000] if len(client_response) > 2000 else client_response
+    )
+    if len(client_response) > 2000:
+        logger.info(f"... (truncated, total length: {len(client_response)} chars)")
+
+    # Compare and show differences
+    if llm_response == client_response:
+        logger.info("")
+        logger.info(">>> MATCH: LLM response and client response are IDENTICAL")
+    else:
+        logger.info("")
+        logger.info(">>> DIFFERENCE DETECTED:")
+        logger.info(f"    LLM response length:    {len(llm_response)} chars")
+        logger.info(f"    Client response length: {len(client_response)} chars")
+
+        # Show character-level diff for first difference
+        min_len = min(len(llm_response), len(client_response))
+        for i in range(min_len):
+            if llm_response[i] != client_response[i]:
+                context_start = max(0, i - 20)
+                context_end = min(min_len, i + 20)
+                logger.info(f"    First difference at position {i}:")
+                logger.info(
+                    f"    LLM:    ...{repr(llm_response[context_start:context_end])}..."
+                )
+                logger.info(
+                    f"    Client: ...{repr(client_response[context_start:context_end])}..."
+                )
+                break
+        else:
+            # No char difference found - one is a prefix of the other
+            if len(llm_response) > len(client_response):
+                logger.info(
+                    f"    Client response is TRUNCATED (missing {len(llm_response) - len(client_response)} chars)"
+                )
+                logger.info(
+                    f"    Missing content: {repr(llm_response[len(client_response) : len(client_response) + 100])}..."
+                )
+            else:
+                logger.info(
+                    f"    Client response has EXTRA content ({len(client_response) - len(llm_response)} chars)"
+                )
+
+    logger.info("=" * 80)
+
 
 def create_api_app():
     """Create the API Flask application (Ollama/OpenAI compatible endpoints)."""
@@ -422,16 +494,23 @@ def stream_ollama_response(
 ) -> Generator[str, None, None]:
     """Stream response in Ollama NDJSON format."""
     output_chars = 0
+    llm_chunks = []  # Collect raw LLM response for debug comparison
+    client_chunks = []  # Collect what we send to client
+
     try:
         for text in provider.chat_completion_stream(model, messages, system, options):
             output_chars += len(text)
+            llm_chunks.append(text)  # Raw LLM text
+
             chunk = {
                 "model": model,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "message": {"role": "assistant", "content": text},
                 "done": False,
             }
-            yield json.dumps(chunk) + "\n"
+            chunk_str = json.dumps(chunk) + "\n"
+            client_chunks.append(text)  # Track content we're sending
+            yield chunk_str
 
         # Final message
         final = {
@@ -446,6 +525,11 @@ def stream_ollama_response(
             "eval_duration": 0,
         }
         yield json.dumps(final) + "\n"
+
+        # Debug comparison: raw LLM response vs what client receives
+        llm_full = "".join(llm_chunks)
+        client_full = "".join(client_chunks)
+        debug_compare_response("/api/chat (stream)", llm_full, client_full)
 
         # Get streaming result (cost, tokens) if provider supports it (e.g., OpenRouter)
         stream_result = None
@@ -492,10 +576,14 @@ def stream_openai_response(
     response_id = generate_openai_id()
     created = int(time.time())
     output_chars = 0
+    llm_chunks = []  # Collect raw LLM response for debug comparison
+    client_chunks = []  # Collect what we send to client
 
     try:
         for text in provider.chat_completion_stream(model, messages, system, options):
             output_chars += len(text)
+            llm_chunks.append(text)  # Raw LLM text
+
             chunk = {
                 "id": response_id,
                 "object": "chat.completion.chunk",
@@ -505,6 +593,7 @@ def stream_openai_response(
                     {"index": 0, "delta": {"content": text}, "finish_reason": None}
                 ],
             }
+            client_chunks.append(text)  # Track content we're sending
             yield f"data: {json.dumps(chunk)}\n\n"
 
         # Final chunk
@@ -517,6 +606,11 @@ def stream_openai_response(
         }
         yield f"data: {json.dumps(final_chunk)}\n\n"
         yield "data: [DONE]\n\n"
+
+        # Debug comparison: raw LLM response vs what client receives
+        llm_full = "".join(llm_chunks)
+        client_full = "".join(client_chunks)
+        debug_compare_response("/v1/chat/completions (stream)", llm_full, client_full)
 
         # Get streaming result (cost, tokens) if provider supports it (e.g., OpenRouter)
         stream_result = None
@@ -752,6 +846,23 @@ def chat():
             result = provider.chat_completion(
                 model_id, messages, system_prompt, options
             )
+
+            # Debug comparison for non-streaming
+            llm_content = result.get("content", "")
+            response_obj = {
+                "model": model_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "message": {"role": "assistant", "content": llm_content},
+                "done": True,
+                "total_duration": 0,
+                "load_duration": 0,
+                "prompt_eval_count": result.get("input_tokens", 0),
+                "eval_count": result.get("output_tokens", 0),
+                "eval_duration": 0,
+            }
+            client_content = response_obj["message"]["content"]
+            debug_compare_response("/api/chat", llm_content, client_content)
+
             # Track non-streaming request
             track_completion(
                 provider_id=provider.name,
@@ -767,19 +878,7 @@ def chat():
                 cache_creation_tokens=result.get("cache_creation_tokens"),
                 cache_read_tokens=result.get("cache_read_tokens"),
             )
-            return jsonify(
-                {
-                    "model": model_id,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "message": {"role": "assistant", "content": result["content"]},
-                    "done": True,
-                    "total_duration": 0,
-                    "load_duration": 0,
-                    "prompt_eval_count": result.get("input_tokens", 0),
-                    "eval_count": result.get("output_tokens", 0),
-                    "eval_duration": 0,
-                }
-            )
+            return jsonify(response_obj)
 
     except Exception as e:
         logger.error(f"Provider error: {e}")
@@ -914,6 +1013,23 @@ def generate():
             )
         else:
             result = provider.chat_completion(model_id, messages, system, options)
+
+            # Debug comparison for non-streaming
+            llm_content = result.get("content", "")
+            response_obj = {
+                "model": model_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "response": llm_content,
+                "done": True,
+                "total_duration": 0,
+                "load_duration": 0,
+                "prompt_eval_count": result.get("input_tokens", 0),
+                "eval_count": result.get("output_tokens", 0),
+                "eval_duration": 0,
+            }
+            client_content = response_obj["response"]
+            debug_compare_response("/api/generate", llm_content, client_content)
+
             # Track non-streaming request
             track_completion(
                 provider_id=provider.name,
@@ -929,19 +1045,7 @@ def generate():
                 cache_creation_tokens=result.get("cache_creation_tokens"),
                 cache_read_tokens=result.get("cache_read_tokens"),
             )
-            return jsonify(
-                {
-                    "model": model_id,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "response": result["content"],
-                    "done": True,
-                    "total_duration": 0,
-                    "load_duration": 0,
-                    "prompt_eval_count": result.get("input_tokens", 0),
-                    "eval_count": result.get("output_tokens", 0),
-                    "eval_duration": 0,
-                }
-            )
+            return jsonify(response_obj)
 
     except Exception as e:
         logger.error(f"Provider error: {e}")
@@ -1170,6 +1274,34 @@ def openai_chat_completions():
             result = provider.chat_completion(
                 model_id, messages, system_prompt, options
             )
+
+            # Debug comparison for non-streaming
+            llm_content = result.get("content", "")
+            response_obj = {
+                "id": generate_openai_id(),
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model_name,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": llm_content,
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": result.get("input_tokens", 0),
+                    "completion_tokens": result.get("output_tokens", 0),
+                    "total_tokens": result.get("input_tokens", 0)
+                    + result.get("output_tokens", 0),
+                },
+            }
+            client_content = response_obj["choices"][0]["message"]["content"]
+            debug_compare_response("/v1/chat/completions", llm_content, client_content)
+
             # Track non-streaming request
             track_completion(
                 provider_id=provider.name,
@@ -1186,30 +1318,7 @@ def openai_chat_completions():
                 cache_read_tokens=result.get("cache_read_tokens"),
             )
 
-            return jsonify(
-                {
-                    "id": generate_openai_id(),
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": model_name,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": result["content"],
-                            },
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": result.get("input_tokens", 0),
-                        "completion_tokens": result.get("output_tokens", 0),
-                        "total_tokens": result.get("input_tokens", 0)
-                        + result.get("output_tokens", 0),
-                    },
-                }
-            )
+            return jsonify(response_obj)
 
     except Exception as e:
         logger.error(f"Provider error: {e}")
@@ -1298,12 +1407,16 @@ def openai_completions():
                 response_id = generate_openai_id("cmpl")
                 created = int(time.time())
                 output_chars = 0
+                llm_chunks = []  # Collect raw LLM response for debug comparison
+                client_chunks = []  # Collect what we send to client
 
                 try:
                     for text in provider.chat_completion_stream(
                         captured_model_id, messages, None, options
                     ):
                         output_chars += len(text)
+                        llm_chunks.append(text)  # Raw LLM text
+
                         chunk = {
                             "id": response_id,
                             "object": "text_completion",
@@ -1313,6 +1426,7 @@ def openai_completions():
                                 {"index": 0, "text": text, "finish_reason": None}
                             ],
                         }
+                        client_chunks.append(text)  # Track content we're sending
                         yield f"data: {json.dumps(chunk)}\n\n"
 
                     final_chunk = {
@@ -1324,6 +1438,13 @@ def openai_completions():
                     }
                     yield f"data: {json.dumps(final_chunk)}\n\n"
                     yield "data: [DONE]\n\n"
+
+                    # Debug comparison: raw LLM response vs what client receives
+                    llm_full = "".join(llm_chunks)
+                    client_full = "".join(client_chunks)
+                    debug_compare_response(
+                        "/v1/completions (stream)", llm_full, client_full
+                    )
 
                     # Get streaming result (actual tokens, cost) if provider supports it
                     stream_result = None
@@ -1409,6 +1530,25 @@ def openai_completions():
             )
         else:
             result = provider.chat_completion(model_id, messages, None, options)
+
+            # Debug comparison for non-streaming
+            llm_content = result.get("content", "")
+            response_obj = {
+                "id": generate_openai_id("cmpl"),
+                "object": "text_completion",
+                "created": int(time.time()),
+                "model": model_name,
+                "choices": [{"index": 0, "text": llm_content, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": result.get("input_tokens", 0),
+                    "completion_tokens": result.get("output_tokens", 0),
+                    "total_tokens": result.get("input_tokens", 0)
+                    + result.get("output_tokens", 0),
+                },
+            }
+            client_content = response_obj["choices"][0]["text"]
+            debug_compare_response("/v1/completions", llm_content, client_content)
+
             # Track non-streaming request
             track_completion(
                 provider_id=provider.name,
@@ -1425,23 +1565,7 @@ def openai_completions():
                 cache_read_tokens=result.get("cache_read_tokens"),
             )
 
-            return jsonify(
-                {
-                    "id": generate_openai_id("cmpl"),
-                    "object": "text_completion",
-                    "created": int(time.time()),
-                    "model": model_name,
-                    "choices": [
-                        {"index": 0, "text": result["content"], "finish_reason": "stop"}
-                    ],
-                    "usage": {
-                        "prompt_tokens": result.get("input_tokens", 0),
-                        "completion_tokens": result.get("output_tokens", 0),
-                        "total_tokens": result.get("input_tokens", 0)
-                        + result.get("output_tokens", 0),
-                    },
-                }
-            )
+            return jsonify(response_obj)
 
     except Exception as e:
         logger.error(f"Provider error: {e}")
@@ -1529,7 +1653,7 @@ if __name__ == "__main__":
     provider_names = [p.name for p in configured]
 
     logger.info("=" * 60)
-    logger.info("Multi-Provider LLM Proxy v2.0")
+    logger.info("Multi-Provider LLM Proxy v3.0")
     logger.info("=" * 60)
     logger.info(f"API server:   http://{api_host}:{api_port}")
 
@@ -1537,6 +1661,9 @@ if __name__ == "__main__":
         logger.info(f"Admin UI:     http://{admin_host}:{admin_port}")
     else:
         logger.info("Admin UI:     disabled (set ADMIN_ENABLED=true to enable)")
+
+    if DEBUG_RESPONSES:
+        logger.info("Debug mode:   ENABLED (set DEBUG_RESPONSES=false to disable)")
 
     logger.info("-" * 60)
 
