@@ -645,7 +645,6 @@
                                         x-text="sortDirection === 'asc' ? ' ▲' : ' ▼'"
                                     ></span>
                                 </th>
-                                <th class="text-right">%</th>
                                 <th
                                     @click="setSortColumn('tag', 'total_tokens')"
                                     class="text-right cursor-pointer hover:bg-base-200"
@@ -688,10 +687,6 @@
                                         x-text="formatNumber(row.requests)"
                                     ></td>
                                     <td
-                                        class="text-right text-base-content/60"
-                                        x-text="getPercentage(row.requests, getTotalRequests(byTag)) + '%'"
-                                    ></td>
-                                    <td
                                         class="text-right"
                                         x-text="formatTokens(row.total_tokens)"
                                     ></td>
@@ -703,7 +698,7 @@
                             </template>
                             <tr x-show="byTag.length === 0">
                                 <td
-                                    colspan="5"
+                                    colspan="4"
                                     class="text-center text-base-content/60"
                                 >
                                     No data available
@@ -1614,6 +1609,7 @@
                         "tag",
                         metricField,
                         metricColor,
+                        false,
                     );
                 }
                 if (this.activeTab === "providers") {
@@ -1623,6 +1619,7 @@
                         "provider_id",
                         metricField,
                         metricColor,
+                        true,
                     );
                 }
                 if (this.activeTab === "models") {
@@ -1632,6 +1629,7 @@
                         "model_id",
                         metricField,
                         metricColor,
+                        true,
                     );
                 }
                 if (this.activeTab === "clients") {
@@ -1641,6 +1639,7 @@
                         "client",
                         metricField,
                         metricColor,
+                        true,
                     );
                 }
                 if (this.activeTab === "aliases") {
@@ -1650,11 +1649,19 @@
                         "alias",
                         metricField,
                         metricColor,
+                        true,
                     );
                 }
             },
 
-            renderBreakdownChart(containerId, data, labelKey, valueKey, color) {
+            renderBreakdownChart(
+                containerId,
+                data,
+                labelKey,
+                valueKey,
+                color,
+                showPercentage = true,
+            ) {
                 if (!data || data.length === 0) return;
 
                 const chartDom = document.getElementById(containerId);
@@ -1762,7 +1769,7 @@
                                 borderRadius: [0, 4, 4, 0],
                             },
                             label: {
-                                show: true,
+                                show: showPercentage,
                                 position: "right",
                                 formatter: (params) => {
                                     const pct =

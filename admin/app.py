@@ -1948,6 +1948,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 ).filter(
                     RequestLog.timestamp >= filters["start_date"],
                     RequestLog.tag.isnot(None),
+                    RequestLog.tag != "",
                 )
 
                 if filters["end_date"]:
@@ -2002,6 +2003,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 ).filter(
                     DailyStats.date >= filters["start_date"],
                     DailyStats.tag.isnot(None),
+                    DailyStats.tag != "",
                     DailyStats.provider_id.is_(None),
                     DailyStats.model_id.is_(None),
                 )
