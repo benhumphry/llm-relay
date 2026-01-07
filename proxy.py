@@ -293,13 +293,22 @@ def log_designator_usage(resolved, endpoint: str):
     Log designator usage for smart router requests.
 
     This logs the designator LLM call separately from the main request,
-    allowing tracking of routing overhead costs.
+    allowing tracking of routing overhead costs and failures.
     """
     if not resolved.has_router or not resolved.designator_usage:
         return
 
     usage = resolved.designator_usage
-    if not usage.get("input_tokens") and not usage.get("output_tokens"):
+
+    # Check if designator failed
+    designator_error = usage.get("error")
+
+    # Skip logging if no tokens and no error
+    if (
+        not usage.get("input_tokens")
+        and not usage.get("output_tokens")
+        and not designator_error
+    ):
         return
 
     from flask import g
@@ -327,8 +336,8 @@ def log_designator_usage(resolved, endpoint: str):
         input_tokens=usage.get("input_tokens", 0),
         output_tokens=usage.get("output_tokens", 0),
         response_time_ms=0,  # Not tracked separately
-        status_code=200,
-        error_message=None,
+        status_code=500 if designator_error else 200,
+        error_message=designator_error,
         is_streaming=False,
         cost=usage.get("cost"),
         is_designator=True,

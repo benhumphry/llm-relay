@@ -139,6 +139,13 @@ class SmartRouterEngine:
                 messages, system, filtered_candidates, token_count, has_images
             )
 
+            # Check if designator failed
+            if selected_model is None:
+                logger.warning(
+                    f"Router '{self.router.name}' designator failed, using fallback"
+                )
+                return self._use_fallback(designator_usage)
+
             # Validate response
             valid_models = [c["model"] for c in filtered_candidates]
             if selected_model not in valid_models:
@@ -347,8 +354,10 @@ class SmartRouterEngine:
             logger.error(
                 f"Designator model '{self.router.designator_model}' not available"
             )
-            # Return first candidate as fallback
-            return candidates[0]["model"], {}
+            # Return None to signal failure - caller will use configured fallback
+            return None, {
+                "error": f"Designator model '{self.router.designator_model}' not available"
+            }
 
         # Call the designator
         try:
@@ -371,8 +380,8 @@ class SmartRouterEngine:
 
         except Exception as e:
             logger.error(f"Designator call failed: {e}")
-            # Return first candidate as fallback
-            return candidates[0]["model"], {}
+            # Return None to signal failure - caller will use configured fallback
+            return None, {"error": str(e)}
 
     def _build_designator_prompt(
         self,
