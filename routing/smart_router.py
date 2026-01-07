@@ -371,7 +371,7 @@ class SmartRouterEngine:
                 options={
                     "max_tokens": 100,
                     "temperature": 0,
-                    "reasoning_effort": "none",  # Disable reasoning for OpenAI o-series
+                    "reasoning_effort": "minimal",  # Minimize reasoning for OpenAI o-series
                 },
             )
 
@@ -394,7 +394,7 @@ class SmartRouterEngine:
             }
 
             logger.info(f"Router '{self.router.name}' designator selected: {selected}")
-            logger.debug(f"Designator full response: {result}")
+            logger.info(f"Designator full response: {result}")
             if not selected:
                 logger.warning(
                     f"Designator returned empty response. Full result: {result}"
