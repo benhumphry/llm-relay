@@ -233,15 +233,8 @@ def fetch_openai_descriptions(api_key: str) -> dict[str, str]:
 
     Note: OpenAI's API returns minimal metadata (id, created, owned_by).
     No descriptions available.
-
-    Args:
-        api_key: OpenAI API key
-
-    Returns:
-        Empty dict (OpenAI doesn't provide descriptions)
     """
-    # OpenAI doesn't provide descriptions in their models endpoint
-    # Just log that we checked
+    descriptions = {}
     try:
         with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
             response = client.get(
@@ -256,39 +249,223 @@ def fetch_openai_descriptions(api_key: str) -> dict[str, str]:
     except Exception as e:
         logger.warning(f"Failed to fetch OpenAI models: {e}")
 
-    return {}
+    return descriptions
 
 
-def fetch_all_provider_descriptions() -> dict[str, dict[str, str]]:
+def fetch_groq_descriptions(api_key: str) -> dict[str, str]:
     """
-    Fetch descriptions from all configured providers.
+    Fetch model info from Groq's API.
+
+    Groq's models endpoint returns id, owned_by, and active status.
+    No descriptions available.
+    """
+    descriptions = {}
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+            logger.info(
+                f"Groq has {len(data.get('data', []))} models (no descriptions available)"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to fetch Groq models: {e}")
+
+    return descriptions
+
+
+def fetch_mistral_descriptions(api_key: str) -> dict[str, str]:
+    """
+    Fetch model info from Mistral's API.
+
+    Mistral returns id, owned_by, capabilities, and description.
+    """
+    descriptions = {}
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.get(
+                "https://api.mistral.ai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            for model in data.get("data", []):
+                model_id = model.get("id", "")
+                description = model.get("description", "")
+
+                if model_id and description:
+                    descriptions[model_id] = description
+
+            logger.info(f"Fetched {len(descriptions)} descriptions from Mistral")
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch Mistral models: {e}")
+
+    return descriptions
+
+
+def fetch_perplexity_descriptions(api_key: str) -> dict[str, str]:
+    """
+    Fetch model info from Perplexity's API.
+
+    Perplexity uses OpenAI-compatible API but doesn't provide descriptions.
+    """
+    descriptions = {}
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.get(
+                "https://api.perplexity.ai/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+            logger.info(
+                f"Perplexity has {len(data.get('data', []))} models (no descriptions available)"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to fetch Perplexity models: {e}")
+
+    return descriptions
+
+
+def fetch_cohere_descriptions(api_key: str) -> dict[str, str]:
+    """
+    Fetch model info from Cohere's API.
+
+    Cohere's models endpoint includes name and description.
+    """
+    descriptions = {}
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.get(
+                "https://api.cohere.ai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            for model in data.get("models", []):
+                model_id = model.get("name", "")
+                description = model.get("description", "")
+
+                if model_id and description:
+                    descriptions[model_id] = description
+
+            logger.info(f"Fetched {len(descriptions)} descriptions from Cohere")
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch Cohere models: {e}")
+
+    return descriptions
+
+
+def fetch_xai_descriptions(api_key: str) -> dict[str, str]:
+    """
+    Fetch model info from xAI's API.
+
+    xAI uses OpenAI-compatible API.
+    """
+    descriptions = {}
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.get(
+                "https://api.x.ai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            for model in data.get("data", []):
+                model_id = model.get("id", "")
+                description = model.get("description", "")
+
+                if model_id and description:
+                    descriptions[model_id] = description
+
+            if descriptions:
+                logger.info(f"Fetched {len(descriptions)} descriptions from xAI")
+            else:
+                logger.info(
+                    f"xAI has {len(data.get('data', []))} models (no descriptions available)"
+                )
+
+    except Exception as e:
+        logger.warning(f"Failed to fetch xAI models: {e}")
+
+    return descriptions
+
+
+# Provider configuration: maps provider_id to (env_var, fetch_function)
+PROVIDER_FETCH_CONFIG = {
+    "gemini": ("GOOGLE_API_KEY", fetch_google_descriptions),
+    "anthropic": ("ANTHROPIC_API_KEY", fetch_anthropic_descriptions),
+    "openai": ("OPENAI_API_KEY", fetch_openai_descriptions),
+    "groq": ("GROQ_API_KEY", fetch_groq_descriptions),
+    "mistral": ("MISTRAL_API_KEY", fetch_mistral_descriptions),
+    "perplexity": ("PERPLEXITY_API_KEY", fetch_perplexity_descriptions),
+    "cohere": ("COHERE_API_KEY", fetch_cohere_descriptions),
+    "xai": ("XAI_API_KEY", fetch_xai_descriptions),
+}
+
+
+def get_available_description_providers() -> list[dict]:
+    """
+    Get list of providers that can be synced for descriptions.
+
+    Returns:
+        List of dicts with provider_id and has_api_key status
+    """
+    providers = []
+    for provider_id, (env_var, _) in PROVIDER_FETCH_CONFIG.items():
+        providers.append(
+            {
+                "id": provider_id,
+                "has_api_key": bool(os.environ.get(env_var)),
+            }
+        )
+    # Always include OpenRouter (no API key needed)
+    providers.append({"id": "openrouter", "has_api_key": True})
+    return providers
+
+
+def fetch_all_provider_descriptions(
+    provider_filter: str | None = None,
+) -> dict[str, dict[str, str]]:
+    """
+    Fetch descriptions from configured providers.
+
+    Args:
+        provider_filter: If set, only fetch from this provider
 
     Returns:
         Dict mapping provider_id to {model_id: description}
     """
     all_descriptions = {}
 
-    # Google Gemini
-    google_key = os.environ.get("GOOGLE_API_KEY")
-    if google_key:
-        all_descriptions["gemini"] = fetch_google_descriptions(google_key)
+    for provider_id, (env_var, fetch_func) in PROVIDER_FETCH_CONFIG.items():
+        # Skip if filtering to a specific provider
+        if provider_filter and provider_filter != provider_id:
+            continue
 
-    # Anthropic (display names only, but useful for model list)
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    if anthropic_key:
-        all_descriptions["anthropic"] = fetch_anthropic_descriptions(anthropic_key)
-
-    # OpenAI (no descriptions, but we try anyway)
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    if openai_key:
-        all_descriptions["openai"] = fetch_openai_descriptions(openai_key)
+        api_key = os.environ.get(env_var)
+        if api_key:
+            descriptions = fetch_func(api_key)
+            if descriptions:
+                all_descriptions[provider_id] = descriptions
 
     return all_descriptions
 
 
-def sync_model_descriptions(update_existing: bool = False) -> dict:
+def sync_model_descriptions(
+    update_existing: bool = False,
+    provider: str | None = None,
+) -> dict:
     """
-    Sync model descriptions from all sources.
+    Sync model descriptions from provider APIs and/or OpenRouter.
 
     Strategy:
     1. Fetch from individual providers first (most current for new models)
@@ -297,21 +474,36 @@ def sync_model_descriptions(update_existing: bool = False) -> dict:
 
     Args:
         update_existing: If True, overwrite existing descriptions
+        provider: If set, only sync from this provider (or "openrouter" for OpenRouter only)
 
     Returns:
         Dict with sync statistics
     """
     stats = {"updated": 0, "skipped": 0, "providers_synced": []}
 
-    # Step 1: Fetch from individual providers
-    provider_descriptions = fetch_all_provider_descriptions()
+    # Determine what to fetch
+    fetch_providers = provider != "openrouter"
+    fetch_openrouter = provider is None or provider == "openrouter"
 
-    # Step 2: Fetch from OpenRouter (public API)
-    openrouter_descriptions = fetch_openrouter_descriptions()
+    # Step 1: Fetch from individual providers (if not OpenRouter-only)
+    provider_descriptions = {}
+    if fetch_providers:
+        provider_descriptions = fetch_all_provider_descriptions(
+            provider_filter=provider if provider and provider != "openrouter" else None
+        )
+
+    # Step 2: Fetch from OpenRouter (public API) if included
+    openrouter_descriptions = {}
+    if fetch_openrouter:
+        openrouter_descriptions = fetch_openrouter_descriptions()
 
     # Step 3: Update database
     with get_db_context() as db:
-        models = db.query(Model).all()
+        # Filter models if syncing a specific provider
+        if provider and provider != "openrouter":
+            models = db.query(Model).filter(Model.provider_id == provider).all()
+        else:
+            models = db.query(Model).all()
 
         for model in models:
             new_description = None
@@ -326,16 +518,19 @@ def sync_model_descriptions(update_existing: bool = False) -> dict:
 
             # Then, try OpenRouter with smart matching for dated/versioned models
             # OpenRouter descriptions are typically more detailed
-            openrouter_desc = _find_best_description_match(
-                model.id, model.provider_id, openrouter_descriptions
-            )
+            if openrouter_descriptions:
+                openrouter_desc = _find_best_description_match(
+                    model.id, model.provider_id, openrouter_descriptions
+                )
 
-            if openrouter_desc:
-                # OpenRouter descriptions are usually richer, prefer them
-                # unless the provider gave us something longer
-                if not new_description or len(openrouter_desc) > len(new_description):
-                    new_description = openrouter_desc
-                    source = "openrouter"
+                if openrouter_desc:
+                    # OpenRouter descriptions are usually richer, prefer them
+                    # unless the provider gave us something longer
+                    if not new_description or len(openrouter_desc) > len(
+                        new_description
+                    ):
+                        new_description = openrouter_desc
+                        source = "openrouter"
 
             # Update if we have a new description
             if new_description:
@@ -352,7 +547,12 @@ def sync_model_descriptions(update_existing: bool = False) -> dict:
 
         db.commit()
 
-    stats["providers_synced"] = list(provider_descriptions.keys()) + ["openrouter"]
+    # Build list of synced providers
+    synced = list(provider_descriptions.keys())
+    if openrouter_descriptions:
+        synced.append("openrouter")
+    stats["providers_synced"] = synced
+
     logger.info(
         f"Description sync complete: {stats['updated']} updated, {stats['skipped']} skipped"
     )

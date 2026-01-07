@@ -3300,21 +3300,26 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         Sync model descriptions from provider APIs and OpenRouter.
 
         Fetches descriptions from:
-        - Provider APIs (Google Gemini has descriptions, others have limited data)
+        - Provider APIs (Google, Mistral, Cohere have descriptions)
         - OpenRouter public API (rich descriptions, no auth needed)
 
         Request body (optional):
         {
+            "provider": null,         // Sync specific provider only, or "openrouter"
             "update_existing": false  // If true, overwrite existing descriptions
         }
         """
         from db import sync_model_descriptions
 
         data = request.get_json() or {}
+        provider = data.get("provider")  # None = all providers
         update_existing = data.get("update_existing", False)
 
         try:
-            stats = sync_model_descriptions(update_existing=update_existing)
+            stats = sync_model_descriptions(
+                update_existing=update_existing,
+                provider=provider,
+            )
             return jsonify(
                 {
                     "success": True,
@@ -3326,6 +3331,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         except Exception as e:
             logger.exception("Failed to sync model descriptions")
             return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/models/sync-descriptions/providers", methods=["GET"])
+    @require_auth_api
+    def get_description_sync_providers():
+        """Get list of providers available for description sync."""
+        from db import get_available_description_providers
+
+        return jsonify({"providers": get_available_description_providers()})
 
     # -------------------------------------------------------------------------
     # Debug Log Streaming API

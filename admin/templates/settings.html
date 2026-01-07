@@ -925,6 +925,25 @@ content %}
 
                 <div class="space-y-4">
                     <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Provider (optional)</span>
+                        </label>
+                        <select
+                            x-model="descSyncProvider"
+                            class="select select-bordered select-sm"
+                        >
+                            <option value="">All providers</option>
+                            <template x-for="p in descSyncProviders" :key="p.id">
+                                <option
+                                    :value="p.id"
+                                    x-text="p.id + (p.has_api_key ? '' : ' (no API key)')"
+                                    :disabled="!p.has_api_key"
+                                ></option>
+                            </template>
+                        </select>
+                    </div>
+
+                    <div class="form-control">
                         <label class="label cursor-pointer justify-start gap-3">
                             <input
                                 type="checkbox"
@@ -1332,6 +1351,8 @@ content %}
             savingTracking: false,
 
             // Description sync
+            descSyncProviders: [],
+            descSyncProvider: "",
             descSyncUpdateExisting: false,
             syncingDescriptions: false,
             descSyncResults: null,
@@ -1578,12 +1599,14 @@ content %}
                         statsRes,
                         syncProvidersRes,
                         trackingRes,
+                        descProvidersRes,
                     ] = await Promise.all([
                         fetch("/api/settings"),
                         fetch("/api/providers"),
                         fetch("/api/stats"),
                         fetch("/api/models/sync/providers"),
                         fetch("/api/usage/settings"),
+                        fetch("/api/models/sync-descriptions/providers"),
                     ]);
 
                     if (providersRes.ok) {
@@ -1595,6 +1618,10 @@ content %}
                     if (syncProvidersRes.ok) {
                         const data = await syncProvidersRes.json();
                         this.syncProviders = data.providers || [];
+                    }
+                    if (descProvidersRes.ok) {
+                        const data = await descProvidersRes.json();
+                        this.descSyncProviders = data.providers || [];
                     }
                     if (trackingRes.ok) {
                         const loaded = await trackingRes.json();
@@ -1700,12 +1727,17 @@ content %}
                 this.descSyncResults = null;
 
                 try {
+                    const body = {
+                        update_existing: this.descSyncUpdateExisting,
+                    };
+                    if (this.descSyncProvider) {
+                        body.provider = this.descSyncProvider;
+                    }
+
                     const res = await fetch("/api/models/sync-descriptions", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            update_existing: this.descSyncUpdateExisting,
-                        }),
+                        body: JSON.stringify(body),
                     });
 
                     if (res.ok) {

@@ -52,6 +52,7 @@ from .smart_routers import (
     update_smart_router,
 )
 from .sync_descriptions import (
+    get_available_description_providers,
     get_descriptions_for_models,
     get_model_description,
     sync_model_descriptions,
@@ -106,4 +107,5 @@ __all__ = [
     "sync_model_descriptions",
     "get_model_description",
     "get_descriptions_for_models",
+    "get_available_description_providers",
 ]
