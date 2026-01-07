@@ -1728,7 +1728,12 @@ content %}
                             (a, b) => a + b,
                             0,
                         );
-                        this.showToast(`Imported ${total} items successfully`);
+                        // Build detailed message
+                        const details = Object.entries(stats)
+                            .filter(([k, v]) => v > 0)
+                            .map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`)
+                            .join(', ');
+                        this.showToast(`Imported: ${details || 'no items'}`);
                         await this.loadSettings();
                     } else {
                         const error = await res.json();
