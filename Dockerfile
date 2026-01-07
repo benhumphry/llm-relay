@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-LABEL maintainer="Ben Sherlock"
+LABEL maintainer="Ben Humphry"
 LABEL description="LLM Relay - Multi-provider proxy with Ollama and OpenAI API compatibility"
 LABEL version="1.0.3"
 
