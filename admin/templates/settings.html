@@ -1655,7 +1655,26 @@ content %}
                 this.importing = true;
                 try {
                     const text = await file.text();
-                    const data = JSON.parse(text);
+                    if (!text || !text.trim()) {
+                        this.showToast("Import file is empty", "error");
+                        return;
+                    }
+
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (parseErr) {
+                        this.showToast(
+                            "Invalid JSON file: " + parseErr.message,
+                            "error",
+                        );
+                        return;
+                    }
+
+                    if (typeof data !== "object" || data === null) {
+                        this.showToast("Import file must contain a JSON object", "error");
+                        return;
+                    }
 
                     const res = await fetch("/api/config/import", {
                         method: "POST",
@@ -1681,7 +1700,7 @@ content %}
                     }
                 } catch (err) {
                     this.showToast(
-                        "Failed to parse import file: " + err.message,
+                        "Import failed: " + err.message,
                         "error",
                     );
                 } finally {
