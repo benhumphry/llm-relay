@@ -1246,34 +1246,48 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         from providers.loader import get_provider_config
         from providers.ollama_provider import OllamaProvider
 
+        # Get provider enabled status from database
+        provider_enabled = {}
+        with get_db_context() as db:
+            for p in db.query(Provider).all():
+                provider_enabled[p.id] = p.enabled
+
         # Count providers from registry
         all_providers = registry.get_all_providers()
         provider_count = len(all_providers)
 
-        # Build set of configured provider names (have API key or don't need one)
-        configured_providers = set()
+        # Build set of active provider names (enabled AND configured)
+        active_providers = set()
+        configured_count = 0
         for provider in all_providers:
+            # Check if provider is enabled in database
+            is_enabled = provider_enabled.get(provider.name, True)
+            if not is_enabled:
+                continue
+
             # Check if this is an Ollama-type provider (doesn't need API key)
             if isinstance(provider, OllamaProvider):
                 # Ollama providers are configured if they're running/reachable
                 if provider.is_configured():
-                    configured_providers.add(provider.name)
+                    configured_count += 1
+                    active_providers.add(provider.name)
             else:
                 # Other providers need an API key
                 config = get_provider_config(provider.name)
                 api_key_env = config.get("api_key_env")
                 if api_key_env and os.environ.get(api_key_env):
-                    configured_providers.add(provider.name)
+                    configured_count += 1
+                    active_providers.add(provider.name)
 
-        # Count models - only from configured providers
+        # Count models - only from active providers (enabled AND configured)
         total_models = 0
         enabled_models = 0
         system_models = 0
         custom_models = 0
 
         for prov_name in get_all_provider_names():
-            # Skip unconfigured providers
-            if prov_name not in configured_providers:
+            # Skip inactive providers
+            if prov_name not in active_providers:
                 continue
 
             models = get_all_models_with_metadata(prov_name)
@@ -1288,7 +1302,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "providers": {
                     "total": provider_count,
                     "enabled": provider_count,  # All registered providers are enabled
-                    "configured": len(configured_providers),
+                    "configured": configured_count,
                 },
                 "models": {
                     "total": total_models,
