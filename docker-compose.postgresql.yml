@@ -1,0 +1,73 @@
+# LLM Relay with PostgreSQL
+# Docker Compose configuration with external PostgreSQL database
+#
+# This example shows how to run LLM Relay with PostgreSQL instead of the
+# default SQLite database. Use PostgreSQL for:
+#   - Production deployments
+#   - Multi-instance/replicated setups
+#   - Better concurrent write performance
+#
+# Quick Start:
+#   1. Copy .env.example to .env
+#   2. Add your API keys to .env
+#   3. Run: docker compose -f docker-compose.postgresql.yml up -d
+#
+# Notes:
+#   - The PostgreSQL database is created automatically on first run
+#   - Data is persisted in the postgres-data volume
+#   - For existing PostgreSQL servers, remove the postgres service and update DATABASE_URL
+
+services:
+  llm-relay:
+    image: ghcr.io/benhumphry/llm-relay:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "11434:11434" # API server (Ollama/OpenAI compatible)
+      - "8080:8080" # Admin UI
+    env_file:
+      - .env
+    environment:
+      # Server configuration
+      - PORT=11434
+      - HOST=0.0.0.0
+      - ADMIN_PORT=8080
+      - ADMIN_HOST=0.0.0.0
+      # PostgreSQL connection
+      - DATABASE_URL=postgresql://llmrelay:llmrelay@postgres:5432/llmrelay
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:11434/')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=llmrelay
+      - POSTGRES_PASSWORD=llmrelay
+      - POSTGRES_DB=llmrelay
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llmrelay -d llmrelay"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  postgres-data:
