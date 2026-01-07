@@ -242,26 +242,6 @@ content %}
                                                 </svg>
                                                 Disable
                                             </button>
-                                            <button
-                                                @click="dismissAlert(alert)"
-                                                class="btn btn-ghost btn-xs"
-                                                title="Dismiss this alert for 24 hours"
-                                            >
-                                                <svg
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    viewBox="0 0 24 24"
-                                                    stroke="currentColor"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M6 18L18 6M6 6l12 12"
-                                                    />
-                                                </svg>
-                                            </button>
                                             <a
                                                 :href="'/admin/requests?model=' + encodeURIComponent(alert.provider_id + '/' + alert.model_id)"
                                                 class="btn btn-ghost btn-xs"
@@ -289,6 +269,26 @@ content %}
                                                 </svg>
                                                 View
                                             </a>
+                                            <button
+                                                @click="dismissAlert(alert)"
+                                                class="btn btn-ghost btn-xs"
+                                                title="Dismiss this alert for 24 hours"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M6 18L18 6M6 6l12 12"
+                                                    />
+                                                </svg>
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
