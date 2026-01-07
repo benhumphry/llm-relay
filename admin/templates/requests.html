@@ -518,11 +518,10 @@ content %}
                             <th>Status</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <template x-for="log in requests" :key="log.id">
-                            <template x-fragment>
-                                <!-- Main Row -->
-                                <tr
+                    <template x-for="log in requests" :key="log.id">
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
                                     @click="toggleExpand(log.id)"
                                     class="cursor-pointer hover:bg-base-200"
                                     :class="{'bg-error/10': log.status_code >= 400}"
@@ -676,9 +675,10 @@ content %}
                                         </div>
                                     </td>
                                 </tr>
-                            </template>
-                        </template>
-                        <tr x-show="requests.length === 0 && !loading">
+                        </tbody>
+                    </template>
+                    <tbody x-show="requests.length === 0 && !loading">
+                        <tr>
                             <td
                                 colspan="8"
                                 class="text-center text-base-content/60 py-8"
@@ -686,7 +686,9 @@ content %}
                                 No requests found for the selected filters
                             </td>
                         </tr>
-                        <tr x-show="loading">
+                    </tbody>
+                    <tbody x-show="loading">
+                        <tr>
                             <td colspan="8" class="text-center py-8">
                                 <span
                                     class="loading loading-spinner loading-md"
