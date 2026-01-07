@@ -145,8 +145,18 @@ content %}
                             Export models, providers, aliases, smart routers,
                             and settings.
                         </p>
+                        <div class="flex items-center gap-4 mb-2">
+                            <label class="label cursor-pointer gap-2">
+                                <input
+                                    type="checkbox"
+                                    x-model="includeRequestLogs"
+                                    class="checkbox checkbox-sm"
+                                />
+                                <span class="label-text text-sm">Include request logs</span>
+                            </label>
+                        </div>
                         <a
-                            href="/api/config/export"
+                            :href="'/api/config/export' + (includeRequestLogs ? '?include_logs=true' : '')"
                             class="btn btn-outline btn-sm"
                             download
                         >
@@ -1214,6 +1224,7 @@ content %}
             confirmPassword: "",
             changingPassword: false,
             importing: false,
+            includeRequestLogs: false,
             toasts: [],
             currentTheme: localStorage.getItem("theme") || "system",
             syncProviders: [],

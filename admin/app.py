@@ -906,11 +906,17 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Alias,
             CustomModel,
             CustomProvider,
+            DailyStats,
             ModelOverride,
             OllamaInstance,
+            Provider,
+            RequestLog,
             Setting,
             SmartRouter,
         )
+
+        # Check if request logs should be included
+        include_logs = request.args.get("include_logs", "false").lower() == "true"
 
         with get_db_context() as db:
             export_data = {
@@ -999,7 +1005,66 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     }
                     for r in db.query(SmartRouter).all()
                 ],
+                # Provider enabled/disabled state (only system providers)
+                "providers": [
+                    {
+                        "id": p.id,
+                        "enabled": p.enabled,
+                    }
+                    for p in db.query(Provider)
+                    .filter(Provider.source == "system")
+                    .all()
+                ],
             }
+
+            # Optionally include request logs
+            if include_logs:
+                export_data["request_logs"] = [
+                    {
+                        "timestamp": log.timestamp.isoformat()
+                        if log.timestamp
+                        else None,
+                        "client_ip": log.client_ip,
+                        "hostname": log.hostname,
+                        "tag": log.tag,
+                        "alias": log.alias,
+                        "is_designator": log.is_designator,
+                        "router_name": log.router_name,
+                        "provider_id": log.provider_id,
+                        "model_id": log.model_id,
+                        "endpoint": log.endpoint,
+                        "input_tokens": log.input_tokens,
+                        "output_tokens": log.output_tokens,
+                        "reasoning_tokens": log.reasoning_tokens,
+                        "cached_input_tokens": log.cached_input_tokens,
+                        "cache_creation_tokens": log.cache_creation_tokens,
+                        "cache_read_tokens": log.cache_read_tokens,
+                        "cost": log.cost,
+                        "response_time_ms": log.response_time_ms,
+                        "status_code": log.status_code,
+                        "error_message": log.error_message,
+                        "is_streaming": log.is_streaming,
+                    }
+                    for log in db.query(RequestLog).order_by(RequestLog.timestamp).all()
+                ]
+                export_data["daily_stats"] = [
+                    {
+                        "date": stat.date.strftime("%Y-%m-%d") if stat.date else None,
+                        "tag": stat.tag,
+                        "provider_id": stat.provider_id,
+                        "model_id": stat.model_id,
+                        "alias": stat.alias,
+                        "router_name": stat.router_name,
+                        "request_count": stat.request_count,
+                        "success_count": stat.success_count,
+                        "error_count": stat.error_count,
+                        "input_tokens": stat.input_tokens,
+                        "output_tokens": stat.output_tokens,
+                        "total_response_time_ms": stat.total_response_time_ms,
+                        "estimated_cost": stat.estimated_cost,
+                    }
+                    for stat in db.query(DailyStats).order_by(DailyStats.date).all()
+                ]
 
         response = jsonify(export_data)
         response.headers["Content-Disposition"] = (
@@ -1015,8 +1080,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Alias,
             CustomModel,
             CustomProvider,
+            DailyStats,
             ModelOverride,
             OllamaInstance,
+            Provider,
+            RequestLog,
             Setting,
             SmartRouter,
         )
@@ -1044,6 +1112,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "custom_providers": 0,
             "aliases": 0,
             "smart_routers": 0,
+            "providers": 0,
+            "request_logs": 0,
+            "daily_stats": 0,
         }
 
         with get_db_context() as db:
@@ -1235,6 +1306,82 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     router.tags = r.get("tags", [])
                     db.add(router)
                 stats["smart_routers"] += 1
+
+            # Import provider enabled/disabled state
+            for p in data.get("providers", []):
+                existing = db.query(Provider).filter(Provider.id == p["id"]).first()
+                if existing:
+                    existing.enabled = p.get("enabled", True)
+                    stats["providers"] += 1
+
+            # Import request logs (if present)
+            for log in data.get("request_logs", []):
+                # Parse timestamp
+                timestamp = None
+                if log.get("timestamp"):
+                    try:
+                        timestamp = datetime.fromisoformat(log["timestamp"])
+                    except (ValueError, TypeError):
+                        timestamp = datetime.utcnow()
+
+                db.add(
+                    RequestLog(
+                        timestamp=timestamp or datetime.utcnow(),
+                        client_ip=log.get("client_ip", "unknown"),
+                        hostname=log.get("hostname"),
+                        tag=log.get("tag", "unknown"),
+                        alias=log.get("alias"),
+                        is_designator=log.get("is_designator", False),
+                        router_name=log.get("router_name"),
+                        provider_id=log.get("provider_id", "unknown"),
+                        model_id=log.get("model_id", "unknown"),
+                        endpoint=log.get("endpoint", "unknown"),
+                        input_tokens=log.get("input_tokens", 0),
+                        output_tokens=log.get("output_tokens", 0),
+                        reasoning_tokens=log.get("reasoning_tokens"),
+                        cached_input_tokens=log.get("cached_input_tokens"),
+                        cache_creation_tokens=log.get("cache_creation_tokens"),
+                        cache_read_tokens=log.get("cache_read_tokens"),
+                        cost=log.get("cost"),
+                        response_time_ms=log.get("response_time_ms", 0),
+                        status_code=log.get("status_code", 200),
+                        error_message=log.get("error_message"),
+                        is_streaming=log.get("is_streaming", False),
+                    )
+                )
+                stats["request_logs"] += 1
+
+            # Import daily stats (if present)
+            for stat in data.get("daily_stats", []):
+                # Parse date
+                date = None
+                if stat.get("date"):
+                    try:
+                        date = datetime.strptime(stat["date"], "%Y-%m-%d")
+                    except (ValueError, TypeError):
+                        continue  # Skip invalid dates
+
+                if date:
+                    db.add(
+                        DailyStats(
+                            date=date,
+                            tag=stat.get("tag"),
+                            provider_id=stat.get("provider_id"),
+                            model_id=stat.get("model_id"),
+                            alias=stat.get("alias"),
+                            router_name=stat.get("router_name"),
+                            request_count=stat.get("request_count", 0),
+                            success_count=stat.get("success_count", 0),
+                            error_count=stat.get("error_count", 0),
+                            input_tokens=stat.get("input_tokens", 0),
+                            output_tokens=stat.get("output_tokens", 0),
+                            total_response_time_ms=stat.get(
+                                "total_response_time_ms", 0
+                            ),
+                            estimated_cost=stat.get("estimated_cost", 0.0),
+                        )
+                    )
+                    stats["daily_stats"] += 1
 
         return jsonify({"success": True, "stats": stats})
 
