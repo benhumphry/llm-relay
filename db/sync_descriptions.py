@@ -459,36 +459,29 @@ def get_available_description_providers() -> list[dict]:
     """
     Get list of providers that can be synced for descriptions.
 
-    Returns all providers from the database (since OpenRouter can provide
-    descriptions for any provider's models), plus OpenRouter itself.
+    Returns providers from PROVIDER_FETCH_CONFIG (those with native fetch functions)
+    plus OpenRouter. This matches what sync_model_descriptions() will actually attempt.
 
     Returns:
         List of dicts with provider_id and has_api_key status
     """
-    from .connection import get_db_context
-    from .models import Provider
-
     providers = []
-    seen = set()
 
-    # Get all providers from database
-    with get_db_context() as db:
-        db_providers = db.query(Provider).filter(Provider.enabled == True).all()
-        for p in db_providers:
-            if p.id not in seen:
-                # Check if this provider has a native fetch function
-                env_var = PROVIDER_FETCH_CONFIG.get(p.id, (None, None))[0]
-                providers.append(
-                    {
-                        "id": p.id,
-                        "has_api_key": True,  # All DB providers can get descriptions from OpenRouter
-                    }
-                )
-                seen.add(p.id)
+    # Add all providers that have fetch functions configured
+    for provider_id, (env_var, _) in PROVIDER_FETCH_CONFIG.items():
+        has_api_key = bool(os.environ.get(env_var))
+        providers.append(
+            {
+                "id": provider_id,
+                "has_api_key": has_api_key,
+            }
+        )
 
     # Always include OpenRouter (no API key needed, provides descriptions for all)
-    if "openrouter" not in seen:
-        providers.append({"id": "openrouter", "has_api_key": True})
+    providers.append({"id": "openrouter", "has_api_key": True})
+
+    # Sort alphabetically for consistent display
+    providers.sort(key=lambda p: p["id"])
 
     return providers
 
