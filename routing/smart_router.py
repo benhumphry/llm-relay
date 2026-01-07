@@ -393,7 +393,7 @@ class SmartRouterEngine:
         has_images: bool,
     ) -> str:
         """Build the prompt for the designator LLM."""
-        # Build model list with descriptions
+        # Build model list with notes (which may contain synced descriptions or custom notes)
         model_lines = []
         for c in candidates:
             caps = ", ".join(c.get("capabilities", [])) or "general"
@@ -403,16 +403,13 @@ class SmartRouterEngine:
 
             line = f"- {c['model']}\n  Context: {c['context_length']} tokens{cost_str}\n  Capabilities: {caps}"
 
-            # Add description if available (truncated for prompt efficiency)
-            description = c.get("description")
-            if description:
-                # Truncate long descriptions to keep prompt size reasonable
-                if len(description) > 300:
-                    description = description[:297] + "..."
-                line += f"\n  Description: {description}"
-
-            if c.get("notes"):
-                line += f"\n  Notes: {c['notes']}"
+            # Add notes if available (may contain synced description or custom notes)
+            notes = c.get("notes")
+            if notes:
+                # Truncate long notes to keep prompt size reasonable
+                if len(notes) > 300:
+                    notes = notes[:297] + "..."
+                line += f"\n  Notes: {notes}"
             model_lines.append(line)
 
         models_section = "\n".join(model_lines)

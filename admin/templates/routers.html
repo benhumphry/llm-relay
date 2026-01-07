@@ -350,7 +350,7 @@ content %}
                                     x-model="form.candidates[index].model"
                                     class="select select-bordered select-sm flex-1 min-w-0"
                                     required
-                                    @change="if (index === 0 && !form.fallback_model) form.fallback_model = $event.target.value"
+                                    @change="onCandidateModelChange(index, $event.target.value)"
                                 >
                                     <option value="">Select model...</option>
                                     <template
@@ -359,7 +359,7 @@ content %}
                                     >
                                         <option
                                             :value="model.id"
-                                            x-text="model.id"
+                                            x-text="model.id + (model.description ? ' ●' : '')"
                                         ></option>
                                     </template>
                                 </select>
@@ -367,7 +367,8 @@ content %}
                                     type="text"
                                     x-model="form.candidates[index].notes"
                                     class="input input-bordered input-sm flex-1 min-w-0"
-                                    placeholder="Notes (optional)"
+                                    :placeholder="getModelDescription(form.candidates[index].model) ? 'Has description - click to use' : 'Notes (optional)'"
+                                    @focus="autoFillDescription(index)"
                                 />
                                 <div class="w-20 flex justify-center">
                                     <input
@@ -668,6 +669,37 @@ content %}
             removeCandidate(index) {
                 if (this.form.candidates.length > 2) {
                     this.form.candidates.splice(index, 1);
+                }
+            },
+
+            getModelDescription(modelId) {
+                if (!modelId) return null;
+                const model = this.availableModels.find(m => m.id === modelId);
+                return model?.description || null;
+            },
+
+            onCandidateModelChange(index, modelId) {
+                // Set fallback if first candidate and no fallback set
+                if (index === 0 && !this.form.fallback_model) {
+                    this.form.fallback_model = modelId;
+                }
+                // Auto-fill notes with description if notes is empty
+                if (modelId && !this.form.candidates[index].notes) {
+                    const description = this.getModelDescription(modelId);
+                    if (description) {
+                        this.form.candidates[index].notes = description;
+                    }
+                }
+            },
+
+            autoFillDescription(index) {
+                const candidate = this.form.candidates[index];
+                // Only auto-fill if notes is empty and model has a description
+                if (candidate.model && !candidate.notes) {
+                    const description = this.getModelDescription(candidate.model);
+                    if (description) {
+                        this.form.candidates[index].notes = description;
+                    }
                 }
             },
 
