@@ -367,8 +367,7 @@ content %}
                                     type="text"
                                     x-model="form.candidates[index].notes"
                                     class="input input-bordered input-sm flex-1 min-w-0"
-                                    :placeholder="getModelDescription(form.candidates[index].model) ? 'Has description - click to use' : 'Notes (optional)'"
-                                    @focus="autoFillDescription(index)"
+                                    placeholder="Notes (optional)"
                                 />
                                 <div class="w-20 flex justify-center">
                                     <input
@@ -683,23 +682,10 @@ content %}
                 if (index === 0 && !this.form.fallback_model) {
                     this.form.fallback_model = modelId;
                 }
-                // Auto-fill notes with description if notes is empty
-                if (modelId && !this.form.candidates[index].notes) {
+                // Always update notes with description when model changes
+                if (modelId) {
                     const description = this.getModelDescription(modelId);
-                    if (description) {
-                        this.form.candidates[index].notes = description;
-                    }
-                }
-            },
-
-            autoFillDescription(index) {
-                const candidate = this.form.candidates[index];
-                // Only auto-fill if notes is empty and model has a description
-                if (candidate.model && !candidate.notes) {
-                    const description = this.getModelDescription(candidate.model);
-                    if (description) {
-                        this.form.candidates[index].notes = description;
-                    }
+                    this.form.candidates[index].notes = description || "";
                 }
             },
 
