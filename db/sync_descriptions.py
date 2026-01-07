@@ -498,7 +498,7 @@ def fetch_all_provider_descriptions(
     provider_filter: str | None = None,
 ) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """
-    Fetch descriptions from configured providers.
+    Fetch descriptions from enabled providers that have fetch functions.
 
     Args:
         provider_filter: If set, only fetch from this provider
@@ -508,10 +508,24 @@ def fetch_all_provider_descriptions(
         - Dict mapping provider_id to {model_id: description}
         - Dict mapping provider_id to status ("success", "no_descriptions", "no_api_key", "error")
     """
+    from .connection import get_db_context
+    from .models import Provider
+
     all_descriptions = {}
     status = {}
 
+    # Get enabled providers from database
+    with get_db_context() as db:
+        enabled_providers = {
+            p.id for p in db.query(Provider).filter(Provider.enabled == True).all()
+        }
+
+    # Only process providers that are both enabled AND have fetch functions
     for provider_id, (env_var, fetch_func) in PROVIDER_FETCH_CONFIG.items():
+        # Skip if not enabled in database
+        if provider_id not in enabled_providers:
+            continue
+
         # Skip if filtering to a specific provider
         if provider_filter and provider_filter != provider_id:
             continue
