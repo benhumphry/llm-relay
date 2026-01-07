@@ -332,11 +332,13 @@ content %}
                         </button>
                     </label>
                     <!-- Column headers -->
-                    <div class="flex gap-2 items-center text-xs text-base-content/50 mb-1 px-1">
-                        <span class="flex-1">Model</span>
-                        <span class="flex-1">Notes (optional)</span>
-                        <span class="w-16 text-center" title="Fallback when designator fails">Fallback</span>
-                        <span class="w-8"></span>
+                    <div class="flex gap-2 items-center text-xs text-base-content/50 mb-1">
+                        <span class="flex-1 min-w-0">Model</span>
+                        <span class="flex-1 min-w-0">Notes (optional)</span>
+                        <div class="w-20 text-center tooltip tooltip-top" data-tip="Used when designator fails">
+                            <span>Fallback</span>
+                        </div>
+                        <span class="w-10"></span>
                     </div>
                     <div class="space-y-2">
                         <template
@@ -346,7 +348,7 @@ content %}
                             <div class="flex gap-2 items-center">
                                 <select
                                     x-model="form.candidates[index].model"
-                                    class="select select-bordered select-sm flex-1"
+                                    class="select select-bordered select-sm flex-1 min-w-0"
                                     required
                                     @change="if (index === 0 && !form.fallback_model) form.fallback_model = $event.target.value"
                                 >
@@ -364,23 +366,24 @@ content %}
                                 <input
                                     type="text"
                                     x-model="form.candidates[index].notes"
-                                    class="input input-bordered input-sm flex-1"
+                                    class="input input-bordered input-sm flex-1 min-w-0"
                                     placeholder="Notes (optional)"
                                 />
-                                <div class="w-16 flex justify-center">
+                                <div class="w-20 flex justify-center">
                                     <input
                                         type="radio"
                                         name="fallback_model"
                                         class="radio radio-sm"
                                         :value="form.candidates[index].model"
-                                        x-model="form.fallback_model"
+                                        :checked="form.fallback_model === form.candidates[index].model"
+                                        @change="form.fallback_model = form.candidates[index].model"
                                         :disabled="!form.candidates[index].model"
                                     />
                                 </div>
                                 <button
                                     type="button"
                                     @click="removeCandidate(index)"
-                                    class="btn btn-ghost btn-sm text-error w-8"
+                                    class="btn btn-ghost btn-sm btn-square text-error"
                                     :disabled="form.candidates.length <= 2"
                                 >
                                     <svg
