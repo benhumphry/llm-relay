@@ -155,10 +155,10 @@ content %}
                                 <span class="label-text text-sm">Include request logs</span>
                             </label>
                         </div>
-                        <a
-                            :href="'/api/config/export' + (includeRequestLogs ? '?include_logs=true' : '')"
+                        <button
+                            @click="exportConfig()"
                             class="btn btn-outline btn-sm"
-                            download
+                            :class="{ 'loading': exporting }"
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -175,7 +175,7 @@ content %}
                                 />
                             </svg>
                             Export Configuration
-                        </a>
+                        </button>
                     </div>
 
                     <!-- Import -->
@@ -1224,6 +1224,7 @@ content %}
             confirmPassword: "",
             changingPassword: false,
             importing: false,
+            exporting: false,
             includeRequestLogs: false,
             toasts: [],
             currentTheme: localStorage.getItem("theme") || "system",
@@ -1645,6 +1646,37 @@ content %}
                     this.showToast("Failed to change password", "error");
                 } finally {
                     this.changingPassword = false;
+                }
+            },
+
+            async exportConfig() {
+                this.exporting = true;
+                try {
+                    const url = '/api/config/export' + (this.includeRequestLogs ? '?include_logs=true' : '');
+                    const res = await fetch(url);
+
+                    if (!res.ok) {
+                        throw new Error('Export failed: ' + res.statusText);
+                    }
+
+                    const data = await res.json();
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const downloadUrl = URL.createObjectURL(blob);
+
+                    const a = document.createElement('a');
+                    a.href = downloadUrl;
+                    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                    a.download = `llm-relay-config-${timestamp}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(downloadUrl);
+
+                    this.showToast('Configuration exported successfully');
+                } catch (err) {
+                    this.showToast('Export failed: ' + err.message, 'error');
+                } finally {
+                    this.exporting = false;
                 }
             },
 
