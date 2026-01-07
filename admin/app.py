@@ -38,6 +38,7 @@ from db import (
 from providers import registry
 from providers.hybrid_loader import get_all_models_with_metadata
 from providers.loader import get_all_provider_names
+from version import VERSION
 
 from .auth import (
     authenticate,
@@ -76,9 +77,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     )
 
     @admin.context_processor
-    def inject_auth_status():
-        """Make auth status available in all templates."""
-        return {"auth_enabled": is_auth_enabled()}
+    def inject_globals():
+        """Make global variables available in all templates."""
+        return {"auth_enabled": is_auth_enabled(), "version": VERSION}
 
     # -------------------------------------------------------------------------
     # Authentication Routes

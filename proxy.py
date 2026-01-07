@@ -1866,8 +1866,10 @@ if __name__ == "__main__":
 
     provider_names = [p.name for p in configured]
 
+    from version import VERSION
+
     logger.info("=" * 60)
-    logger.info("LLM Relay v1.0.3")
+    logger.info(f"LLM Relay v{VERSION}")
     logger.info("=" * 60)
     logger.info(f"API server:   http://{api_host}:{api_port}")
 
