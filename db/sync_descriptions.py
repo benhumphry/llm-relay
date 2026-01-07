@@ -87,6 +87,16 @@ def _find_best_description_match(
     """
     import re
 
+    def normalize_model_name(name: str) -> str:
+        """Normalize model name for fuzzy matching.
+
+        Handles variations like:
+        - claude-haiku-4.5 vs claude-haiku-4-5 (dot vs hyphen in versions)
+        - claude-3.5-sonnet vs claude-3-5-sonnet
+        """
+        # Replace dots with hyphens in version numbers (e.g., 4.5 -> 4-5)
+        return re.sub(r"(\d)\.(\d)", r"\1-\2", name.lower())
+
     # Try exact match with provider prefix
     full_key = f"{provider_id}/{model_id}"
     if full_key in descriptions:
@@ -95,6 +105,16 @@ def _find_best_description_match(
     # Try exact match on model_id only
     if model_id in descriptions:
         return descriptions[model_id]
+
+    # Try normalized matching (handles 4.5 vs 4-5 variations)
+    normalized_model = normalize_model_name(model_id)
+    normalized_full_key = f"{provider_id}/{normalized_model}"
+
+    for desc_key, desc_value in descriptions.items():
+        if normalize_model_name(desc_key) == normalized_full_key:
+            return desc_value
+        if "/" not in desc_key and normalize_model_name(desc_key) == normalized_model:
+            return desc_value
 
     # Try cross-provider matching for common provider name variations
     # OpenRouter uses different provider names than we do internally
