@@ -3937,16 +3937,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
     def _categorize_error(status_code: int, error_message: str | None = None) -> str:
         """Categorize HTTP status code into error type."""
-        if status_code == 404:
-            return "not_found"
-        elif status_code in (401, 403):
-            return "auth_error"
-        elif status_code == 429:
-            return "rate_limit"
-        elif 500 <= status_code < 600:
-            return "server_error"
-        elif status_code == 400 and error_message:
-            # Check if the 400 error is actually a model not found error
+        # First check if error message indicates a model not found error
+        # (regardless of status code, since some providers wrap errors)
+        if error_message:
             msg_lower = error_message.lower()
             if any(
                 phrase in msg_lower
@@ -3959,6 +3952,17 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 ]
             ):
                 return "not_found"
+
+        # Then categorize by status code
+        if status_code == 404:
+            return "not_found"
+        elif status_code in (401, 403):
+            return "auth_error"
+        elif status_code == 429:
+            return "rate_limit"
+        elif 500 <= status_code < 600:
+            return "server_error"
+        elif status_code == 400:
             return "bad_request"
         else:
             return "error"
