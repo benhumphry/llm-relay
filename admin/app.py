@@ -3985,6 +3985,34 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Alerts management page."""
         return render_template("alerts.html")
 
+    def _get_dismissed_alerts() -> dict:
+        """Get dismissed alerts from settings. Returns {key: expiry_timestamp}."""
+        with get_db_context() as db:
+            setting = (
+                db.query(Setting).filter(Setting.key == "dismissed_alerts").first()
+            )
+            if setting and setting.value:
+                try:
+                    dismissed = json.loads(setting.value)
+                    # Clean up expired dismissals
+                    now = datetime.utcnow().timestamp()
+                    return {k: v for k, v in dismissed.items() if v > now}
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return {}
+
+    def _set_dismissed_alerts(dismissed: dict):
+        """Save dismissed alerts to settings."""
+        with get_db_context() as db:
+            setting = (
+                db.query(Setting).filter(Setting.key == "dismissed_alerts").first()
+            )
+            if setting:
+                setting.value = json.dumps(dismissed)
+            else:
+                db.add(Setting(key="dismissed_alerts", value=json.dumps(dismissed)))
+            db.commit()
+
     @admin.route("/api/alerts", methods=["GET"])
     @require_auth_api
     def get_alerts():
@@ -3995,6 +4023,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         hours = int(request.args.get("hours", 24))
         cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+        # Get dismissed alerts
+        dismissed = _get_dismissed_alerts()
 
         with get_db_context() as db:
             # Query errors grouped by provider, model, and status code
@@ -4026,6 +4057,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             warning_count = 0
 
             for error in errors:
+                # Check if this alert is dismissed
+                alert_key = f"{error.provider_id}/{error.model_id}/{error.status_code}"
+                if alert_key in dismissed:
+                    continue
+
                 error_type = _categorize_error(error.status_code, error.error_message)
                 # Model not found and auth errors are critical
                 severity = (
@@ -4071,6 +4107,29 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "period_hours": hours,
                 }
             )
+
+    @admin.route("/api/alerts/dismiss", methods=["POST"])
+    @require_auth_api
+    def dismiss_alert():
+        """Dismiss an alert for 24 hours."""
+        data = request.get_json() or {}
+
+        provider_id = data.get("provider_id")
+        model_id = data.get("model_id")
+        status_code = data.get("status_code")
+
+        if not all([provider_id, model_id, status_code]):
+            return jsonify({"error": "Missing required fields"}), 400
+
+        alert_key = f"{provider_id}/{model_id}/{status_code}"
+
+        # Get current dismissals and add new one
+        dismissed = _get_dismissed_alerts()
+        # Dismiss for 24 hours
+        dismissed[alert_key] = (datetime.utcnow().timestamp()) + (24 * 60 * 60)
+        _set_dismissed_alerts(dismissed)
+
+        return jsonify({"success": True, "dismissed_until": dismissed[alert_key]})
 
     @admin.route("/api/alerts/count", methods=["GET"])
     @require_auth_api

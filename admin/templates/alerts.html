@@ -327,7 +327,6 @@ content %}
             dismissedAlerts: {},
 
             async init() {
-                this.loadDismissed();
                 await this.loadAlerts();
             },
 
@@ -336,49 +335,36 @@ content %}
                 this.loadAlerts();
             },
 
-            loadDismissed() {
+            async dismissAlert(alert) {
                 try {
-                    const stored = localStorage.getItem('dismissedAlerts');
-                    if (stored) {
-                        const parsed = JSON.parse(stored);
-                        // Clean up expired dismissals (older than 24 hours)
-                        const now = Date.now();
-                        const valid = {};
-                        for (const [key, expiry] of Object.entries(parsed)) {
-                            if (expiry > now) {
-                                valid[key] = expiry;
-                            }
+                    const response = await fetch('/api/alerts/dismiss', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            provider_id: alert.provider_id,
+                            model_id: alert.model_id,
+                            status_code: alert.status_code
+                        })
+                    });
+
+                    if (response.ok) {
+                        // Remove from visible alerts
+                        this.alerts = this.alerts.filter(a =>
+                            !(a.provider_id === alert.provider_id &&
+                              a.model_id === alert.model_id &&
+                              a.status_code === alert.status_code)
+                        );
+                        // Update summary
+                        if (alert.severity === 'critical') {
+                            this.summary.critical = Math.max(0, this.summary.critical - 1);
+                        } else {
+                            this.summary.warning = Math.max(0, this.summary.warning - 1);
                         }
-                        this.dismissedAlerts = valid;
-                        localStorage.setItem('dismissedAlerts', JSON.stringify(valid));
+                    } else {
+                        console.error('Failed to dismiss alert');
                     }
-                } catch (e) {
-                    this.dismissedAlerts = {};
-                }
-            },
-
-            getAlertKey(alert) {
-                return `${alert.provider_id}/${alert.model_id}/${alert.status_code}`;
-            },
-
-            isDismissed(alert) {
-                const key = this.getAlertKey(alert);
-                const expiry = this.dismissedAlerts[key];
-                return expiry && expiry > Date.now();
-            },
-
-            dismissAlert(alert) {
-                const key = this.getAlertKey(alert);
-                // Dismiss for 24 hours
-                this.dismissedAlerts[key] = Date.now() + (24 * 60 * 60 * 1000);
-                localStorage.setItem('dismissedAlerts', JSON.stringify(this.dismissedAlerts));
-                // Remove from visible alerts
-                this.alerts = this.alerts.filter(a => this.getAlertKey(a) !== key);
-                // Update summary
-                if (alert.severity === 'critical') {
-                    this.summary.critical = Math.max(0, this.summary.critical - 1);
-                } else {
-                    this.summary.warning = Math.max(0, this.summary.warning - 1);
+                } catch (error) {
+                    console.error('Failed to dismiss alert:', error);
                 }
             },
 
@@ -388,14 +374,12 @@ content %}
                     const response = await fetch(`/api/alerts?hours=${this.hours}`);
                     if (response.ok) {
                         const data = await response.json();
-                        // Filter out dismissed alerts
-                        const allAlerts = data.alerts || [];
-                        this.alerts = allAlerts.filter(a => !this.isDismissed(a));
-                        // Recalculate summary based on visible alerts
-                        this.summary = {
-                            critical: this.alerts.filter(a => a.severity === 'critical').length,
-                            warning: this.alerts.filter(a => a.severity === 'warning').length,
-                            total: this.alerts.length
+                        // Alerts are already filtered server-side
+                        this.alerts = data.alerts || [];
+                        this.summary = data.summary || {
+                            critical: 0,
+                            warning: 0,
+                            total: 0
                         };
                     }
                 } catch (error) {

@@ -407,11 +407,12 @@
                     },
                     async loadAlerts() {
                         try {
-                            const response = await fetch('/api/alerts/count');
+                            const response = await fetch('/api/alerts?hours=24');
                             if (response.ok) {
                                 const data = await response.json();
-                                this.critical = data.critical || 0;
-                                this.warning = data.warning || 0;
+                                // Server already filters out dismissed alerts
+                                this.critical = data.summary?.critical || 0;
+                                this.warning = data.summary?.warning || 0;
                             }
                         } catch (error) {
                             console.error('Failed to load alerts count:', error);
