@@ -1256,59 +1256,57 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         all_providers = registry.get_all_providers()
         provider_count = len(all_providers)
 
-        # Build set of active provider names (enabled AND configured)
-        active_providers = set()
+        # Build sets of configured and active providers
+        configured_providers = set()  # Has API key or is Ollama
+        active_providers = set()  # Configured AND enabled
         configured_count = 0
+
         for provider in all_providers:
-            # Check if provider is enabled in database
             is_enabled = provider_enabled.get(provider.name, True)
-            if not is_enabled:
-                continue
+            is_configured = False
 
             # Check if this is an Ollama-type provider (doesn't need API key)
             if isinstance(provider, OllamaProvider):
-                # Ollama providers are configured if they're running/reachable
                 if provider.is_configured():
-                    configured_count += 1
-                    active_providers.add(provider.name)
+                    is_configured = True
             else:
                 # Other providers need an API key
                 config = get_provider_config(provider.name)
                 api_key_env = config.get("api_key_env")
                 if api_key_env and os.environ.get(api_key_env):
-                    configured_count += 1
+                    is_configured = True
+
+            if is_configured:
+                configured_providers.add(provider.name)
+                configured_count += 1
+                if is_enabled:
                     active_providers.add(provider.name)
 
-        # Count models - only from active providers (enabled AND configured)
-        total_models = 0
-        enabled_models = 0
-        system_models = 0
-        custom_models = 0
-
+        # Count available models (from configured providers, regardless of enabled)
+        available_models = 0
         for prov_name in get_all_provider_names():
-            # Skip inactive providers
+            if prov_name not in configured_providers:
+                continue
+            models = get_all_models_with_metadata(prov_name)
+            available_models += sum(1 for m in models if m.get("enabled", True))
+
+        # Count active models (from active providers - enabled AND configured)
+        active_models = 0
+        for prov_name in get_all_provider_names():
             if prov_name not in active_providers:
                 continue
-
             models = get_all_models_with_metadata(prov_name)
-
-            total_models += len(models)
-            enabled_models += sum(1 for m in models if m.get("enabled", True))
-            system_models += sum(1 for m in models if m.get("is_system", True))
-            custom_models += sum(1 for m in models if not m.get("is_system", True))
+            active_models += sum(1 for m in models if m.get("enabled", True))
 
         return jsonify(
             {
                 "providers": {
                     "total": provider_count,
-                    "enabled": provider_count,  # All registered providers are enabled
                     "configured": configured_count,
                 },
                 "models": {
-                    "total": total_models,
-                    "enabled": enabled_models,
-                    "system": system_models,
-                    "custom": custom_models,
+                    "active": active_models,
+                    "available": available_models,
                 },
             }
         )

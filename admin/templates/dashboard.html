@@ -89,7 +89,7 @@ content %}
                         <p class="text-base-content/60 text-sm">Models</p>
                         <p
                             class="text-2xl font-bold"
-                            x-text="stats.models?.total || '-'"
+                            x-text="stats.models?.active || '-'"
                         ></p>
                     </div>
                     <div class="bg-secondary/10 p-2 rounded-lg">
@@ -110,7 +110,7 @@ content %}
                     </div>
                 </div>
                 <div class="text-xs text-base-content/60 mt-1">
-                    <span x-text="stats.models?.enabled || 0"></span> enabled
+                    <span x-text="stats.models?.available || 0"></span> available
                 </div>
             </div>
         </div>
