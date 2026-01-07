@@ -824,6 +824,33 @@ content %}
                     .toISOString()
                     .split("T")[0];
 
+                // Parse URL parameters to pre-populate filters
+                const urlParams = new URLSearchParams(window.location.search);
+                urlParams.getAll("model").forEach(m => {
+                    if (m && !this.filters.models.includes(m)) {
+                        this.filters.models.push(m);
+                    }
+                });
+                urlParams.getAll("provider").forEach(p => {
+                    if (p && !this.filters.providers.includes(p)) {
+                        this.filters.providers.push(p);
+                    }
+                });
+                urlParams.getAll("tag").forEach(t => {
+                    if (t && !this.filters.tags.includes(t)) {
+                        this.filters.tags.push(t);
+                    }
+                });
+                urlParams.getAll("client").forEach(c => {
+                    if (c && !this.filters.clients.includes(c)) {
+                        this.filters.clients.push(c);
+                    }
+                });
+                const status = urlParams.get("status");
+                if (status) {
+                    this.filters.status = status;
+                }
+
                 await this.loadFilterOptions();
                 await this.loadData();
             },
