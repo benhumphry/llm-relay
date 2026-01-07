@@ -407,7 +407,7 @@
                     },
                     async loadAlerts() {
                         try {
-                            const response = await fetch('/admin/api/alerts/count');
+                            const response = await fetch('/api/alerts/count');
                             if (response.ok) {
                                 const data = await response.json();
                                 this.critical = data.critical || 0;

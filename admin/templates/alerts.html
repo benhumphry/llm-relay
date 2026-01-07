@@ -316,7 +316,7 @@ content %}
             async loadAlerts() {
                 this.loading = true;
                 try {
-                    const response = await fetch(`/admin/api/alerts?hours=${this.hours}`);
+                    const response = await fetch(`/api/alerts?hours=${this.hours}`);
                     if (response.ok) {
                         const data = await response.json();
                         this.alerts = data.alerts || [];
@@ -349,7 +349,7 @@ content %}
                 }
 
                 try {
-                    const response = await fetch('/admin/api/models/override', {
+                    const response = await fetch('/api/models/override', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
