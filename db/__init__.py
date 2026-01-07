@@ -51,6 +51,11 @@ from .smart_routers import (
     router_name_available,
     update_smart_router,
 )
+from .sync_descriptions import (
+    get_descriptions_for_models,
+    get_model_description,
+    sync_model_descriptions,
+)
 
 __all__ = [
     # Connection
@@ -97,4 +102,8 @@ __all__ = [
     "ensure_seeded",
     "seed_providers",
     "seed_models_from_litellm",
+    # Description sync
+    "sync_model_descriptions",
+    "get_model_description",
+    "get_descriptions_for_models",
 ]

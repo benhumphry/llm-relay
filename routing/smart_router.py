@@ -273,7 +273,7 @@ class SmartRouterEngine:
         Get candidate models with their metadata.
 
         Returns list of dicts with model info including context_length,
-        capabilities, and costs.
+        capabilities, costs, and descriptions.
         """
         candidates = []
 
@@ -295,6 +295,7 @@ class SmartRouterEngine:
                             "capabilities": model_info.capabilities,
                             "input_cost": model_info.input_cost,
                             "output_cost": model_info.output_cost,
+                            "description": getattr(model_info, "description", None),
                         }
                     )
                 else:
@@ -307,6 +308,7 @@ class SmartRouterEngine:
                             "capabilities": [],
                             "input_cost": None,
                             "output_cost": None,
+                            "description": None,
                         }
                     )
             except ValueError:
@@ -391,7 +393,7 @@ class SmartRouterEngine:
         has_images: bool,
     ) -> str:
         """Build the prompt for the designator LLM."""
-        # Build model list
+        # Build model list with descriptions
         model_lines = []
         for c in candidates:
             caps = ", ".join(c.get("capabilities", [])) or "general"
@@ -400,6 +402,15 @@ class SmartRouterEngine:
                 cost_str = f" | Cost: ${c['input_cost']:.2f}/${c['output_cost']:.2f} per 1M tokens"
 
             line = f"- {c['model']}\n  Context: {c['context_length']} tokens{cost_str}\n  Capabilities: {caps}"
+
+            # Add description if available (truncated for prompt efficiency)
+            description = c.get("description")
+            if description:
+                # Truncate long descriptions to keep prompt size reasonable
+                if len(description) > 300:
+                    description = description[:297] + "..."
+                line += f"\n  Description: {description}"
+
             if c.get("notes"):
                 line += f"\n  Notes: {c['notes']}"
             model_lines.append(line)

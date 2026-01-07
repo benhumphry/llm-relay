@@ -30,6 +30,8 @@ db/                   # Database layer
   connection.py       # DB connection and migrations
   aliases.py          # Alias CRUD operations
   smart_routers.py    # Smart router CRUD operations
+  sync_descriptions.py # Model description sync from providers/OpenRouter
+  seed.py             # LiteLLM pricing data sync
 tracking/             # Usage tracking
   usage_tracker.py    # Async request logging and statistics
   tag_extractor.py    # Tag parsing from API keys
@@ -58,7 +60,13 @@ Async background service that batches request logs and updates daily statistics.
 Simple name -> target_model mappings for user-friendly model names.
 
 ### Smart Routers (routing/smart_router.py)
-Use a designator LLM to intelligently route requests to the best candidate model based on query content.
+Use a designator LLM to intelligently route requests to the best candidate model based on query content. The designator receives candidate model info including descriptions to help make informed routing decisions.
+
+### Model Descriptions (db/sync_descriptions.py)
+Fetches model descriptions from provider APIs (Google) and OpenRouter's public API. Descriptions help smart routers make better decisions since LLM designators have training cutoffs and don't know about newer models.
+
+### System Alerts (admin/app.py)
+Query-based alerts that detect problematic models from RequestLog errors (404s, auth failures). Computed on-demand rather than stored.
 
 ## Common Tasks
 

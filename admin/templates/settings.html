@@ -914,6 +914,89 @@ content %}
             </div>
         </div>
 
+        <!-- Model Descriptions -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Model Descriptions</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Sync model descriptions from provider APIs and OpenRouter.
+                    Descriptions help smart routers make better routing decisions.
+                </p>
+
+                <div class="space-y-4">
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="descSyncUpdateExisting"
+                                class="checkbox checkbox-sm"
+                            />
+                            <div>
+                                <span class="label-text">Overwrite existing descriptions</span>
+                                <p class="text-xs text-base-content/60">
+                                    Replace manually-edited descriptions with synced data
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <button
+                        @click="syncDescriptions()"
+                        class="btn btn-outline btn-sm"
+                        :class="{ 'loading': syncingDescriptions }"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4 mr-1"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                        </svg>
+                        Sync Descriptions
+                    </button>
+
+                    <!-- Results -->
+                    <template x-if="descSyncResults">
+                        <div class="space-y-2 mt-2">
+                            <div class="alert" :class="descSyncResults.success ? 'alert-success' : 'alert-error'">
+                                <template x-if="descSyncResults.success">
+                                    <div>
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <div class="text-sm">
+                                            <span x-text="descSyncResults.updated"></span> models updated,
+                                            <span x-text="descSyncResults.skipped"></span> skipped
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="!descSyncResults.success">
+                                    <div>
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                        <span class="text-sm" x-text="descSyncResults.error"></span>
+                                    </div>
+                                </template>
+                            </div>
+                            <template x-if="descSyncResults.success && descSyncResults.providers_synced">
+                                <div class="text-xs text-base-content/60">
+                                    Sources: <span x-text="descSyncResults.providers_synced.join(', ')"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
         <!-- System Info -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
@@ -1247,6 +1330,11 @@ content %}
                 retention_days: 90,
             },
             savingTracking: false,
+
+            // Description sync
+            descSyncUpdateExisting: false,
+            syncingDescriptions: false,
+            descSyncResults: null,
 
             // Debug log viewer
             debugLogs: [],
@@ -1604,6 +1692,42 @@ content %}
                     this.showToast("Failed to save tracking settings", "error");
                 } finally {
                     this.savingTracking = false;
+                }
+            },
+
+            async syncDescriptions() {
+                this.syncingDescriptions = true;
+                this.descSyncResults = null;
+
+                try {
+                    const res = await fetch("/api/models/sync-descriptions", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            update_existing: this.descSyncUpdateExisting,
+                        }),
+                    });
+
+                    if (res.ok) {
+                        this.descSyncResults = await res.json();
+                        if (this.descSyncResults.updated > 0) {
+                            this.showToast(
+                                `Updated ${this.descSyncResults.updated} model descriptions`,
+                                "success"
+                            );
+                        } else {
+                            this.showToast("No new descriptions found");
+                        }
+                    } else {
+                        const data = await res.json();
+                        this.descSyncResults = { success: false, error: data.error || "Sync failed" };
+                        this.showToast("Description sync failed", "error");
+                    }
+                } catch (err) {
+                    this.descSyncResults = { success: false, error: err.message };
+                    this.showToast("Description sync failed", "error");
+                } finally {
+                    this.syncingDescriptions = false;
                 }
             },
 

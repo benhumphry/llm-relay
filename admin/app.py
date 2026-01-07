@@ -3289,6 +3289,44 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         except ImportError:
             return jsonify({"providers": []})
 
+    # =========================================================================
+    # Model Description Sync API
+    # =========================================================================
+
+    @admin.route("/api/models/sync-descriptions", methods=["POST"])
+    @require_auth_api
+    def sync_descriptions():
+        """
+        Sync model descriptions from provider APIs and OpenRouter.
+
+        Fetches descriptions from:
+        - Provider APIs (Google Gemini has descriptions, others have limited data)
+        - OpenRouter public API (rich descriptions, no auth needed)
+
+        Request body (optional):
+        {
+            "update_existing": false  // If true, overwrite existing descriptions
+        }
+        """
+        from db import sync_model_descriptions
+
+        data = request.get_json() or {}
+        update_existing = data.get("update_existing", False)
+
+        try:
+            stats = sync_model_descriptions(update_existing=update_existing)
+            return jsonify(
+                {
+                    "success": True,
+                    "updated": stats["updated"],
+                    "skipped": stats["skipped"],
+                    "providers_synced": stats["providers_synced"],
+                }
+            )
+        except Exception as e:
+            logger.exception("Failed to sync model descriptions")
+            return jsonify({"error": str(e)}), 500
+
     # -------------------------------------------------------------------------
     # Debug Log Streaming API
     # -------------------------------------------------------------------------
