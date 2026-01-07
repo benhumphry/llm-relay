@@ -1089,7 +1089,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             SmartRouter,
         )
 
-        data = request.get_json()
+        try:
+            data = request.get_json()
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Invalid JSON: {str(e)}"}), 400
+
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
@@ -1108,271 +1112,283 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "daily_stats": 0,
         }
 
-        with get_db_context() as db:
-            # Import settings (skip password)
-            for s in data.get("settings", []):
-                if s["key"] == Setting.KEY_ADMIN_PASSWORD_HASH:
-                    continue
-                existing = db.query(Setting).filter(Setting.key == s["key"]).first()
-                if existing:
-                    existing.value = s["value"]
-                else:
-                    db.add(Setting(key=s["key"], value=s["value"]))
-                stats["settings"] += 1
+        try:
+            with get_db_context() as db:
+                # Import settings (skip password)
+                for s in data.get("settings", []):
+                    if s["key"] == Setting.KEY_ADMIN_PASSWORD_HASH:
+                        continue
+                    existing = db.query(Setting).filter(Setting.key == s["key"]).first()
+                    if existing:
+                        existing.value = s["value"]
+                    else:
+                        db.add(Setting(key=s["key"], value=s["value"]))
+                    stats["settings"] += 1
 
-            # Import model overrides
-            for o in data.get("model_overrides", []):
-                existing = (
-                    db.query(ModelOverride)
-                    .filter(
-                        ModelOverride.provider_id == o["provider_id"],
-                        ModelOverride.model_id == o["model_id"],
+                # Import model overrides
+                for o in data.get("model_overrides", []):
+                    existing = (
+                        db.query(ModelOverride)
+                        .filter(
+                            ModelOverride.provider_id == o["provider_id"],
+                            ModelOverride.model_id == o["model_id"],
+                        )
+                        .first()
                     )
-                    .first()
-                )
-                if existing:
-                    existing.disabled = o.get("disabled", False)
-                    existing.input_cost = o.get("input_cost")
-                    existing.output_cost = o.get("output_cost")
-                    existing.cache_read_multiplier = o.get("cache_read_multiplier")
-                    existing.cache_write_multiplier = o.get("cache_write_multiplier")
-                    existing.capabilities = o.get("capabilities")
-                    existing.context_length = o.get("context_length")
-                    existing.description = o.get("description")
-                else:
-                    override = ModelOverride(
-                        provider_id=o["provider_id"],
-                        model_id=o["model_id"],
-                        disabled=o.get("disabled", False),
-                        input_cost=o.get("input_cost"),
-                        output_cost=o.get("output_cost"),
-                        cache_read_multiplier=o.get("cache_read_multiplier"),
-                        cache_write_multiplier=o.get("cache_write_multiplier"),
-                        context_length=o.get("context_length"),
-                        description=o.get("description"),
-                    )
-                    override.capabilities = o.get("capabilities")
-                    db.add(override)
-                stats["model_overrides"] += 1
+                    if existing:
+                        existing.disabled = o.get("disabled", False)
+                        existing.input_cost = o.get("input_cost")
+                        existing.output_cost = o.get("output_cost")
+                        existing.cache_read_multiplier = o.get("cache_read_multiplier")
+                        existing.cache_write_multiplier = o.get(
+                            "cache_write_multiplier"
+                        )
+                        existing.capabilities = o.get("capabilities")
+                        existing.context_length = o.get("context_length")
+                        existing.description = o.get("description")
+                    else:
+                        override = ModelOverride(
+                            provider_id=o["provider_id"],
+                            model_id=o["model_id"],
+                            disabled=o.get("disabled", False),
+                            input_cost=o.get("input_cost"),
+                            output_cost=o.get("output_cost"),
+                            cache_read_multiplier=o.get("cache_read_multiplier"),
+                            cache_write_multiplier=o.get("cache_write_multiplier"),
+                            context_length=o.get("context_length"),
+                            description=o.get("description"),
+                        )
+                        override.capabilities = o.get("capabilities")
+                        db.add(override)
+                    stats["model_overrides"] += 1
 
-            # Import custom models
-            for m in data.get("custom_models", []):
-                existing = (
-                    db.query(CustomModel)
-                    .filter(
-                        CustomModel.provider_id == m["provider_id"],
-                        CustomModel.model_id == m["model_id"],
+                # Import custom models
+                for m in data.get("custom_models", []):
+                    existing = (
+                        db.query(CustomModel)
+                        .filter(
+                            CustomModel.provider_id == m["provider_id"],
+                            CustomModel.model_id == m["model_id"],
+                        )
+                        .first()
                     )
-                    .first()
-                )
-                if existing:
-                    existing.family = m.get("family")
-                    existing.description = m.get("description")
-                    existing.context_length = m.get("context_length", 128000)
-                    existing.capabilities = m.get("capabilities", [])
-                    existing.unsupported_params = m.get("unsupported_params", [])
-                    existing.supports_system_prompt = m.get(
-                        "supports_system_prompt", True
-                    )
-                    existing.use_max_completion_tokens = m.get(
-                        "use_max_completion_tokens", False
-                    )
-                    existing.enabled = m.get("enabled", True)
-                    existing.input_cost = m.get("input_cost")
-                    existing.output_cost = m.get("output_cost")
-                    existing.cache_read_multiplier = m.get("cache_read_multiplier")
-                    existing.cache_write_multiplier = m.get("cache_write_multiplier")
-                else:
-                    model = CustomModel(
-                        provider_id=m["provider_id"],
-                        model_id=m["model_id"],
-                        family=m.get("family"),
-                        description=m.get("description"),
-                        context_length=m.get("context_length", 128000),
-                        supports_system_prompt=m.get("supports_system_prompt", True),
-                        use_max_completion_tokens=m.get(
+                    if existing:
+                        existing.family = m.get("family")
+                        existing.description = m.get("description")
+                        existing.context_length = m.get("context_length", 128000)
+                        existing.capabilities = m.get("capabilities", [])
+                        existing.unsupported_params = m.get("unsupported_params", [])
+                        existing.supports_system_prompt = m.get(
+                            "supports_system_prompt", True
+                        )
+                        existing.use_max_completion_tokens = m.get(
                             "use_max_completion_tokens", False
-                        ),
-                        enabled=m.get("enabled", True),
-                        input_cost=m.get("input_cost"),
-                        output_cost=m.get("output_cost"),
-                        cache_read_multiplier=m.get("cache_read_multiplier"),
-                        cache_write_multiplier=m.get("cache_write_multiplier"),
-                    )
-                    model.capabilities = m.get("capabilities", [])
-                    model.unsupported_params = m.get("unsupported_params", [])
-                    db.add(model)
-                stats["custom_models"] += 1
-
-            # Import Ollama instances
-            for o in data.get("ollama_instances", []):
-                existing = (
-                    db.query(OllamaInstance)
-                    .filter(OllamaInstance.name == o["name"])
-                    .first()
-                )
-                if existing:
-                    existing.base_url = o["base_url"]
-                    existing.enabled = o.get("enabled", True)
-                else:
-                    db.add(
-                        OllamaInstance(
-                            name=o["name"],
-                            base_url=o["base_url"],
-                            enabled=o.get("enabled", True),
                         )
-                    )
-                stats["ollama_instances"] += 1
-
-            # Import custom providers
-            for p in data.get("custom_providers", []):
-                existing = (
-                    db.query(CustomProvider)
-                    .filter(CustomProvider.name == p["name"])
-                    .first()
-                )
-                if existing:
-                    existing.type = p["type"]
-                    existing.base_url = p["base_url"]
-                    existing.api_key_env = p.get("api_key_env")
-                    existing.enabled = p.get("enabled", True)
-                else:
-                    db.add(
-                        CustomProvider(
-                            name=p["name"],
-                            type=p["type"],
-                            base_url=p["base_url"],
-                            api_key_env=p.get("api_key_env"),
-                            enabled=p.get("enabled", True),
+                        existing.enabled = m.get("enabled", True)
+                        existing.input_cost = m.get("input_cost")
+                        existing.output_cost = m.get("output_cost")
+                        existing.cache_read_multiplier = m.get("cache_read_multiplier")
+                        existing.cache_write_multiplier = m.get(
+                            "cache_write_multiplier"
                         )
-                    )
-                stats["custom_providers"] += 1
-
-            # Import aliases (v3.1+)
-            for a in data.get("aliases", []):
-                existing = db.query(Alias).filter(Alias.name == a["name"]).first()
-                if existing:
-                    existing.target_model = a["target_model"]
-                    existing.tags = a.get("tags", [])
-                    existing.description = a.get("description")
-                    existing.enabled = a.get("enabled", True)
-                else:
-                    alias = Alias(
-                        name=a["name"],
-                        target_model=a["target_model"],
-                        description=a.get("description"),
-                        enabled=a.get("enabled", True),
-                    )
-                    alias.tags = a.get("tags", [])
-                    db.add(alias)
-                stats["aliases"] += 1
-
-            # Import smart routers (v3.2+)
-            for r in data.get("smart_routers", []):
-                existing = (
-                    db.query(SmartRouter).filter(SmartRouter.name == r["name"]).first()
-                )
-                if existing:
-                    existing.designator_model = r["designator_model"]
-                    existing.purpose = r["purpose"]
-                    existing.candidates_json = json.dumps(r.get("candidates", []))
-                    existing.strategy = r.get("strategy", "per_request")
-                    existing.fallback_model = r["fallback_model"]
-                    existing.session_ttl = r.get("session_ttl", 3600)
-                    existing.tags = r.get("tags", [])
-                    existing.description = r.get("description")
-                    existing.enabled = r.get("enabled", True)
-                else:
-                    router = SmartRouter(
-                        name=r["name"],
-                        designator_model=r["designator_model"],
-                        purpose=r["purpose"],
-                        candidates_json=json.dumps(r.get("candidates", [])),
-                        strategy=r.get("strategy", "per_request"),
-                        fallback_model=r["fallback_model"],
-                        session_ttl=r.get("session_ttl", 3600),
-                        description=r.get("description"),
-                        enabled=r.get("enabled", True),
-                    )
-                    router.tags = r.get("tags", [])
-                    db.add(router)
-                stats["smart_routers"] += 1
-
-            # Import provider enabled/disabled state
-            for p in data.get("providers", []):
-                existing = db.query(Provider).filter(Provider.id == p["id"]).first()
-                if existing:
-                    existing.enabled = p.get("enabled", True)
-                    stats["providers"] += 1
-
-            # Import request logs (if present)
-            for log in data.get("request_logs", []):
-                # Parse timestamp
-                timestamp = None
-                if log.get("timestamp"):
-                    try:
-                        timestamp = datetime.fromisoformat(log["timestamp"])
-                    except (ValueError, TypeError):
-                        timestamp = datetime.utcnow()
-
-                db.add(
-                    RequestLog(
-                        timestamp=timestamp or datetime.utcnow(),
-                        client_ip=log.get("client_ip", "unknown"),
-                        hostname=log.get("hostname"),
-                        tag=log.get("tag", "unknown"),
-                        alias=log.get("alias"),
-                        is_designator=log.get("is_designator", False),
-                        router_name=log.get("router_name"),
-                        provider_id=log.get("provider_id", "unknown"),
-                        model_id=log.get("model_id", "unknown"),
-                        endpoint=log.get("endpoint", "unknown"),
-                        input_tokens=log.get("input_tokens", 0),
-                        output_tokens=log.get("output_tokens", 0),
-                        reasoning_tokens=log.get("reasoning_tokens"),
-                        cached_input_tokens=log.get("cached_input_tokens"),
-                        cache_creation_tokens=log.get("cache_creation_tokens"),
-                        cache_read_tokens=log.get("cache_read_tokens"),
-                        cost=log.get("cost"),
-                        response_time_ms=log.get("response_time_ms", 0),
-                        status_code=log.get("status_code", 200),
-                        error_message=log.get("error_message"),
-                        is_streaming=log.get("is_streaming", False),
-                    )
-                )
-                stats["request_logs"] += 1
-
-            # Import daily stats (if present)
-            for stat in data.get("daily_stats", []):
-                # Parse date
-                date = None
-                if stat.get("date"):
-                    try:
-                        date = datetime.strptime(stat["date"], "%Y-%m-%d")
-                    except (ValueError, TypeError):
-                        continue  # Skip invalid dates
-
-                if date:
-                    db.add(
-                        DailyStats(
-                            date=date,
-                            tag=stat.get("tag"),
-                            provider_id=stat.get("provider_id"),
-                            model_id=stat.get("model_id"),
-                            alias=stat.get("alias"),
-                            router_name=stat.get("router_name"),
-                            request_count=stat.get("request_count", 0),
-                            success_count=stat.get("success_count", 0),
-                            error_count=stat.get("error_count", 0),
-                            input_tokens=stat.get("input_tokens", 0),
-                            output_tokens=stat.get("output_tokens", 0),
-                            total_response_time_ms=stat.get(
-                                "total_response_time_ms", 0
+                    else:
+                        model = CustomModel(
+                            provider_id=m["provider_id"],
+                            model_id=m["model_id"],
+                            family=m.get("family"),
+                            description=m.get("description"),
+                            context_length=m.get("context_length", 128000),
+                            supports_system_prompt=m.get(
+                                "supports_system_prompt", True
                             ),
-                            estimated_cost=stat.get("estimated_cost", 0.0),
+                            use_max_completion_tokens=m.get(
+                                "use_max_completion_tokens", False
+                            ),
+                            enabled=m.get("enabled", True),
+                            input_cost=m.get("input_cost"),
+                            output_cost=m.get("output_cost"),
+                            cache_read_multiplier=m.get("cache_read_multiplier"),
+                            cache_write_multiplier=m.get("cache_write_multiplier"),
+                        )
+                        model.capabilities = m.get("capabilities", [])
+                        model.unsupported_params = m.get("unsupported_params", [])
+                        db.add(model)
+                    stats["custom_models"] += 1
+
+                # Import Ollama instances
+                for o in data.get("ollama_instances", []):
+                    existing = (
+                        db.query(OllamaInstance)
+                        .filter(OllamaInstance.name == o["name"])
+                        .first()
+                    )
+                    if existing:
+                        existing.base_url = o["base_url"]
+                        existing.enabled = o.get("enabled", True)
+                    else:
+                        db.add(
+                            OllamaInstance(
+                                name=o["name"],
+                                base_url=o["base_url"],
+                                enabled=o.get("enabled", True),
+                            )
+                        )
+                    stats["ollama_instances"] += 1
+
+                # Import custom providers
+                for p in data.get("custom_providers", []):
+                    existing = (
+                        db.query(CustomProvider)
+                        .filter(CustomProvider.name == p["name"])
+                        .first()
+                    )
+                    if existing:
+                        existing.type = p["type"]
+                        existing.base_url = p["base_url"]
+                        existing.api_key_env = p.get("api_key_env")
+                        existing.enabled = p.get("enabled", True)
+                    else:
+                        db.add(
+                            CustomProvider(
+                                name=p["name"],
+                                type=p["type"],
+                                base_url=p["base_url"],
+                                api_key_env=p.get("api_key_env"),
+                                enabled=p.get("enabled", True),
+                            )
+                        )
+                    stats["custom_providers"] += 1
+
+                # Import aliases
+                for a in data.get("aliases", []):
+                    existing = db.query(Alias).filter(Alias.name == a["name"]).first()
+                    if existing:
+                        existing.target_model = a["target_model"]
+                        existing.tags = a.get("tags", [])
+                        existing.description = a.get("description")
+                        existing.enabled = a.get("enabled", True)
+                    else:
+                        alias = Alias(
+                            name=a["name"],
+                            target_model=a["target_model"],
+                            description=a.get("description"),
+                            enabled=a.get("enabled", True),
+                        )
+                        alias.tags = a.get("tags", [])
+                        db.add(alias)
+                    stats["aliases"] += 1
+
+                # Import smart routers
+                for r in data.get("smart_routers", []):
+                    existing = (
+                        db.query(SmartRouter)
+                        .filter(SmartRouter.name == r["name"])
+                        .first()
+                    )
+                    if existing:
+                        existing.designator_model = r["designator_model"]
+                        existing.purpose = r["purpose"]
+                        existing.candidates_json = json.dumps(r.get("candidates", []))
+                        existing.strategy = r.get("strategy", "per_request")
+                        existing.fallback_model = r["fallback_model"]
+                        existing.session_ttl = r.get("session_ttl", 3600)
+                        existing.tags = r.get("tags", [])
+                        existing.description = r.get("description")
+                        existing.enabled = r.get("enabled", True)
+                    else:
+                        router = SmartRouter(
+                            name=r["name"],
+                            designator_model=r["designator_model"],
+                            purpose=r["purpose"],
+                            candidates_json=json.dumps(r.get("candidates", [])),
+                            strategy=r.get("strategy", "per_request"),
+                            fallback_model=r["fallback_model"],
+                            session_ttl=r.get("session_ttl", 3600),
+                            description=r.get("description"),
+                            enabled=r.get("enabled", True),
+                        )
+                        router.tags = r.get("tags", [])
+                        db.add(router)
+                    stats["smart_routers"] += 1
+
+                # Import provider enabled/disabled state
+                for p in data.get("providers", []):
+                    existing = db.query(Provider).filter(Provider.id == p["id"]).first()
+                    if existing:
+                        existing.enabled = p.get("enabled", True)
+                        stats["providers"] += 1
+
+                # Import request logs (if present)
+                for log in data.get("request_logs", []):
+                    # Parse timestamp
+                    timestamp = None
+                    if log.get("timestamp"):
+                        try:
+                            timestamp = datetime.fromisoformat(log["timestamp"])
+                        except (ValueError, TypeError):
+                            timestamp = datetime.utcnow()
+
+                    db.add(
+                        RequestLog(
+                            timestamp=timestamp or datetime.utcnow(),
+                            client_ip=log.get("client_ip", "unknown"),
+                            hostname=log.get("hostname"),
+                            tag=log.get("tag", "unknown"),
+                            alias=log.get("alias"),
+                            is_designator=log.get("is_designator", False),
+                            router_name=log.get("router_name"),
+                            provider_id=log.get("provider_id", "unknown"),
+                            model_id=log.get("model_id", "unknown"),
+                            endpoint=log.get("endpoint", "unknown"),
+                            input_tokens=log.get("input_tokens", 0),
+                            output_tokens=log.get("output_tokens", 0),
+                            reasoning_tokens=log.get("reasoning_tokens"),
+                            cached_input_tokens=log.get("cached_input_tokens"),
+                            cache_creation_tokens=log.get("cache_creation_tokens"),
+                            cache_read_tokens=log.get("cache_read_tokens"),
+                            cost=log.get("cost"),
+                            response_time_ms=log.get("response_time_ms", 0),
+                            status_code=log.get("status_code", 200),
+                            error_message=log.get("error_message"),
+                            is_streaming=log.get("is_streaming", False),
                         )
                     )
-                    stats["daily_stats"] += 1
+                    stats["request_logs"] += 1
+
+                # Import daily stats (if present)
+                for stat in data.get("daily_stats", []):
+                    # Parse date
+                    date = None
+                    if stat.get("date"):
+                        try:
+                            date = datetime.strptime(stat["date"], "%Y-%m-%d")
+                        except (ValueError, TypeError):
+                            continue  # Skip invalid dates
+
+                    if date:
+                        db.add(
+                            DailyStats(
+                                date=date,
+                                tag=stat.get("tag"),
+                                provider_id=stat.get("provider_id"),
+                                model_id=stat.get("model_id"),
+                                alias=stat.get("alias"),
+                                router_name=stat.get("router_name"),
+                                request_count=stat.get("request_count", 0),
+                                success_count=stat.get("success_count", 0),
+                                error_count=stat.get("error_count", 0),
+                                input_tokens=stat.get("input_tokens", 0),
+                                output_tokens=stat.get("output_tokens", 0),
+                                total_response_time_ms=stat.get(
+                                    "total_response_time_ms", 0
+                                ),
+                                estimated_cost=stat.get("estimated_cost", 0.0),
+                            )
+                        )
+                        stats["daily_stats"] += 1
+
+        except Exception as e:
+            return jsonify({"success": False, "error": f"Import failed: {str(e)}"}), 500
 
         return jsonify({"success": True, "stats": stats})
 
