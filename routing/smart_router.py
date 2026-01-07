@@ -363,14 +363,30 @@ class SmartRouterEngine:
 
         # Call the designator
         try:
+            # Disable reasoning/thinking for designator - we just want a direct answer
             result = designator_resolved.provider.chat_completion(
                 model=designator_resolved.model_id,
                 messages=[{"role": "user", "content": prompt}],
                 system=None,  # System is built into the prompt
-                options={"max_tokens": 100, "temperature": 0},
+                options={
+                    "max_tokens": 100,
+                    "temperature": 0,
+                    "reasoning_effort": "none",  # Disable reasoning for OpenAI o-series
+                },
             )
 
+            # Some models (like o1/o3) put the answer in reasoning_content instead of content
             selected = result.get("content", "").strip()
+            if not selected:
+                # Try reasoning_content as fallback for reasoning models
+                selected = result.get("reasoning_content", "").strip()
+                # If still empty but we have reasoning, the model may have just "thought" without answering
+                if not selected and result.get("reasoning_tokens", 0) > 0:
+                    logger.warning(
+                        f"Designator used {result.get('reasoning_tokens')} reasoning tokens but produced no output. "
+                        "Consider using a non-reasoning model as designator (e.g., gpt-4o-mini)."
+                    )
+
             usage = {
                 "input_tokens": result.get("input_tokens", 0),
                 "output_tokens": result.get("output_tokens", 0),
@@ -378,6 +394,11 @@ class SmartRouterEngine:
             }
 
             logger.info(f"Router '{self.router.name}' designator selected: {selected}")
+            logger.debug(f"Designator full response: {result}")
+            if not selected:
+                logger.warning(
+                    f"Designator returned empty response. Full result: {result}"
+                )
             return selected, usage
 
         except Exception as e:

@@ -350,6 +350,11 @@ class OpenAICompatibleProvider(LLMProvider):
             kwargs["presence_penalty"] = options["presence_penalty"]
         if "frequency_penalty" in options and "frequency_penalty" not in unsupported:
             kwargs["frequency_penalty"] = options["frequency_penalty"]
+        if "reasoning_effort" in options:
+            # For OpenAI o-series reasoning models - controls thinking depth
+            # Values: "none", "low", "medium", "high"
+            # Non-reasoning models and other providers will ignore this parameter
+            kwargs["reasoning_effort"] = options["reasoning_effort"]
 
         # Log if we filtered any parameters
         filtered = [p for p in options if p in unsupported]
