@@ -224,34 +224,6 @@ content %}
                 ></span>
             </button>
 
-            <!-- Alias Filter -->
-            <button
-                @click="expandedFilter = expandedFilter === 'aliases' ? null : 'aliases'"
-                class="btn btn-sm gap-1"
-                :class="expandedFilter === 'aliases' ? 'btn-accent' : 'btn-outline'"
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                >
-                    <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                    />
-                </svg>
-                Aliases
-                <span
-                    x-show="filters.aliases.length > 0"
-                    class="badge badge-accent badge-xs"
-                    x-text="filters.aliases.length"
-                ></span>
-            </button>
-
             <!-- Status Filter -->
             <div class="join">
                 <button
@@ -406,34 +378,6 @@ content %}
                     >
                 </div>
             </div>
-
-            <!-- Aliases Panel -->
-            <div x-show="expandedFilter === 'aliases'">
-                <div class="flex flex-wrap gap-2">
-                    <template
-                        x-for="alias in filterOptions.aliases"
-                        :key="alias"
-                    >
-                        <label class="cursor-pointer">
-                            <input
-                                type="checkbox"
-                                :checked="filters.aliases.includes(alias)"
-                                @change="toggleFilter('aliases', alias)"
-                                class="hidden peer"
-                            />
-                            <span
-                                class="badge badge-lg peer-checked:badge-accent peer-checked:text-accent-content hover:opacity-80"
-                                x-text="alias"
-                            ></span>
-                        </label>
-                    </template>
-                    <span
-                        x-show="filterOptions.aliases.length === 0"
-                        class="text-sm text-base-content/60"
-                        >No aliases available</span
-                    >
-                </div>
-            </div>
         </div>
 
         <!-- Active Filters Display -->
@@ -491,17 +435,6 @@ content %}
                     </button>
                 </span>
             </template>
-            <template x-for="alias in filters.aliases" :key="'alias-' + alias">
-                <span class="badge badge-accent gap-1">
-                    <span x-text="alias"></span>
-                    <button
-                        @click="removeFilter('aliases', alias)"
-                        class="hover:text-error"
-                    >
-                        x
-                    </button>
-                </span>
-            </template>
             <span
                 x-show="filters.status"
                 class="badge gap-1"
@@ -545,9 +478,10 @@ content %}
     <div class="card bg-base-100 shadow">
         <div class="card-body p-4">
             <div class="overflow-x-auto">
-                <table class="table table-zebra table-sm">
+                <table class="table table-sm">
                     <thead>
                         <tr>
+                            <th class="w-8"></th>
                             <th
                                 class="cursor-pointer hover:bg-base-200"
                                 @click="toggleSort('timestamp')"
@@ -558,34 +492,9 @@ content %}
                                     x-text="sortDirection === 'asc' ? ' ^' : ' v'"
                                 ></span>
                             </th>
-                            <th>Client</th>
-                            <th>Tag</th>
-                            <th>Alias</th>
-                            <th>Router</th>
-                            <th>Provider</th>
                             <th>Model</th>
-                            <th>Endpoint</th>
-                            <th
-                                class="text-right cursor-pointer hover:bg-base-200"
-                                @click="toggleSort('input_tokens')"
-                            >
-                                In
-                                <span
-                                    x-show="sortColumn === 'input_tokens'"
-                                    x-text="sortDirection === 'asc' ? ' ^' : ' v'"
-                                ></span>
-                            </th>
-                            <th
-                                class="text-right cursor-pointer hover:bg-base-200"
-                                @click="toggleSort('output_tokens')"
-                            >
-                                Out
-                                <span
-                                    x-show="sortColumn === 'output_tokens'"
-                                    x-text="sortDirection === 'asc' ? ' ^' : ' v'"
-                                ></span>
-                            </th>
-                            <th>Mode</th>
+                            <th>Tags</th>
+                            <th class="text-right">Tokens</th>
                             <th
                                 class="text-right cursor-pointer hover:bg-base-200"
                                 @click="toggleSort('cost')"
@@ -600,7 +509,7 @@ content %}
                                 class="text-right cursor-pointer hover:bg-base-200"
                                 @click="toggleSort('response_time_ms')"
                             >
-                                Time (ms)
+                                Time
                                 <span
                                     x-show="sortColumn === 'response_time_ms'"
                                     x-text="sortDirection === 'asc' ? ' ^' : ' v'"
@@ -611,133 +520,174 @@ content %}
                     </thead>
                     <tbody>
                         <template x-for="log in requests" :key="log.id">
-                            <tr
-                                :class="{'bg-error/10': log.status_code >= 400}"
-                            >
-                                <td
-                                    class="whitespace-nowrap text-xs"
-                                    x-text="formatTime(log.timestamp)"
-                                ></td>
-                                <td class="text-xs">
-                                    <span
-                                        x-text="log.hostname || log.client_ip"
-                                    ></span>
-                                </td>
-                                <td>
-                                    <template
-                                        x-for="tag in (log.tag || '').split(',').filter(t => t.trim())"
-                                        :key="tag"
-                                    >
-                                        <span
-                                            class="badge badge-outline badge-xs mr-1"
-                                            x-text="tag.trim()"
-                                        ></span>
-                                    </template>
-                                    <span
-                                        x-show="!log.tag"
-                                        class="text-base-content/40"
-                                        >-</span
-                                    >
-                                </td>
-                                <td>
-                                    <span
-                                        x-show="log.alias"
-                                        class="badge badge-accent badge-outline badge-xs"
-                                        x-text="log.alias"
-                                    ></span>
-                                    <span
-                                        x-show="!log.alias"
-                                        class="text-base-content/40"
-                                        >-</span
-                                    >
-                                </td>
-                                <td>
-                                    <span
-                                        x-show="log.router_name"
-                                        class="badge badge-warning badge-outline badge-xs"
-                                        x-text="log.router_name"
-                                    ></span>
-                                    <span
-                                        x-show="log.is_designator"
-                                        class="badge badge-ghost badge-xs ml-1"
-                                        >D</span
-                                    >
-                                    <span
-                                        x-show="!log.router_name"
-                                        class="text-base-content/40"
-                                        >-</span
-                                    >
-                                </td>
-                                <td
-                                    class="text-xs"
-                                    x-text="log.provider_id"
-                                ></td>
-                                <td
-                                    class="font-mono text-xs max-w-32 truncate"
-                                    x-text="log.model_id"
-                                ></td>
-                                <td class="text-xs" x-text="log.endpoint"></td>
-                                <td class="text-right text-xs">
-                                    <div
-                                        class="tooltip tooltip-left"
-                                        :data-tip="formatTokenTooltip(log)"
-                                    >
-                                        <span x-text="log.input_tokens"></span>
-                                        <span
-                                            x-show="hasExtendedTokens(log)"
-                                            class="text-info ml-1"
-                                            >*</span
+                            <template x-fragment>
+                                <!-- Main Row -->
+                                <tr
+                                    @click="toggleExpand(log.id)"
+                                    class="cursor-pointer hover:bg-base-200"
+                                    :class="{'bg-error/10': log.status_code >= 400}"
+                                >
+                                    <td class="w-8">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 transition-transform"
+                                            :class="{'rotate-90': expandedRows.includes(log.id)}"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
                                         >
-                                    </div>
-                                </td>
-                                <td
-                                    class="text-right text-xs"
-                                    x-text="log.output_tokens"
-                                ></td>
-                                <td class="text-xs">
-                                    <span
-                                        class="badge badge-ghost badge-xs"
-                                        x-text="log.is_streaming ? 'stream' : 'sync'"
-                                    ></span>
-                                </td>
-                                <td class="text-right text-xs">
-                                    <span
-                                        x-show="log.cost !== null"
-                                        x-text="'$' + log.cost.toFixed(6)"
-                                    ></span>
-                                    <span
-                                        x-show="log.cost === null"
-                                        class="text-base-content/40"
-                                        >-</span
-                                    >
-                                </td>
-                                <td
-                                    class="text-right text-xs"
-                                    x-text="log.response_time_ms"
-                                ></td>
-                                <td>
-                                    <span
-                                        :class="{
-                                            'badge-success': log.status_code >= 200 && log.status_code < 300,
-                                            'badge-warning': log.status_code >= 300 && log.status_code < 400,
-                                            'badge-error': log.status_code >= 400
-                                        }"
-                                        class="badge badge-xs"
-                                        x-text="log.status_code"
-                                    ></span>
-                                </td>
-                            </tr>
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M9 5l7 7-7 7"
+                                            />
+                                        </svg>
+                                    </td>
+                                    <td
+                                        class="whitespace-nowrap text-xs"
+                                        x-text="formatTime(log.timestamp)"
+                                    ></td>
+                                    <td>
+                                        <div class="flex flex-col">
+                                            <span class="font-mono text-xs" x-text="log.model_id"></span>
+                                            <span class="text-xs text-base-content/50" x-text="log.provider_id"></span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <template
+                                            x-for="tag in (log.tag || '').split(',').filter(t => t.trim()).slice(0, 2)"
+                                            :key="tag"
+                                        >
+                                            <span
+                                                class="badge badge-outline badge-xs mr-1"
+                                                x-text="tag.trim()"
+                                            ></span>
+                                        </template>
+                                        <span
+                                            x-show="(log.tag || '').split(',').filter(t => t.trim()).length > 2"
+                                            class="text-xs text-base-content/50"
+                                            x-text="'+' + ((log.tag || '').split(',').filter(t => t.trim()).length - 2)"
+                                        ></span>
+                                        <span
+                                            x-show="!log.tag"
+                                            class="text-base-content/40"
+                                            >-</span
+                                        >
+                                    </td>
+                                    <td class="text-right text-xs">
+                                        <span x-text="log.input_tokens + ' / ' + log.output_tokens"></span>
+                                    </td>
+                                    <td class="text-right text-xs">
+                                        <span
+                                            x-show="log.cost !== null"
+                                            x-text="'$' + log.cost.toFixed(4)"
+                                        ></span>
+                                        <span
+                                            x-show="log.cost === null"
+                                            class="text-base-content/40"
+                                            >-</span
+                                        >
+                                    </td>
+                                    <td class="text-right text-xs">
+                                        <span x-text="formatDuration(log.response_time_ms)"></span>
+                                    </td>
+                                    <td>
+                                        <span
+                                            :class="{
+                                                'badge-success': log.status_code >= 200 && log.status_code < 300,
+                                                'badge-warning': log.status_code >= 300 && log.status_code < 400,
+                                                'badge-error': log.status_code >= 400
+                                            }"
+                                            class="badge badge-xs"
+                                            x-text="log.status_code"
+                                        ></span>
+                                    </td>
+                                </tr>
+                                <!-- Expanded Details Row -->
+                                <tr x-show="expandedRows.includes(log.id)" x-transition>
+                                    <td colspan="8" class="bg-base-200 p-0">
+                                        <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                            <!-- Client Info -->
+                                            <div>
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Client</div>
+                                                <div x-text="log.hostname || log.client_ip || '-'"></div>
+                                            </div>
+                                            <!-- Endpoint -->
+                                            <div>
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Endpoint</div>
+                                                <div class="font-mono text-xs" x-text="log.endpoint || '-'"></div>
+                                            </div>
+                                            <!-- Mode -->
+                                            <div>
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Mode</div>
+                                                <span
+                                                    class="badge badge-ghost badge-sm"
+                                                    x-text="log.is_streaming ? 'streaming' : 'sync'"
+                                                ></span>
+                                            </div>
+                                            <!-- Full Model Path -->
+                                            <div>
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Full Model</div>
+                                                <div class="font-mono text-xs" x-text="log.provider_id + '/' + log.model_id"></div>
+                                            </div>
+                                            <!-- Alias -->
+                                            <div x-show="log.alias">
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Alias</div>
+                                                <span class="badge badge-accent badge-sm" x-text="log.alias"></span>
+                                            </div>
+                                            <!-- Router -->
+                                            <div x-show="log.router_name">
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Router</div>
+                                                <span class="badge badge-warning badge-sm" x-text="log.router_name"></span>
+                                                <span
+                                                    x-show="log.is_designator"
+                                                    class="badge badge-ghost badge-xs ml-1"
+                                                    >designator</span
+                                                >
+                                            </div>
+                                            <!-- All Tags -->
+                                            <div x-show="log.tag">
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">All Tags</div>
+                                                <div class="flex flex-wrap gap-1">
+                                                    <template
+                                                        x-for="tag in (log.tag || '').split(',').filter(t => t.trim())"
+                                                        :key="tag"
+                                                    >
+                                                        <span
+                                                            class="badge badge-primary badge-sm"
+                                                            x-text="tag.trim()"
+                                                        ></span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                            <!-- Token Details -->
+                                            <div>
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Token Details</div>
+                                                <div class="text-xs space-y-1">
+                                                    <div>Input: <span class="font-mono" x-text="log.input_tokens"></span></div>
+                                                    <div>Output: <span class="font-mono" x-text="log.output_tokens"></span></div>
+                                                    <div x-show="log.reasoning_tokens">Reasoning: <span class="font-mono" x-text="log.reasoning_tokens"></span></div>
+                                                    <div x-show="log.cached_input_tokens">Cached: <span class="font-mono" x-text="log.cached_input_tokens"></span></div>
+                                                    <div x-show="log.cache_creation_tokens">Cache Write: <span class="font-mono" x-text="log.cache_creation_tokens"></span></div>
+                                                    <div x-show="log.cache_read_tokens">Cache Read: <span class="font-mono" x-text="log.cache_read_tokens"></span></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
                         </template>
                         <tr x-show="requests.length === 0 && !loading">
                             <td
-                                colspan="14"
+                                colspan="8"
                                 class="text-center text-base-content/60 py-8"
                             >
                                 No requests found for the selected filters
                             </td>
                         </tr>
                         <tr x-show="loading">
-                            <td colspan="14" class="text-center py-8">
+                            <td colspan="8" class="text-center py-8">
                                 <span
                                     class="loading loading-spinner loading-md"
                                 ></span>
@@ -832,7 +782,6 @@ content %}
                 providers: [],
                 models: [],
                 clients: [],
-                aliases: [],
                 status: null,
             },
             filterOptions: {
@@ -840,7 +789,6 @@ content %}
                 providers: [],
                 models: [],
                 clients: [],
-                aliases: [],
             },
             expandedFilter: null,
 
@@ -857,6 +805,7 @@ content %}
             // Data
             requests: [],
             loading: false,
+            expandedRows: [],
 
             // UI
             toast: { show: false, message: "", type: "info" },
@@ -890,6 +839,15 @@ content %}
                 this.dateMode = "custom";
             },
 
+            toggleExpand(id) {
+                const idx = this.expandedRows.indexOf(id);
+                if (idx === -1) {
+                    this.expandedRows.push(id);
+                } else {
+                    this.expandedRows.splice(idx, 1);
+                }
+            },
+
             buildQueryParams() {
                 const params = new URLSearchParams();
 
@@ -919,7 +877,6 @@ content %}
                 );
                 this.filters.models.forEach((m) => params.append("model", m));
                 this.filters.clients.forEach((c) => params.append("client", c));
-                this.filters.aliases.forEach((a) => params.append("alias", a));
                 if (this.filters.status)
                     params.set("status", this.filters.status);
 
@@ -947,6 +904,7 @@ content %}
 
             async loadData() {
                 this.loading = true;
+                this.expandedRows = [];
                 try {
                     const res = await fetch(
                         `/api/usage/requests?${this.buildQueryParams()}`,
@@ -990,7 +948,6 @@ content %}
                 this.filters.providers = [];
                 this.filters.models = [];
                 this.filters.clients = [];
-                this.filters.aliases = [];
                 this.filters.status = null;
                 this.expandedFilter = null;
                 this.currentPage = 1;
@@ -1003,7 +960,6 @@ content %}
                     this.filters.providers.length > 0 ||
                     this.filters.models.length > 0 ||
                     this.filters.clients.length > 0 ||
-                    this.filters.aliases.length > 0 ||
                     this.filters.status !== null
                 );
             },
@@ -1067,29 +1023,10 @@ content %}
                 return d.toLocaleString();
             },
 
-            hasExtendedTokens(log) {
-                return (
-                    log.reasoning_tokens ||
-                    log.cached_input_tokens ||
-                    log.cache_creation_tokens ||
-                    log.cache_read_tokens
-                );
-            },
-
-            formatTokenTooltip(log) {
-                let parts = [
-                    `In: ${log.input_tokens}`,
-                    `Out: ${log.output_tokens}`,
-                ];
-                if (log.reasoning_tokens)
-                    parts.push(`Reasoning: ${log.reasoning_tokens}`);
-                if (log.cached_input_tokens)
-                    parts.push(`Cached: ${log.cached_input_tokens}`);
-                if (log.cache_creation_tokens)
-                    parts.push(`Cache Write: ${log.cache_creation_tokens}`);
-                if (log.cache_read_tokens)
-                    parts.push(`Cache Read: ${log.cache_read_tokens}`);
-                return parts.join(" | ");
+            formatDuration(ms) {
+                if (ms === null || ms === undefined) return "-";
+                if (ms < 1000) return ms + "ms";
+                return (ms / 1000).toFixed(1) + "s";
             },
 
             showToast(message, type = "info") {
