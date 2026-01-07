@@ -1093,16 +1093,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        # Validate version (support 1.x, 2.x and 3.x)
-        version = data.get("version", "")
-        if not (
-            version.startswith("1.")
-            or version.startswith("2.")
-            or version.startswith("3.")
-        ):
-            return jsonify(
-                {"success": False, "error": f"Unsupported export version: {version}"}
-            ), 400
+        # No version validation - import any recognized fields, ignore unknown ones
 
         stats = {
             "settings": 0,
