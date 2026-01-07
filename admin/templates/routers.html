@@ -222,7 +222,7 @@ content %}
 
     <!-- Add/Edit Modal -->
     <div class="modal" :class="{ 'modal-open': showModal }">
-        <div class="modal-box max-w-2xl">
+        <div class="modal-box max-w-4xl">
             <h3
                 class="font-bold text-lg"
                 x-text="editingRouter ? 'Edit Smart Router' : 'Add Smart Router'"
@@ -331,16 +331,24 @@ content %}
                             + Add
                         </button>
                     </label>
+                    <!-- Column headers -->
+                    <div class="flex gap-2 items-center text-xs text-base-content/50 mb-1 px-1">
+                        <span class="flex-1">Model</span>
+                        <span class="flex-1">Notes (optional)</span>
+                        <span class="w-16 text-center" title="Fallback when designator fails">Fallback</span>
+                        <span class="w-8"></span>
+                    </div>
                     <div class="space-y-2">
                         <template
                             x-for="(candidate, index) in form.candidates"
                             :key="index"
                         >
-                            <div class="flex gap-2 items-start">
+                            <div class="flex gap-2 items-center">
                                 <select
                                     x-model="form.candidates[index].model"
                                     class="select select-bordered select-sm flex-1"
                                     required
+                                    @change="if (index === 0 && !form.fallback_model) form.fallback_model = $event.target.value"
                                 >
                                     <option value="">Select model...</option>
                                     <template
@@ -359,10 +367,20 @@ content %}
                                     class="input input-bordered input-sm flex-1"
                                     placeholder="Notes (optional)"
                                 />
+                                <div class="w-16 flex justify-center">
+                                    <input
+                                        type="radio"
+                                        name="fallback_model"
+                                        class="radio radio-sm"
+                                        :value="form.candidates[index].model"
+                                        x-model="form.fallback_model"
+                                        :disabled="!form.candidates[index].model"
+                                    />
+                                </div>
                                 <button
                                     type="button"
                                     @click="removeCandidate(index)"
-                                    class="btn btn-ghost btn-sm text-error"
+                                    class="btn btn-ghost btn-sm text-error w-8"
                                     :disabled="form.candidates.length <= 2"
                                 >
                                     <svg
@@ -388,42 +406,6 @@ content %}
                             class="label-text-alt text-error"
                             x-text="formErrors.candidates"
                         ></span>
-                    </label>
-                </div>
-
-                <!-- Fallback Model (radio buttons from candidates) -->
-                <div class="form-control mt-4">
-                    <label class="label">
-                        <span class="label-text">Fallback Model</span>
-                    </label>
-                    <div class="space-y-2 pl-1">
-                        <template x-for="(candidate, index) in form.candidates" :key="index">
-                            <label
-                                class="flex items-center gap-2 cursor-pointer"
-                                x-show="candidate.model"
-                            >
-                                <input
-                                    type="radio"
-                                    name="fallback_model"
-                                    class="radio radio-sm"
-                                    :value="candidate.model"
-                                    x-model="form.fallback_model"
-                                />
-                                <span class="font-mono text-sm" x-text="candidate.model"></span>
-                            </label>
-                        </template>
-                        <p
-                            x-show="!form.candidates.some(c => c.model)"
-                            class="text-sm text-base-content/50 italic"
-                        >
-                            Add candidate models above first
-                        </p>
-                    </div>
-                    <label class="label">
-                        <span class="label-text-alt"
-                            >Used when designator fails or returns invalid
-                            response</span
-                        >
                     </label>
                 </div>
 
