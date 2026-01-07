@@ -1733,8 +1733,9 @@ content %}
                             .filter(([k, v]) => v > 0)
                             .map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`)
                             .join(', ');
-                        this.showToast(`Imported: ${details || 'no items'}`);
-                        await this.loadSettings();
+                        this.showToast(`Imported: ${details || 'no items'}. Reloading...`);
+                        // Force full page reload to refresh all cached data
+                        setTimeout(() => window.location.reload(), 1500);
                     } else {
                         const error = await res.json();
                         this.showToast(
