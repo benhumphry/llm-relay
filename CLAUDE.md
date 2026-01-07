@@ -18,6 +18,8 @@ LLM Relay - A self-hosted proxy that unifies multiple LLM providers (Anthropic, 
 
 ```
 proxy.py              # Main Flask app with all API endpoints
+VERSION               # Single source of truth for version number
+version.py            # Module to read VERSION file
 providers/            # LLM provider implementations
   base.py             # Abstract base class for providers
   registry.py         # Model resolution and provider discovery
@@ -97,3 +99,9 @@ Migrations run automatically on startup via `db/connection.py:run_migrations()`.
 - Streaming responses use Server-Sent Events
 - Admin UI uses Alpine.js for reactivity - no build step required
 - Cost tracking uses provider-specific pricing from `db/seed.py`
+
+### Versioning
+- Edit `VERSION` file to update the version number - it propagates to:
+  - Startup log in `proxy.py`
+  - Admin UI settings page (via `version` template variable)
+  - Docker image (copied at build time)
