@@ -114,7 +114,12 @@ block content %}
                                 <span
                                     x-text="getProviderModelCount(provider.id)"
                                 ></span>
-                                models
+                                models -
+                                <span
+                                    class="font-semibold"
+                                    x-text="getProviderActiveModelCount(provider.id)"
+                                ></span>
+                                active
                             </div>
 
                             <!-- Status Badge -->
@@ -1466,6 +1471,10 @@ block content %}
 
             getProviderModelCount(providerId) {
                 return this.getProviderModels(providerId).length;
+            },
+
+            getProviderActiveModelCount(providerId) {
+                return this.getProviderModels(providerId).filter(m => !m.disabled).length;
             },
 
             getFilteredProviderModels(providerId) {
