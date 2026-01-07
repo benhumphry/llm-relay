@@ -391,27 +391,34 @@ content %}
                     </label>
                 </div>
 
-                <!-- Fallback Model -->
+                <!-- Fallback Model (radio buttons from candidates) -->
                 <div class="form-control mt-4">
                     <label class="label">
                         <span class="label-text">Fallback Model</span>
                     </label>
-                    <select
-                        x-model="form.fallback_model"
-                        class="select select-bordered"
-                        required
-                    >
-                        <option value="">Select a model...</option>
-                        <template
-                            x-for="model in availableModels"
-                            :key="model.id"
-                        >
-                            <option
-                                :value="model.id"
-                                x-text="model.id"
-                            ></option>
+                    <div class="space-y-2 pl-1">
+                        <template x-for="(candidate, index) in form.candidates" :key="index">
+                            <label
+                                class="flex items-center gap-2 cursor-pointer"
+                                x-show="candidate.model"
+                            >
+                                <input
+                                    type="radio"
+                                    name="fallback_model"
+                                    class="radio radio-sm"
+                                    :value="candidate.model"
+                                    x-model="form.fallback_model"
+                                />
+                                <span class="font-mono text-sm" x-text="candidate.model"></span>
+                            </label>
                         </template>
-                    </select>
+                        <p
+                            x-show="!form.candidates.some(c => c.model)"
+                            class="text-sm text-base-content/50 italic"
+                        >
+                            Add candidate models above first
+                        </p>
+                    </div>
                     <label class="label">
                         <span class="label-text-alt"
                             >Used when designator fails or returns invalid
