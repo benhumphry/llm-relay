@@ -286,7 +286,6 @@ block content %}
                                 <thead>
                                     <tr>
                                         <th>Model</th>
-                                        <th>Type</th>
                                         <th>Family</th>
                                         <th>Context</th>
                                         <th>Cost ($/M)</th>
@@ -312,32 +311,7 @@ block content %}
                                                     x-text="model.description"
                                                 ></div>
                                             </td>
-                                            <td :class="{ 'opacity-50': model.disabled || !model.provider_active }">
-                                                <template
-                                                    x-if="model.source === 'litellm'"
-                                                >
-                                                    <span
-                                                        class="badge badge-info badge-xs"
-                                                        >LiteLLM</span
-                                                    >
-                                                </template>
-                                                <template
-                                                    x-if="model.source === 'ollama'"
-                                                >
-                                                    <span
-                                                        class="badge badge-warning badge-xs"
-                                                        >Ollama</span
-                                                    >
-                                                </template>
-                                                <template
-                                                    x-if="model.source === 'custom'"
-                                                >
-                                                    <span
-                                                        class="badge badge-success badge-xs"
-                                                        >Custom</span
-                                                    >
-                                                </template>
-                                            </td>
+
                                             <td
                                                 class="text-sm"
                                                 :class="{ 'opacity-50': model.disabled || !model.provider_active }"
