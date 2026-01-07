@@ -66,19 +66,25 @@ Works with Open WebUI, Cursor, Continue, and any Ollama or OpenAI-compatible cli
 
 ### Providers
 
-10+ built-in providers, 700+ models:
+15 built-in providers, 700+ models:
 
 | Provider | Set Environment Variable |
 |----------|--------------------------|
 | Anthropic | `ANTHROPIC_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Google Gemini | `GOOGLE_API_KEY` |
-| Perplexity | `PERPLEXITY_API_KEY` |
-| Groq | `GROQ_API_KEY` |
 | DeepSeek | `DEEPSEEK_API_KEY` |
 | Mistral | `MISTRAL_API_KEY` |
+| Groq | `GROQ_API_KEY` |
 | xAI | `XAI_API_KEY` |
+| Perplexity | `PERPLEXITY_API_KEY` |
 | OpenRouter | `OPENROUTER_API_KEY` |
+| Fireworks | `FIREWORKS_API_KEY` |
+| Together AI | `TOGETHER_API_KEY` |
+| DeepInfra | `DEEPINFRA_API_KEY` |
+| Cerebras | `CEREBRAS_API_KEY` |
+| SambaNova | `SAMBANOVA_API_KEY` |
+| Cohere | `COHERE_API_KEY` |
 
 Plus: connect local Ollama instances and add custom OpenAI-compatible providers through the Admin UI.
 
