@@ -1838,6 +1838,35 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Request log page."""
         return render_template("requests.html")
 
+    def build_model_filter_conditions(models: list[str], model_class):
+        """Build SQLAlchemy filter conditions for model list.
+
+        Handles models that may include provider prefix (e.g., "perplexity/sonar-small-chat").
+
+        Args:
+            models: List of model identifiers (may include provider prefix)
+            model_class: SQLAlchemy model class (RequestLog or DailyStats)
+
+        Returns:
+            List of SQLAlchemy filter conditions to be used with or_()
+        """
+        from sqlalchemy import and_
+
+        conditions = []
+        for model in models:
+            if "/" in model:
+                # Split provider/model and match both
+                provider_part, model_part = model.split("/", 1)
+                conditions.append(
+                    and_(
+                        model_class.provider_id == provider_part,
+                        model_class.model_id == model_part,
+                    )
+                )
+            else:
+                conditions.append(model_class.model_id == model)
+        return conditions
+
     def parse_usage_filters():
         """Parse common filter parameters from request args.
 
@@ -2038,7 +2067,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
 
                 if filters["models"]:
-                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+                    model_conditions = build_model_filter_conditions(
+                        filters["models"], RequestLog
+                    )
+                    if model_conditions:
+                        query = query.filter(or_(*model_conditions))
 
                 if filters["clients"]:
                     # Filter by client (hostname or IP)
@@ -2138,7 +2171,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
 
                 if filters["models"]:
-                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+                    model_conditions = build_model_filter_conditions(
+                        filters["models"], RequestLog
+                    )
+                    if model_conditions:
+                        query = query.filter(or_(*model_conditions))
 
                 if filters["clients"]:
                     client_conditions = []
@@ -2257,7 +2294,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     query = query.filter(or_(*tag_conditions))
 
                 if filters["models"]:
-                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+                    model_conditions = build_model_filter_conditions(
+                        filters["models"], RequestLog
+                    )
+                    if model_conditions:
+                        query = query.filter(or_(*model_conditions))
 
                 if filters["clients"]:
                     client_conditions = []
@@ -2395,7 +2436,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
 
                 if filters["models"]:
-                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+                    model_conditions = build_model_filter_conditions(
+                        filters["models"], RequestLog
+                    )
+                    if model_conditions:
+                        query = query.filter(or_(*model_conditions))
 
                 results = (
                     query.group_by(RequestLog.provider_id, RequestLog.model_id)
@@ -2443,7 +2488,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
 
                 if filters["models"]:
-                    query = query.filter(DailyStats.model_id.in_(filters["models"]))
+                    model_conditions = build_model_filter_conditions(
+                        filters["models"], DailyStats
+                    )
+                    if model_conditions:
+                        query = query.filter(or_(*model_conditions))
 
                 results = (
                     query.group_by(DailyStats.provider_id, DailyStats.model_id)
@@ -2504,7 +2553,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 query = query.filter(RequestLog.provider_id.in_(filters["providers"]))
 
             if filters["models"]:
-                query = query.filter(RequestLog.model_id.in_(filters["models"]))
+                model_conditions = build_model_filter_conditions(
+                    filters["models"], RequestLog
+                )
+                if model_conditions:
+                    query = query.filter(or_(*model_conditions))
 
             if filters["clients"]:
                 client_conditions = []
@@ -2583,7 +2636,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
 
                 if filters["models"]:
-                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+                    model_conditions = build_model_filter_conditions(
+                        filters["models"], RequestLog
+                    )
+                    if model_conditions:
+                        query = query.filter(or_(*model_conditions))
 
                 if filters["clients"]:
                     client_conditions = []
@@ -2706,7 +2763,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
 
                 if filters["models"]:
-                    query = query.filter(RequestLog.model_id.in_(filters["models"]))
+                    model_conditions = build_model_filter_conditions(
+                        filters["models"], RequestLog
+                    )
+                    if model_conditions:
+                        query = query.filter(or_(*model_conditions))
 
                 if filters["clients"]:
                     client_conditions = []
@@ -2842,7 +2903,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 query = query.filter(RequestLog.provider_id.in_(providers))
 
             if models:
-                query = query.filter(RequestLog.model_id.in_(models))
+                model_conditions = build_model_filter_conditions(models, RequestLog)
+                if model_conditions:
+                    query = query.filter(or_(*model_conditions))
 
             logs = query.order_by(RequestLog.timestamp.desc()).all()
 
@@ -2975,7 +3038,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 query = query.filter(RequestLog.provider_id.in_(providers))
 
             if models:
-                query = query.filter(RequestLog.model_id.in_(models))
+                model_conditions = build_model_filter_conditions(models, RequestLog)
+                if model_conditions:
+                    query = query.filter(or_(*model_conditions))
 
             if clients:
                 client_conditions = []
