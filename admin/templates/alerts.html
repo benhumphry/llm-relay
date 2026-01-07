@@ -242,8 +242,28 @@ content %}
                                                 </svg>
                                                 Disable
                                             </button>
+                                            <button
+                                                @click="dismissAlert(alert)"
+                                                class="btn btn-ghost btn-xs"
+                                                title="Dismiss this alert for 24 hours"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M6 18L18 6M6 6l12 12"
+                                                    />
+                                                </svg>
+                                            </button>
                                             <a
-                                                :href="'/admin/requests?models=' + encodeURIComponent(alert.model_id)"
+                                                :href="'/admin/requests?models=' + encodeURIComponent(alert.provider_id + '/' + alert.model_id)"
                                                 class="btn btn-ghost btn-xs"
                                                 title="View requests"
                                             >
@@ -303,8 +323,10 @@ content %}
                 warning: 0,
                 total: 0
             },
+            dismissedAlerts: {},
 
             async init() {
+                this.loadDismissed();
                 await this.loadAlerts();
             },
 
@@ -313,14 +335,67 @@ content %}
                 this.loadAlerts();
             },
 
+            loadDismissed() {
+                try {
+                    const stored = localStorage.getItem('dismissedAlerts');
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        // Clean up expired dismissals (older than 24 hours)
+                        const now = Date.now();
+                        const valid = {};
+                        for (const [key, expiry] of Object.entries(parsed)) {
+                            if (expiry > now) {
+                                valid[key] = expiry;
+                            }
+                        }
+                        this.dismissedAlerts = valid;
+                        localStorage.setItem('dismissedAlerts', JSON.stringify(valid));
+                    }
+                } catch (e) {
+                    this.dismissedAlerts = {};
+                }
+            },
+
+            getAlertKey(alert) {
+                return `${alert.provider_id}/${alert.model_id}/${alert.status_code}`;
+            },
+
+            isDismissed(alert) {
+                const key = this.getAlertKey(alert);
+                const expiry = this.dismissedAlerts[key];
+                return expiry && expiry > Date.now();
+            },
+
+            dismissAlert(alert) {
+                const key = this.getAlertKey(alert);
+                // Dismiss for 24 hours
+                this.dismissedAlerts[key] = Date.now() + (24 * 60 * 60 * 1000);
+                localStorage.setItem('dismissedAlerts', JSON.stringify(this.dismissedAlerts));
+                // Remove from visible alerts
+                this.alerts = this.alerts.filter(a => this.getAlertKey(a) !== key);
+                // Update summary
+                if (alert.severity === 'critical') {
+                    this.summary.critical = Math.max(0, this.summary.critical - 1);
+                } else {
+                    this.summary.warning = Math.max(0, this.summary.warning - 1);
+                }
+            },
+
             async loadAlerts() {
                 this.loading = true;
                 try {
                     const response = await fetch(`/api/alerts?hours=${this.hours}`);
                     if (response.ok) {
                         const data = await response.json();
-                        this.alerts = data.alerts || [];
-                        this.summary = data.summary || { critical: 0, warning: 0, total: 0 };
+                        // Filter out dismissed alerts
+                        const allAlerts = data.alerts || [];
+                        this.alerts = allAlerts.filter(a => !this.isDismissed(a));
+                        // Recalculate summary based on visible alerts
+                        this.summary = {
+                            critical: this.alerts.filter(a => a.severity === 'critical').length,
+                            warning: this.alerts.filter(a => a.severity === 'warning').length,
+                            total: this.alerts.length
+                        };
                     }
                 } catch (error) {
                     console.error('Failed to load alerts:', error);
