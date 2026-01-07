@@ -1246,13 +1246,36 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         from providers.loader import get_provider_config
         from providers.ollama_provider import OllamaProvider
 
-        # Count models from hybrid system
+        # Count providers from registry
+        all_providers = registry.get_all_providers()
+        provider_count = len(all_providers)
+
+        # Build set of configured provider names (have API key or don't need one)
+        configured_providers = set()
+        for provider in all_providers:
+            # Check if this is an Ollama-type provider (doesn't need API key)
+            if isinstance(provider, OllamaProvider):
+                # Ollama providers are configured if they're running/reachable
+                if provider.is_configured():
+                    configured_providers.add(provider.name)
+            else:
+                # Other providers need an API key
+                config = get_provider_config(provider.name)
+                api_key_env = config.get("api_key_env")
+                if api_key_env and os.environ.get(api_key_env):
+                    configured_providers.add(provider.name)
+
+        # Count models - only from configured providers
         total_models = 0
         enabled_models = 0
         system_models = 0
         custom_models = 0
 
         for prov_name in get_all_provider_names():
+            # Skip unconfigured providers
+            if prov_name not in configured_providers:
+                continue
+
             models = get_all_models_with_metadata(prov_name)
 
             total_models += len(models)
@@ -1260,31 +1283,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             system_models += sum(1 for m in models if m.get("is_system", True))
             custom_models += sum(1 for m in models if not m.get("is_system", True))
 
-        # Count providers from registry
-        all_providers = registry.get_all_providers()
-        provider_count = len(all_providers)
-
-        # Count configured providers (have API key or don't need one)
-        configured = 0
-        for provider in all_providers:
-            # Check if this is an Ollama-type provider (doesn't need API key)
-            if isinstance(provider, OllamaProvider):
-                # Ollama providers are configured if they're running/reachable
-                if provider.is_configured():
-                    configured += 1
-            else:
-                # Other providers need an API key
-                config = get_provider_config(provider.name)
-                api_key_env = config.get("api_key_env")
-                if api_key_env and os.environ.get(api_key_env):
-                    configured += 1
-
         return jsonify(
             {
                 "providers": {
                     "total": provider_count,
                     "enabled": provider_count,  # All registered providers are enabled
-                    "configured": configured,
+                    "configured": len(configured_providers),
                 },
                 "models": {
                     "total": total_models,
