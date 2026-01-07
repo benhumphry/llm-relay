@@ -71,7 +71,9 @@ def _find_best_description_match(
     1. Exact match: provider/model_id
     2. Exact match: model_id only
     3. Cross-provider match: Try common provider name variations
-    4. Base model match: Strip date/version suffixes only (not variant suffixes)
+    4. Base model match (both directions):
+       - Strip suffixes from our model to find base in descriptions
+       - Find descriptions with dated suffixes that match our base model
 
     For base model matching, a description for "claude-3-opus" should apply to:
     - claude-3-opus-20250101 (dated version)
@@ -111,11 +113,11 @@ def _find_best_description_match(
         if alias_key in descriptions:
             return descriptions[alias_key]
 
-    # Try base model matching for dated/versioned models ONLY
-    # These are suffixes that indicate the same model at a different point in time
+    # Version/date suffixes that indicate the same model at different points in time
     # NOT variant suffixes like -mini, -pro, -turbo which are different models
     version_suffixes = [
         r"-\d{8}$",  # -20240229 (8-digit date suffix)
+        r"-\d{2}-\d{4}$",  # -08-2024 (MM-YYYY suffix)
         r"-\d{4}-\d{2}-\d{2}$",  # -2024-02-29 (ISO date)
         r"-latest$",  # -latest
         r"-preview$",  # -preview
@@ -123,25 +125,42 @@ def _find_best_description_match(
         r"-exp$",  # -exp (experimental)
         r"-experimental$",  # -experimental
     ]
-    # Note: We intentionally DON'T strip these as they indicate different models:
-    # -mini, -pro, -turbo, -plus, -ultra, -lite, -small, -medium, -large
-    # -0125, -0314 etc (4-digit) are ambiguous - could be dates or versions, skip them
 
+    providers_to_try = [provider_id] + provider_aliases.get(provider_id, [])
+
+    # Strategy A: Strip suffixes from OUR model to find base in descriptions
     for suffix_pattern in version_suffixes:
         match = re.search(suffix_pattern, model_id, re.IGNORECASE)
         if match:
-            # Extract base model name
             base_model = model_id[: match.start()]
-
-            # Try to find description for base model (with all provider variations)
-            providers_to_try = [provider_id] + provider_aliases.get(provider_id, [])
             for prov in providers_to_try:
                 base_full_key = f"{prov}/{base_model}"
                 if base_full_key in descriptions:
                     return descriptions[base_full_key]
-
             if base_model in descriptions:
                 return descriptions[base_model]
+
+    # Strategy B: Find descriptions with dated suffixes that match our base model
+    # e.g., our model is "command-r-plus", find "cohere/command-r-plus-08-2024"
+    for desc_key, desc_value in descriptions.items():
+        # Extract provider and model from description key
+        if "/" in desc_key:
+            desc_provider, desc_model = desc_key.split("/", 1)
+        else:
+            desc_provider = None
+            desc_model = desc_key
+
+        # Check if provider matches (or is an alias)
+        if desc_provider and desc_provider not in providers_to_try:
+            continue
+
+        # Check if stripping suffix from description model matches our model
+        for suffix_pattern in version_suffixes:
+            match = re.search(suffix_pattern, desc_model, re.IGNORECASE)
+            if match:
+                base_desc_model = desc_model[: match.start()]
+                if base_desc_model == model_id:
+                    return desc_value
 
     # No match found
     return None
