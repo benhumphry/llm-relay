@@ -1282,13 +1282,13 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 if is_enabled:
                     active_providers.add(provider.name)
 
-        # Count available models (from configured providers, regardless of enabled)
+        # Count available models (all models from configured providers)
         available_models = 0
         for prov_name in get_all_provider_names():
             if prov_name not in configured_providers:
                 continue
             models = get_all_models_with_metadata(prov_name)
-            available_models += sum(1 for m in models if m.get("enabled", True))
+            available_models += len(models)
 
         # Count active models (from active providers - enabled AND configured)
         active_models = 0
