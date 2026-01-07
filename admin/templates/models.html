@@ -302,14 +302,20 @@ block content %}
                                             class="hover"
                                         >
                                             <td :class="{ 'opacity-50': model.disabled || !model.provider_active }">
-                                                <div
-                                                    class="font-medium"
-                                                    x-text="model.id"
-                                                ></div>
-                                                <div
-                                                    class="text-xs text-base-content/60 max-w-xs truncate"
-                                                    x-text="model.description"
-                                                ></div>
+                                                <div class="flex items-center gap-1.5">
+                                                    <span
+                                                        class="font-medium"
+                                                        x-text="model.id"
+                                                    ></span>
+                                                    <!-- Description indicator -->
+                                                    <template x-if="model.description || model.system_description">
+                                                        <div class="tooltip tooltip-right max-w-sm" :data-tip="model.description || model.system_description">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-info opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                            </svg>
+                                                        </div>
+                                                    </template>
+                                                </div>
                                             </td>
 
                                             <td
@@ -1097,14 +1103,23 @@ block content %}
 
                 <!-- Description override -->
                 <div class="form-control">
-                    <label class="label"
-                        ><span class="label-text">Description</span></label
-                    >
+                    <label class="label">
+                        <span class="label-text">Description</span>
+                        <template x-if="overrideForm.system_description">
+                            <span class="label-text-alt text-success">Has synced description</span>
+                        </template>
+                    </label>
+                    <!-- Show system description if exists -->
+                    <template x-if="overrideForm.system_description && !overrideForm.description">
+                        <div class="bg-base-200 rounded-lg p-3 mb-2 text-sm text-base-content/70">
+                            <span x-text="overrideForm.system_description"></span>
+                        </div>
+                    </template>
                     <textarea
                         x-model="overrideForm.description"
                         class="textarea textarea-bordered"
                         rows="2"
-                        :placeholder="overrideForm.system_description || 'No description'"
+                        :placeholder="overrideForm.system_description ? 'Override description (leave empty to use synced)' : 'No description available'"
                     ></textarea>
                 </div>
 
