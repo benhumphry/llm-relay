@@ -434,7 +434,7 @@ def get_available_description_providers() -> list[dict]:
 
 def fetch_all_provider_descriptions(
     provider_filter: str | None = None,
-) -> dict[str, dict[str, str]]:
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """
     Fetch descriptions from configured providers.
 
@@ -442,9 +442,12 @@ def fetch_all_provider_descriptions(
         provider_filter: If set, only fetch from this provider
 
     Returns:
-        Dict mapping provider_id to {model_id: description}
+        Tuple of:
+        - Dict mapping provider_id to {model_id: description}
+        - Dict mapping provider_id to status ("success", "no_descriptions", "no_api_key", "error")
     """
     all_descriptions = {}
+    status = {}
 
     for provider_id, (env_var, fetch_func) in PROVIDER_FETCH_CONFIG.items():
         # Skip if filtering to a specific provider
@@ -452,12 +455,22 @@ def fetch_all_provider_descriptions(
             continue
 
         api_key = os.environ.get(env_var)
-        if api_key:
+        if not api_key:
+            status[provider_id] = "no_api_key"
+            continue
+
+        try:
             descriptions = fetch_func(api_key)
             if descriptions:
                 all_descriptions[provider_id] = descriptions
+                status[provider_id] = "success"
+            else:
+                status[provider_id] = "no_descriptions"
+        except Exception as e:
+            logger.warning(f"Error fetching from {provider_id}: {e}")
+            status[provider_id] = "error"
 
-    return all_descriptions
+    return all_descriptions, status
 
 
 def sync_model_descriptions(
@@ -479,7 +492,12 @@ def sync_model_descriptions(
     Returns:
         Dict with sync statistics
     """
-    stats = {"updated": 0, "skipped": 0, "providers_synced": []}
+    stats = {
+        "updated": 0,
+        "skipped": 0,
+        "providers_synced": [],
+        "providers_attempted": {},
+    }
 
     # Determine what to fetch
     fetch_providers = provider != "openrouter"
@@ -487,15 +505,20 @@ def sync_model_descriptions(
 
     # Step 1: Fetch from individual providers (if not OpenRouter-only)
     provider_descriptions = {}
+    provider_status = {}
     if fetch_providers:
-        provider_descriptions = fetch_all_provider_descriptions(
+        provider_descriptions, provider_status = fetch_all_provider_descriptions(
             provider_filter=provider if provider and provider != "openrouter" else None
         )
+        stats["providers_attempted"].update(provider_status)
 
     # Step 2: Fetch from OpenRouter (public API) if included
     openrouter_descriptions = {}
     if fetch_openrouter:
         openrouter_descriptions = fetch_openrouter_descriptions()
+        stats["providers_attempted"]["openrouter"] = (
+            "success" if openrouter_descriptions else "no_descriptions"
+        )
 
     # Step 3: Update database
     with get_db_context() as db:

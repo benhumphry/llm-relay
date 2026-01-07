@@ -3326,6 +3326,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "updated": stats["updated"],
                     "skipped": stats["skipped"],
                     "providers_synced": stats["providers_synced"],
+                    "providers_attempted": stats.get("providers_attempted", {}),
                 }
             )
         except Exception as e:

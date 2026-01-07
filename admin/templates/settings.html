@@ -1005,9 +1005,29 @@ content %}
                                     </div>
                                 </template>
                             </div>
-                            <template x-if="descSyncResults.success && descSyncResults.providers_synced">
-                                <div class="text-xs text-base-content/60">
-                                    Sources: <span x-text="descSyncResults.providers_synced.join(', ')"></span>
+                            <!-- Provider status details -->
+                            <template x-if="descSyncResults.success && descSyncResults.providers_attempted">
+                                <div class="text-xs space-y-1">
+                                    <template x-for="(status, provider) in descSyncResults.providers_attempted" :key="provider">
+                                        <div class="flex items-center gap-2">
+                                            <span
+                                                class="w-2 h-2 rounded-full"
+                                                :class="{
+                                                    'bg-success': status === 'success',
+                                                    'bg-warning': status === 'no_descriptions',
+                                                    'bg-base-content/30': status === 'no_api_key',
+                                                    'bg-error': status === 'error'
+                                                }"
+                                            ></span>
+                                            <span class="font-medium" x-text="provider"></span>
+                                            <span class="text-base-content/50" x-text="
+                                                status === 'success' ? 'has descriptions' :
+                                                status === 'no_descriptions' ? 'no descriptions in API' :
+                                                status === 'no_api_key' ? 'no API key' :
+                                                status === 'error' ? 'fetch failed' : status
+                                            "></span>
+                                        </div>
+                                    </template>
                                 </div>
                             </template>
                         </div>
