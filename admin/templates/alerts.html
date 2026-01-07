@@ -1,0 +1,388 @@
+{% extends "base.html" %} {% block title %}Alerts{% endblock %} {% block
+content %}
+<div x-data="alertsPage()" x-init="init()">
+    <!-- Header -->
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
+        <div>
+            <h1 class="text-2xl font-bold">System Alerts</h1>
+            <p class="text-base-content/60">
+                Monitor model errors and health issues
+            </p>
+        </div>
+        <div class="flex gap-2 items-center">
+            <!-- Time Period -->
+            <div class="join">
+                <button
+                    @click="setPeriod(1)"
+                    :class="{'btn-active': hours === 1}"
+                    class="btn btn-sm join-item"
+                >
+                    1h
+                </button>
+                <button
+                    @click="setPeriod(6)"
+                    :class="{'btn-active': hours === 6}"
+                    class="btn btn-sm join-item"
+                >
+                    6h
+                </button>
+                <button
+                    @click="setPeriod(24)"
+                    :class="{'btn-active': hours === 24}"
+                    class="btn btn-sm join-item"
+                >
+                    24h
+                </button>
+                <button
+                    @click="setPeriod(72)"
+                    :class="{'btn-active': hours === 72}"
+                    class="btn btn-sm join-item"
+                >
+                    3d
+                </button>
+            </div>
+            <button @click="loadAlerts()" class="btn btn-sm btn-outline">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                    />
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <!-- Critical -->
+        <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-figure text-error">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-8 w-8"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
+                </svg>
+            </div>
+            <div class="stat-title">Critical</div>
+            <div class="stat-value text-error" x-text="summary.critical">0</div>
+            <div class="stat-desc">Model not found / Auth errors</div>
+        </div>
+
+        <!-- Warnings -->
+        <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-figure text-warning">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-8 w-8"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                </svg>
+            </div>
+            <div class="stat-title">Warnings</div>
+            <div class="stat-value text-warning" x-text="summary.warning">0</div>
+            <div class="stat-desc">Rate limits / Server errors</div>
+        </div>
+
+        <!-- Period -->
+        <div class="stat bg-base-100 rounded-box shadow">
+            <div class="stat-figure text-base-content/30">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-8 w-8"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                </svg>
+            </div>
+            <div class="stat-title">Time Period</div>
+            <div class="stat-value" x-text="hours + 'h'">24h</div>
+            <div class="stat-desc">Errors in the last <span x-text="hours">24</span> hours</div>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <template x-if="loading">
+        <div class="flex justify-center py-12">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    </template>
+
+    <!-- No Alerts -->
+    <template x-if="!loading && alerts.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-success"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium text-success">All Systems Healthy</h3>
+                <p class="mt-2 text-base-content/60">
+                    No model errors detected in the last <span x-text="hours">24</span> hours.
+                </p>
+            </div>
+        </div>
+    </template>
+
+    <!-- Alerts Table -->
+    <template x-if="!loading && alerts.length > 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body p-0">
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra">
+                        <thead>
+                            <tr>
+                                <th>Severity</th>
+                                <th>Model</th>
+                                <th>Error Type</th>
+                                <th>Count</th>
+                                <th>Last Seen</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="alert in alerts" :key="alert.provider_id + '/' + alert.model_id + '/' + alert.status_code">
+                                <tr>
+                                    <td>
+                                        <span
+                                            class="badge"
+                                            :class="alert.severity === 'critical' ? 'badge-error' : 'badge-warning'"
+                                            x-text="alert.severity"
+                                        ></span>
+                                    </td>
+                                    <td>
+                                        <div class="font-mono text-sm">
+                                            <span class="text-base-content/50" x-text="alert.provider_id + '/'"></span>
+                                            <span x-text="alert.model_id"></span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div>
+                                            <span class="font-medium" x-text="alert.error_description"></span>
+                                            <span class="text-base-content/50 text-xs ml-1" x-text="'(' + alert.status_code + ')'"></span>
+                                        </div>
+                                        <div
+                                            x-show="alert.error_message"
+                                            class="text-xs text-base-content/50 truncate max-w-xs"
+                                            x-text="alert.error_message"
+                                            :title="alert.error_message"
+                                        ></div>
+                                    </td>
+                                    <td>
+                                        <span class="font-mono" x-text="alert.count"></span>
+                                        <span class="text-base-content/50 text-xs">errors</span>
+                                    </td>
+                                    <td>
+                                        <span class="text-sm" x-text="formatTime(alert.last_seen)"></span>
+                                    </td>
+                                    <td>
+                                        <div class="flex gap-1">
+                                            <button
+                                                @click="disableModel(alert)"
+                                                class="btn btn-ghost btn-xs text-error"
+                                                title="Disable this model"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                                                    />
+                                                </svg>
+                                                Disable
+                                            </button>
+                                            <a
+                                                :href="'/admin/requests?models=' + encodeURIComponent(alert.model_id)"
+                                                class="btn btn-ghost btn-xs"
+                                                title="View requests"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                                    />
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                                                    />
+                                                </svg>
+                                                View
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Help Text -->
+    <div class="mt-6 text-sm text-base-content/50">
+        <h4 class="font-medium mb-2">Alert Types:</h4>
+        <ul class="list-disc list-inside space-y-1">
+            <li><span class="badge badge-error badge-xs">critical</span> <strong>Model not found (404)</strong> - The model ID doesn't exist at the provider</li>
+            <li><span class="badge badge-error badge-xs">critical</span> <strong>Auth error (401/403)</strong> - API key is invalid or lacks permissions</li>
+            <li><span class="badge badge-warning badge-xs">warning</span> <strong>Rate limited (429)</strong> - Too many requests, consider load balancing</li>
+            <li><span class="badge badge-warning badge-xs">warning</span> <strong>Server error (5xx)</strong> - Provider is experiencing issues</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+    function alertsPage() {
+        return {
+            loading: true,
+            hours: 24,
+            alerts: [],
+            summary: {
+                critical: 0,
+                warning: 0,
+                total: 0
+            },
+
+            async init() {
+                await this.loadAlerts();
+            },
+
+            setPeriod(h) {
+                this.hours = h;
+                this.loadAlerts();
+            },
+
+            async loadAlerts() {
+                this.loading = true;
+                try {
+                    const response = await fetch(`/admin/api/alerts?hours=${this.hours}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.alerts = data.alerts || [];
+                        this.summary = data.summary || { critical: 0, warning: 0, total: 0 };
+                    }
+                } catch (error) {
+                    console.error('Failed to load alerts:', error);
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            formatTime(isoString) {
+                if (!isoString) return 'Unknown';
+                const date = new Date(isoString);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+
+                if (diffMins < 1) return 'Just now';
+                if (diffMins < 60) return `${diffMins}m ago`;
+                if (diffHours < 24) return `${diffHours}h ago`;
+                return date.toLocaleDateString();
+            },
+
+            async disableModel(alert) {
+                if (!confirm(`Disable model ${alert.provider_id}/${alert.model_id}?\n\nThis will prevent the model from being used until re-enabled.`)) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/admin/api/models/override', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            provider_id: alert.provider_id,
+                            model_id: alert.model_id,
+                            disabled: true
+                        })
+                    });
+
+                    if (response.ok) {
+                        // Remove from alerts list
+                        this.alerts = this.alerts.filter(a =>
+                            !(a.provider_id === alert.provider_id &&
+                              a.model_id === alert.model_id &&
+                              a.status_code === alert.status_code)
+                        );
+                        // Update summary
+                        if (alert.severity === 'critical') {
+                            this.summary.critical = Math.max(0, this.summary.critical - 1);
+                        } else {
+                            this.summary.warning = Math.max(0, this.summary.warning - 1);
+                        }
+                        this.summary.total = Math.max(0, this.summary.total - 1);
+                    } else {
+                        const data = await response.json();
+                        alert('Failed to disable model: ' + (data.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    console.error('Failed to disable model:', error);
+                    alert('Failed to disable model');
+                }
+            }
+        };
+    }
+</script>
+{% endblock %}

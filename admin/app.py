@@ -3814,4 +3814,167 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
             return jsonify(result)
 
+    # -------------------------------------------------------------------------
+    # Alerts API (System Health Monitoring)
+    # -------------------------------------------------------------------------
+
+    def _categorize_error(status_code: int) -> str:
+        """Categorize HTTP status code into error type."""
+        if status_code == 404:
+            return "not_found"
+        elif status_code in (401, 403):
+            return "auth_error"
+        elif status_code == 429:
+            return "rate_limit"
+        elif 500 <= status_code < 600:
+            return "server_error"
+        else:
+            return "error"
+
+    def _get_error_description(error_type: str) -> str:
+        """Get human-readable description for error type."""
+        descriptions = {
+            "not_found": "Model not found",
+            "auth_error": "Authentication failed",
+            "rate_limit": "Rate limited",
+            "server_error": "Server error",
+            "error": "Request failed",
+        }
+        return descriptions.get(error_type, "Unknown error")
+
+    @admin.route("/alerts")
+    @require_auth
+    def alerts_page():
+        """Alerts management page."""
+        return render_template("alerts.html")
+
+    @admin.route("/api/alerts", methods=["GET"])
+    @require_auth_api
+    def get_alerts():
+        """Get model alerts based on recent errors in request logs."""
+        from datetime import timedelta
+
+        from sqlalchemy import func
+
+        hours = int(request.args.get("hours", 24))
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+        with get_db_context() as db:
+            # Query errors grouped by provider, model, and status code
+            errors = (
+                db.query(
+                    RequestLog.provider_id,
+                    RequestLog.model_id,
+                    RequestLog.status_code,
+                    func.count().label("count"),
+                    func.max(RequestLog.timestamp).label("last_seen"),
+                    func.max(RequestLog.error_message).label("error_message"),
+                )
+                .filter(
+                    RequestLog.timestamp >= cutoff,
+                    RequestLog.status_code >= 400,
+                    RequestLog.provider_id.isnot(None),
+                    RequestLog.model_id.isnot(None),
+                )
+                .group_by(
+                    RequestLog.provider_id,
+                    RequestLog.model_id,
+                    RequestLog.status_code,
+                )
+                .all()
+            )
+
+            alerts = []
+            critical_count = 0
+            warning_count = 0
+
+            for error in errors:
+                error_type = _categorize_error(error.status_code)
+                # 404 and auth errors are critical (model doesn't exist or API key issue)
+                severity = (
+                    "critical" if error.status_code in (404, 401, 403) else "warning"
+                )
+
+                if severity == "critical":
+                    critical_count += 1
+                else:
+                    warning_count += 1
+
+                alerts.append(
+                    {
+                        "provider_id": error.provider_id,
+                        "model_id": error.model_id,
+                        "status_code": error.status_code,
+                        "error_type": error_type,
+                        "error_description": _get_error_description(error_type),
+                        "error_message": error.error_message,
+                        "count": error.count,
+                        "last_seen": error.last_seen.isoformat()
+                        if error.last_seen
+                        else None,
+                        "severity": severity,
+                    }
+                )
+
+            # Sort by severity (critical first) then by count
+            alerts.sort(
+                key=lambda x: (0 if x["severity"] == "critical" else 1, -x["count"])
+            )
+
+            return jsonify(
+                {
+                    "alerts": alerts,
+                    "summary": {
+                        "critical": critical_count,
+                        "warning": warning_count,
+                        "total": len(alerts),
+                    },
+                    "period_hours": hours,
+                }
+            )
+
+    @admin.route("/api/alerts/count", methods=["GET"])
+    @require_auth_api
+    def get_alerts_count():
+        """Get count of alerts for badge display (lightweight query)."""
+        from datetime import timedelta
+
+        from sqlalchemy import func
+
+        hours = int(request.args.get("hours", 24))
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+        with get_db_context() as db:
+            # Count distinct model/status combinations with errors
+            critical_count = (
+                db.query(func.count(func.distinct(RequestLog.model_id)))
+                .filter(
+                    RequestLog.timestamp >= cutoff,
+                    RequestLog.status_code.in_([404, 401, 403]),
+                    RequestLog.model_id.isnot(None),
+                )
+                .scalar()
+                or 0
+            )
+
+            warning_count = (
+                db.query(func.count(func.distinct(RequestLog.model_id)))
+                .filter(
+                    RequestLog.timestamp >= cutoff,
+                    RequestLog.status_code >= 400,
+                    ~RequestLog.status_code.in_([404, 401, 403]),
+                    RequestLog.model_id.isnot(None),
+                )
+                .scalar()
+                or 0
+            )
+
+            return jsonify(
+                {
+                    "critical": critical_count,
+                    "warning": warning_count,
+                    "total": critical_count + warning_count,
+                }
+            )
+
     return admin
