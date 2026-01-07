@@ -1318,6 +1318,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     if existing:
                         existing.enabled = p.get("enabled", True)
                         stats["providers"] += 1
+                db.flush()  # Ensure provider changes are written
 
                 # Import request logs (if present)
                 for log in data.get("request_logs", []):
