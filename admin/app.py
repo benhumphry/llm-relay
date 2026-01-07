@@ -3869,7 +3869,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     # Alerts API (System Health Monitoring)
     # -------------------------------------------------------------------------
 
-    def _categorize_error(status_code: int) -> str:
+    def _categorize_error(status_code: int, error_message: str | None = None) -> str:
         """Categorize HTTP status code into error type."""
         if status_code == 404:
             return "not_found"
@@ -3879,6 +3879,21 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return "rate_limit"
         elif 500 <= status_code < 600:
             return "server_error"
+        elif status_code == 400 and error_message:
+            # Check if the 400 error is actually a model not found error
+            msg_lower = error_message.lower()
+            if any(
+                phrase in msg_lower
+                for phrase in [
+                    "invalid model",
+                    "model not found",
+                    "model does not exist",
+                    "unknown model",
+                    "no such model",
+                ]
+            ):
+                return "not_found"
+            return "bad_request"
         else:
             return "error"
 
@@ -3889,6 +3904,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "auth_error": "Authentication failed",
             "rate_limit": "Rate limited",
             "server_error": "Server error",
+            "bad_request": "Bad request",
             "error": "Request failed",
         }
         return descriptions.get(error_type, "Unknown error")
@@ -3940,10 +3956,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             warning_count = 0
 
             for error in errors:
-                error_type = _categorize_error(error.status_code)
-                # 404 and auth errors are critical (model doesn't exist or API key issue)
+                error_type = _categorize_error(error.status_code, error.error_message)
+                # Model not found and auth errors are critical
                 severity = (
-                    "critical" if error.status_code in (404, 401, 403) else "warning"
+                    "critical"
+                    if error_type in ("not_found", "auth_error")
+                    else "warning"
                 )
 
                 if severity == "critical":
