@@ -190,17 +190,19 @@ def fetch_anthropic_descriptions(api_key: str) -> dict[str, str]:
     """
     Fetch model info from Anthropic's API.
 
-    Note: Anthropic only returns display_name, not descriptions.
-    We still fetch to get the current model list.
+    Note: Anthropic only returns display_name, not actual descriptions.
+    The display_name is just the model ID formatted, not useful as a description.
+    We return an empty dict since there are no real descriptions to sync.
 
     Args:
         api_key: Anthropic API key
 
     Returns:
-        Dict mapping model_id to display_name (not rich description)
+        Empty dict - Anthropic doesn't provide descriptions
     """
-    descriptions = {}
-
+    # Anthropic's API only returns display_name which is just the model ID
+    # (e.g., "claude-3-opus-20240229") - not a useful description.
+    # OpenRouter provides actual descriptions for Anthropic models.
     try:
         with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
             response = client.get(
@@ -209,22 +211,13 @@ def fetch_anthropic_descriptions(api_key: str) -> dict[str, str]:
             )
             response.raise_for_status()
             data = response.json()
-
-            for model in data.get("data", []):
-                model_id = model.get("id", "")
-                display_name = model.get("display_name", "")
-
-                if model_id and display_name:
-                    # Anthropic doesn't have descriptions, just display names
-                    # We'll use this as a fallback if no OpenRouter description
-                    descriptions[model_id] = display_name
-
-            logger.info(f"Fetched {len(descriptions)} model names from Anthropic")
-
+            logger.info(
+                f"Anthropic has {len(data.get('data', []))} models (no descriptions in API)"
+            )
     except Exception as e:
-        logger.warning(f"Failed to fetch Anthropic model info: {e}")
+        logger.warning(f"Failed to fetch Anthropic models: {e}")
 
-    return descriptions
+    return {}
 
 
 def fetch_openai_descriptions(api_key: str) -> dict[str, str]:
@@ -555,7 +548,25 @@ def sync_model_descriptions(
                         new_description = openrouter_desc
                         source = "openrouter"
 
-            # Update if we have a new description
+            # Validate description is actually useful (not just the model name)
+            if new_description:
+                desc_lower = new_description.lower().strip()
+                model_lower = model.id.lower()
+                full_name = f"{model.provider_id}/{model.id}".lower()
+
+                # Skip if description is just the model name or provider/model
+                if desc_lower in (
+                    model_lower,
+                    full_name,
+                    model_lower.replace("-", " "),
+                    model_lower.replace("_", " "),
+                ):
+                    new_description = None
+                # Skip very short descriptions (likely just names)
+                elif len(new_description) < 20:
+                    new_description = None
+
+            # Update if we have a useful description
             if new_description:
                 if not model.description or update_existing:
                     model.description = new_description
