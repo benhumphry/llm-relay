@@ -1475,7 +1475,11 @@ block content %}
 
             getProviderActiveModelCount(providerId) {
                 const provider = this.providers.find(p => p.id === providerId);
-                if (provider && !provider.enabled) {
+                if (!provider || !provider.enabled) {
+                    return 0;
+                }
+                // Ollama providers don't need an API key
+                if (provider.type !== 'ollama' && !provider.has_api_key) {
                     return 0;
                 }
                 return this.getProviderModels(providerId).filter(m => !m.disabled).length;
