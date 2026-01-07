@@ -1474,6 +1474,10 @@ block content %}
             },
 
             getProviderActiveModelCount(providerId) {
+                const provider = this.providers.find(p => p.id === providerId);
+                if (provider && !provider.enabled) {
+                    return 0;
+                }
                 return this.getProviderModels(providerId).filter(m => !m.disabled).length;
             },
 
