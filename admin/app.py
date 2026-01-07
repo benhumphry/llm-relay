@@ -1674,9 +1674,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         from datetime import datetime, timedelta
 
         # Date range - support both preset days and custom range
+        # Accept both "start"/"end" and "start_date"/"end_date" for compatibility
         days = request.args.get("days")
-        start = request.args.get("start")
-        end = request.args.get("end")
+        start = request.args.get("start") or request.args.get("start_date")
+        end = request.args.get("end") or request.args.get("end_date")
 
         if start:
             # Custom date range

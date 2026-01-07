@@ -9,7 +9,38 @@ content %}
             <h1 class="text-2xl font-bold">Dashboard</h1>
             <p class="text-base-content/60">Overview of your LLM Relay</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 items-center">
+            <!-- Period Selector -->
+            <div class="join">
+                <button
+                    @click="setPeriod('today')"
+                    class="join-item btn btn-sm"
+                    :class="period === 'today' ? 'btn-primary' : 'btn-outline'"
+                >
+                    Today
+                </button>
+                <button
+                    @click="setPeriod('7d')"
+                    class="join-item btn btn-sm"
+                    :class="period === '7d' ? 'btn-primary' : 'btn-outline'"
+                >
+                    7d
+                </button>
+                <button
+                    @click="setPeriod('30d')"
+                    class="join-item btn btn-sm"
+                    :class="period === '30d' ? 'btn-primary' : 'btn-outline'"
+                >
+                    30d
+                </button>
+                <button
+                    @click="setPeriod('90d')"
+                    class="join-item btn btn-sm"
+                    :class="period === '90d' ? 'btn-primary' : 'btn-outline'"
+                >
+                    90d
+                </button>
+            </div>
             <button
                 @click="reloadConfig()"
                 class="btn btn-outline btn-sm"
@@ -105,17 +136,17 @@ content %}
             </div>
         </div>
 
-        <!-- Today's Requests Card -->
+        <!-- Requests Card -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-base-content/60 text-sm">
-                            Today's Requests
+                            <span x-text="periodLabel"></span> Requests
                         </p>
                         <p
                             class="text-2xl font-bold"
-                            x-text="todayStats?.requests || '0'"
+                            x-text="periodStats?.requests || '0'"
                         ></p>
                     </div>
                     <div class="bg-accent/10 p-2 rounded-lg">
@@ -136,21 +167,25 @@ content %}
                     </div>
                 </div>
                 <div class="text-xs text-base-content/60 mt-1">
-                    <span x-text="formatTokens(todayStats?.tokens || 0)"></span>
+                    <span
+                        x-text="formatTokens(periodStats?.tokens || 0)"
+                    ></span>
                     tokens
                 </div>
             </div>
         </div>
 
-        <!-- Today's Cost Card -->
+        <!-- Cost Card -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
                 <div class="flex items-center justify-between">
                     <div>
-                        <p class="text-base-content/60 text-sm">Today's Cost</p>
+                        <p class="text-base-content/60 text-sm">
+                            <span x-text="periodLabel"></span> Cost
+                        </p>
                         <p
                             class="text-2xl font-bold"
-                            x-text="'$' + (todayStats?.cost || 0).toFixed(2)"
+                            x-text="'$' + (periodStats?.cost || 0).toFixed(2)"
                         ></p>
                     </div>
                     <div class="bg-success/10 p-2 rounded-lg">
@@ -172,7 +207,7 @@ content %}
                 </div>
                 <div class="text-xs text-base-content/60 mt-1">
                     <span
-                        x-text="'$' + (todayStats?.cache_savings || 0).toFixed(2)"
+                        x-text="'$' + (periodStats?.cache_savings || 0).toFixed(2)"
                     ></span>
                     saved from cache
                 </div>
@@ -624,20 +659,44 @@ content %}
     function dashboard() {
         return {
             stats: {},
-            todayStats: null,
+            periodStats: null,
             topProviders: [],
             topModels: [],
             topClients: [],
             topTags: [],
             reloading: false,
             toasts: [],
+            period: "today",
+
+            get periodLabel() {
+                const labels = {
+                    today: "Today's",
+                    "7d": "7 Day",
+                    "30d": "30 Day",
+                    "90d": "90 Day",
+                };
+                return labels[this.period] || "Today's";
+            },
+
+            getDateParams() {
+                if (this.period === "today") {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    return `start_date=${today.toISOString().split("T")[0]}`;
+                } else {
+                    const days = parseInt(this.period);
+                    return `days=${days}`;
+                }
+            },
+
+            async setPeriod(newPeriod) {
+                this.period = newPeriod;
+                await this.loadStats();
+            },
 
             async loadStats() {
                 try {
-                    // Get today's date range
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    const startDate = today.toISOString().split("T")[0];
+                    const dateParams = this.getDateParams();
 
                     const [
                         statsRes,
@@ -648,17 +707,17 @@ content %}
                         tagsRes,
                     ] = await Promise.all([
                         fetch("/api/stats"),
-                        fetch(`/api/usage/summary?start_date=${startDate}`),
-                        fetch(`/api/usage/by-provider?start_date=${startDate}`),
-                        fetch(`/api/usage/by-model?start_date=${startDate}`),
-                        fetch(`/api/usage/by-client?start_date=${startDate}`),
-                        fetch(`/api/usage/by-tag?start_date=${startDate}`),
+                        fetch(`/api/usage/summary?${dateParams}`),
+                        fetch(`/api/usage/by-provider?${dateParams}`),
+                        fetch(`/api/usage/by-model?${dateParams}`),
+                        fetch(`/api/usage/by-client?${dateParams}`),
+                        fetch(`/api/usage/by-tag?${dateParams}`),
                     ]);
 
                     if (statsRes.ok) this.stats = await statsRes.json();
                     if (summaryRes.ok) {
                         const summary = await summaryRes.json();
-                        this.todayStats = {
+                        this.periodStats = {
                             requests: summary.total_requests || 0,
                             tokens: summary.total_tokens || 0,
                             cost: summary.estimated_cost || 0,
