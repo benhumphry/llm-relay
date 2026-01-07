@@ -243,9 +243,9 @@ content %}
                                                 Disable
                                             </button>
                                             <a
-                                                :href="'/requests?model=' + encodeURIComponent(alert.provider_id + '/' + alert.model_id)"
+                                                :href="'/requests?model=' + encodeURIComponent(alert.provider_id + '/' + alert.model_id) + '&status=error'"
                                                 class="btn btn-ghost btn-xs"
-                                                title="View requests"
+                                                title="View error requests"
                                             >
                                                 <svg
                                                     xmlns="http://www.w3.org/2000/svg"
