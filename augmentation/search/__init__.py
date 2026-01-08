@@ -100,11 +100,17 @@ def get_configured_search_provider() -> "SearchProvider | None":
     Returns:
         SearchProvider instance or None if no provider is configured/available
     """
-    from db import get_setting
-    from db.models import KEY_WEB_SEARCH_PROVIDER, KEY_WEB_SEARCH_URL
+    from db import Setting, get_db_context
 
-    provider_name = get_setting(KEY_WEB_SEARCH_PROVIDER)
-    url_override = get_setting(KEY_WEB_SEARCH_URL)
+    provider_name = None
+    url_override = None
+
+    with get_db_context() as db:
+        keys = [Setting.KEY_WEB_SEARCH_PROVIDER, Setting.KEY_WEB_SEARCH_URL]
+        settings = db.query(Setting).filter(Setting.key.in_(keys)).all()
+        settings_dict = {s.key: s.value for s in settings}
+        provider_name = settings_dict.get(Setting.KEY_WEB_SEARCH_PROVIDER)
+        url_override = settings_dict.get(Setting.KEY_WEB_SEARCH_URL)
 
     if provider_name:
         provider = get_search_provider(provider_name, url_override=url_override or None)

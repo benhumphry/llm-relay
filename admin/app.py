@@ -903,19 +903,25 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def get_web_settings():
         """Get web search and scraping settings."""
-        from db.models import (
-            KEY_JINA_API_KEY,
-            KEY_WEB_SCRAPER_PROVIDER,
-            KEY_WEB_SEARCH_PROVIDER,
-            KEY_WEB_SEARCH_URL,
-        )
+        keys = [
+            Setting.KEY_WEB_SEARCH_PROVIDER,
+            Setting.KEY_WEB_SEARCH_URL,
+            Setting.KEY_WEB_SCRAPER_PROVIDER,
+            Setting.KEY_JINA_API_KEY,
+        ]
+
+        with get_db_context() as db:
+            settings = db.query(Setting).filter(Setting.key.in_(keys)).all()
+            settings_dict = {s.key: s.value for s in settings}
 
         return jsonify(
             {
-                "search_provider": get_setting(KEY_WEB_SEARCH_PROVIDER) or "",
-                "search_url": get_setting(KEY_WEB_SEARCH_URL) or "",
-                "scraper_provider": get_setting(KEY_WEB_SCRAPER_PROVIDER) or "builtin",
-                "jina_api_key": get_setting(KEY_JINA_API_KEY) or "",
+                "search_provider": settings_dict.get(Setting.KEY_WEB_SEARCH_PROVIDER)
+                or "",
+                "search_url": settings_dict.get(Setting.KEY_WEB_SEARCH_URL) or "",
+                "scraper_provider": settings_dict.get(Setting.KEY_WEB_SCRAPER_PROVIDER)
+                or "builtin",
+                "jina_api_key": settings_dict.get(Setting.KEY_JINA_API_KEY) or "",
             }
         )
 
@@ -923,13 +929,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def save_web_settings():
         """Save web search and scraping settings."""
-        from db.models import (
-            KEY_JINA_API_KEY,
-            KEY_WEB_SCRAPER_PROVIDER,
-            KEY_WEB_SEARCH_PROVIDER,
-            KEY_WEB_SEARCH_URL,
-        )
-
         data = request.get_json() or {}
 
         # Validate search provider
@@ -943,10 +942,21 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"error": "Invalid scraper provider"}), 400
 
         # Save settings
-        set_setting(KEY_WEB_SEARCH_PROVIDER, search_provider)
-        set_setting(KEY_WEB_SEARCH_URL, data.get("search_url", ""))
-        set_setting(KEY_WEB_SCRAPER_PROVIDER, scraper_provider)
-        set_setting(KEY_JINA_API_KEY, data.get("jina_api_key", ""))
+        settings_to_save = {
+            Setting.KEY_WEB_SEARCH_PROVIDER: search_provider,
+            Setting.KEY_WEB_SEARCH_URL: data.get("search_url", ""),
+            Setting.KEY_WEB_SCRAPER_PROVIDER: scraper_provider,
+            Setting.KEY_JINA_API_KEY: data.get("jina_api_key", ""),
+        }
+
+        with get_db_context() as db:
+            for key, value in settings_to_save.items():
+                setting = db.query(Setting).filter(Setting.key == key).first()
+                if setting:
+                    setting.value = value
+                else:
+                    db.add(Setting(key=key, value=value))
+            db.commit()
 
         return jsonify({"success": True})
 
@@ -1122,8 +1132,32 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             },
         }
 
+        # Get database info
+        database_url = os.environ.get("DATABASE_URL", "")
+        if database_url and (
+            "postgresql" in database_url or "postgres" in database_url
+        ):
+            db_type = "PostgreSQL"
+            # Extract host from URL (hide credentials)
+            try:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(database_url)
+                db_display = (
+                    f"{parsed.hostname}:{parsed.port or 5432}/{parsed.path.lstrip('/')}"
+                )
+            except Exception:
+                db_display = "configured"
+        else:
+            db_type = "SQLite"
+            db_display = "built-in"
+
         # Build dependencies status
         dependencies = {
+            "database": {
+                "type": db_type,
+                "display": db_display,
+            },
             "chromadb": {
                 "configured": chroma_configured,
                 "available": chroma_available,
