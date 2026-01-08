@@ -53,6 +53,172 @@ CHROMA_COLLECTION_PREFIX=llmrelay_  # Namespace for collections
 
 ---
 
+## Model Intelligence (Smart Router Enhancement)
+
+**Status:** Planned  
+**Priority:** Medium  
+**Dependencies:** ChromaDB, Search Provider (SearXNG or similar)
+
+### Overview
+Enhance Smart Router designator decisions by providing balanced, real-world model assessments instead of relying on static marketing descriptions. Uses web search to gather recent model comparisons, benchmarks, and user feedback, then caches summarized intelligence in ChromaDB.
+
+### The Problem
+Current smart router descriptions are often:
+- Overly positive marketing-speak ("excels at", "best-in-class")
+- Static and quickly outdated
+- Lacking comparative context
+- Missing real-world performance insights
+
+### The Solution
+Periodically search for model reviews/benchmarks and cache balanced summaries:
+
+```
+# Current (static, marketing-focused):
+"claude-sonnet-4-20250514: Claude Sonnet excels at complex analysis and coding tasks 
+              with exceptional instruction-following capabilities."
+
+# With Model Intelligence (balanced, comparative):
+"claude-sonnet-4-20250514: Strong at code generation and analysis. More verbose than GPT-4o.
+              Better at following complex multi-step instructions. Higher cost
+              but more reliable for professional/technical work. Can be slower
+              for simple queries where GPT-4o-mini would suffice."
+```
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Admin: Refresh Model Intelligence            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ For each candidate model in Smart Routers:                      │
+│   1. Search: "{model_name} review benchmark comparison 2024"    │
+│   2. Aggregate top results                                      │
+│   3. Summarize via LLM: "Create balanced assessment..."         │
+│   4. Store in ChromaDB collection: "model_intelligence"         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Smart Router Request                         │
+│                                                                 │
+│ Designator prompt now includes:                                 │
+│ - Static descriptions (fallback)                                │
+│ - Model intelligence from ChromaDB (if available)               │
+│ - More balanced view → better routing decisions                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### ChromaDB Integration
+```python
+# Collection: "model_intelligence"
+{
+    "id": "anthropic/claude-sonnet-4-20250514",
+    "content": "claude-sonnet-4-20250514 balanced assessment for semantic search",
+    "metadata": {
+        "provider": "anthropic",
+        "model_id": "claude-sonnet-4-20250514",
+        "intelligence": "Strong at code and analysis. More verbose than...",
+        "strengths": ["code generation", "instruction following", "long context"],
+        "weaknesses": ["verbosity", "cost", "speed on simple tasks"],
+        "best_for": ["professional work", "complex analysis", "coding"],
+        "avoid_for": ["simple queries", "cost-sensitive tasks"],
+        "sources": ["url1", "url2", "url3"],
+        "search_queries": ["claude sonnet review 2024", ...],
+        "generated_at": "2024-01-07T12:00:00Z",
+        "expires_at": "2024-01-14T12:00:00Z",  # Refresh weekly
+    }
+}
+```
+
+### Designator Prompt Enhancement
+```python
+# Current designator prompt
+DESIGNATOR_PROMPT = """
+You are a model router. Select the best model for this query.
+
+CANDIDATES:
+{candidates_with_descriptions}
+
+Query: {query}
+"""
+
+# Enhanced with Model Intelligence
+DESIGNATOR_PROMPT_WITH_INTELLIGENCE = """
+You are a model router. Select the best model for this query.
+
+CANDIDATES:
+{for each candidate}
+- {model_name}: {static_description}
+  Intelligence: {model_intelligence_from_chromadb}
+{end for}
+
+Query: {query}
+"""
+```
+
+### Admin UI Features
+- "Refresh Model Intelligence" button (manual trigger)
+- Last refresh timestamp
+- View cached intelligence per model
+- Enable/disable per Smart Router
+- Configure refresh frequency (if auto-refresh enabled)
+
+### Database Changes
+```python
+# Add to SmartRouter model
+class SmartRouter(Base):
+    # ... existing fields ...
+    
+    # Model Intelligence (optional enhancement)
+    use_model_intelligence: bool = False  # Opt-in per router
+```
+
+### Settings
+```python
+# Global settings for Model Intelligence
+MODEL_INTELLIGENCE_ENABLED = True  # Master switch
+MODEL_INTELLIGENCE_SEARCH_PROVIDER = "searxng"  # Which search to use
+MODEL_INTELLIGENCE_SUMMARIZER_MODEL = "openai/gpt-4o-mini"  # LLM for summaries
+MODEL_INTELLIGENCE_TTL_DAYS = 7  # How often to refresh
+MODEL_INTELLIGENCE_MAX_SOURCES = 5  # Sources per model
+```
+
+### Implementation Phases
+1. Add `use_model_intelligence` field to SmartRouter model
+2. Create "model_intelligence" ChromaDB collection wrapper
+3. Implement intelligence gathering:
+   - Search provider integration (reuse from Smart Augmentor)
+   - Result aggregation
+   - LLM summarization
+4. Modify SmartRouterEngine to include intelligence in designator prompt
+5. Admin UI: refresh button, view intelligence, per-router toggle
+6. Optional: Background job for auto-refresh
+
+### Optional: User Feedback Loop (Future)
+Store routing outcomes and user feedback to learn which models actually perform well:
+```python
+# Collection: "routing_feedback"
+{
+    "id": "request_id",
+    "content": "query text",
+    "metadata": {
+        "router_name": "code-router",
+        "selected_model": "anthropic/claude-sonnet",
+        "query_type": "code",  # inferred
+        "user_rating": 5,  # if feedback collected
+        "response_time_ms": 1200,
+        "created_at": "...",
+    }
+}
+```
+
+This creates a self-improving system where routing decisions get better over time based on actual usage patterns.
+
+---
+
 ## Smart Augmentor (Web Context)
 
 **Status:** Planned  
@@ -874,6 +1040,22 @@ test.clear()
 - [ ] Augmentation engine
 - [ ] Registry integration
 - [ ] Admin UI
+
+### Phase 2.5: Model Intelligence (Smart Router Enhancement)
+**Dependencies:** Phase 1 (ChromaDB), Phase 2 (Search Providers)
+
+- [ ] Add `use_model_intelligence` field to SmartRouter model
+- [ ] Create `model_intelligence` ChromaDB collection
+- [ ] Implement intelligence gathering service
+  - [ ] Search integration (reuse from Smart Augmentor)
+  - [ ] Result aggregation
+  - [ ] LLM summarization with balanced prompt
+- [ ] Modify SmartRouterEngine to include intelligence in designator prompt
+- [ ] Admin UI
+  - [ ] "Refresh Model Intelligence" button
+  - [ ] View cached intelligence per model
+  - [ ] Per-router enable/disable toggle
+- [ ] Optional: Background job for periodic auto-refresh
 
 ### Phase 3: Smart RAG
 - [ ] Database model & CRUD
