@@ -9,7 +9,81 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+from .embeddings import (
+    EmbeddingProvider,
+    LocalEmbeddingProvider,
+    OllamaEmbeddingProvider,
+    OpenAICompatibleEmbeddingProvider,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _get_embedding_provider_for_rag(
+    embedding_provider: str,
+    embedding_model: Optional[str],
+    ollama_url: Optional[str],
+) -> EmbeddingProvider:
+    """
+    Get an embedding provider based on RAG configuration.
+
+    Args:
+        embedding_provider: "local", "ollama:<instance>", or provider name
+        embedding_model: Model name for embeddings
+        ollama_url: Ollama URL (for ollama providers)
+
+    Returns:
+        Configured EmbeddingProvider
+    """
+    if embedding_provider == "local":
+        return LocalEmbeddingProvider(model_name=embedding_model)
+
+    if embedding_provider.startswith("ollama:") or embedding_provider == "ollama":
+        # Extract instance name if present
+        if ":" in embedding_provider:
+            instance_name = embedding_provider.split(":", 1)[1]
+        else:
+            instance_name = "ollama"
+
+        if not ollama_url:
+            raise ValueError(f"Ollama URL required for {embedding_provider}")
+
+        return OllamaEmbeddingProvider(
+            model_name=embedding_model,
+            ollama_url=ollama_url,
+            instance_name=instance_name,
+        )
+
+    # It's a provider name - look up from registry
+    from providers import registry
+
+    provider = registry.get_provider(embedding_provider)
+    if not provider:
+        raise ValueError(f"Provider not found: {embedding_provider}")
+
+    if not provider.is_configured():
+        raise ValueError(f"Provider not configured: {embedding_provider}")
+
+    # Get base URL and API key from provider
+    base_url = getattr(provider, "base_url", None)
+    api_key = getattr(provider, "api_key", None)
+
+    if not base_url:
+        # Some providers have different URL attribute names
+        base_url = getattr(provider, "url", None)
+
+    if not api_key:
+        raise ValueError(f"Provider {embedding_provider} has no API key configured")
+
+    if not embedding_model:
+        raise ValueError(f"Embedding model required for provider {embedding_provider}")
+
+    return OpenAICompatibleEmbeddingProvider(
+        provider_name=embedding_provider,
+        base_url=base_url,
+        api_key=api_key,
+        model_name=embedding_model,
+    )
 
 
 @dataclass
@@ -105,10 +179,10 @@ class RAGRetriever:
         embed_model = None
         embed_provider = None
         try:
-            provider = get_embedding_provider(
+            provider = _get_embedding_provider_for_rag(
                 embedding_provider,
-                model_name=embedding_model,
-                ollama_url=ollama_url,
+                embedding_model,
+                ollama_url,
             )
             embed_result = provider.embed_query(query)
             query_embedding = embed_result.embeddings[0]

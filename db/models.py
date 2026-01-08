@@ -1195,15 +1195,14 @@ class SmartRAG(Base):
     )  # "provider_id/model_id"
 
     # Embedding configuration
-    embedding_provider: Mapped[str] = mapped_column(
-        String(50), default="local"
-    )  # "local" | "ollama" | "openai"
+    # embedding_provider: "local", "ollama:<instance>", or provider name (e.g., "openai")
+    embedding_provider: Mapped[str] = mapped_column(String(100), default="local")
     embedding_model: Mapped[Optional[str]] = mapped_column(
         String(150), nullable=True
-    )  # e.g., "granite3.2-vision:latest" for Ollama
+    )  # Model name for embeddings
     ollama_url: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
-    )  # Override default Ollama URL
+    )  # Ollama instance URL (when using ollama provider)
 
     # Indexing configuration
     index_schedule: Mapped[Optional[str]] = mapped_column(

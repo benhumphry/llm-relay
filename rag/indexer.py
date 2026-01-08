@@ -221,7 +221,7 @@ class RAGIndexer:
         """Implementation of RAG indexing."""
         from db import get_smart_rag_by_id, update_smart_rag_index_status
 
-        from .embeddings import get_embedding_provider
+        from .retriever import _get_embedding_provider_for_rag
 
         # Get RAG config
         rag = get_smart_rag_by_id(rag_id)
@@ -244,10 +244,10 @@ class RAGIndexer:
                 raise ValueError(f"Source path is not a directory: {rag.source_path}")
 
             # Get embedding provider
-            embedding_provider = get_embedding_provider(
+            embedding_provider = _get_embedding_provider_for_rag(
                 rag.embedding_provider,
-                model_name=rag.embedding_model,
-                ollama_url=rag.ollama_url,
+                rag.embedding_model,
+                rag.ollama_url,
             )
 
             if not embedding_provider.is_available():

@@ -5426,6 +5426,125 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         models.sort(key=lambda m: (m["provider"], m["model_id"]))
         return jsonify(models)
 
+    @admin.route("/api/rags/embedding-models", methods=["GET"])
+    @require_auth_api
+    def list_embedding_models_for_rag():
+        """List all available embedding models for RAG."""
+        # Known embedding models for various providers
+        PROVIDER_EMBEDDING_MODELS = {
+            "openai": [
+                {"id": "text-embedding-3-small", "name": "Text Embedding 3 Small"},
+                {"id": "text-embedding-3-large", "name": "Text Embedding 3 Large"},
+                {"id": "text-embedding-ada-002", "name": "Text Embedding Ada 002"},
+            ],
+            "openrouter": [
+                {
+                    "id": "openai/text-embedding-3-small",
+                    "name": "OpenAI Text Embedding 3 Small",
+                },
+                {
+                    "id": "openai/text-embedding-3-large",
+                    "name": "OpenAI Text Embedding 3 Large",
+                },
+            ],
+            "together": [
+                {
+                    "id": "togethercomputer/m2-bert-80M-8k-retrieval",
+                    "name": "M2-BERT 80M 8K",
+                },
+                {
+                    "id": "togethercomputer/m2-bert-80M-32k-retrieval",
+                    "name": "M2-BERT 80M 32K",
+                },
+                {"id": "BAAI/bge-large-en-v1.5", "name": "BGE Large English"},
+                {"id": "BAAI/bge-base-en-v1.5", "name": "BGE Base English"},
+            ],
+            "fireworks": [
+                {
+                    "id": "nomic-ai/nomic-embed-text-v1.5",
+                    "name": "Nomic Embed Text v1.5",
+                },
+                {"id": "thenlper/gte-large", "name": "GTE Large"},
+            ],
+            "deepinfra": [
+                {"id": "BAAI/bge-large-en-v1.5", "name": "BGE Large English"},
+                {
+                    "id": "sentence-transformers/all-MiniLM-L6-v2",
+                    "name": "All MiniLM L6 v2",
+                },
+            ],
+            "cohere": [
+                {"id": "embed-english-v3.0", "name": "Embed English v3.0"},
+                {"id": "embed-multilingual-v3.0", "name": "Embed Multilingual v3.0"},
+                {"id": "embed-english-light-v3.0", "name": "Embed English Light v3.0"},
+            ],
+        }
+
+        result = {
+            "local": {
+                "available": True,
+                "description": "Bundled model (no external dependencies)",
+                "models": [
+                    {
+                        "id": "BAAI/bge-small-en-v1.5",
+                        "name": "BGE Small English (384 dim)",
+                    }
+                ],
+            },
+            "ollama": {
+                "available": False,
+                "instances": [],
+            },
+            "providers": [],
+        }
+
+        # Check Ollama instances
+        ollama_instances = []
+        for provider in _get_ollama_providers():
+            if provider.is_configured():
+                # Get all models from this instance
+                raw_models = provider.get_raw_models()
+                models = []
+                for model in raw_models:
+                    name = model.get("name", "")
+                    models.append(
+                        {
+                            "id": name,
+                            "name": name,
+                            "size": model.get("size"),
+                        }
+                    )
+                if models:
+                    ollama_instances.append(
+                        {
+                            "name": provider.name,
+                            "url": provider.base_url,
+                            "models": models,
+                        }
+                    )
+
+        if ollama_instances:
+            result["ollama"]["available"] = True
+            result["ollama"]["instances"] = ollama_instances
+
+        # Check all configured providers that support embeddings
+        for provider in registry.get_available_providers():
+            # Skip Ollama providers (handled above)
+            if provider.name.startswith("ollama"):
+                continue
+
+            # Check if provider has known embedding models
+            provider_name = provider.name.lower()
+            if provider_name in PROVIDER_EMBEDDING_MODELS:
+                result["providers"].append(
+                    {
+                        "name": provider.name,
+                        "models": PROVIDER_EMBEDDING_MODELS[provider_name],
+                    }
+                )
+
+        return jsonify(result)
+
     @admin.route("/api/rags", methods=["GET"])
     @require_auth_api
     def list_rags():

@@ -356,49 +356,83 @@ content %}
                 </div>
 
                 <!-- Embedding Provider -->
-                <div class="grid grid-cols-2 gap-4 mt-4">
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">Embedding Provider</span>
-                        </label>
-                        <select
-                            x-model="form.embedding_provider"
-                            class="select select-bordered"
-                        >
-                            <option value="local">Local (sentence-transformers)</option>
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Embedding Provider</span>
+                    </label>
+                    <select
+                        x-model="form.embedding_provider"
+                        @change="onEmbeddingProviderChange()"
+                        class="select select-bordered"
+                    >
+                        <option value="local">Local (sentence-transformers)</option>
+                        <template x-if="embeddingModels.ollama?.available">
                             <option value="ollama">Ollama</option>
-                            <option value="openai">OpenAI</option>
-                        </select>
+                        </template>
+                        <template x-for="provider in embeddingModels.providers || []" :key="provider.name">
+                            <option :value="provider.name" x-text="provider.name"></option>
+                        </template>
+                    </select>
+                </div>
+
+                <!-- Local Embedding Info -->
+                <div x-show="form.embedding_provider === 'local'" class="mt-2">
+                    <div class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3">
+                        Uses bundled <span class="font-mono">BAAI/bge-small-en-v1.5</span> model. No external dependencies required.
                     </div>
-                    <div class="form-control">
+                </div>
+
+                <!-- Ollama Instance & Model (shown when ollama selected) -->
+                <template x-if="form.embedding_provider === 'ollama' && embeddingModels.ollama?.available">
+                    <div class="grid grid-cols-2 gap-4 mt-2">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Ollama Instance</span>
+                            </label>
+                            <select
+                                x-model="form.ollama_instance"
+                                @change="onOllamaInstanceChange()"
+                                class="select select-bordered"
+                            >
+                                <template x-for="instance in embeddingModels.ollama.instances" :key="instance.name">
+                                    <option :value="instance.name" x-text="instance.name + ' (' + instance.url + ')'"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Embedding Model</span>
+                            </label>
+                            <select
+                                x-model="form.embedding_model"
+                                class="select select-bordered font-mono"
+                            >
+                                <option value="">Select a model...</option>
+                                <template x-for="model in getOllamaModels()" :key="model.id">
+                                    <option :value="model.id" x-text="model.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Provider Embedding Model (shown when a provider is selected) -->
+                <template x-if="isProviderEmbedding()">
+                    <div class="form-control mt-2">
                         <label class="label">
                             <span class="label-text">Embedding Model</span>
                         </label>
-                        <input
-                            type="text"
+                        <select
                             x-model="form.embedding_model"
-                            class="input input-bordered font-mono"
-                            placeholder="e.g., nomic-embed-text"
-                            :disabled="form.embedding_provider === 'local'"
-                        />
+                            class="select select-bordered font-mono"
+                        >
+                            <option value="">Select a model...</option>
+                            <template x-for="model in getProviderModels()" :key="model.id">
+                                <option :value="model.id" x-text="model.name"></option>
+                            </template>
+                        </select>
                     </div>
-                </div>
-                <label class="label">
-                    <span class="label-text-alt">Local uses bundled BAAI/bge-small-en-v1.5. Ollama/OpenAI require model name.</span>
-                </label>
-
-                <!-- Ollama URL (shown when ollama selected) -->
-                <div class="form-control mt-2" x-show="form.embedding_provider === 'ollama'">
-                    <label class="label">
-                        <span class="label-text">Ollama URL (optional)</span>
-                    </label>
-                    <input
-                        type="text"
-                        x-model="form.ollama_url"
-                        class="input input-bordered font-mono"
-                        placeholder="http://localhost:11434"
-                    />
-                </div>
+                </template>
 
                 <!-- Index Schedule -->
                 <div class="form-control mt-4">
@@ -587,6 +621,7 @@ content %}
             loading: true,
             rags: [],
             availableModels: [],
+            embeddingModels: {},
             expandedRows: [],
             indexingRags: [],
             showModal: false,
@@ -601,6 +636,7 @@ content %}
                 target_model: '',
                 embedding_provider: 'local',
                 embedding_model: '',
+                ollama_instance: '',
                 ollama_url: '',
                 index_schedule: '',
                 custom_schedule: '',
@@ -619,6 +655,7 @@ content %}
                 await Promise.all([
                     this.loadRags(),
                     this.loadAvailableModels(),
+                    this.loadEmbeddingModels(),
                 ]);
                 this.loading = false;
             },
@@ -645,6 +682,62 @@ content %}
                 }
             },
 
+            async loadEmbeddingModels() {
+                try {
+                    const response = await fetch('/api/rags/embedding-models');
+                    if (response.ok) {
+                        this.embeddingModels = await response.json();
+                    }
+                } catch (error) {
+                    console.error('Failed to load embedding models:', error);
+                }
+            },
+
+            onEmbeddingProviderChange() {
+                // Reset model selection when provider changes
+                this.form.embedding_model = '';
+                this.form.ollama_instance = '';
+                this.form.ollama_url = '';
+
+                // Set defaults based on provider
+                if (this.form.embedding_provider === 'ollama' && this.embeddingModels.ollama?.instances?.length > 0) {
+                    this.form.ollama_instance = this.embeddingModels.ollama.instances[0].name;
+                    this.form.ollama_url = this.embeddingModels.ollama.instances[0].url;
+                } else if (this.isProviderEmbedding()) {
+                    const providerModels = this.getProviderModels();
+                    if (providerModels.length > 0) {
+                        this.form.embedding_model = providerModels[0].id;
+                    }
+                }
+            },
+
+            onOllamaInstanceChange() {
+                // Update URL when instance changes
+                const instance = this.embeddingModels.ollama?.instances?.find(i => i.name === this.form.ollama_instance);
+                if (instance) {
+                    this.form.ollama_url = instance.url;
+                    this.form.embedding_model = ''; // Reset model selection
+                }
+            },
+
+            getOllamaModels() {
+                const instance = this.embeddingModels.ollama?.instances?.find(i => i.name === this.form.ollama_instance);
+                return instance?.models || [];
+            },
+
+            isProviderEmbedding() {
+                // Check if current selection is a provider (not local or ollama)
+                if (this.form.embedding_provider === 'local' || this.form.embedding_provider === 'ollama') {
+                    return false;
+                }
+                return (this.embeddingModels.providers || []).some(p => p.name === this.form.embedding_provider);
+            },
+
+            getProviderModels() {
+                const provider = (this.embeddingModels.providers || []).find(p => p.name === this.form.embedding_provider);
+                return provider?.models || [];
+            },
+
             toggleExpand(id) {
                 const idx = this.expandedRows.indexOf(id);
                 if (idx >= 0) {
@@ -662,6 +755,7 @@ content %}
                     target_model: '',
                     embedding_provider: 'local',
                     embedding_model: '',
+                    ollama_instance: '',
                     ollama_url: '',
                     index_schedule: '',
                     custom_schedule: '',
@@ -683,12 +777,25 @@ content %}
                 const schedulePresets = ['', '0 * * * *', '0 */6 * * *', '0 2 * * *', '0 2 * * 0'];
                 const isPreset = schedulePresets.includes(rag.index_schedule || '');
 
+                // Parse embedding provider - could be "ollama:instance_name" or just "provider_name"
+                let embeddingProvider = rag.embedding_provider || 'local';
+                let ollamaInstance = '';
+                if (embeddingProvider.startsWith('ollama:')) {
+                    ollamaInstance = embeddingProvider.split(':')[1];
+                    embeddingProvider = 'ollama';
+                } else if (embeddingProvider === 'ollama' && rag.ollama_url) {
+                    // Find instance by URL
+                    const instance = (this.embeddingModels.ollama?.instances || []).find(i => i.url === rag.ollama_url);
+                    ollamaInstance = instance?.name || '';
+                }
+
                 this.form = {
                     name: rag.name,
                     source_path: rag.source_path,
                     target_model: '',
-                    embedding_provider: rag.embedding_provider || 'local',
+                    embedding_provider: embeddingProvider,
                     embedding_model: rag.embedding_model || '',
+                    ollama_instance: ollamaInstance,
                     ollama_url: rag.ollama_url || '',
                     index_schedule: isPreset ? (rag.index_schedule || '') : 'custom',
                     custom_schedule: isPreset ? '' : (rag.index_schedule || ''),
@@ -728,13 +835,21 @@ content %}
                     ? this.form.custom_schedule
                     : this.form.index_schedule;
 
+                // Format embedding provider - for Ollama, include instance name
+                let embeddingProvider = this.form.embedding_provider;
+                let ollamaUrl = null;
+                if (this.form.embedding_provider === 'ollama' && this.form.ollama_instance) {
+                    embeddingProvider = `ollama:${this.form.ollama_instance}`;
+                    ollamaUrl = this.form.ollama_url;
+                }
+
                 const payload = {
                     name: this.form.name.toLowerCase().trim(),
                     source_path: this.form.source_path.trim(),
                     target_model: this.form.target_model,
-                    embedding_provider: this.form.embedding_provider,
+                    embedding_provider: embeddingProvider,
                     embedding_model: this.form.embedding_model || null,
-                    ollama_url: this.form.ollama_url || null,
+                    ollama_url: ollamaUrl,
                     index_schedule: schedule || null,
                     max_results: parseInt(this.form.max_results),
                     similarity_threshold: parseFloat(this.form.similarity_threshold),

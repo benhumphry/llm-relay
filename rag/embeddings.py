@@ -3,8 +3,8 @@ Embedding provider abstraction for Smart RAG.
 
 Supports multiple embedding backends:
 - local: Bundled sentence-transformers model (BAAI/bge-small-en-v1.5)
-- ollama: Ollama embeddings (granite3.2-vision, nomic-embed-text, etc.)
-- openai: OpenAI embeddings (text-embedding-3-small)
+- ollama: Any Ollama instance via /api/embeddings
+- provider: Any configured LLM provider via OpenAI-compatible /v1/embeddings
 """
 
 import logging
@@ -26,16 +26,11 @@ class EmbeddingResult:
     provider: str = ""
 
 
-# Available embedding providers
-_PROVIDERS: dict[str, type["EmbeddingProvider"]] = {}
-
-
 class EmbeddingProvider(ABC):
     """Abstract base class for embedding providers."""
 
     name: str = "base"
     description: str = "Base embedding provider"
-    requires_api_key: bool = False
 
     @abstractmethod
     def embed(self, texts: list[str]) -> EmbeddingResult:
@@ -86,7 +81,6 @@ class LocalEmbeddingProvider(EmbeddingProvider):
 
     name = "local"
     description = "Local embeddings (sentence-transformers)"
-    requires_api_key = False
 
     DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 
@@ -157,37 +151,33 @@ class LocalEmbeddingProvider(EmbeddingProvider):
 
 class OllamaEmbeddingProvider(EmbeddingProvider):
     """
-    Ollama embedding provider.
+    Ollama embedding provider via /api/embeddings endpoint.
 
-    Supports models like:
-    - nomic-embed-text
-    - mxbai-embed-large
-    - granite3.2-vision (multimodal)
-    - all-minilm
+    Supports any model available on the Ollama instance.
     """
 
     name = "ollama"
     description = "Ollama embeddings"
-    requires_api_key = False
 
     DEFAULT_MODEL = "nomic-embed-text"
-    DEFAULT_URL = "http://localhost:11434"
 
     # Known embedding dimensions for common models
     MODEL_DIMENSIONS = {
         "nomic-embed-text": 768,
         "mxbai-embed-large": 1024,
         "all-minilm": 384,
-        "granite3.2-vision": 1024,
+        "snowflake-arctic-embed": 1024,
     }
 
     def __init__(
         self,
         model_name: Optional[str] = None,
         ollama_url: Optional[str] = None,
+        instance_name: Optional[str] = None,
     ):
         self.model_name = model_name or self.DEFAULT_MODEL
-        self.ollama_url = ollama_url or os.environ.get("OLLAMA_URL", self.DEFAULT_URL)
+        self.ollama_url = ollama_url or "http://localhost:11434"
+        self.instance_name = instance_name or "ollama"
         self._dimension = self.MODEL_DIMENSIONS.get(
             self.model_name.split(":")[0], 768
         )  # Default 768
@@ -219,7 +209,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             embeddings=embeddings,
             usage={"prompt_tokens": total_tokens, "total_tokens": total_tokens},
             model=self.model_name,
-            provider=self.name,
+            provider=f"ollama:{self.instance_name}",
         )
 
     def embed_query(self, text: str) -> EmbeddingResult:
@@ -229,27 +219,16 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
             embeddings=embeddings,
             usage={"prompt_tokens": total_tokens, "total_tokens": total_tokens},
             model=self.model_name,
-            provider=self.name,
+            provider=f"ollama:{self.instance_name}",
         )
 
     def is_available(self) -> bool:
-        """Check if Ollama is reachable and the model is available."""
+        """Check if Ollama is reachable."""
         try:
             import httpx
 
             response = httpx.get(f"{self.ollama_url}/api/tags", timeout=5.0)
-            if response.status_code != 200:
-                return False
-
-            # Check if our model is in the list
-            data = response.json()
-            model_names = [m["name"] for m in data.get("models", [])]
-            # Check both with and without tag
-            base_model = self.model_name.split(":")[0]
-            return any(
-                m == self.model_name or m.startswith(f"{base_model}:")
-                for m in model_names
-            )
+            return response.status_code == 200
         except Exception:
             return False
 
@@ -259,37 +238,54 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
         return self._dimension
 
 
-class OpenAIEmbeddingProvider(EmbeddingProvider):
+class OpenAICompatibleEmbeddingProvider(EmbeddingProvider):
     """
-    OpenAI embedding provider.
+    OpenAI-compatible embedding provider.
 
-    Uses text-embedding-3-small by default.
+    Works with any provider that supports the /v1/embeddings endpoint:
+    - OpenAI
+    - OpenRouter
+    - Together
+    - Fireworks
+    - Any other OpenAI-compatible API
     """
 
-    name = "openai"
-    description = "OpenAI embeddings"
-    requires_api_key = True
+    name = "openai-compatible"
+    description = "OpenAI-compatible embeddings"
 
-    DEFAULT_MODEL = "text-embedding-3-small"
-
-    # Known dimensions
+    # Known dimensions for common embedding models
     MODEL_DIMENSIONS = {
+        # OpenAI
         "text-embedding-3-small": 1536,
         "text-embedding-3-large": 3072,
         "text-embedding-ada-002": 1536,
+        # Together
+        "togethercomputer/m2-bert-80M-8k-retrieval": 768,
+        "togethercomputer/m2-bert-80M-32k-retrieval": 768,
+        # Voyage (via OpenRouter)
+        "voyage-large-2": 1536,
+        "voyage-code-2": 1536,
     }
 
-    def __init__(self, model_name: Optional[str] = None):
-        self.model_name = model_name or self.DEFAULT_MODEL
-        self.api_key = os.environ.get("OPENAI_API_KEY")
-        self._dimension = self.MODEL_DIMENSIONS.get(self.model_name, 1536)
+    def __init__(
+        self,
+        provider_name: str,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+    ):
+        self.provider_name = provider_name
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.model_name = model_name
+        self._dimension = self.MODEL_DIMENSIONS.get(model_name, 1536)
 
     def _embed_batch(self, texts: list[str]) -> tuple[list[list[float]], dict]:
-        """Call OpenAI API to get embeddings. Returns (embeddings, usage)."""
+        """Call OpenAI-compatible API to get embeddings."""
         import httpx
 
         response = httpx.post(
-            "https://api.openai.com/v1/embeddings",
+            f"{self.base_url}/v1/embeddings",
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -304,7 +300,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
         embeddings = [item["embedding"] for item in sorted_data]
 
-        # OpenAI returns actual usage
+        # Get usage if available
         usage = data.get("usage", {})
         return embeddings, usage
 
@@ -315,7 +311,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             embeddings=embeddings,
             usage=usage,
             model=self.model_name,
-            provider=self.name,
+            provider=self.provider_name,
         )
 
     def embed_query(self, text: str) -> EmbeddingResult:
@@ -325,11 +321,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             embeddings=embeddings,
             usage=usage,
             model=self.model_name,
-            provider=self.name,
+            provider=self.provider_name,
         )
 
     def is_available(self) -> bool:
-        """Check if OpenAI API key is configured."""
+        """Check if API key is configured."""
         return bool(self.api_key)
 
     @property
@@ -338,67 +334,62 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         return self._dimension
 
 
-# Register providers
-_PROVIDERS = {
-    "local": LocalEmbeddingProvider,
-    "ollama": OllamaEmbeddingProvider,
-    "openai": OpenAIEmbeddingProvider,
-}
-
-
 def get_embedding_provider(
-    provider_name: str,
+    provider_type: str,
     model_name: Optional[str] = None,
+    provider_name: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
     ollama_url: Optional[str] = None,
 ) -> EmbeddingProvider:
     """
-    Get an embedding provider by name.
+    Get an embedding provider.
 
     Args:
-        provider_name: Provider name ("local", "ollama", "openai")
-        model_name: Optional model name override
-        ollama_url: Optional Ollama URL override (for ollama provider)
+        provider_type: "local", "ollama", or "provider"
+        model_name: Model to use for embeddings
+        provider_name: For "provider" type, the provider name (e.g., "openai", "openrouter")
+        base_url: For "provider" type, the API base URL
+        api_key: For "provider" type, the API key
+        ollama_url: For "ollama" type, the Ollama instance URL
 
     Returns:
         Configured EmbeddingProvider instance
 
     Raises:
-        ValueError: If provider name is unknown
+        ValueError: If required parameters are missing
     """
-    if provider_name not in _PROVIDERS:
-        raise ValueError(
-            f"Unknown embedding provider: {provider_name}. "
-            f"Available: {list(_PROVIDERS.keys())}"
+    if provider_type == "local":
+        return LocalEmbeddingProvider(model_name=model_name)
+
+    elif provider_type == "ollama":
+        if not ollama_url:
+            raise ValueError("ollama_url is required for Ollama embeddings")
+        return OllamaEmbeddingProvider(
+            model_name=model_name,
+            ollama_url=ollama_url,
+            instance_name=provider_name,
         )
 
-    provider_class = _PROVIDERS[provider_name]
+    elif provider_type == "provider":
+        if not provider_name:
+            raise ValueError("provider_name is required for provider embeddings")
+        if not base_url:
+            raise ValueError("base_url is required for provider embeddings")
+        if not api_key:
+            raise ValueError("api_key is required for provider embeddings")
+        if not model_name:
+            raise ValueError("model_name is required for provider embeddings")
 
-    if provider_name == "ollama":
-        return provider_class(model_name=model_name, ollama_url=ollama_url)
-    elif provider_name == "local":
-        return provider_class(model_name=model_name)
-    elif provider_name == "openai":
-        return provider_class(model_name=model_name)
+        return OpenAICompatibleEmbeddingProvider(
+            provider_name=provider_name,
+            base_url=base_url,
+            api_key=api_key,
+            model_name=model_name,
+        )
+
     else:
-        return provider_class()
-
-
-def list_embedding_providers() -> list[dict]:
-    """
-    List available embedding providers with their status.
-
-    Returns:
-        List of dicts with provider info and availability status
-    """
-    result = []
-    for name, provider_class in _PROVIDERS.items():
-        provider = provider_class()
-        result.append(
-            {
-                "name": name,
-                "description": provider.description,
-                "requires_api_key": provider.requires_api_key,
-                "available": provider.is_available(),
-            }
+        raise ValueError(
+            f"Unknown embedding provider type: {provider_type}. "
+            f"Available: local, ollama, provider"
         )
-    return result
