@@ -1781,16 +1781,12 @@ content %}
                     const featureRes = await fetch('/api/feature-status');
                     if (featureRes.ok) {
                         const featureData = await featureRes.json();
-                        const searchProviders = featureData.dependencies?.search_providers || {};
+                        const searchProviders = featureData.dependencies?.search_providers || [];
 
-                        // Build available providers list
-                        this.availableSearchProviders = [];
-                        if (searchProviders.searxng) {
-                            this.availableSearchProviders.push({ name: 'searxng', label: 'SearXNG' });
-                        }
-                        if (searchProviders.perplexity) {
-                            this.availableSearchProviders.push({ name: 'perplexity', label: 'Perplexity' });
-                        }
+                        // Build available providers list from configured providers
+                        this.availableSearchProviders = searchProviders
+                            .filter(p => p.configured)
+                            .map(p => ({ name: p.name, label: p.name.charAt(0).toUpperCase() + p.name.slice(1) }));
                         this.hasAnySearchProvider = this.availableSearchProviders.length > 0;
                     }
 
