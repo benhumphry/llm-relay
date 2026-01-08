@@ -263,6 +263,7 @@ def update_smart_rag_index_status(
     error: str | None = None,
     document_count: int | None = None,
     chunk_count: int | None = None,
+    collection_name: str | None = None,
     db: Optional[Session] = None,
 ) -> bool:
     """
@@ -274,6 +275,7 @@ def update_smart_rag_index_status(
         error: Error message if status is "error"
         document_count: Number of documents indexed
         chunk_count: Number of chunks created
+        collection_name: ChromaDB collection name
 
     Returns:
         True if updated, False if RAG not found
@@ -295,6 +297,9 @@ def update_smart_rag_index_status(
 
         if chunk_count is not None:
             rag.chunk_count = chunk_count
+
+        if collection_name is not None:
+            rag.collection_name = collection_name
 
         session.flush()
         logger.info(f"Updated index status for smart RAG {rag.name}: {status}")

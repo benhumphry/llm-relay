@@ -7,8 +7,9 @@ and ChromaDB for vector storage.
 
 from .embeddings import (
     EmbeddingProvider,
-    get_embedding_provider,
-    list_embedding_providers,
+    LocalEmbeddingProvider,
+    OllamaEmbeddingProvider,
+    OpenAICompatibleEmbeddingProvider,
 )
 from .indexer import (
     RAGIndexer,
@@ -26,8 +27,9 @@ from .retriever import (
 __all__ = [
     # Embeddings
     "EmbeddingProvider",
-    "get_embedding_provider",
-    "list_embedding_providers",
+    "LocalEmbeddingProvider",
+    "OllamaEmbeddingProvider",
+    "OpenAICompatibleEmbeddingProvider",
     # Indexer
     "RAGIndexer",
     "get_indexer",

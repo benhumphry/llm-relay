@@ -288,7 +288,11 @@ class RAGIndexer:
             if not documents:
                 logger.warning(f"No documents found in {rag.source_path}")
                 update_smart_rag_index_status(
-                    rag_id, "ready", document_count=0, chunk_count=0
+                    rag_id,
+                    "ready",
+                    document_count=0,
+                    chunk_count=0,
+                    collection_name=collection_name,
                 )
                 return True
 
@@ -304,7 +308,7 @@ class RAGIndexer:
                 texts = [doc["content"] for doc in batch]
 
                 # Generate embeddings
-                embeddings = embedding_provider.embed(texts)
+                embed_result = embedding_provider.embed(texts)
 
                 # Prepare for ChromaDB
                 ids = [
@@ -325,7 +329,7 @@ class RAGIndexer:
                 # Add to collection
                 collection.add(
                     ids=ids,
-                    embeddings=embeddings,
+                    embeddings=embed_result.embeddings,
                     documents=texts,
                     metadatas=metadatas,
                 )
@@ -339,6 +343,7 @@ class RAGIndexer:
                 "ready",
                 document_count=doc_count,
                 chunk_count=total_chunks,
+                collection_name=collection_name,
             )
 
             logger.info(
@@ -546,6 +551,7 @@ def get_indexer() -> RAGIndexer:
     global _indexer
     if _indexer is None:
         _indexer = RAGIndexer()
+        _indexer.start()
     return _indexer
 
 
