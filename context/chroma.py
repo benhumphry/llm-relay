@@ -2,7 +2,7 @@
 ChromaDB client wrapper for LLM Relay.
 
 Provides a unified interface for all ChromaDB operations across
-Smart Cache, Smart Augmentor, and Smart RAG features.
+Smart Cache, Smart Augmentor, and Model Intelligence features.
 
 ChromaDB is OPTIONAL - features requiring it will only be available
 when CHROMA_URL environment variable is set and the service is reachable.
@@ -150,7 +150,7 @@ def require_chroma():
     if not is_chroma_configured():
         raise RuntimeError(
             "ChromaDB not configured. Set CHROMA_URL environment variable "
-            "to enable Smart Cache, Smart Augmentor, and Smart RAG features."
+            "to enable Smart Cache, Smart Augmentor, and Model Intelligence features."
         )
     if not is_chroma_available(force_check=True):
         url = get_chroma_url()

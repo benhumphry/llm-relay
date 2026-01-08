@@ -99,7 +99,7 @@ Includes all optional services for maximum functionality:
 | Service | Purpose | Required For |
 |---------|---------|--------------|
 | PostgreSQL | Database | Production deployments |
-| ChromaDB | Vector storage | Smart Cache, Smart Augmentor, Smart RAG, Model Intelligence |
+| ChromaDB | Vector storage | Smart Cache, Smart Augmentor, Model Intelligence |
 | SearXNG | Web search | Smart Augmentor (web context) |
 
 ### Start All Services
@@ -141,8 +141,7 @@ SEARXNG_URL=http://searxng:8080
 
 - **Smart Cache**: Semantic response caching - returns cached answers for similar queries
 - **Smart Augmentor**: Caches web search results and scraped content
-- **Smart RAG**: Stores document chunks for retrieval
-- **Model Intelligence**: Caches balanced model assessments for smart routing
+- **Model Intelligence**: Caches comparative model assessments for smart routing
 
 **Resource requirements**: ~500MB RAM minimum, more for large collections
 

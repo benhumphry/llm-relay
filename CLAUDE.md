@@ -88,7 +88,18 @@ Key settings:
 - `use_model_intelligence` - Enhance designator with web-gathered model assessments (strengths, weaknesses, best use cases). Requires ChromaDB.
 
 ### Model Intelligence (context/model_intelligence.py)
-Web-gathered balanced assessments of LLM models for Smart Router designators. Searches for model reviews/benchmarks and summarizes into strengths, weaknesses, best_for, and avoid_for categories. Cached in ChromaDB with TTL-based expiry.
+Web-gathered comparative assessments of LLM models for Smart Router designators. When enabled on a router:
+1. Searches for individual model reviews/benchmarks
+2. Searches for direct model comparisons ("Claude vs GPT-4o")
+3. Summarizes into RELATIVE strengths/weaknesses between the specific candidates
+4. Cached in ChromaDB with TTL-based expiry
+
+Key settings (on SmartRouter):
+- `use_model_intelligence` - Enable intelligence-enhanced routing
+- `intelligence_model` - Model to summarize search results (required when enabled)
+- `search_provider` - Which search provider to use for gathering intelligence
+
+The comparative approach means assessments highlight when to choose Model A over Model B specifically, rather than generic model descriptions.
 
 ### Smart Caches (routing/smart_cache.py)
 Semantic response caching using ChromaDB. Caches LLM responses and returns them for semantically similar queries, reducing token usage and costs. Key settings:

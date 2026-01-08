@@ -2,7 +2,7 @@
 Context module for LLM Relay.
 
 Provides ChromaDB integration and utilities for Smart Cache,
-Smart Augmentor, and Smart RAG features.
+Smart Augmentor, and Model Intelligence features.
 
 IMPORTANT: ChromaDB is OPTIONAL. Features requiring it are only available
 when CHROMA_URL environment variable is set and the service is reachable.

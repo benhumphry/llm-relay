@@ -123,13 +123,48 @@ Create friendly names for models:
 | `gpt` | `openai/gpt-4o` |
 | `fast` | `groq/llama-3.3-70b-versatile` |
 
+### Redirects
+
+Transparent model name mappings with wildcard support. Unlike aliases, redirects are checked first in resolution and don't appear in logs:
+
+| Source Pattern | Target |
+|----------------|--------|
+| `gpt-4` | `gpt-4o` |
+| `openrouter/anthropic/*` | `anthropic/*` |
+
+Use cases: seamless model upgrades, provider switching without client changes.
+
 ### Smart Routers
 
 Let an LLM pick the best model for each request. Configure candidate models, and a fast designator model routes requests based on query content.
 
+**Model Intelligence** (optional): Enable web-gathered comparative assessments so the designator knows each model's relative strengths and weaknesses. The system searches for model reviews and direct comparisons, then summarizes into actionable routing guidance.
+
 <p align="center">
   <img src="screenshot-routers.png" alt="Smart router configuration" width="800">
 </p>
+
+### Smart Caches
+
+Semantic response caching using ChromaDB. Returns cached responses for semantically similar queries, reducing token usage and costs.
+
+- Configurable similarity threshold (default 95%)
+- TTL-based expiration
+- Token length filters (skip caching short responses)
+- Option to match only last message (ignores conversation history)
+
+Requires ChromaDB (`CHROMA_URL` environment variable).
+
+### Smart Augmentors
+
+Context augmentation via web search and URL scraping. A fast designator LLM analyzes each query and decides how to augment:
+
+- **direct** — Pass through unchanged (coding, creative tasks)
+- **search** — Search the web and inject results (current events, recent data)
+- **scrape** — Fetch specific URLs mentioned by the user
+- **search+scrape** — Search then scrape top results for comprehensive research
+
+Requires a search provider (SearXNG or Perplexity).
 
 ### Admin UI
 
@@ -161,7 +196,7 @@ volumes:
 
 ### Production & Advanced Setup
 
-For production deployments, PostgreSQL is recommended. For Smart Cache, Smart Augmentor, and Smart RAG features, ChromaDB is required.
+For production deployments, PostgreSQL is recommended. For Smart Cache, Smart Augmentor, and Model Intelligence features, ChromaDB is required.
 
 See **[INSTALLATION.md](INSTALLATION.md)** for:
 - PostgreSQL setup
@@ -179,7 +214,8 @@ See **[INSTALLATION.md](INSTALLATION.md)** for:
 | `ADMIN_PORT` | 8080 | Admin UI port |
 | `ADMIN_PASSWORD` | (random) | Admin UI password |
 | `DATABASE_URL` | SQLite | PostgreSQL URL for production |
-| `CHROMA_URL` | (none) | ChromaDB URL (enables smart features) |
+| `CHROMA_URL` | (none) | ChromaDB URL (enables Smart Cache, Model Intelligence) |
+| `SEARXNG_URL` | (none) | SearXNG URL (enables Smart Augmentor search) |
 
 ### Without Docker
 

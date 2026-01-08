@@ -935,7 +935,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if not configured:
             result["message"] = (
                 "ChromaDB not configured. Set CHROMA_URL environment variable "
-                "to enable Smart Cache, Smart Augmentor, and Smart RAG features."
+                "to enable Smart Cache, Smart Augmentor, and Model Intelligence features."
             )
             return jsonify(result)
 

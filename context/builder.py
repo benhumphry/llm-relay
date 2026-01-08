@@ -1,7 +1,7 @@
 """
 Context building utilities for injecting retrieved content into prompts.
 
-Used by Smart Cache, Smart Augmentor, and Smart RAG to format and inject
+Used by Smart Cache and Smart Augmentor to format and inject
 context into LLM requests.
 """
 
