@@ -1,6 +1,6 @@
 {% extends "base.html" %} {% block title %}Dashboard{% endblock %} {% block
 content %}
-<div x-data="dashboard()" x-init="loadStats()">
+<div x-data="dashboard()" x-init="init()">
     <!-- Header -->
     <div
         class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
@@ -422,6 +422,14 @@ content %}
                         </a>
                     </li>
                     <li>
+                        <a href="{{ url_for('admin.redirects_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                            </svg>
+                            <span class="text-sm">Redirects</span>
+                        </a>
+                    </li>
+                    <li>
                         <a href="{{ url_for('admin.routers_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -429,6 +437,26 @@ content %}
                             <span class="text-sm">Smart Routers</span>
                         </a>
                     </li>
+                    <template x-if="featureStatus.features?.smart_caches?.available">
+                        <li>
+                            <a href="{{ url_for('admin.caches_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                                </svg>
+                                <span class="text-sm">Smart Caches</span>
+                            </a>
+                        </li>
+                    </template>
+                    <template x-if="featureStatus.features?.smart_augmentors?.available">
+                        <li>
+                            <a href="{{ url_for('admin.augmentors_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                                <span class="text-sm">Smart Augmentors</span>
+                            </a>
+                        </li>
+                    </template>
                 </ul>
             </div>
         </div>
@@ -491,6 +519,130 @@ content %}
         </div>
     </div>
 
+    <!-- Optional Features Status -->
+    <div class="card bg-base-100 shadow-lg mt-8">
+        <div class="card-body py-4">
+            <h2 class="text-lg font-semibold mb-4">Optional Features</h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Features Column -->
+                <div>
+                    <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3">Features</h3>
+                    <ul class="space-y-2">
+                        <!-- Smart Caches -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template x-if="featureStatus.features?.smart_caches?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </template>
+                                <template x-if="!featureStatus.features?.smart_caches?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">Smart Caches</span>
+                            </div>
+                            <span class="text-xs text-base-content/50" x-text="featureStatus.features?.smart_caches?.reason || 'Available'"></span>
+                        </li>
+
+                        <!-- Smart Augmentors -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template x-if="featureStatus.features?.smart_augmentors?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </template>
+                                <template x-if="!featureStatus.features?.smart_augmentors?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">Smart Augmentors</span>
+                            </div>
+                            <span class="text-xs text-base-content/50" x-text="featureStatus.features?.smart_augmentors?.reason || 'Available'"></span>
+                        </li>
+
+                        <!-- Model Intelligence -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template x-if="featureStatus.features?.model_intelligence?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </template>
+                                <template x-if="!featureStatus.features?.model_intelligence?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">Model Intelligence</span>
+                            </div>
+                            <span class="text-xs text-base-content/50" x-text="featureStatus.features?.model_intelligence?.reason || 'Available'"></span>
+                        </li>
+
+                        <!-- Smart RAG -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span class="text-sm text-base-content/50">Smart RAG</span>
+                            </div>
+                            <span class="text-xs text-base-content/50">Coming soon</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Dependencies Column -->
+                <div>
+                    <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3">Dependencies</h3>
+                    <ul class="space-y-2">
+                        <!-- ChromaDB -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template x-if="featureStatus.dependencies?.chromadb?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </template>
+                                <template x-if="!featureStatus.dependencies?.chromadb?.available">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">ChromaDB</span>
+                            </div>
+                            <span class="text-xs text-base-content/50" x-text="featureStatus.dependencies?.chromadb?.url || featureStatus.dependencies?.chromadb?.reason || 'Not configured'"></span>
+                        </li>
+
+                        <!-- Search Providers -->
+                        <template x-for="provider in featureStatus.dependencies?.search_providers || []" :key="provider.name">
+                            <li class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <template x-if="provider.configured">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                    </template>
+                                    <template x-if="!provider.configured">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </template>
+                                    <span class="text-sm capitalize" x-text="provider.name"></span>
+                                </div>
+                                <span class="text-xs text-base-content/50" x-text="provider.configured ? provider.url : (provider.requires_api_key ? 'API key not set' : 'URL not set')"></span>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast notifications -->
     <div class="toast toast-end">
         <template x-for="toast in toasts" :key="toast.id">
@@ -515,6 +667,25 @@ content %}
             topTags: [],
             toasts: [],
             period: "today",
+            featureStatus: {},
+
+            async init() {
+                await Promise.all([
+                    this.loadStats(),
+                    this.loadFeatureStatus(),
+                ]);
+            },
+
+            async loadFeatureStatus() {
+                try {
+                    const response = await fetch("/api/feature-status");
+                    if (response.ok) {
+                        this.featureStatus = await response.json();
+                    }
+                } catch (err) {
+                    console.error("Failed to load feature status:", err);
+                }
+            },
 
             get periodLabel() {
                 const labels = {

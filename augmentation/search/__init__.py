@@ -91,6 +91,32 @@ def get_default_search_provider() -> "SearchProvider | None":
     return None
 
 
+def get_configured_search_provider() -> "SearchProvider | None":
+    """
+    Get the search provider configured in global settings.
+
+    Falls back to get_default_search_provider() if no provider is configured in settings.
+
+    Returns:
+        SearchProvider instance or None if no provider is configured/available
+    """
+    from db import get_setting
+    from db.models import KEY_WEB_SEARCH_PROVIDER, KEY_WEB_SEARCH_URL
+
+    provider_name = get_setting(KEY_WEB_SEARCH_PROVIDER)
+    url_override = get_setting(KEY_WEB_SEARCH_URL)
+
+    if provider_name:
+        provider = get_search_provider(provider_name, url_override=url_override or None)
+        if provider:
+            return provider
+        logger.warning(
+            f"Configured search provider '{provider_name}' not available, falling back to default"
+        )
+
+    return get_default_search_provider()
+
+
 # Import and register providers
 from .searxng import SearXNGProvider
 
@@ -107,6 +133,7 @@ except ImportError:
 __all__ = [
     "get_search_provider",
     "get_default_search_provider",
+    "get_configured_search_provider",
     "list_search_providers",
     "register_provider",
 ]

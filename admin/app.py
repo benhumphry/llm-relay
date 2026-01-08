@@ -896,6 +896,61 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         return jsonify({"success": True})
 
     # -------------------------------------------------------------------------
+    # Web Search & Scraping Settings
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/settings/web", methods=["GET"])
+    @require_auth_api
+    def get_web_settings():
+        """Get web search and scraping settings."""
+        from db.models import (
+            KEY_JINA_API_KEY,
+            KEY_WEB_SCRAPER_PROVIDER,
+            KEY_WEB_SEARCH_PROVIDER,
+            KEY_WEB_SEARCH_URL,
+        )
+
+        return jsonify(
+            {
+                "search_provider": get_setting(KEY_WEB_SEARCH_PROVIDER) or "",
+                "search_url": get_setting(KEY_WEB_SEARCH_URL) or "",
+                "scraper_provider": get_setting(KEY_WEB_SCRAPER_PROVIDER) or "builtin",
+                "jina_api_key": get_setting(KEY_JINA_API_KEY) or "",
+            }
+        )
+
+    @admin.route("/api/settings/web", methods=["PUT"])
+    @require_auth_api
+    def save_web_settings():
+        """Save web search and scraping settings."""
+        from db.models import (
+            KEY_JINA_API_KEY,
+            KEY_WEB_SCRAPER_PROVIDER,
+            KEY_WEB_SEARCH_PROVIDER,
+            KEY_WEB_SEARCH_URL,
+        )
+
+        data = request.get_json() or {}
+
+        # Validate search provider
+        search_provider = data.get("search_provider", "")
+        if search_provider and search_provider not in ("searxng", "perplexity"):
+            return jsonify({"error": "Invalid search provider"}), 400
+
+        # Validate scraper provider
+        scraper_provider = data.get("scraper_provider", "builtin")
+        if scraper_provider not in ("builtin", "jina"):
+            return jsonify({"error": "Invalid scraper provider"}), 400
+
+        # Save settings
+        set_setting(KEY_WEB_SEARCH_PROVIDER, search_provider)
+        set_setting(KEY_WEB_SEARCH_URL, data.get("search_url", ""))
+        set_setting(KEY_WEB_SCRAPER_PROVIDER, scraper_provider)
+        set_setting(KEY_JINA_API_KEY, data.get("jina_api_key", ""))
+
+        return jsonify({"success": True})
+
+    # -------------------------------------------------------------------------
     # ChromaDB Status
     # -------------------------------------------------------------------------
 
@@ -974,6 +1029,121 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             result["error"] = f"ChromaDB not reachable at {url}"
 
         return jsonify(result)
+
+    @admin.route("/api/feature-status", methods=["GET"])
+    @require_auth_api
+    def feature_status():
+        """
+        Get status of optional features and their dependencies.
+
+        Used by dashboard and sidebar to show available features.
+        """
+        import os
+
+        # Check ChromaDB
+        chroma_configured = False
+        chroma_available = False
+        chroma_url = os.environ.get("CHROMA_URL", "")
+
+        try:
+            from context import is_chroma_available, is_chroma_configured
+
+            chroma_configured = is_chroma_configured()
+            if chroma_configured:
+                chroma_available = is_chroma_available()
+        except ImportError:
+            pass
+
+        # Check search providers
+        search_providers = []
+        has_search_provider = False
+
+        try:
+            from augmentation.search import list_search_providers
+
+            search_providers = list_search_providers()
+            has_search_provider = any(p["configured"] for p in search_providers)
+        except ImportError:
+            pass
+
+        # Add URL info to search providers
+        searxng_url = os.environ.get("SEARXNG_URL", "")
+        perplexity_configured = bool(os.environ.get("PERPLEXITY_API_KEY", ""))
+
+        for p in search_providers:
+            if p["name"] == "searxng":
+                p["url"] = searxng_url
+            elif p["name"] == "perplexity":
+                p["url"] = "api.perplexity.ai"
+
+        # Build feature status
+        features = {
+            "smart_caches": {
+                "available": chroma_available,
+                "enabled": chroma_configured,
+                "reason": None
+                if chroma_available
+                else (
+                    "CHROMA_URL not set"
+                    if not chroma_configured
+                    else "ChromaDB not reachable"
+                ),
+            },
+            "smart_augmentors": {
+                "available": chroma_available and has_search_provider,
+                "enabled": chroma_configured and has_search_provider,
+                "reason": None
+                if (chroma_available and has_search_provider)
+                else (
+                    "Requires ChromaDB and a search provider"
+                    if not chroma_configured
+                    else "No search provider configured"
+                    if not has_search_provider
+                    else "ChromaDB not reachable"
+                ),
+            },
+            "model_intelligence": {
+                "available": chroma_available and has_search_provider,
+                "enabled": chroma_configured and has_search_provider,
+                "reason": None
+                if (chroma_available and has_search_provider)
+                else (
+                    "Requires ChromaDB and a search provider"
+                    if not chroma_configured
+                    else "No search provider configured"
+                    if not has_search_provider
+                    else "ChromaDB not reachable"
+                ),
+            },
+            "smart_rag": {
+                "available": False,
+                "enabled": False,
+                "reason": "Coming soon",
+            },
+        }
+
+        # Build dependencies status
+        dependencies = {
+            "chromadb": {
+                "configured": chroma_configured,
+                "available": chroma_available,
+                "url": chroma_url or None,
+                "reason": None
+                if chroma_available
+                else (
+                    "CHROMA_URL not set" if not chroma_configured else "Not reachable"
+                ),
+            },
+            "search_providers": search_providers,
+            "has_search_provider": has_search_provider,
+        }
+
+        return jsonify(
+            {
+                "features": features,
+                "dependencies": dependencies,
+            }
+        )
 
     # -------------------------------------------------------------------------
     # Config Import/Export
@@ -4662,7 +4832,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
             mi = ModelIntelligence(
                 summarizer_model=router.intelligence_model,
-                search_provider=router.search_provider,
             )
             # Use comparative refresh to get relative assessments between candidates
             results = mi.refresh_models_comparative(model_ids, force=force)

@@ -520,26 +520,10 @@ content %}
 
                 <!-- Model Intelligence Settings (shown when enabled) -->
                 <template x-if="form.use_model_intelligence">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 bg-base-200 rounded-lg">
-                        <!-- Search Provider -->
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Search Provider</span>
-                            </label>
-                            <select
-                                x-model="form.search_provider"
-                                class="select select-bordered"
-                            >
-                                <option value="">Default (SearXNG)</option>
-                                <template x-for="provider in searchProviders" :key="provider.name">
-                                    <option :value="provider.name" x-text="provider.name + (provider.configured ? '' : ' (not configured)')"></option>
-                                </template>
-                            </select>
-                            <label class="label">
-                                <span class="label-text-alt">Provider for searching model information</span>
-                            </label>
-                        </div>
-
+                    <div class="mt-4 p-4 bg-base-200 rounded-lg">
+                        <p class="text-sm text-base-content/70 mb-3">
+                            Search provider is configured in <a href="/settings" class="link link-primary">Settings</a>.
+                        </p>
                         <!-- Intelligence Model -->
                         <div class="form-control">
                             <label class="label">
@@ -625,7 +609,6 @@ content %}
             refreshingIntelligence: null,
             intelligenceStatus: {},
             redirectWarnings: {},  // { routerId: { modelName: { redirected: true, target: 'x' } } }
-            searchProviders: [],
             modelIntelligence: {},  // { modelId: { intelligence, strengths, ... } }
             form: {
                 name: '',
@@ -641,7 +624,6 @@ content %}
                 tagsInput: '',
                 enabled: true,
                 use_model_intelligence: false,
-                search_provider: '',
                 intelligence_model: '',
             },
             formErrors: {},
@@ -651,7 +633,6 @@ content %}
                     this.loadRouters(),
                     this.loadAvailableModels(),
                     this.loadStats(),
-                    this.loadSearchProviders(),
                 ]);
                 this.loading = false;
             },
@@ -686,17 +667,6 @@ content %}
                     }
                 } catch (error) {
                     console.error('Failed to load available models:', error);
-                }
-            },
-
-            async loadSearchProviders() {
-                try {
-                    const response = await fetch('/api/search-providers');
-                    if (response.ok) {
-                        this.searchProviders = await response.json();
-                    }
-                } catch (error) {
-                    console.error('Failed to load search providers:', error);
                 }
             },
 
@@ -783,7 +753,6 @@ content %}
                     tagsInput: '',
                     enabled: true,
                     use_model_intelligence: false,
-                    search_provider: '',
                     intelligence_model: '',
                 };
                 this.formErrors = {};
@@ -821,7 +790,6 @@ content %}
                     tagsInput: (router.tags || []).join(', '),
                     enabled: router.enabled,
                     use_model_intelligence: router.use_model_intelligence || false,
-                    search_provider: router.search_provider || '',
                     intelligence_model: router.intelligence_model || '',
                 };
                 this.formErrors = {};
@@ -966,7 +934,6 @@ content %}
                     tags: tags,
                     enabled: this.form.enabled,
                     use_model_intelligence: this.form.use_model_intelligence,
-                    search_provider: this.form.search_provider || null,
                     intelligence_model: this.form.intelligence_model || null,
                 };
 

@@ -261,17 +261,12 @@ Respond with ONLY your decision (e.g., "direct" or "search:UK foreign policy 202
 
     def _execute_search(self, query: str) -> str:
         """Execute a web search and return formatted results."""
-        from augmentation import get_search_provider
+        from augmentation import get_configured_search_provider
 
-        provider = get_search_provider(
-            self.augmentor.search_provider,
-            url_override=self.augmentor.search_provider_url,
-        )
+        provider = get_configured_search_provider()
 
         if not provider:
-            logger.warning(
-                f"Search provider '{self.augmentor.search_provider}' not available"
-            )
+            logger.warning("No search provider configured or available")
             return ""
 
         try:

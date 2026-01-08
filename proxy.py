@@ -1436,7 +1436,7 @@ def pull_model():
 @app.route("/api/version", methods=["GET"])
 def version():
     """Return version information."""
-    return jsonify({"version": "1.2.0-multi-provider"})
+    return jsonify({"version": "1.2.1-multi-provider"})
 
 
 @app.route("/api/ps", methods=["GET"])

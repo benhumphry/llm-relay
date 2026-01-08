@@ -127,7 +127,7 @@
                     </div>
 
                     <!-- Navigation -->
-                    <ul class="menu p-4 gap-1">
+                    <ul class="menu p-4 gap-1" x-data="sidebarNav()" x-init="init()">
                         <!-- Dashboard -->
                         <li>
                             <a
@@ -271,50 +271,54 @@
                                 Smart Routers
                             </a>
                         </li>
-                        <li>
-                            <a
-                                href="{{ url_for('admin.caches_page') }}"
-                                class="{% if request.endpoint == 'admin.caches_page' %}active{% endif %}"
-                            >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-5 w-5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
+                        <template x-if="features.smart_caches">
+                            <li>
+                                <a
+                                    href="{{ url_for('admin.caches_page') }}"
+                                    class="{% if request.endpoint == 'admin.caches_page' %}active{% endif %}"
                                 >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-                                    />
-                                </svg>
-                                Smart Caches
-                            </a>
-                        </li>
-                        <li>
-                            <a
-                                href="{{ url_for('admin.augmentors_page') }}"
-                                class="{% if request.endpoint == 'admin.augmentors_page' %}active{% endif %}"
-                            >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-5 w-5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-5 w-5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+                                        />
+                                    </svg>
+                                    Smart Caches
+                                </a>
+                            </li>
+                        </template>
+                        <template x-if="features.smart_augmentors">
+                            <li>
+                                <a
+                                    href="{{ url_for('admin.augmentors_page') }}"
+                                    class="{% if request.endpoint == 'admin.augmentors_page' %}active{% endif %}"
                                 >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                                    />
-                                </svg>
-                                Smart Augmentors
-                            </a>
-                        </li>
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-5 w-5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                                        />
+                                    </svg>
+                                    Smart Augmentors
+                                </a>
+                            </li>
+                        </template>
 
                         <!-- Usage -->
                         <li class="menu-title mt-4">
@@ -461,6 +465,28 @@
         </div>
         {% endblock %}
         <script>
+            // Sidebar navigation component - loads feature status for conditional display
+            function sidebarNav() {
+                return {
+                    features: {
+                        smart_caches: false,
+                        smart_augmentors: false,
+                    },
+                    async init() {
+                        try {
+                            const response = await fetch('/api/feature-status');
+                            if (response.ok) {
+                                const data = await response.json();
+                                this.features.smart_caches = data.features?.smart_caches?.available || false;
+                                this.features.smart_augmentors = data.features?.smart_augmentors?.available || false;
+                            }
+                        } catch (error) {
+                            console.error('Failed to load feature status:', error);
+                        }
+                    }
+                };
+            }
+
             // Alerts badge component for sidebar
             function alertsBadge() {
                 return {

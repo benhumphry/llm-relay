@@ -212,11 +212,6 @@ content %}
                                             <div class="text-xs text-base-content/50 uppercase mb-1">Target Model</div>
                                             <div class="font-mono text-xs" x-text="augmentor.target_model"></div>
                                         </div>
-                                        <!-- Search Provider -->
-                                        <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Search Provider</div>
-                                            <div class="text-sm capitalize" x-text="augmentor.search_provider || 'searxng'"></div>
-                                        </div>
                                         <!-- Limits -->
                                         <div>
                                             <div class="text-xs text-base-content/50 uppercase mb-1">Limits</div>
@@ -337,19 +332,11 @@ content %}
                     </label>
                 </div>
 
-                <!-- Search Provider -->
-                <div class="form-control mt-4">
-                    <label class="label">
-                        <span class="label-text">Search Provider</span>
-                    </label>
-                    <select
-                        x-model="form.search_provider"
-                        class="select select-bordered"
-                    >
-                        <template x-for="provider in searchProviders" :key="provider.name">
-                            <option :value="provider.name" x-text="provider.name + (provider.configured ? '' : ' (not configured)')"></option>
-                        </template>
-                    </select>
+                <!-- Search Provider Note -->
+                <div class="mt-4 p-3 bg-base-200 rounded-lg">
+                    <p class="text-sm text-base-content/70">
+                        Search provider is configured in <a href="/settings" class="link link-primary">Settings</a>.
+                    </p>
                 </div>
 
                 <!-- Limits -->
@@ -484,7 +471,6 @@ content %}
             loading: true,
             augmentors: [],
             availableModels: [],
-            searchProviders: [],
             expandedRows: [],
             showModal: false,
             showDeleteModal: false,
@@ -497,7 +483,6 @@ content %}
                 designator_model: '',
                 target_model: '',
                 purpose: '',
-                search_provider: 'searxng',
                 max_search_results: 5,
                 max_scrape_urls: 3,
                 max_context_tokens: 4000,
@@ -511,7 +496,6 @@ content %}
                 await Promise.all([
                     this.loadAugmentors(),
                     this.loadAvailableModels(),
-                    this.loadSearchProviders(),
                 ]);
                 this.loading = false;
             },
@@ -538,17 +522,6 @@ content %}
                 }
             },
 
-            async loadSearchProviders() {
-                try {
-                    const response = await fetch('/api/search-providers');
-                    if (response.ok) {
-                        this.searchProviders = await response.json();
-                    }
-                } catch (error) {
-                    console.error('Failed to load search providers:', error);
-                }
-            },
-
             toggleExpand(id) {
                 const idx = this.expandedRows.indexOf(id);
                 if (idx >= 0) {
@@ -565,7 +538,6 @@ content %}
                     designator_model: '',
                     target_model: '',
                     purpose: '',
-                    search_provider: 'searxng',
                     max_search_results: 5,
                     max_scrape_urls: 3,
                     max_context_tokens: 4000,
@@ -584,7 +556,6 @@ content %}
                     designator_model: augmentor.designator_model,
                     target_model: augmentor.target_model,
                     purpose: augmentor.purpose || '',
-                    search_provider: augmentor.search_provider || 'searxng',
                     max_search_results: augmentor.max_search_results,
                     max_scrape_urls: augmentor.max_scrape_urls,
                     max_context_tokens: augmentor.max_context_tokens,
@@ -616,7 +587,6 @@ content %}
                     designator_model: this.form.designator_model,
                     target_model: this.form.target_model,
                     purpose: this.form.purpose || null,
-                    search_provider: this.form.search_provider,
                     max_search_results: parseInt(this.form.max_search_results),
                     max_scrape_urls: parseInt(this.form.max_scrape_urls),
                     max_context_tokens: parseInt(this.form.max_context_tokens),

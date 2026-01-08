@@ -213,6 +213,12 @@ class Setting(Base):
     KEY_DEFAULT_MODEL = "default_model"
     KEY_ADMIN_PASSWORD_HASH = "admin_password_hash"
     KEY_SESSION_SECRET = "session_secret"
+
+    # Web search settings (v1.2.1)
+    KEY_WEB_SEARCH_PROVIDER = "web_search_provider"  # "searxng" or "perplexity"
+    KEY_WEB_SEARCH_URL = "web_search_url"  # Override URL for SearXNG
+    KEY_WEB_SCRAPER_PROVIDER = "web_scraper_provider"  # "builtin" or "jina"
+    KEY_JINA_API_KEY = "jina_api_key"  # Optional Jina API key
     # Usage tracking settings (v2.1)
     KEY_TRACKING_ENABLED = "tracking_enabled"
     KEY_DNS_RESOLUTION_ENABLED = "dns_resolution_enabled"

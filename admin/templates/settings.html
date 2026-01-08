@@ -1162,6 +1162,98 @@ content %}
                 </div>
             </div>
         </div>
+
+        <!-- Web Search & Scraping -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Web Search & Scraping</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Configure web search and scraping for Smart Augmentors and Model Intelligence
+                </p>
+
+                <div class="space-y-4">
+                    <!-- Search Provider -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Search Provider</span>
+                        </label>
+                        <select
+                            x-model="webSettings.search_provider"
+                            class="select select-bordered"
+                            :disabled="!hasAnySearchProvider"
+                        >
+                            <option value="">Select provider...</option>
+                            <template x-for="provider in availableSearchProviders" :key="provider.name">
+                                <option :value="provider.name" x-text="provider.name.charAt(0).toUpperCase() + provider.name.slice(1)"></option>
+                            </template>
+                        </select>
+                        <template x-if="!hasAnySearchProvider">
+                            <label class="label">
+                                <span class="label-text-alt text-warning">No search providers configured. Set SEARXNG_URL or PERPLEXITY_API_KEY.</span>
+                            </label>
+                        </template>
+                    </div>
+
+                    <!-- Search URL Override (for SearXNG) -->
+                    <template x-if="webSettings.search_provider === 'searxng'">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">SearXNG URL Override</span>
+                            </label>
+                            <input
+                                type="url"
+                                x-model="webSettings.search_url"
+                                class="input input-bordered"
+                                placeholder="Leave empty to use SEARXNG_URL env var"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt">Override the default SearXNG URL from environment</span>
+                            </label>
+                        </div>
+                    </template>
+
+                    <!-- Scraper Provider -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Web Scraper</span>
+                        </label>
+                        <select
+                            x-model="webSettings.scraper_provider"
+                            class="select select-bordered"
+                        >
+                            <option value="builtin">Built-in (httpx + BeautifulSoup)</option>
+                            <option value="jina">Jina Reader (handles JS-heavy sites)</option>
+                        </select>
+                    </div>
+
+                    <!-- Jina API Key (optional) -->
+                    <template x-if="webSettings.scraper_provider === 'jina'">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Jina API Key (optional)</span>
+                            </label>
+                            <input
+                                type="password"
+                                x-model="webSettings.jina_api_key"
+                                class="input input-bordered"
+                                placeholder="For higher rate limits"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt">Optional - increases rate limits for Jina Reader API</span>
+                            </label>
+                        </div>
+                    </template>
+
+                    <button
+                        @click="saveWebSettings()"
+                        class="btn btn-primary btn-sm"
+                        :class="{ 'loading': savingWebSettings }"
+                    >
+                        Save Web Settings
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Debug Log Viewer (full width) -->
@@ -1385,6 +1477,17 @@ content %}
             debugLogFilter: "all",
             debugLogSearch: "",
             debugAutoScroll: true,
+
+            // Web search & scraping settings
+            webSettings: {
+                search_provider: '',
+                search_url: '',
+                scraper_provider: 'builtin',
+                jina_api_key: '',
+            },
+            availableSearchProviders: [],
+            hasAnySearchProvider: false,
+            savingWebSettings: false,
 
             // Computed property for filtered logs
             get filteredDebugLogs() {
@@ -1664,8 +1767,68 @@ content %}
 
                     // Initialize debug log viewer
                     await this.initDebugLogs();
+
+                    // Load web settings
+                    await this.loadWebSettings();
                 } catch (err) {
                     this.showToast("Failed to load settings", "error");
+                }
+            },
+
+            async loadWebSettings() {
+                try {
+                    // Get available search providers from feature-status endpoint
+                    const featureRes = await fetch('/api/feature-status');
+                    if (featureRes.ok) {
+                        const featureData = await featureRes.json();
+                        const searchProviders = featureData.dependencies?.search_providers || {};
+
+                        // Build available providers list
+                        this.availableSearchProviders = [];
+                        if (searchProviders.searxng) {
+                            this.availableSearchProviders.push({ name: 'searxng', label: 'SearXNG' });
+                        }
+                        if (searchProviders.perplexity) {
+                            this.availableSearchProviders.push({ name: 'perplexity', label: 'Perplexity' });
+                        }
+                        this.hasAnySearchProvider = this.availableSearchProviders.length > 0;
+                    }
+
+                    // Load saved web settings
+                    const webRes = await fetch('/api/settings/web');
+                    if (webRes.ok) {
+                        const webData = await webRes.json();
+                        this.webSettings = {
+                            search_provider: webData.search_provider || '',
+                            search_url: webData.search_url || '',
+                            scraper_provider: webData.scraper_provider || 'builtin',
+                            jina_api_key: webData.jina_api_key || '',
+                        };
+                    }
+                } catch (err) {
+                    console.error('Failed to load web settings:', err);
+                }
+            },
+
+            async saveWebSettings() {
+                this.savingWebSettings = true;
+                try {
+                    const res = await fetch('/api/settings/web', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.webSettings),
+                    });
+
+                    if (res.ok) {
+                        this.showToast('Web settings saved');
+                    } else {
+                        const data = await res.json();
+                        this.showToast(data.error || 'Failed to save web settings', 'error');
+                    }
+                } catch (err) {
+                    this.showToast('Failed to save web settings', 'error');
+                } finally {
+                    this.savingWebSettings = false;
                 }
             },
 

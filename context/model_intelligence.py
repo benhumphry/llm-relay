@@ -80,7 +80,6 @@ class ModelIntelligence:
     def __init__(
         self,
         summarizer_model: str | None = None,
-        search_provider: str | None = None,
         ttl_days: int = DEFAULT_TTL_DAYS,
     ):
         """
@@ -88,11 +87,9 @@ class ModelIntelligence:
 
         Args:
             summarizer_model: Model to use for summarizing search results (required for refresh operations)
-            search_provider: Search provider name (e.g., "searxng", "perplexity")
             ttl_days: How long to cache intelligence before refreshing
         """
         self.summarizer_model = summarizer_model
-        self.search_provider = search_provider
         self.ttl_days = ttl_days
         self._collection = None
 
@@ -365,13 +362,10 @@ class ModelIntelligence:
         """Search for direct comparisons between models (e.g., 'Claude vs GPT-4')."""
         from itertools import combinations
 
-        from augmentation.search import get_default_search_provider, get_search_provider
+        from augmentation.search import get_configured_search_provider
 
-        # Use configured search provider or fall back to default
-        if self.search_provider:
-            provider = get_search_provider(self.search_provider)
-        else:
-            provider = get_default_search_provider()
+        # Use globally configured search provider
+        provider = get_configured_search_provider()
 
         if not provider:
             logger.warning("No search provider available for model comparisons")
@@ -575,16 +569,13 @@ Provide this for each model: {model_list}"""
 
     def _search_for_model(self, model_id: str) -> list[dict]:
         """Search for model reviews and comparisons."""
-        from augmentation.search import get_default_search_provider, get_search_provider
+        from augmentation.search import get_configured_search_provider
 
         search_name = self._model_to_search_name(model_id)
         all_results = []
 
-        # Use configured search provider or fall back to default
-        if self.search_provider:
-            provider = get_search_provider(self.search_provider)
-        else:
-            provider = get_default_search_provider()
+        # Use globally configured search provider
+        provider = get_configured_search_provider()
 
         if not provider:
             logger.warning("No search provider available for model intelligence")
