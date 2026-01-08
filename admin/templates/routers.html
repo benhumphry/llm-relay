@@ -720,7 +720,9 @@ content %}
             },
 
             getCandidateRequests(routerName, modelId) {
-                return this.stats[routerName]?.candidates?.[modelId] || 0;
+                // Stats are stored by model_id only (e.g., "gpt-5"), not full path (e.g., "openai/gpt-5")
+                const shortModelId = modelId.includes('/') ? modelId.split('/').pop() : modelId;
+                return this.stats[routerName]?.candidates?.[shortModelId] || 0;
             },
 
             getCandidatePercent(routerName, modelId) {
