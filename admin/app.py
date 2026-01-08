@@ -4582,4 +4582,126 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             }
         )
 
+    # =========================================================================
+    # Smart Augmentors (v3.4)
+    # =========================================================================
+
+    @admin.route("/augmentors")
+    @require_auth
+    def augmentors_page():
+        """Smart augmentors management page."""
+        return render_template("augmentors.html")
+
+    @admin.route("/api/augmentors", methods=["GET"])
+    @require_auth_api
+    def list_augmentors():
+        """List all smart augmentors."""
+        from db import get_all_smart_augmentors
+
+        augmentors = get_all_smart_augmentors()
+        return jsonify([a.to_dict() for a in augmentors])
+
+    @admin.route("/api/augmentors/<int:augmentor_id>", methods=["GET"])
+    @require_auth_api
+    def get_augmentor(augmentor_id: int):
+        """Get a specific smart augmentor."""
+        from db import get_smart_augmentor_by_id
+
+        augmentor = get_smart_augmentor_by_id(augmentor_id)
+        if not augmentor:
+            return jsonify({"error": "Augmentor not found"}), 404
+        return jsonify(augmentor.to_dict())
+
+    @admin.route("/api/augmentors", methods=["POST"])
+    @require_auth_api
+    def create_augmentor():
+        """Create a new smart augmentor."""
+        from db import create_smart_augmentor
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+
+        target_model = data.get("target_model", "").strip()
+        if not target_model:
+            return jsonify({"error": "Target model is required"}), 400
+
+        designator_model = data.get("designator_model", "").strip()
+        if not designator_model:
+            return jsonify({"error": "Designator model is required"}), 400
+
+        try:
+            augmentor = create_smart_augmentor(
+                name=name,
+                designator_model=designator_model,
+                target_model=target_model,
+                purpose=data.get("purpose"),
+                search_provider=data.get("search_provider", "searxng"),
+                search_provider_url=data.get("search_provider_url"),
+                max_search_results=data.get("max_search_results", 5),
+                max_scrape_urls=data.get("max_scrape_urls", 3),
+                max_context_tokens=data.get("max_context_tokens", 4000),
+                tags=data.get("tags", []),
+                description=data.get("description"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(augmentor.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/augmentors/<int:augmentor_id>", methods=["PUT"])
+    @require_auth_api
+    def update_augmentor(augmentor_id: int):
+        """Update a smart augmentor."""
+        from db import update_smart_augmentor
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        try:
+            augmentor = update_smart_augmentor(
+                augmentor_id=augmentor_id,
+                name=data.get("name"),
+                designator_model=data.get("designator_model"),
+                target_model=data.get("target_model"),
+                purpose=data.get("purpose"),
+                search_provider=data.get("search_provider"),
+                search_provider_url=data.get("search_provider_url"),
+                max_search_results=data.get("max_search_results"),
+                max_scrape_urls=data.get("max_scrape_urls"),
+                max_context_tokens=data.get("max_context_tokens"),
+                tags=data.get("tags"),
+                description=data.get("description"),
+                enabled=data.get("enabled"),
+            )
+            if not augmentor:
+                return jsonify({"error": "Augmentor not found"}), 404
+            return jsonify(augmentor.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/augmentors/<int:augmentor_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_augmentor_endpoint(augmentor_id: int):
+        """Delete a smart augmentor."""
+        from db import delete_smart_augmentor
+
+        if delete_smart_augmentor(augmentor_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Failed to delete augmentor"}), 500
+
+    @admin.route("/api/search-providers", methods=["GET"])
+    @require_auth_api
+    def list_search_providers():
+        """List available search providers."""
+        from augmentation import list_search_providers
+
+        providers = list_search_providers()
+        return jsonify(providers)
+
     return admin

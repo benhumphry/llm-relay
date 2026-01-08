@@ -34,6 +34,7 @@ from .models import (
     Provider,
     RequestLog,
     Setting,
+    SmartAugmentor,
     SmartCache,
     SmartRouter,
 )
@@ -41,6 +42,15 @@ from .seed import (
     ensure_seeded,
     seed_models_from_litellm,
     seed_providers,
+)
+from .smart_augmentors import (
+    create_smart_augmentor,
+    delete_smart_augmentor,
+    get_all_smart_augmentors,
+    get_smart_augmentor_by_id,
+    get_smart_augmentor_by_name,
+    update_smart_augmentor,
+    update_smart_augmentor_stats,
 )
 from .smart_caches import (
     cache_name_available,
@@ -124,6 +134,15 @@ __all__ = [
     "delete_smart_cache",
     "cache_name_available",
     "get_enabled_smart_caches",
+    # Smart Augmentors (v3.4)
+    "SmartAugmentor",
+    "get_all_smart_augmentors",
+    "get_smart_augmentor_by_name",
+    "get_smart_augmentor_by_id",
+    "create_smart_augmentor",
+    "update_smart_augmentor",
+    "update_smart_augmentor_stats",
+    "delete_smart_augmentor",
     # Seeding
     "ensure_seeded",
     "seed_providers",

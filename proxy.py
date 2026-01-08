@@ -908,6 +908,54 @@ def chat():
             }
         )
 
+    # Handle Smart Augmentor context injection (v3.4)
+    augmentor_name = None
+    if getattr(resolved, "has_augmentation", False):
+        augmentation_result = resolved.augmentation_result
+        augmentor_name = augmentation_result.augmentor_name
+
+        # Swap in augmented content
+        if augmentation_result.augmented_system is not None:
+            system_prompt = augmentation_result.augmented_system
+        if augmentation_result.augmented_messages:
+            messages = augmentation_result.augmented_messages
+
+        # Log augmentation decision
+        aug_type = augmentation_result.augmentation_type
+        if aug_type != "direct":
+            logger.info(f"Augmentor '{augmentor_name}' applied {aug_type} augmentation")
+
+        # Update augmentor statistics
+        from db import update_smart_augmentor_stats
+
+        update_smart_augmentor_stats(
+            augmentor_id=augmentation_result.augmentor_id,
+            increment_requests=1,
+            increment_augmented=1 if aug_type != "direct" else 0,
+            increment_search=1 if "search" in aug_type else 0,
+            increment_scrape=1 if "scrape" in aug_type else 0,
+        )
+
+        # Log designator usage for augmentor
+        if augmentation_result.designator_usage:
+            designator_model = augmentation_result.designator_model or "unknown"
+            designator_usage = augmentation_result.designator_usage
+            track_completion(
+                provider_id=designator_model.split("/")[0]
+                if "/" in designator_model
+                else "unknown",
+                model_id=designator_model.split("/")[1]
+                if "/" in designator_model
+                else designator_model,
+                model_name=designator_model,
+                endpoint="/api/chat",
+                input_tokens=designator_usage.get("prompt_tokens", 0),
+                output_tokens=designator_usage.get("completion_tokens", 0),
+                status_code=200,
+                tag=tag,
+                is_designator=True,
+            )
+
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/api/chat")
 
@@ -1519,6 +1567,54 @@ def openai_chat_completions():
                 "x_cache": {"hit": True, "cache_name": cache_name},
             }
         )
+
+    # Handle Smart Augmentor context injection (v3.4)
+    augmentor_name = None
+    if getattr(resolved, "has_augmentation", False):
+        augmentation_result = resolved.augmentation_result
+        augmentor_name = augmentation_result.augmentor_name
+
+        # Swap in augmented content
+        if augmentation_result.augmented_system is not None:
+            system_prompt = augmentation_result.augmented_system
+        if augmentation_result.augmented_messages:
+            messages = augmentation_result.augmented_messages
+
+        # Log augmentation decision
+        aug_type = augmentation_result.augmentation_type
+        if aug_type != "direct":
+            logger.info(f"Augmentor '{augmentor_name}' applied {aug_type} augmentation")
+
+        # Update augmentor statistics
+        from db import update_smart_augmentor_stats
+
+        update_smart_augmentor_stats(
+            augmentor_id=augmentation_result.augmentor_id,
+            increment_requests=1,
+            increment_augmented=1 if aug_type != "direct" else 0,
+            increment_search=1 if "search" in aug_type else 0,
+            increment_scrape=1 if "scrape" in aug_type else 0,
+        )
+
+        # Log designator usage for augmentor
+        if augmentation_result.designator_usage:
+            designator_model = augmentation_result.designator_model or "unknown"
+            designator_usage = augmentation_result.designator_usage
+            track_completion(
+                provider_id=designator_model.split("/")[0]
+                if "/" in designator_model
+                else "unknown",
+                model_id=designator_model.split("/")[1]
+                if "/" in designator_model
+                else designator_model,
+                model_name=designator_model,
+                endpoint="/v1/chat/completions",
+                input_tokens=designator_usage.get("prompt_tokens", 0),
+                output_tokens=designator_usage.get("completion_tokens", 0),
+                status_code=200,
+                tag=tag,
+                is_designator=True,
+            )
 
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/v1/chat/completions")

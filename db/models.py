@@ -913,6 +913,121 @@ class SmartCache(Base):
         }
 
 
+# ============================================================================
+# Smart Augmentor Model (v3.4)
+# ============================================================================
+
+
+class SmartAugmentor(Base):
+    """
+    Smart augmentors that enhance LLM requests with web search and URL scraping.
+
+    A smart augmentor uses a designator LLM to decide what augmentation to apply:
+    - direct: pass through unchanged
+    - search:query: search via configured provider, inject results
+    - scrape:url1,url2: fetch specific URLs, inject content
+    - search+scrape:query: search then scrape top results
+
+    The augmented context is injected into the system prompt before forwarding
+    to the target model.
+    """
+
+    __tablename__ = "smart_augmentors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+
+    # Designator LLM config
+    designator_model: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # "provider_id/model_id" for deciding augmentation
+    purpose: Mapped[Optional[str]] = mapped_column(
+        Text
+    )  # Context for augmentation decisions (e.g., "research assistant for current events")
+
+    # Target model to forward augmented requests to
+    target_model: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # "provider_id/model_id"
+
+    # Search provider config
+    search_provider: Mapped[str] = mapped_column(
+        String(50), default="searxng"
+    )  # "searxng" | "perplexity" | future providers
+    search_provider_url: Mapped[Optional[str]] = mapped_column(
+        String(500)
+    )  # Override default URL for self-hosted providers
+    max_search_results: Mapped[int] = mapped_column(Integer, default=5)
+    max_scrape_urls: Mapped[int] = mapped_column(Integer, default=3)
+
+    # Context injection config
+    max_context_tokens: Mapped[int] = mapped_column(
+        Integer, default=4000
+    )  # Max tokens for injected context
+
+    # Statistics
+    total_requests: Mapped[int] = mapped_column(Integer, default=0)
+    augmented_requests: Mapped[int] = mapped_column(Integer, default=0)  # Non-direct
+    search_requests: Mapped[int] = mapped_column(Integer, default=0)
+    scrape_requests: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Optional tags for usage tracking
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        return json.loads(self.tags_json) if self.tags_json else []
+
+    @tags.setter
+    def tags(self, value: list[str]):
+        """Set tags from a list."""
+        self.tags_json = json.dumps(value) if value else "[]"
+
+    @property
+    def augmentation_rate(self) -> float:
+        """Calculate augmentation rate as a percentage."""
+        if self.total_requests == 0:
+            return 0.0
+        return (self.augmented_requests / self.total_requests) * 100
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "designator_model": self.designator_model,
+            "purpose": self.purpose,
+            "target_model": self.target_model,
+            "search_provider": self.search_provider,
+            "search_provider_url": self.search_provider_url,
+            "max_search_results": self.max_search_results,
+            "max_scrape_urls": self.max_scrape_urls,
+            "max_context_tokens": self.max_context_tokens,
+            "total_requests": self.total_requests,
+            "augmented_requests": self.augmented_requests,
+            "search_requests": self.search_requests,
+            "scrape_requests": self.scrape_requests,
+            "augmentation_rate": self.augmentation_rate,
+            "tags": self.tags,
+            "description": self.description,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 # Future tables for v2.2+ (defined here for reference, not created yet)
 #
 # class ApiKey(Base):

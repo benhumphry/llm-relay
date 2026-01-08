@@ -31,6 +31,7 @@ db/                   # Database layer
   aliases.py          # Alias CRUD operations
   smart_routers.py    # Smart router CRUD operations
   smart_caches.py     # Smart cache CRUD operations
+  smart_augmentors.py # Smart augmentor CRUD operations
   sync_descriptions.py # Model description sync from providers/OpenRouter
   seed.py             # LiteLLM pricing data sync
 tracking/             # Usage tracking
@@ -40,6 +41,13 @@ tracking/             # Usage tracking
 routing/              # Smart routing
   smart_router.py     # Designator-based model selection
   smart_cache.py      # Semantic response caching with ChromaDB
+  smart_augmentor.py  # Web search/scrape context augmentation
+augmentation/         # Web search and scraping
+  search/             # Search provider implementations
+    base.py           # SearchProvider abstract base class
+    searxng.py        # SearXNG search provider
+    perplexity.py     # Perplexity search provider
+  scraper.py          # URL content scraping
 context/              # ChromaDB integration
   chroma.py           # ChromaDB client wrapper and collection management
 admin/                # Admin dashboard
@@ -52,7 +60,7 @@ config/               # Configuration
 ## Key Concepts
 
 ### Model Resolution (providers/registry.py)
-Resolution order: Smart Router -> Smart Cache -> Alias -> Provider prefix -> Provider search -> Default fallback
+Resolution order: Smart Router -> Smart Cache -> Smart Augmentor -> Alias -> Provider prefix -> Provider search -> Default fallback
 
 ### ResolvedModel
 Dataclass returned by `registry.resolve_model()` containing provider, model_id, and metadata about how it was resolved (alias, router, default fallback).
@@ -75,6 +83,23 @@ Semantic response caching using ChromaDB. Caches LLM responses and returns them 
 - `cache_ttl_hours` - How long cached entries remain valid
 
 Requires ChromaDB (set `CHROMA_URL` environment variable).
+
+### Smart Augmentors (routing/smart_augmentor.py)
+Context augmentation using web search and URL scraping. A designator LLM analyzes each query and decides:
+- `direct` - pass through unchanged (simple questions, coding, creative tasks)
+- `search:query` - search the web and inject results (current events, recent data)
+- `scrape:url1,url2` - fetch specific URLs mentioned by the user
+- `search+scrape:query` - search then scrape top results for comprehensive research
+
+Key settings:
+- `designator_model` - Fast/cheap model to decide augmentation (e.g., "openai/gpt-4o-mini")
+- `target_model` - Model to forward augmented requests to
+- `search_provider` - Which search provider to use ("searxng", "perplexity")
+- `max_search_results` / `max_scrape_urls` - Limits on fetched content
+- `max_context_tokens` - Maximum tokens for injected context
+- `purpose` - Context for the designator (e.g., "research assistant for current events")
+
+Requires a search provider (set `SEARXNG_URL` for SearXNG, or `PERPLEXITY_API_KEY` for Perplexity).
 
 ### Model Descriptions (db/sync_descriptions.py)
 Fetches model descriptions from provider APIs (Google) and OpenRouter's public API. Descriptions help smart routers make better decisions since LLM designators have training cutoffs and don't know about newer models.

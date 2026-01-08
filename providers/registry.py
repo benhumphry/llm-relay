@@ -93,6 +93,46 @@ class CacheResolvedModel(ResolvedModel):
         return None
 
 
+@dataclass
+class AugmentorResolvedModel(ResolvedModel):
+    """
+    Extended ResolvedModel that includes smart augmentor information.
+
+    When resolve_model() returns an AugmentorResolvedModel, the proxy should:
+    1. Use augmentation_result.augmented_system instead of original system
+    2. Use augmentation_result.augmented_messages instead of original messages
+    3. Forward to the target provider with augmented context
+    """
+
+    augmentation_result: "object" = None  # AugmentationResult from SmartAugmentorEngine
+
+    @property
+    def has_augmentation(self) -> bool:
+        """Check if this resolution came from a smart augmentor."""
+        return True
+
+    @property
+    def augmented_system(self) -> str | None:
+        """Get the augmented system prompt."""
+        if self.augmentation_result:
+            return self.augmentation_result.augmented_system
+        return None
+
+    @property
+    def augmented_messages(self) -> list[dict]:
+        """Get the augmented messages."""
+        if self.augmentation_result:
+            return self.augmentation_result.augmented_messages
+        return []
+
+    @property
+    def augmentation_type(self) -> str:
+        """Get the type of augmentation applied."""
+        if self.augmentation_result:
+            return self.augmentation_result.augmentation_type
+        return "direct"
+
+
 class ProviderRegistry:
     """
     Central registry for all LLM providers.
@@ -147,10 +187,11 @@ class ProviderRegistry:
         Resolution order:
         1. Check if it's a smart router (v3.2) - requires messages
         2. Check if it's a smart cache (v3.3) - requires ChromaDB, returns CacheResolvedModel
-        3. Check if it's an alias (v3.1)
-        4. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        5. Check each configured provider's models
-        6. Fall back to default provider/model
+        3. Check if it's a smart augmentor (v3.4) - returns AugmentorResolvedModel
+        4. Check if it's an alias (v3.1)
+        5. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        6. Check each configured provider's models
+        7. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
@@ -161,6 +202,7 @@ class ProviderRegistry:
         Returns:
             ResolvedModel with provider, model_id, and optional alias info
             OR CacheResolvedModel for smart cache lookups
+            OR AugmentorResolvedModel for smart augmentor lookups
 
         Raises:
             ValueError: If model not found and no default configured
@@ -168,10 +210,11 @@ class ProviderRegistry:
         from context.chroma import is_chroma_available
         from db import (
             get_alias_by_name,
+            get_smart_augmentor_by_name,
             get_smart_cache_by_name,
             get_smart_router_by_name,
         )
-        from routing import SmartCacheEngine, SmartRouterEngine
+        from routing import SmartAugmentorEngine, SmartCacheEngine, SmartRouterEngine
 
         name = model_name.lower().strip()
 
@@ -255,7 +298,38 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 3: Check if it's an alias (v3.1)
+        # Step 3: Check if it's a smart augmentor (v3.4)
+        augmentor = get_smart_augmentor_by_name(name)
+        if augmentor and augmentor.enabled:
+            if messages is not None:
+                logger.debug(f"Using smart augmentor '{name}'")
+                engine = SmartAugmentorEngine(augmentor, self)
+                augmentation_result = engine.augment(messages, system)
+                # Return an AugmentorResolvedModel that the proxy can handle
+                return AugmentorResolvedModel(
+                    provider=augmentation_result.resolved.provider,
+                    model_id=augmentation_result.resolved.model_id,
+                    alias_name=augmentor.name,
+                    alias_tags=augmentor.tags or [],
+                    augmentation_result=augmentation_result,
+                )
+            else:
+                # No messages - just resolve to target model
+                logger.debug(
+                    f"Smart augmentor '{name}' called without messages, resolving target"
+                )
+                try:
+                    target_result = self._resolve_actual_model(augmentor.target_model)
+                    return ResolvedModel(
+                        provider=target_result.provider,
+                        model_id=target_result.model_id,
+                        alias_name=augmentor.name,
+                        alias_tags=augmentor.tags or [],
+                    )
+                except ValueError:
+                    pass  # Fall through to normal resolution
+
+        # Step 4: Check if it's an alias (v3.1)
         alias = get_alias_by_name(name)
         if alias and alias.enabled:
             logger.debug(f"Resolving alias '{name}' -> '{alias.target_model}'")
@@ -284,7 +358,7 @@ class ProviderRegistry:
                             alias_tags=alias.tags or [],
                         )
 
-        # Step 4-6: Normal model resolution
+        # Step 5-7: Normal model resolution
         return self._resolve_actual_model(name)
 
     def _resolve_actual_model(self, model_name: str) -> ResolvedModel:
@@ -486,6 +560,7 @@ class ProviderRegistry:
             get_enabled_smart_caches,
             get_enabled_smart_routers,
         )
+
         """
         Get combined model list in OpenAI format.
 
