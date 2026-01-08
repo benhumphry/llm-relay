@@ -903,16 +903,20 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def get_web_settings():
         """Get web search and scraping settings."""
+        import os
+
         keys = [
             Setting.KEY_WEB_SEARCH_PROVIDER,
             Setting.KEY_WEB_SEARCH_URL,
             Setting.KEY_WEB_SCRAPER_PROVIDER,
-            Setting.KEY_JINA_API_KEY,
         ]
 
         with get_db_context() as db:
             settings = db.query(Setting).filter(Setting.key.in_(keys)).all()
             settings_dict = {s.key: s.value for s in settings}
+
+        # Check if JINA_API_KEY env var is set
+        jina_api_configured = bool(os.environ.get("JINA_API_KEY", ""))
 
         return jsonify(
             {
@@ -921,7 +925,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "search_url": settings_dict.get(Setting.KEY_WEB_SEARCH_URL) or "",
                 "scraper_provider": settings_dict.get(Setting.KEY_WEB_SCRAPER_PROVIDER)
                 or "builtin",
-                "jina_api_key": settings_dict.get(Setting.KEY_JINA_API_KEY) or "",
+                "jina_api_configured": jina_api_configured,
             }
         )
 
@@ -941,12 +945,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if scraper_provider not in ("builtin", "jina"):
             return jsonify({"error": "Invalid scraper provider"}), 400
 
-        # Save settings
+        # Save settings (jina_api_key is now via env var JINA_API_KEY)
         settings_to_save = {
             Setting.KEY_WEB_SEARCH_PROVIDER: search_provider,
             Setting.KEY_WEB_SEARCH_URL: data.get("search_url", ""),
             Setting.KEY_WEB_SCRAPER_PROVIDER: scraper_provider,
-            Setting.KEY_JINA_API_KEY: data.get("jina_api_key", ""),
         }
 
         with get_db_context() as db:

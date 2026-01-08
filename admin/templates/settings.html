@@ -1226,21 +1226,25 @@ content %}
                         </select>
                     </div>
 
-                    <!-- Jina API Key (optional) -->
+                    <!-- Jina API Key status (optional) -->
                     <template x-if="webSettings.scraper_provider === 'jina'">
                         <div class="form-control">
                             <label class="label">
-                                <span class="label-text">Jina API Key (optional)</span>
+                                <span class="label-text">Jina API Key</span>
                             </label>
-                            <input
-                                type="password"
-                                x-model="webSettings.jina_api_key"
-                                class="input input-bordered"
-                                placeholder="For higher rate limits"
-                            />
-                            <label class="label">
-                                <span class="label-text-alt">Optional - increases rate limits for Jina Reader API</span>
-                            </label>
+                            <div class="flex items-center gap-2 h-12 px-4 bg-base-200 rounded-lg">
+                                <template x-if="webSettings.jina_api_configured">
+                                    <span class="text-success flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Configured via JINA_API_KEY
+                                    </span>
+                                </template>
+                                <template x-if="!webSettings.jina_api_configured">
+                                    <span class="text-base-content/50">Not configured (optional - set JINA_API_KEY for higher rate limits)</span>
+                                </template>
+                            </div>
                         </div>
                     </template>
 
@@ -1483,7 +1487,7 @@ content %}
                 search_provider: '',
                 search_url: '',
                 scraper_provider: 'builtin',
-                jina_api_key: '',
+                jina_api_configured: false,
             },
             availableSearchProviders: [],
             hasAnySearchProvider: false,
@@ -1798,7 +1802,7 @@ content %}
                             search_provider: webData.search_provider || '',
                             search_url: webData.search_url || '',
                             scraper_provider: webData.scraper_provider || 'builtin',
-                            jina_api_key: webData.jina_api_key || '',
+                            jina_api_configured: webData.jina_api_configured || false,
                         };
                     }
                 } catch (err) {
