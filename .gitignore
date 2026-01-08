@@ -34,5 +34,6 @@ build/
 # Database (persisted via Docker volume)
 db/data/
 
-# Development docker-compose (local testing)
+# Development files (local testing)
 docker-compose.dev.yml
+dev-config/
