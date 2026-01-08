@@ -479,6 +479,29 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        # v3.5.1: Add augmentation detail columns
+        if "augmentation_type" not in existing_columns:
+            migrations.append(
+                (
+                    "augmentation_type",
+                    "ALTER TABLE request_logs ADD COLUMN augmentation_type VARCHAR(20)",
+                )
+            )
+        if "augmentation_query" not in existing_columns:
+            migrations.append(
+                (
+                    "augmentation_query",
+                    "ALTER TABLE request_logs ADD COLUMN augmentation_query VARCHAR(500)",
+                )
+            )
+        if "augmentation_urls" not in existing_columns:
+            migrations.append(
+                (
+                    "augmentation_urls",
+                    "ALTER TABLE request_logs ADD COLUMN augmentation_urls TEXT",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for request_logs table (v3.2)"

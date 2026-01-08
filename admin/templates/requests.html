@@ -657,6 +657,22 @@ content %}
                                                     >designator</span
                                                 >
                                             </div>
+                                            <!-- Augmentation Details -->
+                                            <div x-show="log.augmentation_type && log.augmentation_type !== 'direct'">
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Augmentation</div>
+                                                <div class="text-xs space-y-1">
+                                                    <div>Type: <span class="badge badge-success badge-xs" x-text="log.augmentation_type"></span></div>
+                                                    <div x-show="log.augmentation_query">Query: <span class="font-mono text-xs" x-text="log.augmentation_query"></span></div>
+                                                    <div x-show="log.augmentation_urls && log.augmentation_urls.length > 0">
+                                                        URLs scraped:
+                                                        <ul class="list-disc list-inside ml-2">
+                                                            <template x-for="url in (log.augmentation_urls || [])" :key="url">
+                                                                <li class="truncate max-w-xs"><a :href="url" target="_blank" class="link link-hover text-xs" x-text="url"></a></li>
+                                                            </template>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </div>
                                             <!-- All Tags -->
                                             <div x-show="log.tag">
                                                 <div class="text-xs text-base-content/50 uppercase mb-1">All Tags</div>

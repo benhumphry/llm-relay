@@ -220,6 +220,10 @@ def track_completion(
     router_name: str | None = None,
     # Smart augmentor tracking (v3.5)
     augmentor_name: str | None = None,
+    # Augmentation details (v3.5.1)
+    augmentation_type: str | None = None,
+    augmentation_query: str | None = None,
+    augmentation_urls: list[str] | None = None,
 ):
     """
     Track a completed request.
@@ -243,6 +247,10 @@ def track_completion(
         alias: Alias name if request used an alias (v3.1)
         is_designator: Whether this was a designator call (v3.2)
         router_name: Smart router name if request used a router (v3.2)
+        augmentor_name: Smart augmentor name if request used an augmentor (v3.5)
+        augmentation_type: Type of augmentation applied (direct|search|scrape|search+scrape)
+        augmentation_query: Search query used for augmentation (if any)
+        augmentation_urls: List of URLs scraped for augmentation (if any)
     """
     from flask import g
 
@@ -288,6 +296,9 @@ def track_completion(
         is_designator=is_designator,
         router_name=router_name,
         augmentor_name=augmentor_name,
+        augmentation_type=augmentation_type,
+        augmentation_query=augmentation_query,
+        augmentation_urls=augmentation_urls,
     )
 
 
@@ -927,10 +938,18 @@ def chat():
     # Handle Smart Augmentor context injection (v3.4)
     augmentor_name = None
     augmentor_tags = []
+    augmentation_type = None
+    augmentation_query = None
+    augmentation_urls = None
     if getattr(resolved, "has_augmentation", False):
         augmentation_result = resolved.augmentation_result
         augmentor_name = augmentation_result.augmentor_name
         augmentor_tags = augmentation_result.augmentor_tags or []
+
+        # Capture augmentation details for logging (v3.5.1)
+        augmentation_type = augmentation_result.augmentation_type
+        augmentation_query = augmentation_result.search_query
+        augmentation_urls = augmentation_result.scraped_urls or None
 
         # Swap in augmented content
         if augmentation_result.augmented_system is not None:
@@ -1033,6 +1052,11 @@ def chat():
             captured_resolved = resolved  # Capture for cache storage (v3.3)
             captured_messages = messages  # Capture for cache storage (v3.3)
             captured_system = system_prompt  # Capture for cache storage (v3.3)
+            # Capture augmentation details for logging (v3.5.1)
+            captured_augmentor = augmentor_name
+            captured_aug_type = augmentation_type
+            captured_aug_query = augmentation_query
+            captured_aug_urls = augmentation_urls
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -1076,6 +1100,10 @@ def chat():
                     else None,
                     alias=captured_alias,
                     router_name=captured_router,
+                    augmentor_name=captured_augmentor,
+                    augmentation_type=captured_aug_type,
+                    augmentation_query=captured_aug_query,
+                    augmentation_urls=captured_aug_urls,
                 )
 
                 # Store response in smart cache on cache miss (v3.3)
@@ -1156,6 +1184,10 @@ def chat():
                 tag=tag,
                 alias=alias_name,
                 router_name=router_name,
+                augmentor_name=augmentor_name,
+                augmentation_type=augmentation_type,
+                augmentation_query=augmentation_query,
+                augmentation_urls=augmentation_urls,
             )
 
             # Store response in smart cache on cache miss (v3.3)
@@ -1198,6 +1230,10 @@ def chat():
             tag=tag,
             alias=alias_name,
             router_name=router_name,
+            augmentor_name=augmentor_name,
+            augmentation_type=augmentation_type,
+            augmentation_query=augmentation_query,
+            augmentation_urls=augmentation_urls,
         )
         return jsonify({"error": str(e)}), 500
 
@@ -1610,10 +1646,18 @@ def openai_chat_completions():
     # Handle Smart Augmentor context injection (v3.4)
     augmentor_name = None
     augmentor_tags = []
+    augmentation_type = None
+    augmentation_query = None
+    augmentation_urls = None
     if getattr(resolved, "has_augmentation", False):
         augmentation_result = resolved.augmentation_result
         augmentor_name = augmentation_result.augmentor_name
         augmentor_tags = augmentation_result.augmentor_tags or []
+
+        # Capture augmentation details for logging (v3.5.1)
+        augmentation_type = augmentation_result.augmentation_type
+        augmentation_query = augmentation_result.search_query
+        augmentation_urls = augmentation_result.scraped_urls or None
 
         # Swap in augmented content
         if augmentation_result.augmented_system is not None:
@@ -1726,6 +1770,11 @@ def openai_chat_completions():
             captured_resolved = resolved  # Capture for cache storage (v3.3)
             captured_messages = messages  # Capture for cache storage (v3.3)
             captured_system = system_prompt  # Capture for cache storage (v3.3)
+            # Capture augmentation details for logging (v3.5.1)
+            captured_augmentor = augmentor_name
+            captured_aug_type = augmentation_type
+            captured_aug_query = augmentation_query
+            captured_aug_urls = augmentation_urls
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -1769,6 +1818,10 @@ def openai_chat_completions():
                     else None,
                     alias=captured_alias,
                     router_name=captured_router,
+                    augmentor_name=captured_augmentor,
+                    augmentation_type=captured_aug_type,
+                    augmentation_query=captured_aug_query,
+                    augmentation_urls=captured_aug_urls,
                 )
 
                 # Store response in smart cache on cache miss (v3.3)
@@ -1866,6 +1919,10 @@ def openai_chat_completions():
                 tag=tag,
                 alias=alias_name,
                 router_name=router_name,
+                augmentor_name=augmentor_name,
+                augmentation_type=augmentation_type,
+                augmentation_query=augmentation_query,
+                augmentation_urls=augmentation_urls,
             )
 
             # Store response in smart cache on cache miss (v3.3)
@@ -1908,6 +1965,10 @@ def openai_chat_completions():
             tag=tag,
             alias=alias_name,
             router_name=router_name,
+            augmentor_name=augmentor_name,
+            augmentation_type=augmentation_type,
+            augmentation_query=augmentation_query,
+            augmentation_urls=augmentation_urls,
         )
         return jsonify(
             {

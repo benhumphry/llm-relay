@@ -79,6 +79,10 @@ class UsageTracker:
         router_name: Optional[str] = None,
         # Smart augmentor tracking (v3.5)
         augmentor_name: Optional[str] = None,
+        # Augmentation details (v3.5.1)
+        augmentation_type: Optional[str] = None,
+        augmentation_query: Optional[str] = None,
+        augmentation_urls: Optional[list[str]] = None,
     ):
         """
         Queue a request log entry.
@@ -105,6 +109,10 @@ class UsageTracker:
             alias: Alias name if request used an alias (v3.1)
             is_designator: Whether this was a designator call (v3.2)
             router_name: Smart router name if request used a router (v3.2)
+            augmentor_name: Smart augmentor name if request used an augmentor (v3.5)
+            augmentation_type: Type of augmentation applied (direct|search|scrape|search+scrape)
+            augmentation_query: Search query used for augmentation (if any)
+            augmentation_urls: List of URLs scraped for augmentation (if any)
         """
         if not self._is_tracking_enabled():
             return
@@ -133,6 +141,9 @@ class UsageTracker:
                 "is_designator": is_designator,
                 "router_name": router_name,
                 "augmentor_name": augmentor_name,
+                "augmentation_type": augmentation_type,
+                "augmentation_query": augmentation_query,
+                "augmentation_urls": augmentation_urls,
             }
         )
 
@@ -209,7 +220,12 @@ class UsageTracker:
                     is_designator=entry.get("is_designator", False),  # v3.2
                     router_name=entry.get("router_name"),  # v3.2
                     augmentor_name=entry.get("augmentor_name"),  # v3.5
+                    augmentation_type=entry.get("augmentation_type"),  # v3.5.1
+                    augmentation_query=entry.get("augmentation_query"),  # v3.5.1
                 )
+                # Set scraped URLs using property setter (handles JSON serialization)
+                if entry.get("augmentation_urls"):
+                    log.scraped_urls = entry["augmentation_urls"]
                 db.add(log)
         except Exception as e:
             logger.error(f"Error saving request log: {e}")

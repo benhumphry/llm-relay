@@ -511,6 +511,17 @@ class RequestLog(Base):
         String(100), nullable=True, index=True
     )
 
+    # Augmentation details (v3.5.1) - what augmentation was applied and how
+    augmentation_type: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )  # "direct"|"search"|"scrape"|"search+scrape"
+    augmentation_query: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Search query used (if any)
+    augmentation_urls: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # JSON array of scraped URLs (if any)
+
     # Request details
     provider_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -546,6 +557,18 @@ class RequestLog(Base):
 
     __table_args__ = ({"sqlite_autoincrement": True},)
 
+    @property
+    def scraped_urls(self) -> list[str]:
+        """Get scraped URLs as a list."""
+        if not self.augmentation_urls:
+            return []
+        return json.loads(self.augmentation_urls)
+
+    @scraped_urls.setter
+    def scraped_urls(self, value: list[str]):
+        """Set scraped URLs from a list."""
+        self.augmentation_urls = json.dumps(value) if value else None
+
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -558,6 +581,9 @@ class RequestLog(Base):
             "is_designator": self.is_designator,
             "router_name": self.router_name,
             "augmentor_name": self.augmentor_name,
+            "augmentation_type": self.augmentation_type,
+            "augmentation_query": self.augmentation_query,
+            "augmentation_urls": self.scraped_urls,
             "provider_id": self.provider_id,
             "model_id": self.model_id,
             "endpoint": self.endpoint,

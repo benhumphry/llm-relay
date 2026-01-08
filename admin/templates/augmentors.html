@@ -537,7 +537,7 @@ content %}
                     name: '',
                     designator_model: '',
                     target_model: '',
-                    purpose: '',
+                    purpose: 'Research assistant that augments queries with current web information when needed.',
                     max_search_results: 5,
                     max_scrape_urls: 3,
                     max_context_tokens: 4000,
@@ -551,10 +551,11 @@ content %}
 
             openEditModal(augmentor) {
                 this.editingAugmentor = augmentor;
+                // Set form with empty selects first so options render
                 this.form = {
                     name: augmentor.name,
-                    designator_model: augmentor.designator_model,
-                    target_model: augmentor.target_model,
+                    designator_model: '',
+                    target_model: '',
                     purpose: augmentor.purpose || '',
                     max_search_results: augmentor.max_search_results,
                     max_scrape_urls: augmentor.max_scrape_urls,
@@ -565,6 +566,12 @@ content %}
                 };
                 this.formErrors = {};
                 this.showModal = true;
+
+                // Populate select values after DOM renders with options
+                this.$nextTick(() => {
+                    this.form.designator_model = augmentor.designator_model;
+                    this.form.target_model = augmentor.target_model;
+                });
             },
 
             closeModal() {
