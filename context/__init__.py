@@ -4,19 +4,25 @@ Context module for LLM Relay.
 Provides ChromaDB integration and utilities for Smart Cache,
 Smart Augmentor, and Smart RAG features.
 
-Usage:
-    from context import is_chroma_available, CollectionWrapper
+IMPORTANT: ChromaDB is OPTIONAL. Features requiring it are only available
+when CHROMA_URL environment variable is set and the service is reachable.
 
-    # Check if ChromaDB is available
-    if is_chroma_available():
-        # Use a collection
-        cache = CollectionWrapper("response_cache")
-        cache.add(
-            ids=["doc1"],
-            documents=["What is the capital of France?"],
-            metadatas=[{"answer": "Paris"}]
-        )
-        results = cache.query("capital of France", n_results=5)
+Usage:
+    from context import is_chroma_available, is_chroma_configured
+
+    # Check if ChromaDB is configured (CHROMA_URL set)
+    if is_chroma_configured():
+        # Check if it's actually reachable
+        if is_chroma_available():
+            from context import CollectionWrapper
+
+            cache = CollectionWrapper("response_cache")
+            cache.add(
+                ids=["doc1"],
+                documents=["What is the capital of France?"],
+                metadatas=[{"answer": "Paris"}]
+            )
+            results = cache.query("capital of France", n_results=5)
 """
 
 from .builder import (
@@ -40,7 +46,9 @@ from .chroma import (
     get_collection,
     get_collection_prefix,
     is_chroma_available,
+    is_chroma_configured,
     list_collections,
+    require_chroma,
     reset_client,
 )
 
@@ -53,6 +61,8 @@ __all__ = [
     "delete_collection",
     "list_collections",
     "is_chroma_available",
+    "is_chroma_configured",
+    "require_chroma",
     "reset_client",
     "CollectionWrapper",
     # Context builder utilities

@@ -3,6 +3,9 @@ ChromaDB client wrapper for LLM Relay.
 
 Provides a unified interface for all ChromaDB operations across
 Smart Cache, Smart Augmentor, and Smart RAG features.
+
+ChromaDB is OPTIONAL - features requiring it will only be available
+when CHROMA_URL environment variable is set and the service is reachable.
 """
 
 import logging
@@ -14,11 +17,29 @@ logger = logging.getLogger(__name__)
 
 # Singleton client instance
 _client = None
+# Cached availability status (None = not checked, True/False = result)
+_availability_checked = False
+_is_available = False
 
 
-def get_chroma_url() -> str:
-    """Get ChromaDB URL from environment."""
-    return os.environ.get("CHROMA_URL", "http://localhost:8000")
+def is_chroma_configured() -> bool:
+    """
+    Check if ChromaDB is configured via environment variable.
+
+    Returns:
+        True if CHROMA_URL is set, False otherwise
+    """
+    return bool(os.environ.get("CHROMA_URL"))
+
+
+def get_chroma_url() -> str | None:
+    """
+    Get ChromaDB URL from environment.
+
+    Returns:
+        URL string if configured, None otherwise
+    """
+    return os.environ.get("CHROMA_URL")
 
 
 def get_collection_prefix() -> str:
@@ -32,8 +53,19 @@ def get_chroma_client():
 
     Returns:
         chromadb.HttpClient instance
+
+    Raises:
+        RuntimeError: If ChromaDB is not configured (CHROMA_URL not set)
+        ImportError: If chromadb package is not installed
+        Exception: If connection fails
     """
     global _client
+
+    if not is_chroma_configured():
+        raise RuntimeError(
+            "ChromaDB not configured. Set CHROMA_URL environment variable."
+        )
+
     if _client is None:
         try:
             import chromadb
@@ -61,24 +93,71 @@ def get_chroma_client():
 
 def reset_client():
     """Reset the client singleton (useful for testing or reconnection)."""
-    global _client
+    global _client, _availability_checked, _is_available
     _client = None
+    _availability_checked = False
+    _is_available = False
 
 
-def is_chroma_available() -> bool:
+def is_chroma_available(force_check: bool = False) -> bool:
     """
     Check if ChromaDB is configured and reachable.
 
+    This function caches its result to avoid repeated network calls.
+    Use force_check=True to bypass the cache.
+
+    Args:
+        force_check: If True, bypass cache and check again
+
     Returns:
-        True if ChromaDB is available, False otherwise
+        True if ChromaDB is configured and available, False otherwise
     """
+    global _availability_checked, _is_available
+
+    # Return cached result if available
+    if _availability_checked and not force_check:
+        return _is_available
+
+    # Not configured = not available
+    if not is_chroma_configured():
+        _availability_checked = True
+        _is_available = False
+        return False
+
     try:
         client = get_chroma_client()
         client.heartbeat()
+        _availability_checked = True
+        _is_available = True
         return True
     except Exception as e:
         logger.debug(f"ChromaDB not available: {e}")
+        _availability_checked = True
+        _is_available = False
         return False
+
+
+def require_chroma():
+    """
+    Decorator/check that raises an error if ChromaDB is not available.
+
+    Usage:
+        require_chroma()  # Raises RuntimeError if not available
+
+    Raises:
+        RuntimeError: If ChromaDB is not configured or not reachable
+    """
+    if not is_chroma_configured():
+        raise RuntimeError(
+            "ChromaDB not configured. Set CHROMA_URL environment variable "
+            "to enable Smart Cache, Smart Augmentor, and Smart RAG features."
+        )
+    if not is_chroma_available(force_check=True):
+        url = get_chroma_url()
+        raise RuntimeError(
+            f"ChromaDB not reachable at {url}. "
+            "Ensure ChromaDB is running and accessible."
+        )
 
 
 def get_collection(name: str, create: bool = True):
@@ -91,6 +170,9 @@ def get_collection(name: str, create: bool = True):
 
     Returns:
         ChromaDB Collection object
+
+    Raises:
+        RuntimeError: If ChromaDB is not configured
     """
     client = get_chroma_client()
     prefix = get_collection_prefix()
@@ -111,7 +193,11 @@ def delete_collection(name: str) -> bool:
     Returns:
         True if deleted successfully, False otherwise
     """
-    client = get_chroma_client()
+    try:
+        client = get_chroma_client()
+    except RuntimeError:
+        return False
+
     prefix = get_collection_prefix()
     full_name = f"{prefix}{name}"
 
@@ -129,8 +215,11 @@ def list_collections() -> list[str]:
     List all collections with our prefix.
 
     Returns:
-        List of collection names (without prefix)
+        List of collection names (without prefix), empty list if not configured
     """
+    if not is_chroma_available():
+        return []
+
     try:
         client = get_chroma_client()
         prefix = get_collection_prefix()
@@ -147,6 +236,8 @@ class CollectionWrapper:
     """
     Wrapper for a ChromaDB collection with convenience methods.
 
+    Requires ChromaDB to be configured (CHROMA_URL set).
+
     Usage:
         cache = CollectionWrapper("response_cache")
         cache.add(
@@ -155,6 +246,9 @@ class CollectionWrapper:
             metadatas=[{"answer": "Paris"}]
         )
         results = cache.query("capital of France", n_results=5)
+
+    Raises:
+        RuntimeError: On instantiation if ChromaDB is not configured
     """
 
     def __init__(self, name: str):
@@ -163,7 +257,14 @@ class CollectionWrapper:
 
         Args:
             name: Collection name (without prefix)
+
+        Raises:
+            RuntimeError: If ChromaDB is not configured
         """
+        if not is_chroma_configured():
+            raise RuntimeError(
+                "ChromaDB not configured. Set CHROMA_URL environment variable."
+            )
         self.name = name
         self._collection = None
 

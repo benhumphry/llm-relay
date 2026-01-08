@@ -905,28 +905,39 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Check ChromaDB connection status and list collections."""
         try:
             from context import (
-                get_chroma_client,
                 get_chroma_url,
                 get_collection_prefix,
                 is_chroma_available,
+                is_chroma_configured,
                 list_collections,
             )
         except ImportError:
             return jsonify(
                 {
+                    "configured": False,
                     "available": False,
                     "error": "context module not available",
                 }
             )
 
+        # Check if CHROMA_URL is set
+        configured = is_chroma_configured()
         url = get_chroma_url()
         prefix = get_collection_prefix()
 
         result = {
+            "configured": configured,
             "url": url,
             "prefix": prefix,
             "available": False,
         }
+
+        if not configured:
+            result["message"] = (
+                "ChromaDB not configured. Set CHROMA_URL environment variable "
+                "to enable Smart Cache, Smart Augmentor, and Smart RAG features."
+            )
+            return jsonify(result)
 
         if is_chroma_available():
             result["available"] = True
