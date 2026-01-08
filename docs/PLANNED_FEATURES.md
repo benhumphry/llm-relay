@@ -240,12 +240,70 @@ Context augmentation that intelligently fetches web search results and/or scrape
 
 ### Key Features
 - Extensible search provider system (SearXNG, Perplexity, future: Tavily, Brave)
-- Built-in web scraper (httpx + HTML-to-text)
+- Tiered web scraping (built-in or external services)
 - ChromaDB caching with TTL-based expiry
 - Semantic deduplication (find similar cached results)
 - Accessed by name like aliases
 - Admin UI similar to Smart Routers
 - Cost tracking via existing tag system
+
+### Web Scraping Providers
+
+Tiered approach - simple built-in for most cases, external services for complex sites:
+
+| Provider | Description | Best For |
+|----------|-------------|----------|
+| `builtin` | httpx + BeautifulSoup | Documentation, blogs, Wikipedia, most content sites |
+| `jina` | Jina Reader API (`r.jina.ai`) | JS-heavy sites, cleaner markdown output, free |
+| `firecrawl` | Firecrawl API (self-hostable) | Complex sites, structured extraction |
+| `custom` | User-provided endpoint | Custom scraping infrastructure |
+
+```python
+# Built-in scraper (default)
+# Simple, fast, no external dependencies
+async def scrape_builtin(url: str) -> ScrapedContent:
+    response = await httpx.get(url, follow_redirects=True)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    # Remove scripts, styles, nav, footer
+    for tag in soup(['script', 'style', 'nav', 'footer', 'header']):
+        tag.decompose()
+    text = soup.get_text(separator='\n', strip=True)
+    return ScrapedContent(url=url, title=soup.title.string, content=text)
+
+# Jina Reader (external, free)
+# Returns clean markdown, handles JS rendering
+async def scrape_jina(url: str) -> ScrapedContent:
+    jina_url = f"https://r.jina.ai/{url}"
+    response = await httpx.get(jina_url)
+    return ScrapedContent(url=url, content=response.text, format="markdown")
+
+# Firecrawl (external, self-hostable)
+# More features: structured data, screenshots, etc.
+async def scrape_firecrawl(url: str, api_url: str) -> ScrapedContent:
+    response = await httpx.post(f"{api_url}/v0/scrape", json={"url": url})
+    data = response.json()
+    return ScrapedContent(url=url, content=data["markdown"], metadata=data)
+
+# Custom endpoint (user-provided)
+# POST {custom_url} with {"url": "..."} -> {"content": "...", "title": "..."}
+async def scrape_custom(url: str, endpoint: str) -> ScrapedContent:
+    response = await httpx.post(endpoint, json={"url": url})
+    return ScrapedContent(**response.json())
+```
+
+**Configuration per SmartAugmentor:**
+```python
+scrape_provider: str = "builtin"  # "builtin" | "jina" | "firecrawl" | "custom"
+scrape_provider_url: str | None   # Required for "firecrawl" and "custom"
+```
+
+**Environment variables for global defaults:**
+```bash
+SCRAPE_PROVIDER=builtin           # Default scrape provider
+JINA_API_KEY=                     # Optional, for higher Jina rate limits
+FIRECRAWL_API_URL=                # Self-hosted Firecrawl URL
+FIRECRAWL_API_KEY=                # Firecrawl API key
+```
 
 ### ChromaDB Integration
 ```python
@@ -287,7 +345,13 @@ class SmartAugmentor(Base):
     search_provider: str  # "searxng" | "perplexity"
     search_provider_url: str | None  # Override default URL
     max_search_results: int = 5
+    
+    # Scrape config
+    scrape_provider: str = "builtin"  # "builtin" | "jina" | "firecrawl" | "custom"
+    scrape_provider_url: str | None  # Required for "firecrawl" and "custom"
     max_scrape_urls: int = 3
+    
+    # Context config
     max_context_tokens: int = 4000
     
     # Caching config
@@ -1079,12 +1143,18 @@ test.clear()
 ## Environment Variables
 
 ```bash
-# ChromaDB
+# ChromaDB (required for Smart Cache/Augmentor/RAG)
 CHROMA_URL=http://localhost:8000
 CHROMA_COLLECTION_PREFIX=llmrelay_
 
 # Search Providers
 SEARXNG_URL=http://localhost:8888
+
+# Web Scraping Providers
+SCRAPE_PROVIDER=builtin              # Default: "builtin" | "jina" | "firecrawl" | "custom"
+JINA_API_KEY=                        # Optional, for higher Jina rate limits
+FIRECRAWL_API_URL=                   # Self-hosted Firecrawl URL
+FIRECRAWL_API_KEY=                   # Firecrawl API key (if using hosted version)
 
 # Document Processing (optional)
 MAX_DOCUMENT_SIZE_MB=50
