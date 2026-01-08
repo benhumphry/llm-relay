@@ -33,3 +33,6 @@ build/
 
 # Database (persisted via Docker volume)
 db/data/
+
+# Development docker-compose (local testing)
+docker-compose.dev.yml
