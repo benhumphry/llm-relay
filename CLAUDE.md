@@ -30,6 +30,7 @@ db/                   # Database layer
   connection.py       # DB connection and migrations
   aliases.py          # Alias CRUD operations
   smart_routers.py    # Smart router CRUD operations
+  smart_caches.py     # Smart cache CRUD operations
   sync_descriptions.py # Model description sync from providers/OpenRouter
   seed.py             # LiteLLM pricing data sync
 tracking/             # Usage tracking
@@ -38,6 +39,9 @@ tracking/             # Usage tracking
   ip_resolver.py      # Client IP detection
 routing/              # Smart routing
   smart_router.py     # Designator-based model selection
+  smart_cache.py      # Semantic response caching with ChromaDB
+context/              # ChromaDB integration
+  chroma.py           # ChromaDB client wrapper and collection management
 admin/                # Admin dashboard
   app.py              # Admin API endpoints and pages
   templates/          # Jinja2 templates with Alpine.js
@@ -48,7 +52,7 @@ config/               # Configuration
 ## Key Concepts
 
 ### Model Resolution (providers/registry.py)
-Resolution order: Smart Router -> Alias -> Provider prefix -> Provider search -> Default fallback
+Resolution order: Smart Router -> Smart Cache -> Alias -> Provider prefix -> Provider search -> Default fallback
 
 ### ResolvedModel
 Dataclass returned by `registry.resolve_model()` containing provider, model_id, and metadata about how it was resolved (alias, router, default fallback).
@@ -61,6 +65,16 @@ Simple name -> target_model mappings for user-friendly model names.
 
 ### Smart Routers (routing/smart_router.py)
 Use a designator LLM to intelligently route requests to the best candidate model based on query content. The designator receives candidate model info including descriptions to help make informed routing decisions.
+
+### Smart Caches (routing/smart_cache.py)
+Semantic response caching using ChromaDB. Caches LLM responses and returns them for semantically similar queries, reducing token usage and costs. Key settings:
+- `similarity_threshold` - How similar queries must be (0.0-1.0, default 0.95)
+- `match_last_message_only` - Only match last user message, ignores conversation history (useful for OpenWebUI)
+- `match_system_prompt` - Whether to include system prompt in cache key
+- `min_cached_tokens` / `max_cached_tokens` - Filter responses by length (filters out titles, short follow-ups)
+- `cache_ttl_hours` - How long cached entries remain valid
+
+Requires ChromaDB (set `CHROMA_URL` environment variable).
 
 ### Model Descriptions (db/sync_descriptions.py)
 Fetches model descriptions from provider APIs (Google) and OpenRouter's public API. Descriptions help smart routers make better decisions since LLM designators have training cutoffs and don't know about newer models.
