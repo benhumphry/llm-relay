@@ -224,6 +224,8 @@ def track_completion(
     augmentation_type: str | None = None,
     augmentation_query: str | None = None,
     augmentation_urls: list[str] | None = None,
+    # Smart RAG tracking (v3.8)
+    rag_name: str | None = None,
 ):
     """
     Track a completed request.
@@ -251,6 +253,7 @@ def track_completion(
         augmentation_type: Type of augmentation applied (direct|search|scrape|search+scrape)
         augmentation_query: Search query used for augmentation (if any)
         augmentation_urls: List of URLs scraped for augmentation (if any)
+        rag_name: Smart RAG name if request used a RAG (v3.8)
     """
     from flask import g
 
@@ -299,6 +302,7 @@ def track_completion(
         augmentation_type=augmentation_type,
         augmentation_query=augmentation_query,
         augmentation_urls=augmentation_urls,
+        rag_name=rag_name,
     )
 
 
@@ -1002,11 +1006,66 @@ def chat():
                 augmentor_name=augmentor_name,
             )
 
+    # Handle Smart RAG context injection (v3.8)
+    rag_name = None
+    rag_tags = []
+    rag_chunks_retrieved = 0
+    if getattr(resolved, "has_rag", False):
+        rag_result = resolved.rag_result
+        rag_name = rag_result.rag_name
+        rag_tags = rag_result.rag_tags or []
+        rag_chunks_retrieved = rag_result.chunks_retrieved
+
+        # Swap in augmented content
+        if rag_result.augmented_system is not None:
+            system_prompt = rag_result.augmented_system
+        if rag_result.augmented_messages:
+            messages = rag_result.augmented_messages
+
+        # Log RAG retrieval
+        if rag_result.context_injected:
+            logger.info(
+                f"RAG '{rag_name}' injected {rag_chunks_retrieved} chunks into context"
+            )
+
+        # Update RAG statistics
+        from db import update_smart_rag_stats
+
+        update_smart_rag_stats(
+            rag_id=rag_result.rag_id,
+            increment_requests=1,
+            increment_injections=1 if rag_result.context_injected else 0,
+        )
+
+        # Log embedding usage for paid providers (OpenAI) (v3.8)
+        if rag_result.embedding_usage and rag_result.embedding_provider == "openai":
+            embed_model = rag_result.embedding_model or "text-embedding-3-small"
+            embed_usage = rag_result.embedding_usage
+
+            # Merge RAG tags with request tags for embedding logging
+            embed_tag = tag
+            if rag_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + rag_tags))
+                embed_tag = ",".join(all_tags)
+
+            track_completion(
+                provider_id="openai",
+                model_id=embed_model,
+                model_name=f"openai/{embed_model}",
+                endpoint="/v1/embeddings",
+                input_tokens=embed_usage.get("prompt_tokens", 0),
+                output_tokens=0,
+                status_code=200,
+                tag=embed_tag,
+                rag_name=rag_name,
+            )
+
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/api/chat")
 
-    # Merge alias/augmentor tags with request tags (v3.1, v3.5)
-    all_entity_tags = alias_tags + augmentor_tags
+    # Merge alias/augmentor/rag tags with request tags (v3.1, v3.5, v3.8)
+    all_entity_tags = alias_tags + augmentor_tags + rag_tags
     if all_entity_tags:
         existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
         all_tags = list(set(existing_tags + all_entity_tags))
@@ -1188,6 +1247,7 @@ def chat():
                 augmentation_type=augmentation_type,
                 augmentation_query=augmentation_query,
                 augmentation_urls=augmentation_urls,
+                rag_name=rag_name,
             )
 
             # Store response in smart cache on cache miss (v3.3)
@@ -1234,6 +1294,7 @@ def chat():
             augmentation_type=augmentation_type,
             augmentation_query=augmentation_query,
             augmentation_urls=augmentation_urls,
+            rag_name=rag_name,
         )
         return jsonify({"error": str(e)}), 500
 
@@ -1710,11 +1771,66 @@ def openai_chat_completions():
                 augmentor_name=augmentor_name,
             )
 
+    # Handle Smart RAG context injection (v3.8)
+    rag_name = None
+    rag_tags = []
+    rag_chunks_retrieved = 0
+    if getattr(resolved, "has_rag", False):
+        rag_result = resolved.rag_result
+        rag_name = rag_result.rag_name
+        rag_tags = rag_result.rag_tags or []
+        rag_chunks_retrieved = rag_result.chunks_retrieved
+
+        # Swap in augmented content
+        if rag_result.augmented_system is not None:
+            system_prompt = rag_result.augmented_system
+        if rag_result.augmented_messages:
+            messages = rag_result.augmented_messages
+
+        # Log RAG retrieval
+        if rag_result.context_injected:
+            logger.info(
+                f"RAG '{rag_name}' injected {rag_chunks_retrieved} chunks into context"
+            )
+
+        # Update RAG statistics
+        from db import update_smart_rag_stats
+
+        update_smart_rag_stats(
+            rag_id=rag_result.rag_id,
+            increment_requests=1,
+            increment_injections=1 if rag_result.context_injected else 0,
+        )
+
+        # Log embedding usage for paid providers (OpenAI) (v3.8)
+        if rag_result.embedding_usage and rag_result.embedding_provider == "openai":
+            embed_model = rag_result.embedding_model or "text-embedding-3-small"
+            embed_usage = rag_result.embedding_usage
+
+            # Merge RAG tags with request tags for embedding logging
+            embed_tag = tag
+            if rag_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + rag_tags))
+                embed_tag = ",".join(all_tags)
+
+            track_completion(
+                provider_id="openai",
+                model_id=embed_model,
+                model_name=f"openai/{embed_model}",
+                endpoint="/v1/embeddings",
+                input_tokens=embed_usage.get("prompt_tokens", 0),
+                output_tokens=0,
+                status_code=200,
+                tag=embed_tag,
+                rag_name=rag_name,
+            )
+
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/v1/chat/completions")
 
-    # Merge alias/augmentor tags with request tags (v3.1, v3.5)
-    all_entity_tags = alias_tags + augmentor_tags
+    # Merge alias/augmentor/rag tags with request tags (v3.1, v3.5, v3.8)
+    all_entity_tags = alias_tags + augmentor_tags + rag_tags
     if all_entity_tags:
         existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
         all_tags = list(set(existing_tags + all_entity_tags))
@@ -1923,6 +2039,7 @@ def openai_chat_completions():
                 augmentation_type=augmentation_type,
                 augmentation_query=augmentation_query,
                 augmentation_urls=augmentation_urls,
+                rag_name=rag_name,
             )
 
             # Store response in smart cache on cache miss (v3.3)
@@ -1969,6 +2086,7 @@ def openai_chat_completions():
             augmentation_type=augmentation_type,
             augmentation_query=augmentation_query,
             augmentation_urls=augmentation_urls,
+            rag_name=rag_name,
         )
         return jsonify(
             {

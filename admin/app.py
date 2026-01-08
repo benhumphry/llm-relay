@@ -1128,10 +1128,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     else "ChromaDB not reachable"
                 ),
             },
-            "smart_rag": {
-                "available": False,
-                "enabled": False,
-                "reason": "Coming soon",
+            "smart_rags": {
+                "available": chroma_available,
+                "enabled": chroma_configured,
+                "reason": None
+                if chroma_available
+                else (
+                    "CHROMA_URL not set"
+                    if not chroma_configured
+                    else "ChromaDB not reachable"
+                ),
             },
         }
 
@@ -5381,6 +5387,193 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         from augmentation import list_search_providers
 
         providers = list_search_providers()
+        return jsonify(providers)
+
+    # =========================================================================
+    # Smart RAGs (v3.8)
+    # =========================================================================
+
+    @admin.route("/rags")
+    @require_auth
+    def rags_page():
+        """Smart RAGs management page."""
+        return render_template("rags.html")
+
+    @admin.route("/api/rags/models", methods=["GET"])
+    @require_auth_api
+    def list_available_models_for_rag():
+        """List all available models that can be used as RAG targets."""
+        models = []
+
+        # Only provider models - no aliases/routers/rags to avoid circular routing
+        for provider in registry.get_available_providers():
+            for model_id, info in provider.get_models().items():
+                models.append(
+                    {
+                        "id": f"{provider.name}/{model_id}",
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "family": info.family,
+                        "description": info.description,
+                        "context_length": info.context_length,
+                        "capabilities": info.capabilities,
+                        "input_cost": info.input_cost,
+                        "output_cost": info.output_cost,
+                    }
+                )
+
+        # Sort by provider, then model_id
+        models.sort(key=lambda m: (m["provider"], m["model_id"]))
+        return jsonify(models)
+
+    @admin.route("/api/rags", methods=["GET"])
+    @require_auth_api
+    def list_rags():
+        """List all smart RAGs."""
+        from db import get_all_smart_rags
+
+        rags = get_all_smart_rags()
+        return jsonify([r.to_dict() for r in rags])
+
+    @admin.route("/api/rags/<int:rag_id>", methods=["GET"])
+    @require_auth_api
+    def get_rag(rag_id: int):
+        """Get a specific smart RAG."""
+        from db import get_smart_rag_by_id
+
+        rag = get_smart_rag_by_id(rag_id)
+        if not rag:
+            return jsonify({"error": "RAG not found"}), 404
+        return jsonify(rag.to_dict())
+
+    @admin.route("/api/rags", methods=["POST"])
+    @require_auth_api
+    def create_rag():
+        """Create a new smart RAG."""
+        from db import create_smart_rag
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+
+        source_path = data.get("source_path", "").strip()
+        if not source_path:
+            return jsonify({"error": "Source path is required"}), 400
+
+        target_model = data.get("target_model", "").strip()
+        if not target_model:
+            return jsonify({"error": "Target model is required"}), 400
+
+        try:
+            rag = create_smart_rag(
+                name=name,
+                source_path=source_path,
+                target_model=target_model,
+                embedding_provider=data.get("embedding_provider", "local"),
+                embedding_model=data.get("embedding_model"),
+                ollama_url=data.get("ollama_url"),
+                index_schedule=data.get("index_schedule"),
+                chunk_size=data.get("chunk_size", 512),
+                chunk_overlap=data.get("chunk_overlap", 50),
+                max_results=data.get("max_results", 5),
+                similarity_threshold=data.get("similarity_threshold", 0.7),
+                max_context_tokens=data.get("max_context_tokens", 4000),
+                tags=data.get("tags", []),
+                description=data.get("description"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(rag.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/rags/<int:rag_id>", methods=["PUT"])
+    @require_auth_api
+    def update_rag_endpoint(rag_id: int):
+        """Update a smart RAG."""
+        from db import update_smart_rag
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        try:
+            rag = update_smart_rag(
+                rag_id=rag_id,
+                name=data.get("name"),
+                source_path=data.get("source_path"),
+                target_model=data.get("target_model"),
+                embedding_provider=data.get("embedding_provider"),
+                embedding_model=data.get("embedding_model"),
+                ollama_url=data.get("ollama_url"),
+                index_schedule=data.get("index_schedule"),
+                chunk_size=data.get("chunk_size"),
+                chunk_overlap=data.get("chunk_overlap"),
+                max_results=data.get("max_results"),
+                similarity_threshold=data.get("similarity_threshold"),
+                max_context_tokens=data.get("max_context_tokens"),
+                tags=data.get("tags"),
+                description=data.get("description"),
+                enabled=data.get("enabled"),
+            )
+            if not rag:
+                return jsonify({"error": "RAG not found"}), 404
+            return jsonify(rag.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/rags/<int:rag_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_rag_endpoint(rag_id: int):
+        """Delete a smart RAG and its ChromaDB collection."""
+        from db import delete_smart_rag, get_smart_rag_by_id
+
+        # Try to delete the ChromaDB collection first
+        rag = get_smart_rag_by_id(rag_id)
+        if rag and rag.collection_name:
+            try:
+                from rag import get_indexer
+
+                indexer = get_indexer()
+                indexer.delete_collection(rag_id)
+            except Exception as e:
+                logger.warning(f"Failed to delete ChromaDB collection: {e}")
+
+        if delete_smart_rag(rag_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Failed to delete RAG"}), 500
+
+    @admin.route("/api/rags/<int:rag_id>/index", methods=["POST"])
+    @require_auth_api
+    def index_rag_now(rag_id: int):
+        """Trigger immediate indexing for a RAG."""
+        from db import get_smart_rag_by_id
+        from rag import get_indexer
+
+        rag = get_smart_rag_by_id(rag_id)
+        if not rag:
+            return jsonify({"error": "RAG not found"}), 404
+
+        try:
+            indexer = get_indexer()
+            if indexer.index_rag(rag_id, background=True):
+                return jsonify({"success": True, "message": "Indexing started"})
+            else:
+                return jsonify({"error": "Indexing already in progress"}), 409
+        except Exception as e:
+            logger.error(f"Failed to start indexing: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/rags/embedding-providers", methods=["GET"])
+    @require_auth_api
+    def list_embedding_providers():
+        """List available embedding providers."""
+        from rag import list_embedding_providers
+
+        providers = list_embedding_providers()
         return jsonify(providers)
 
     return admin

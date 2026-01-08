@@ -1,0 +1,254 @@
+"""
+RAG Retriever for Smart RAG.
+
+Handles semantic search and context formatting for query augmentation.
+"""
+
+import logging
+import os
+from dataclasses import dataclass
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RetrievedChunk:
+    """A retrieved document chunk with metadata."""
+
+    content: str
+    source_file: str
+    chunk_index: int
+    score: float  # Similarity score (0-1, higher is more similar)
+
+
+@dataclass
+class RetrievalResult:
+    """Result of a retrieval operation."""
+
+    chunks: list[RetrievedChunk]
+    query: str
+    total_tokens: int  # Estimated token count of all chunks
+    embedding_usage: dict | None = None  # Usage from embedding call
+    embedding_model: str | None = None  # Model used for embedding
+    embedding_provider: str | None = None  # Provider used for embedding
+
+
+class RAGRetriever:
+    """
+    Retrieves relevant document chunks from ChromaDB.
+    """
+
+    def __init__(self):
+        self._chroma_client = None
+
+    def _get_client(self):
+        """Get or create ChromaDB client."""
+        if self._chroma_client is None:
+            chroma_url = os.environ.get("CHROMA_URL")
+            if not chroma_url:
+                raise ValueError("CHROMA_URL not configured")
+
+            import chromadb
+
+            # Parse URL
+            host = (
+                chroma_url.replace("http://", "").replace("https://", "").split(":")[0]
+            )
+            port_str = (
+                chroma_url.split(":")[-1]
+                if ":" in chroma_url.split("/")[-1]
+                else "8000"
+            )
+            port = int(port_str.split("/")[0])
+
+            self._chroma_client = chromadb.HttpClient(host=host, port=port)
+
+        return self._chroma_client
+
+    def retrieve(
+        self,
+        collection_name: str,
+        query: str,
+        embedding_provider: str,
+        embedding_model: Optional[str] = None,
+        ollama_url: Optional[str] = None,
+        max_results: int = 5,
+        similarity_threshold: float = 0.7,
+    ) -> RetrievalResult:
+        """
+        Retrieve relevant chunks for a query.
+
+        Args:
+            collection_name: ChromaDB collection to search
+            query: User query text
+            embedding_provider: Provider for query embedding
+            embedding_model: Model name for embedding
+            ollama_url: Ollama URL override
+            max_results: Maximum chunks to return
+            similarity_threshold: Minimum similarity score (0-1)
+
+        Returns:
+            RetrievalResult with relevant chunks
+        """
+        from .embeddings import get_embedding_provider
+
+        try:
+            client = self._get_client()
+            collection = client.get_collection(collection_name)
+        except Exception as e:
+            logger.error(f"Failed to get collection {collection_name}: {e}")
+            return RetrievalResult(chunks=[], query=query, total_tokens=0)
+
+        # Get embedding provider and embed query
+        embedding_usage = None
+        embed_model = None
+        embed_provider = None
+        try:
+            provider = get_embedding_provider(
+                embedding_provider,
+                model_name=embedding_model,
+                ollama_url=ollama_url,
+            )
+            embed_result = provider.embed_query(query)
+            query_embedding = embed_result.embeddings[0]
+            embedding_usage = embed_result.usage
+            embed_model = embed_result.model
+            embed_provider = embed_result.provider
+        except Exception as e:
+            logger.error(f"Failed to embed query: {e}")
+            return RetrievalResult(chunks=[], query=query, total_tokens=0)
+
+        # Query ChromaDB
+        try:
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=max_results,
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as e:
+            logger.error(f"ChromaDB query failed: {e}")
+            return RetrievalResult(chunks=[], query=query, total_tokens=0)
+
+        # Process results
+        chunks = []
+        total_tokens = 0
+
+        if results and results["documents"] and results["documents"][0]:
+            documents = results["documents"][0]
+            metadatas = (
+                results["metadatas"][0]
+                if results["metadatas"]
+                else [{}] * len(documents)
+            )
+            distances = (
+                results["distances"][0]
+                if results["distances"]
+                else [0.0] * len(documents)
+            )
+
+            for doc, meta, dist in zip(documents, metadatas, distances):
+                # Convert distance to similarity (ChromaDB uses L2 by default, cosine returns 0-2)
+                # For cosine: similarity = 1 - (distance / 2)
+                similarity = 1 - (dist / 2) if dist <= 2 else 0
+
+                if similarity >= similarity_threshold:
+                    chunk = RetrievedChunk(
+                        content=doc,
+                        source_file=meta.get("source_file", "unknown"),
+                        chunk_index=meta.get("chunk_index", 0),
+                        score=similarity,
+                    )
+                    chunks.append(chunk)
+                    # Rough token estimate (4 chars per token)
+                    total_tokens += len(doc) // 4
+
+        logger.debug(
+            f"Retrieved {len(chunks)} chunks for query (threshold={similarity_threshold})"
+        )
+
+        return RetrievalResult(
+            chunks=chunks,
+            query=query,
+            total_tokens=total_tokens,
+            embedding_usage=embedding_usage,
+            embedding_model=embed_model,
+            embedding_provider=embed_provider,
+        )
+
+    def format_context(
+        self,
+        result: RetrievalResult,
+        max_tokens: int = 4000,
+        include_sources: bool = True,
+    ) -> str:
+        """
+        Format retrieved chunks into context for injection.
+
+        Args:
+            result: RetrievalResult from retrieve()
+            max_tokens: Maximum tokens for context
+            include_sources: Whether to include source file info
+
+        Returns:
+            Formatted context string
+        """
+        if not result.chunks:
+            return ""
+
+        # Sort by relevance (highest score first)
+        sorted_chunks = sorted(result.chunks, key=lambda c: c.score, reverse=True)
+
+        # Build context within token limit
+        context_parts = []
+        current_tokens = 0
+        header = "## Relevant Document Context\n\n"
+        header_tokens = len(header) // 4
+        current_tokens += header_tokens
+
+        for i, chunk in enumerate(sorted_chunks):
+            # Estimate tokens for this chunk
+            chunk_tokens = len(chunk.content) // 4
+
+            if include_sources:
+                source_line = f"[Source: {chunk.source_file}]\n"
+                chunk_tokens += len(source_line) // 4
+            else:
+                source_line = ""
+
+            # Check if we'd exceed limit
+            if current_tokens + chunk_tokens > max_tokens:
+                # Try to fit partial chunk
+                remaining_tokens = max_tokens - current_tokens
+                if remaining_tokens > 100:  # Worth including partial
+                    remaining_chars = remaining_tokens * 4
+                    truncated = chunk.content[:remaining_chars] + "..."
+                    if include_sources:
+                        context_parts.append(f"{source_line}{truncated}\n")
+                    else:
+                        context_parts.append(f"{truncated}\n")
+                break
+
+            if include_sources:
+                context_parts.append(f"{source_line}{chunk.content}\n")
+            else:
+                context_parts.append(f"{chunk.content}\n")
+
+            current_tokens += chunk_tokens
+
+        if not context_parts:
+            return ""
+
+        return header + "\n---\n\n".join(context_parts)
+
+
+# Global retriever instance
+_retriever: Optional[RAGRetriever] = None
+
+
+def get_retriever() -> RAGRetriever:
+    """Get or create the global RAG retriever instance."""
+    global _retriever
+    if _retriever is None:
+        _retriever = RAGRetriever()
+    return _retriever

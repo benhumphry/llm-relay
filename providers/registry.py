@@ -133,6 +133,46 @@ class AugmentorResolvedModel(ResolvedModel):
         return "direct"
 
 
+@dataclass
+class RAGResolvedModel(ResolvedModel):
+    """
+    Extended ResolvedModel that includes smart RAG information.
+
+    When resolve_model() returns a RAGResolvedModel, the proxy should:
+    1. Use rag_result.augmented_system instead of original system
+    2. Use rag_result.augmented_messages instead of original messages
+    3. Forward to the target provider with document context
+    """
+
+    rag_result: "object" = None  # RAGResult from SmartRAGEngine
+
+    @property
+    def has_rag(self) -> bool:
+        """Check if this resolution came from a smart RAG."""
+        return True
+
+    @property
+    def augmented_system(self) -> str | None:
+        """Get the augmented system prompt with document context."""
+        if self.rag_result:
+            return self.rag_result.augmented_system
+        return None
+
+    @property
+    def augmented_messages(self) -> list[dict]:
+        """Get the messages (usually unchanged)."""
+        if self.rag_result:
+            return self.rag_result.augmented_messages
+        return []
+
+    @property
+    def context_injected(self) -> bool:
+        """Check if document context was injected."""
+        if self.rag_result:
+            return self.rag_result.context_injected
+        return False
+
+
 class ProviderRegistry:
     """
     Central registry for all LLM providers.
@@ -189,21 +229,23 @@ class ProviderRegistry:
         2. Check if it's a smart router (v3.2) - requires messages
         3. Check if it's a smart cache (v3.3) - requires ChromaDB, returns CacheResolvedModel
         4. Check if it's a smart augmentor (v3.4) - returns AugmentorResolvedModel
-        5. Check if it's an alias (v3.1)
-        6. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        7. Check each configured provider's models
-        8. Fall back to default provider/model
+        5. Check if it's a smart RAG (v3.8) - returns RAGResolvedModel
+        6. Check if it's an alias (v3.1)
+        7. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        8. Check each configured provider's models
+        9. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
-            messages: Optional message list (required for smart router/cache)
-            system: Optional system prompt (for smart router/cache context)
+            messages: Optional message list (required for smart router/cache/rag)
+            system: Optional system prompt (for smart router/cache/rag context)
             session_key: Optional session key (for per_session routing)
 
         Returns:
             ResolvedModel with provider, model_id, and optional alias info
             OR CacheResolvedModel for smart cache lookups
             OR AugmentorResolvedModel for smart augmentor lookups
+            OR RAGResolvedModel for smart RAG lookups
 
         Raises:
             ValueError: If model not found and no default configured
@@ -214,10 +256,16 @@ class ProviderRegistry:
             get_alias_by_name,
             get_smart_augmentor_by_name,
             get_smart_cache_by_name,
+            get_smart_rag_by_name,
             get_smart_router_by_name,
             increment_redirect_count,
         )
-        from routing import SmartAugmentorEngine, SmartCacheEngine, SmartRouterEngine
+        from routing import (
+            SmartAugmentorEngine,
+            SmartCacheEngine,
+            SmartRAGEngine,
+            SmartRouterEngine,
+        )
 
         name = model_name.lower().strip()
 
@@ -366,7 +414,55 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 5: Check if it's an alias (v3.1)
+        # Step 5: Check if it's a smart RAG (v3.8)
+        rag = get_smart_rag_by_name(name)
+        if rag and rag.enabled:
+            # Smart RAGs require ChromaDB
+            if is_chroma_available():
+                if messages is not None:
+                    logger.debug(f"Using smart RAG '{name}'")
+                    engine = SmartRAGEngine(rag, self)
+                    rag_result = engine.augment(messages, system)
+                    # Return a RAGResolvedModel that the proxy can handle
+                    return RAGResolvedModel(
+                        provider=rag_result.resolved.provider,
+                        model_id=rag_result.resolved.model_id,
+                        alias_name=rag.name,
+                        alias_tags=rag.tags or [],
+                        rag_result=rag_result,
+                    )
+                else:
+                    # No messages - just resolve to target model
+                    logger.debug(
+                        f"Smart RAG '{name}' called without messages, resolving target"
+                    )
+                    try:
+                        target_result = self._resolve_actual_model(rag.target_model)
+                        return ResolvedModel(
+                            provider=target_result.provider,
+                            model_id=target_result.model_id,
+                            alias_name=rag.name,
+                            alias_tags=rag.tags or [],
+                        )
+                    except ValueError:
+                        pass  # Fall through to normal resolution
+            else:
+                logger.warning(
+                    f"Smart RAG '{name}' requested but ChromaDB not available, "
+                    "falling back to target model"
+                )
+                try:
+                    target_result = self._resolve_actual_model(rag.target_model)
+                    return ResolvedModel(
+                        provider=target_result.provider,
+                        model_id=target_result.model_id,
+                        alias_name=rag.name,
+                        alias_tags=rag.tags or [],
+                    )
+                except ValueError:
+                    pass  # Fall through to normal resolution
+
+        # Step 6: Check if it's an alias (v3.1)
         alias = get_alias_by_name(name)
         if alias and alias.enabled:
             logger.debug(f"Resolving alias '{name}' -> '{alias.target_model}'")
@@ -395,7 +491,7 @@ class ProviderRegistry:
                             alias_tags=alias.tags or [],
                         )
 
-        # Step 5-7: Normal model resolution
+        # Step 7-9: Normal model resolution
         return self._resolve_actual_model(name)
 
     def _resolve_actual_model(self, model_name: str) -> ResolvedModel:
@@ -488,6 +584,7 @@ class ProviderRegistry:
             get_enabled_aliases,
             get_enabled_smart_augmentors,
             get_enabled_smart_caches,
+            get_enabled_smart_rags,
             get_enabled_smart_routers,
         )
 
@@ -579,6 +676,28 @@ class ProviderRegistry:
                 }
             )
 
+        # Add smart RAGs (only if ChromaDB is available)
+        if is_chroma_available():
+            rags = get_enabled_smart_rags()
+            for rag_name, rag in rags.items():
+                seen.add(rag_name)
+                models.append(
+                    {
+                        "name": rag_name,
+                        "model": rag_name,
+                        "provider": "smart-rag",
+                        "details": {
+                            "family": "smart-rag",
+                            "parameter_size": "",
+                            "quantization_level": "",
+                        },
+                        "description": rag.description
+                        or f"Document RAG for {rag.target_model}",
+                        "context_length": 0,
+                        "capabilities": ["rag", "documents"],
+                    }
+                )
+
         # Add provider models
         for provider in self.get_available_providers():
             for model_id, info in provider.get_models().items():
@@ -618,19 +737,7 @@ class ProviderRegistry:
         from db import (
             get_enabled_aliases,
             get_enabled_smart_caches,
-            get_enabled_smart_routers,
-        )
-
-        """
-        Get combined model list in OpenAI format.
-
-        Returns list of model info dicts suitable for /v1/models response.
-        Includes aliases, smart routers, smart caches, and provider models.
-        """
-        from context.chroma import is_chroma_available
-        from db import (
-            get_enabled_aliases,
-            get_enabled_smart_caches,
+            get_enabled_smart_rags,
             get_enabled_smart_routers,
         )
 
@@ -671,6 +778,18 @@ class ProviderRegistry:
                         "id": cache_name,
                         "object": "model",
                         "owned_by": "smart-cache",
+                    }
+                )
+
+            # Add smart RAGs
+            rags = get_enabled_smart_rags()
+            for rag_name in rags.keys():
+                seen.add(rag_name)
+                models.append(
+                    {
+                        "id": rag_name,
+                        "object": "model",
+                        "owned_by": "smart-rag",
                     }
                 )
 

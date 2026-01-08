@@ -14,3 +14,6 @@ psycopg2-binary>=2.9.0  # PostgreSQL driver (optional - for external DB)
 
 # v3.x: Context features (Smart Cache, Augmentor, RAG)
 chromadb>=0.4.0  # Vector database for semantic search/caching
+sentence-transformers>=2.2.0  # Local embeddings for Smart RAG
+docling>=2.0.0  # Document parsing for Smart RAG (PDF, DOCX, etc.)
+apscheduler>=3.10.0  # Background scheduling for RAG indexing

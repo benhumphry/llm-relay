@@ -522,6 +522,11 @@ class RequestLog(Base):
         Text, nullable=True
     )  # JSON array of scraped URLs (if any)
 
+    # Smart RAG tracking (v3.8)
+    rag_name: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+
     # Request details
     provider_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -1152,6 +1157,143 @@ class Redirect(Base):
             "enabled": self.enabled,
             "tags": self.tags,
             "redirect_count": self.redirect_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ============================================================================
+# Smart RAG Model (v3.8)
+# ============================================================================
+
+
+class SmartRAG(Base):
+    """
+    Smart RAGs that provide document-based context augmentation.
+
+    A Smart RAG indexes documents from a local folder (Docker-mapped) into
+    ChromaDB, then retrieves relevant chunks to inject as context for queries.
+
+    Uses Docling for document parsing and LlamaIndex for RAG orchestration.
+    """
+
+    __tablename__ = "smart_rags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+
+    # Document source (Docker-mapped folder)
+    source_path: Mapped[str] = mapped_column(
+        String(500), nullable=False
+    )  # e.g., "/data/documents"
+
+    # Target model to forward augmented requests to
+    target_model: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # "provider_id/model_id"
+
+    # Embedding configuration
+    embedding_provider: Mapped[str] = mapped_column(
+        String(50), default="local"
+    )  # "local" | "ollama" | "openai"
+    embedding_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )  # e.g., "granite3.2-vision:latest" for Ollama
+    ollama_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Override default Ollama URL
+
+    # Indexing configuration
+    index_schedule: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # Cron expression, e.g., "0 2 * * *"
+    last_indexed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    index_status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # "pending" | "indexing" | "ready" | "error"
+    index_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Chunking configuration
+    chunk_size: Mapped[int] = mapped_column(Integer, default=512)
+    chunk_overlap: Mapped[int] = mapped_column(Integer, default=50)
+
+    # Retrieval configuration
+    max_results: Mapped[int] = mapped_column(Integer, default=5)
+    similarity_threshold: Mapped[float] = mapped_column(Float, default=0.7)
+    max_context_tokens: Mapped[int] = mapped_column(Integer, default=4000)
+
+    # ChromaDB collection name (auto-generated as "smartrag_{id}")
+    collection_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Statistics
+    document_count: Mapped[int] = mapped_column(Integer, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_requests: Mapped[int] = mapped_column(Integer, default=0)
+    context_injections: Mapped[int] = mapped_column(
+        Integer, default=0
+    )  # Requests where context was added
+
+    # Optional tags for usage tracking
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        return json.loads(self.tags_json) if self.tags_json else []
+
+    @tags.setter
+    def tags(self, value: list[str]):
+        """Set tags from a list."""
+        self.tags_json = json.dumps(value) if value else "[]"
+
+    @property
+    def injection_rate(self) -> float:
+        """Calculate context injection rate as a percentage."""
+        if self.total_requests == 0:
+            return 0.0
+        return (self.context_injections / self.total_requests) * 100
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "source_path": self.source_path,
+            "target_model": self.target_model,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model": self.embedding_model,
+            "ollama_url": self.ollama_url,
+            "index_schedule": self.index_schedule,
+            "last_indexed": self.last_indexed.isoformat()
+            if self.last_indexed
+            else None,
+            "index_status": self.index_status,
+            "index_error": self.index_error,
+            "chunk_size": self.chunk_size,
+            "chunk_overlap": self.chunk_overlap,
+            "max_results": self.max_results,
+            "similarity_threshold": self.similarity_threshold,
+            "max_context_tokens": self.max_context_tokens,
+            "collection_name": self.collection_name,
+            "document_count": self.document_count,
+            "chunk_count": self.chunk_count,
+            "total_requests": self.total_requests,
+            "context_injections": self.context_injections,
+            "injection_rate": self.injection_rate,
+            "tags": self.tags,
+            "description": self.description,
+            "enabled": self.enabled,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

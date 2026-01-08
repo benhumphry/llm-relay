@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance for Claude Code when working on this codebase.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -19,50 +19,36 @@ LLM Relay - A self-hosted proxy that unifies multiple LLM providers (Anthropic, 
 ```
 proxy.py              # Main Flask app with all API endpoints
 VERSION               # Single source of truth for version number
-version.py            # Module to read VERSION file
 providers/            # LLM provider implementations
   base.py             # Abstract base class for providers
   registry.py         # Model resolution and provider discovery
   loader.py           # Provider initialization
-  *_provider.py       # Individual provider implementations
 db/                   # Database layer
   models.py           # SQLAlchemy models
   connection.py       # DB connection and migrations
-  aliases.py          # Alias CRUD operations
-  redirects.py        # Redirect CRUD operations (wildcard support)
-  smart_routers.py    # Smart router CRUD operations
-  smart_caches.py     # Smart cache CRUD operations
-  smart_augmentors.py # Smart augmentor CRUD operations
-  sync_descriptions.py # Model description sync from providers/OpenRouter
   seed.py             # LiteLLM pricing data sync
 tracking/             # Usage tracking
   usage_tracker.py    # Async request logging and statistics
-  tag_extractor.py    # Tag parsing from API keys
-  ip_resolver.py      # Client IP detection
-routing/              # Smart routing
-  smart_router.py     # Designator-based model selection
-  smart_cache.py      # Semantic response caching with ChromaDB
-  smart_augmentor.py  # Web search/scrape context augmentation
+routing/              # Smart features (router, cache, augmentor)
 augmentation/         # Web search and scraping
-  search/             # Search provider implementations
-    base.py           # SearchProvider abstract base class
-    searxng.py        # SearXNG search provider
-    perplexity.py     # Perplexity search provider
+  search/             # Search provider implementations (SearXNG, Perplexity)
   scraper.py          # URL content scraping
 context/              # ChromaDB integration
-  chroma.py           # ChromaDB client wrapper and collection management
-  model_intelligence.py # Web-gathered model assessments for smart routers
+  chroma.py           # ChromaDB client wrapper
+  model_intelligence.py # Web-gathered model assessments
 admin/                # Admin dashboard
   app.py              # Admin API endpoints and pages
   templates/          # Jinja2 templates with Alpine.js
-config/               # Configuration
-  override_loader.py  # Model override YAML loading
+rag/                  # Smart RAG (document retrieval)
+  embeddings.py       # Embedding providers (local, Ollama, OpenAI)
+  indexer.py          # Document indexing with Docling
+  retriever.py        # ChromaDB semantic search
 ```
 
 ## Key Concepts
 
 ### Model Resolution (providers/registry.py)
-Resolution order: Redirect -> Smart Router -> Smart Cache -> Smart Augmentor -> Alias -> Provider prefix -> Provider search -> Default fallback
+Resolution order: Redirect -> Smart Router -> Smart Cache -> Smart Augmentor -> Smart RAG -> Alias -> Provider prefix -> Provider search -> Default fallback
 
 ### ResolvedModel
 Dataclass returned by `registry.resolve_model()` containing provider, model_id, and metadata about how it was resolved (alias, router, default fallback).
@@ -128,6 +114,34 @@ Key settings:
 
 Requires a search provider (set `SEARXNG_URL` for SearXNG, or `PERPLEXITY_API_KEY` for Perplexity).
 
+### Smart RAGs (routing/smart_rag.py)
+Document-based context augmentation using RAG (Retrieval-Augmented Generation). Index local document folders and retrieve relevant context to enhance LLM requests.
+
+How it works:
+1. Documents are parsed using Docling (PDF, DOCX, PPTX, HTML, Markdown, images)
+2. Text is chunked and embedded into ChromaDB (per-RAG collection)
+3. When a request comes in, the query is embedded and similar chunks retrieved
+4. Retrieved context is injected into the system prompt
+5. Request is forwarded to the configured target model
+
+Key settings:
+- `source_path` - Docker-mounted folder containing documents (e.g., `/data/documents`)
+- `target_model` - Model to forward augmented requests to
+- `embedding_provider` - "local" (bundled sentence-transformers), "ollama", or "openai"
+- `embedding_model` - Model name for Ollama/OpenAI embeddings
+- `chunk_size` / `chunk_overlap` - Document chunking parameters
+- `max_results` - Maximum chunks to retrieve
+- `similarity_threshold` - Minimum similarity score for retrieval (0.0-1.0)
+- `max_context_tokens` - Maximum tokens for injected context
+- `index_schedule` - Cron expression for scheduled re-indexing
+
+Embedding providers:
+- **local** (default) - Bundled `BAAI/bge-small-en-v1.5` model (~130MB), no external deps
+- **ollama** - Uses Ollama's `/api/embeddings` endpoint (nomic-embed-text, mxbai-embed-large, etc.)
+- **openai** - Uses OpenAI's embedding API (text-embedding-3-small) - costs logged to request log
+
+Requires ChromaDB (set `CHROMA_URL` environment variable).
+
 ### Model Descriptions (db/sync_descriptions.py)
 Fetches model descriptions from provider APIs (Google) and OpenRouter's public API. Descriptions help smart routers make better decisions since LLM designators have training cutoffs and don't know about newer models.
 
@@ -162,23 +176,31 @@ Migrations run automatically on startup via `db/connection.py:run_migrations()`.
 
 ### Database changes
 1. Add/modify models in `db/models.py`
-2. Add migration logic in `db/connection.py:run_migrations()`
-3. Add CRUD functions in appropriate `db/*.py` file
-4. Export from `db/__init__.py`
+2. For NEW tables: SQLAlchemy's `create_all()` creates them automatically
+3. For EXISTING tables (adding columns): Add migration in `db/connection.py:_run_migrations()`
+4. Add CRUD functions in appropriate `db/*.py` file (follow `smart_caches.py` pattern)
+5. Export from `db/__init__.py`
+
+## API Endpoints
+
+The proxy exposes two compatible APIs:
+
+**Ollama API** (port 11434):
+- `GET /api/tags` — List models
+- `POST /api/chat` — Chat completion
+- `POST /api/generate` — Text generation
+
+**OpenAI API** (port 11434):
+- `GET /v1/models` — List models
+- `POST /v1/chat/completions` — Chat completion
 
 ## Important Notes
 
 - All model names are normalized to lowercase
-- The proxy supports both Ollama API (`/api/chat`, `/api/generate`) and OpenAI API (`/v1/chat/completions`)
 - Streaming responses use Server-Sent Events
 - Admin UI uses Alpine.js for reactivity - no build step required
 - Cost tracking uses provider-specific pricing from `db/seed.py`
-
-### Versioning
-- Edit `VERSION` file to update the version number - it propagates to:
-  - Startup log in `proxy.py`
-  - Admin UI settings page (via `version` template variable)
-  - Docker image (copied at build time)
+- Edit `VERSION` file to update version (propagates to logs, admin UI, Docker image)
 
 ## Development Workflow
 

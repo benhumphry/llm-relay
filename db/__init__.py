@@ -37,6 +37,7 @@ from .models import (
     Setting,
     SmartAugmentor,
     SmartCache,
+    SmartRAG,
     SmartRouter,
 )
 from .redirects import (
@@ -76,6 +77,20 @@ from .smart_caches import (
     reset_smart_cache_stats,
     update_smart_cache,
     update_smart_cache_stats,
+)
+from .smart_rags import (
+    create_smart_rag,
+    delete_smart_rag,
+    get_all_smart_rags,
+    get_enabled_smart_rags,
+    get_rags_with_schedule,
+    get_smart_rag_by_id,
+    get_smart_rag_by_name,
+    rag_name_available,
+    reset_smart_rag_stats,
+    update_smart_rag,
+    update_smart_rag_index_status,
+    update_smart_rag_stats,
 )
 from .smart_routers import (
     create_smart_router,
@@ -177,4 +192,18 @@ __all__ = [
     "delete_redirect",
     "increment_redirect_count",
     "get_enabled_redirects",
+    # Smart RAGs (v3.8)
+    "SmartRAG",
+    "get_all_smart_rags",
+    "get_smart_rag_by_name",
+    "get_smart_rag_by_id",
+    "create_smart_rag",
+    "update_smart_rag",
+    "update_smart_rag_index_status",
+    "update_smart_rag_stats",
+    "reset_smart_rag_stats",
+    "delete_smart_rag",
+    "rag_name_available",
+    "get_enabled_smart_rags",
+    "get_rags_with_schedule",
 ]

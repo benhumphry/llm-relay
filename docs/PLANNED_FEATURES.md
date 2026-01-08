@@ -93,35 +93,37 @@ SEARXNG_URL=http://localhost:8080  # SearXNG for web search
 **Priority:** Medium
 
 ### Overview
-Retrieval-Augmented Generation that extracts relevant information from user-provided document collections and injects it as context for queries.
+Retrieval-Augmented Generation that indexes local document folders (Docker-mapped) and retrieves relevant context to enhance LLM requests.
 
 ### How It Works
-1. User configures document source (Nextcloud, WebDAV, local folder)
-2. Documents are indexed into ChromaDB collection
+1. User creates a Smart RAG pointing at a Docker-mounted folder
+2. Documents are parsed via **Docling** and indexed into ChromaDB (per-RAG collection)
 3. User requests model by RAG name (e.g., "docs-assistant")
-4. Designator analyzes query and decides if RAG retrieval is needed
-5. Relevant document chunks retrieved via semantic search
-6. Context injected into system prompt
-7. Request forwarded to target model
+4. Query is embedded, similar chunks retrieved from ChromaDB
+5. Retrieved context injected into system prompt
+6. Request forwarded to configured target model
 
-### Document Source Connectors
+### Key Technologies
 
-| Priority | Connector | Description |
-|----------|-----------|-------------|
-| 1 | WebDAV | Standard protocol, works with Nextcloud, ownCloud |
-| 2 | Nextcloud API | Native integration with tags, shares, metadata |
-| 3 | Local Folder | Mount point or local path |
+| Component | Library | Purpose |
+|-----------|---------|---------|
+| Document Parsing | **Docling** | PDF, DOCX, PPTX, XLSX, HTML, images, audio |
+| RAG Orchestration | **LlamaIndex** | Chunking, embedding, retrieval pipeline |
+| Vector Store | **ChromaDB** | Already used for Smart Cache, Model Intelligence |
+| Embeddings | Local or Ollama | Bundled `BAAI/bge-small-en-v1.5` or Ollama models |
 
-### Document Processing Pipeline
-```
-Source → Fetch Document → Extract Text → Chunk Content → Generate Embeddings → Store in ChromaDB
-```
+### Document Types (via Docling)
+- **Documents:** PDF, DOCX, PPTX, XLSX, HTML, Markdown, AsciiDoc
+- **Images:** PNG, JPG, TIFF, BMP (with OCR)
+- **Audio:** WAV, MP3 (transcription)
 
-### Text Extraction
-- PDF: `pypdf` or `pdfplumber`
-- DOCX: `python-docx`
-- Plain text, Markdown, HTML: built-in
-- Future: OCR for scanned documents
+### Embedding Options
+
+| Provider | Model | Notes |
+|----------|-------|-------|
+| **Local** (default) | `BAAI/bge-small-en-v1.5` | ~130MB, bundled, no external deps |
+| **Ollama** | `granite3.2-vision`, `nomic-embed-text`, `mxbai-embed-large` | Uses existing Ollama instance |
+| **OpenAI** | `text-embedding-3-small` | API costs, high quality |
 
 ### Database Schema
 ```python
@@ -130,29 +132,37 @@ class SmartRAG(Base):
     
     id: int
     name: str  # unique, e.g., "docs-assistant"
-    designator_model: str
-    purpose: str
-    target_model: str
     
-    # Document source config
-    source_type: str  # "webdav" | "nextcloud" | "local"
-    source_url: str | None
-    source_credentials_json: str | None  # encrypted
-    source_path: str
+    # Document source (Docker-mapped folder)
+    source_path: str  # e.g., "/data/documents"
+    
+    # Target model
+    target_model: str  # "provider_id/model_id"
+    
+    # Embedding config
+    embedding_provider: str  # "local" | "ollama" | "openai"
+    embedding_model: str | None  # e.g., "granite3.2-vision:latest"
+    ollama_url: str | None  # Override for Ollama instance
     
     # Indexing config
-    file_patterns: str  # "*.pdf,*.docx,*.md"
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
+    index_schedule: str | None  # Cron expression, e.g., "0 2 * * *"
+    last_indexed: datetime | None
+    index_status: str  # "pending" | "indexing" | "ready" | "error"
+    index_error: str | None
+    
+    # Chunking config
+    chunk_size: int = 512
+    chunk_overlap: int = 50
     
     # Retrieval config
-    max_chunks: int = 5
-    max_context_tokens: int = 4000
+    max_results: int = 5
     similarity_threshold: float = 0.7
+    max_context_tokens: int = 4000
     
-    # Index status
-    chroma_collection: str | None
-    last_indexed: datetime | None
+    # ChromaDB collection (auto-generated)
+    collection_name: str  # "smartrag_{id}"
+    
+    # Statistics
     document_count: int = 0
     chunk_count: int = 0
     
@@ -160,14 +170,43 @@ class SmartRAG(Base):
     enabled: bool
 ```
 
+### Scheduling Options (Admin UI Presets)
+- Never (manual only)
+- Every hour / 6 hours
+- Daily at 2 AM
+- Weekly on Sunday at 2 AM
+- Custom cron expression
+
+Uses **APScheduler** for background scheduling.
+
+### Docker Volume Mapping
+```yaml
+services:
+  llm-relay:
+    volumes:
+      # Map local/network folders for Smart RAG
+      - /path/to/docs:/data/documents:ro
+      - /network/share:/data/shared:ro
+```
+
 ### Implementation Phases
 1. Database layer (model, CRUD, migration)
-2. ChromaDB collection management
-3. WebDAV connector
-4. Document processing (text extraction, chunking)
-5. Indexing pipeline (background job)
+2. Embedding provider abstraction (local, Ollama, OpenAI)
+3. Document processor (Docling wrapper)
+4. Indexer service (APScheduler + ChromaDB)
+5. Retriever (query + context formatting)
 6. RAG engine & registry integration
 7. Admin UI
+
+### Dependencies
+```
+docling>=2.0.0
+llama-index-core
+llama-index-vector-stores-chroma
+llama-index-embeddings-huggingface
+llama-index-embeddings-ollama  # optional
+apscheduler>=3.10.0
+```
 
 ---
 

@@ -1,0 +1,851 @@
+{% extends "base.html" %} {% block title %}Smart RAGs{% endblock %} {% block
+content %}
+<div x-data="ragsPage()" x-init="init()">
+    <!-- Header -->
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
+        <div>
+            <h1 class="text-2xl font-bold">Smart RAGs</h1>
+            <p class="text-base-content/60">
+                Document-based context augmentation using RAG
+            </p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                />
+            </svg>
+            Add RAG
+        </button>
+    </div>
+
+    <!-- Loading State -->
+    <template x-if="loading">
+        <div class="flex justify-center py-12">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    </template>
+
+    <!-- No RAGs Configured -->
+    <template x-if="!loading && rags.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-base-content/30"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium">
+                    No Smart RAGs Configured
+                </h3>
+                <p class="mt-2 text-base-content/60 max-w-md mx-auto">
+                    Smart RAGs index documents from local folders and inject relevant
+                    context into LLM requests using semantic search.
+                </p>
+                <button @click="openAddModal()" class="btn btn-primary mt-4">
+                    Create Your First RAG
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- RAG Table -->
+    <template x-if="!loading && rags.length > 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="overflow-x-auto">
+                <table class="table table-fixed">
+                    <thead>
+                        <tr>
+                            <th class="w-8"></th>
+                            <th class="w-28">Name</th>
+                            <th class="w-1/5">Source Path</th>
+                            <th class="w-1/5">Target</th>
+                            <th class="w-20">Index</th>
+                            <th class="w-24 text-right">Docs</th>
+                            <th class="w-24 text-right">Chunks</th>
+                            <th class="w-20">Status</th>
+                            <th class="w-28 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <template x-for="rag in rags" :key="rag.id">
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
+                                @click="toggleExpand(rag.id)"
+                                class="cursor-pointer hover:bg-base-200"
+                            >
+                                <td class="w-8">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 transition-transform"
+                                        :class="{'rotate-90': expandedRows.includes(rag.id)}"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
+                                </td>
+                                <td>
+                                    <div class="font-mono font-medium" x-text="rag.name"></div>
+                                </td>
+                                <td>
+                                    <div class="font-mono text-sm text-base-content/70 truncate" x-text="rag.source_path" :title="rag.source_path"></div>
+                                </td>
+                                <td>
+                                    <div class="font-mono text-sm text-base-content/70" x-text="rag.target_model"></div>
+                                </td>
+                                <td>
+                                    <span
+                                        class="badge badge-sm"
+                                        :class="{
+                                            'badge-success': rag.index_status === 'ready',
+                                            'badge-warning': rag.index_status === 'indexing',
+                                            'badge-error': rag.index_status === 'error',
+                                            'badge-ghost': rag.index_status === 'pending'
+                                        }"
+                                        x-text="rag.index_status"
+                                    ></span>
+                                </td>
+                                <td class="text-right">
+                                    <span class="font-mono text-sm" x-text="rag.document_count || 0"></span>
+                                </td>
+                                <td class="text-right">
+                                    <span class="font-mono text-sm" x-text="rag.chunk_count || 0"></span>
+                                </td>
+                                <td>
+                                    <span
+                                        class="badge badge-sm"
+                                        :class="rag.enabled ? 'badge-success' : 'badge-ghost'"
+                                        x-text="rag.enabled ? 'Enabled' : 'Disabled'"
+                                    ></span>
+                                </td>
+                                <td class="text-right" @click.stop>
+                                    <div class="flex justify-end gap-1">
+                                        <button
+                                            @click="indexNow(rag)"
+                                            class="btn btn-ghost btn-sm"
+                                            :class="{ 'loading': indexingRags.includes(rag.id) }"
+                                            :disabled="indexingRags.includes(rag.id)"
+                                            title="Index now"
+                                        >
+                                            <svg
+                                                x-show="!indexingRags.includes(rag.id)"
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="openEditModal(rag)"
+                                            class="btn btn-ghost btn-sm"
+                                            title="Edit RAG"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="confirmDelete(rag)"
+                                            class="btn btn-ghost btn-sm text-error"
+                                            title="Delete RAG"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <!-- Expanded Details Row -->
+                            <tr x-show="expandedRows.includes(rag.id)" x-transition>
+                                <td colspan="9" class="bg-base-200 p-0">
+                                    <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                        <!-- Description -->
+                                        <div x-show="rag.description" class="md:col-span-2">
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Description</div>
+                                            <div class="text-sm" x-text="rag.description"></div>
+                                        </div>
+                                        <!-- Embedding Provider -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Embedding</div>
+                                            <div class="font-mono text-xs">
+                                                <span x-text="rag.embedding_provider"></span>
+                                                <span x-show="rag.embedding_model" x-text="' / ' + rag.embedding_model"></span>
+                                            </div>
+                                        </div>
+                                        <!-- Target Model -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Target Model</div>
+                                            <div class="font-mono text-xs" x-text="rag.target_model"></div>
+                                        </div>
+                                        <!-- Index Schedule -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Schedule</div>
+                                            <div class="text-xs" x-text="rag.index_schedule || 'Manual only'"></div>
+                                        </div>
+                                        <!-- Last Indexed -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Last Indexed</div>
+                                            <div class="text-xs" x-text="rag.last_indexed ? new Date(rag.last_indexed).toLocaleString() : 'Never'"></div>
+                                        </div>
+                                        <!-- Retrieval Settings -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Retrieval</div>
+                                            <div class="text-xs">
+                                                Max: <span class="font-mono" x-text="rag.max_results"></span>,
+                                                Threshold: <span class="font-mono" x-text="rag.similarity_threshold"></span>
+                                            </div>
+                                        </div>
+                                        <!-- Chunking -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Chunking</div>
+                                            <div class="text-xs">
+                                                Size: <span class="font-mono" x-text="rag.chunk_size"></span>,
+                                                Overlap: <span class="font-mono" x-text="rag.chunk_overlap"></span>
+                                            </div>
+                                        </div>
+                                        <!-- Error (if any) -->
+                                        <div x-show="rag.index_error" class="md:col-span-2">
+                                            <div class="text-xs text-error uppercase mb-1">Index Error</div>
+                                            <div class="text-xs text-error" x-text="rag.index_error"></div>
+                                        </div>
+                                        <!-- All Tags -->
+                                        <div x-show="rag.tags && rag.tags.length > 0">
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Tags</div>
+                                            <div class="flex flex-wrap gap-1">
+                                                <template x-for="tag in rag.tags" :key="tag">
+                                                    <span class="badge badge-primary badge-sm" x-text="tag"></span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <!-- Stats -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Statistics</div>
+                                            <div class="text-xs space-y-1">
+                                                <div>Total requests: <span class="font-mono" x-text="rag.total_requests || 0"></span></div>
+                                                <div>Context injected: <span class="font-mono" x-text="rag.context_injections || 0"></span> (<span x-text="(rag.injection_rate || 0).toFixed(0)"></span>%)</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+                </table>
+            </div>
+        </div>
+    </template>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal" :class="{ 'modal-open': showModal }">
+        <div class="modal-box max-w-2xl">
+            <h3 class="font-bold text-lg" x-text="editingRag ? 'Edit RAG' : 'Add RAG'"></h3>
+            <form @submit.prevent="saveRag()">
+                <!-- Name -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">RAG Name</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.name"
+                        class="input input-bordered font-mono"
+                        :class="{ 'input-error': formErrors.name }"
+                        placeholder="e.g., docs-assistant, wiki-search"
+                        required
+                        :disabled="editingRag"
+                    />
+                    <label class="label" x-show="formErrors.name">
+                        <span class="label-text-alt text-error" x-text="formErrors.name"></span>
+                    </label>
+                </div>
+
+                <!-- Source Path -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Source Path</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.source_path"
+                        class="input input-bordered font-mono"
+                        :class="{ 'input-error': formErrors.source_path }"
+                        placeholder="e.g., /data/documents"
+                        required
+                    />
+                    <label class="label">
+                        <span class="label-text-alt">Docker-mounted folder containing documents to index</span>
+                    </label>
+                </div>
+
+                <!-- Target Model -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Target Model</span>
+                    </label>
+                    <select
+                        x-model="form.target_model"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="">Select a model...</option>
+                        <template x-for="model in availableModels" :key="model.id">
+                            <option :value="model.id" x-text="`${model.id} (${model.family})`"></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt">Model to forward requests to</span>
+                    </label>
+                </div>
+
+                <!-- Embedding Provider -->
+                <div class="grid grid-cols-2 gap-4 mt-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Embedding Provider</span>
+                        </label>
+                        <select
+                            x-model="form.embedding_provider"
+                            class="select select-bordered"
+                        >
+                            <option value="local">Local (sentence-transformers)</option>
+                            <option value="ollama">Ollama</option>
+                            <option value="openai">OpenAI</option>
+                        </select>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Embedding Model</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.embedding_model"
+                            class="input input-bordered font-mono"
+                            placeholder="e.g., nomic-embed-text"
+                            :disabled="form.embedding_provider === 'local'"
+                        />
+                    </div>
+                </div>
+                <label class="label">
+                    <span class="label-text-alt">Local uses bundled BAAI/bge-small-en-v1.5. Ollama/OpenAI require model name.</span>
+                </label>
+
+                <!-- Ollama URL (shown when ollama selected) -->
+                <div class="form-control mt-2" x-show="form.embedding_provider === 'ollama'">
+                    <label class="label">
+                        <span class="label-text">Ollama URL (optional)</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.ollama_url"
+                        class="input input-bordered font-mono"
+                        placeholder="http://localhost:11434"
+                    />
+                </div>
+
+                <!-- Index Schedule -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Index Schedule</span>
+                    </label>
+                    <select
+                        x-model="form.index_schedule"
+                        class="select select-bordered"
+                    >
+                        <option value="">Manual only</option>
+                        <option value="0 * * * *">Every hour</option>
+                        <option value="0 */6 * * *">Every 6 hours</option>
+                        <option value="0 2 * * *">Daily at 2 AM</option>
+                        <option value="0 2 * * 0">Weekly on Sunday at 2 AM</option>
+                        <option value="custom">Custom cron...</option>
+                    </select>
+                </div>
+                <div class="form-control mt-2" x-show="form.index_schedule === 'custom'">
+                    <input
+                        type="text"
+                        x-model="form.custom_schedule"
+                        class="input input-bordered font-mono"
+                        placeholder="0 2 * * * (minute hour day month day_of_week)"
+                    />
+                </div>
+
+                <!-- Retrieval Settings -->
+                <div class="grid grid-cols-3 gap-4 mt-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Max Results</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model="form.max_results"
+                            class="input input-bordered"
+                            min="1"
+                            max="20"
+                        />
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Similarity Threshold</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model="form.similarity_threshold"
+                            class="input input-bordered"
+                            min="0"
+                            max="1"
+                            step="0.05"
+                        />
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Max Context Tokens</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model="form.max_context_tokens"
+                            class="input input-bordered"
+                            min="500"
+                            max="32000"
+                        />
+                    </div>
+                </div>
+
+                <!-- Chunking Settings -->
+                <div class="grid grid-cols-2 gap-4 mt-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Chunk Size</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model="form.chunk_size"
+                            class="input input-bordered"
+                            min="100"
+                            max="2000"
+                        />
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Chunk Overlap</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model="form.chunk_overlap"
+                            class="input input-bordered"
+                            min="0"
+                            max="500"
+                        />
+                    </div>
+                </div>
+
+                <!-- Tags -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Tags (optional)</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.tagsInput"
+                        class="input input-bordered"
+                        placeholder="e.g., docs, team-a"
+                    />
+                    <label class="label">
+                        <span class="label-text-alt">Comma-separated tags for usage tracking</span>
+                    </label>
+                </div>
+
+                <!-- Description -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Description (optional)</span>
+                    </label>
+                    <textarea
+                        x-model="form.description"
+                        class="textarea textarea-bordered"
+                        placeholder="What documents does this RAG index?"
+                        rows="2"
+                    ></textarea>
+                </div>
+
+                <!-- Enabled -->
+                <div class="form-control mt-4">
+                    <label class="label cursor-pointer justify-start gap-3">
+                        <input
+                            type="checkbox"
+                            x-model="form.enabled"
+                            class="toggle toggle-primary"
+                        />
+                        <span class="label-text">Enabled</span>
+                    </label>
+                </div>
+
+                <div class="modal-action">
+                    <button type="button" @click="closeModal()" class="btn btn-ghost">
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                        :disabled="saving"
+                    >
+                        <span x-text="editingRag ? 'Save Changes' : 'Create RAG'"></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop" @click="closeModal()"></div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal" :class="{ 'modal-open': showDeleteModal }">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg">Delete RAG</h3>
+            <p class="py-4">
+                Are you sure you want to delete the RAG
+                <span class="font-mono font-bold" x-text="deletingRag?.name"></span>?
+                This will also delete the indexed documents from ChromaDB.
+            </p>
+            <div class="modal-action">
+                <button @click="showDeleteModal = false" class="btn btn-ghost">
+                    Cancel
+                </button>
+                <button
+                    @click="deleteRag()"
+                    class="btn btn-error"
+                    :class="{ 'loading': deleting }"
+                    :disabled="deleting"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop" @click="showDeleteModal = false"></div>
+    </div>
+</div>
+
+<script>
+    function ragsPage() {
+        return {
+            loading: true,
+            rags: [],
+            availableModels: [],
+            expandedRows: [],
+            indexingRags: [],
+            showModal: false,
+            showDeleteModal: false,
+            editingRag: null,
+            deletingRag: null,
+            saving: false,
+            deleting: false,
+            form: {
+                name: '',
+                source_path: '',
+                target_model: '',
+                embedding_provider: 'local',
+                embedding_model: '',
+                ollama_url: '',
+                index_schedule: '',
+                custom_schedule: '',
+                max_results: 5,
+                similarity_threshold: 0.7,
+                max_context_tokens: 4000,
+                chunk_size: 512,
+                chunk_overlap: 50,
+                tagsInput: '',
+                description: '',
+                enabled: true,
+            },
+            formErrors: {},
+
+            async init() {
+                await Promise.all([
+                    this.loadRags(),
+                    this.loadAvailableModels(),
+                ]);
+                this.loading = false;
+            },
+
+            async loadRags() {
+                try {
+                    const response = await fetch('/api/rags');
+                    if (response.ok) {
+                        this.rags = await response.json();
+                    }
+                } catch (error) {
+                    console.error('Failed to load RAGs:', error);
+                }
+            },
+
+            async loadAvailableModels() {
+                try {
+                    const response = await fetch('/api/rags/models');
+                    if (response.ok) {
+                        this.availableModels = await response.json();
+                    }
+                } catch (error) {
+                    console.error('Failed to load available models:', error);
+                }
+            },
+
+            toggleExpand(id) {
+                const idx = this.expandedRows.indexOf(id);
+                if (idx >= 0) {
+                    this.expandedRows.splice(idx, 1);
+                } else {
+                    this.expandedRows.push(id);
+                }
+            },
+
+            openAddModal() {
+                this.editingRag = null;
+                this.form = {
+                    name: '',
+                    source_path: '/data/documents',
+                    target_model: '',
+                    embedding_provider: 'local',
+                    embedding_model: '',
+                    ollama_url: '',
+                    index_schedule: '',
+                    custom_schedule: '',
+                    max_results: 5,
+                    similarity_threshold: 0.7,
+                    max_context_tokens: 4000,
+                    chunk_size: 512,
+                    chunk_overlap: 50,
+                    tagsInput: '',
+                    description: '',
+                    enabled: true,
+                };
+                this.formErrors = {};
+                this.showModal = true;
+            },
+
+            openEditModal(rag) {
+                this.editingRag = rag;
+                const schedulePresets = ['', '0 * * * *', '0 */6 * * *', '0 2 * * *', '0 2 * * 0'];
+                const isPreset = schedulePresets.includes(rag.index_schedule || '');
+
+                this.form = {
+                    name: rag.name,
+                    source_path: rag.source_path,
+                    target_model: '',
+                    embedding_provider: rag.embedding_provider || 'local',
+                    embedding_model: rag.embedding_model || '',
+                    ollama_url: rag.ollama_url || '',
+                    index_schedule: isPreset ? (rag.index_schedule || '') : 'custom',
+                    custom_schedule: isPreset ? '' : (rag.index_schedule || ''),
+                    max_results: rag.max_results,
+                    similarity_threshold: rag.similarity_threshold,
+                    max_context_tokens: rag.max_context_tokens,
+                    chunk_size: rag.chunk_size,
+                    chunk_overlap: rag.chunk_overlap,
+                    tagsInput: (rag.tags || []).join(', '),
+                    description: rag.description || '',
+                    enabled: rag.enabled,
+                };
+                this.formErrors = {};
+                this.showModal = true;
+
+                this.$nextTick(() => {
+                    this.form.target_model = rag.target_model;
+                });
+            },
+
+            closeModal() {
+                this.showModal = false;
+                this.editingRag = null;
+                this.formErrors = {};
+            },
+
+            async saveRag() {
+                this.formErrors = {};
+                this.saving = true;
+
+                const tags = this.form.tagsInput
+                    .split(',')
+                    .map(t => t.trim().toLowerCase())
+                    .filter(t => t.length > 0);
+
+                const schedule = this.form.index_schedule === 'custom'
+                    ? this.form.custom_schedule
+                    : this.form.index_schedule;
+
+                const payload = {
+                    name: this.form.name.toLowerCase().trim(),
+                    source_path: this.form.source_path.trim(),
+                    target_model: this.form.target_model,
+                    embedding_provider: this.form.embedding_provider,
+                    embedding_model: this.form.embedding_model || null,
+                    ollama_url: this.form.ollama_url || null,
+                    index_schedule: schedule || null,
+                    max_results: parseInt(this.form.max_results),
+                    similarity_threshold: parseFloat(this.form.similarity_threshold),
+                    max_context_tokens: parseInt(this.form.max_context_tokens),
+                    chunk_size: parseInt(this.form.chunk_size),
+                    chunk_overlap: parseInt(this.form.chunk_overlap),
+                    tags: tags,
+                    description: this.form.description || null,
+                    enabled: this.form.enabled,
+                };
+
+                try {
+                    const url = this.editingRag
+                        ? `/api/rags/${this.editingRag.id}`
+                        : '/api/rags';
+                    const method = this.editingRag ? 'PUT' : 'POST';
+
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        if (data.error && data.error.includes('name')) {
+                            this.formErrors.name = data.error;
+                        } else if (data.error && data.error.includes('path')) {
+                            this.formErrors.source_path = data.error;
+                        } else {
+                            alert(data.error || 'Failed to save RAG');
+                        }
+                        return;
+                    }
+
+                    await this.loadRags();
+                    this.closeModal();
+                } catch (error) {
+                    console.error('Failed to save RAG:', error);
+                    alert('Failed to save RAG');
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            async indexNow(rag) {
+                this.indexingRags.push(rag.id);
+                try {
+                    const response = await fetch(`/api/rags/${rag.id}/index`, {
+                        method: 'POST',
+                    });
+
+                    if (!response.ok) {
+                        const data = await response.json();
+                        alert(data.error || 'Failed to start indexing');
+                    }
+
+                    // Poll for status updates
+                    this.pollIndexStatus(rag.id);
+                } catch (error) {
+                    console.error('Failed to start indexing:', error);
+                    alert('Failed to start indexing');
+                    this.indexingRags = this.indexingRags.filter(id => id !== rag.id);
+                }
+            },
+
+            async pollIndexStatus(ragId) {
+                // Poll every 2 seconds until indexing is done
+                const poll = async () => {
+                    await this.loadRags();
+                    const rag = this.rags.find(r => r.id === ragId);
+                    if (rag && rag.index_status === 'indexing') {
+                        setTimeout(poll, 2000);
+                    } else {
+                        this.indexingRags = this.indexingRags.filter(id => id !== ragId);
+                    }
+                };
+                setTimeout(poll, 2000);
+            },
+
+            confirmDelete(rag) {
+                this.deletingRag = rag;
+                this.showDeleteModal = true;
+            },
+
+            async deleteRag() {
+                if (!this.deletingRag) return;
+
+                this.deleting = true;
+                try {
+                    const response = await fetch(`/api/rags/${this.deletingRag.id}`, {
+                        method: 'DELETE',
+                    });
+
+                    if (response.ok) {
+                        await this.loadRags();
+                        this.showDeleteModal = false;
+                        this.deletingRag = null;
+                    } else {
+                        const data = await response.json();
+                        alert(data.error || 'Failed to delete RAG');
+                    }
+                } catch (error) {
+                    console.error('Failed to delete RAG:', error);
+                    alert('Failed to delete RAG');
+                } finally {
+                    this.deleting = false;
+                }
+            },
+        };
+    }
+</script>
+{% endblock %}

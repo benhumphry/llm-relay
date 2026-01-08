@@ -5,8 +5,8 @@
 <h1 align="center">LLM Relay</h1>
 
 <p align="center">
-<strong>A lightweight, self-hosted LLM Proxy and Smart Router</strong><br>
-Unified API for cloud and local LLMs with cost tracking, attribution and smart routing.
+<strong>A lightweight, self-hosted LLM Proxy with Smart Features</strong><br>
+Unified API for cloud and local LLMs with cost tracking, intelligent routing, semantic caching, web augmentation, and document RAG.
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@ A single self-hosted proxy that puts all your LLM providers behind one API:
 - **Accurate cost tracking** — Token-level tracking with cache and reasoning tokens
 - **Flexible attribution** — Tag requests by user, project, or team
 - **Works with any client** — Ollama and OpenAI API compatible
-- **Smart routing** — Route requests to the best model for the job
+- **Smart Features** — Intelligent routing, semantic caching, web search augmentation, and document RAG
 
 ## Quick Start
 
@@ -165,6 +165,19 @@ Context augmentation via web search and URL scraping. A fast designator LLM anal
 - **search+scrape** — Search then scrape top results for comprehensive research
 
 Requires a search provider (SearXNG or Perplexity).
+
+### Smart RAGs
+
+Document-based context augmentation using RAG (Retrieval-Augmented Generation). Index local document folders and automatically retrieve relevant context for each query.
+
+- **Multiple formats** — PDF, DOCX, PPTX, HTML, Markdown, images (via Docling)
+- **Flexible embeddings** — Local (bundled), Ollama, or OpenAI
+- **Semantic search** — ChromaDB vector storage with configurable similarity threshold
+- **Scheduled indexing** — Cron-based re-indexing for updated documents
+
+Mount your document folders into the container, create a Smart RAG pointing to the path, and requests to that model name automatically include relevant document context.
+
+Requires ChromaDB (`CHROMA_URL` environment variable).
 
 ### Admin UI
 

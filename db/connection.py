@@ -501,6 +501,14 @@ def _run_migrations(engine) -> None:
                     "ALTER TABLE request_logs ADD COLUMN augmentation_urls TEXT",
                 )
             )
+        # v3.8: Smart RAG tracking
+        if "rag_name" not in existing_columns:
+            migrations.append(
+                (
+                    "rag_name",
+                    "ALTER TABLE request_logs ADD COLUMN rag_name VARCHAR(100)",
+                )
+            )
 
         if migrations:
             logger.info(

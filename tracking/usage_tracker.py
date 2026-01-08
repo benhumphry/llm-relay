@@ -83,6 +83,8 @@ class UsageTracker:
         augmentation_type: Optional[str] = None,
         augmentation_query: Optional[str] = None,
         augmentation_urls: Optional[list[str]] = None,
+        # Smart RAG tracking (v3.8)
+        rag_name: Optional[str] = None,
     ):
         """
         Queue a request log entry.
@@ -113,6 +115,7 @@ class UsageTracker:
             augmentation_type: Type of augmentation applied (direct|search|scrape|search+scrape)
             augmentation_query: Search query used for augmentation (if any)
             augmentation_urls: List of URLs scraped for augmentation (if any)
+            rag_name: Smart RAG name if request used a RAG (v3.8)
         """
         if not self._is_tracking_enabled():
             return
@@ -144,6 +147,7 @@ class UsageTracker:
                 "augmentation_type": augmentation_type,
                 "augmentation_query": augmentation_query,
                 "augmentation_urls": augmentation_urls,
+                "rag_name": rag_name,
             }
         )
 
@@ -222,6 +226,7 @@ class UsageTracker:
                     augmentor_name=entry.get("augmentor_name"),  # v3.5
                     augmentation_type=entry.get("augmentation_type"),  # v3.5.1
                     augmentation_query=entry.get("augmentation_query"),  # v3.5.1
+                    rag_name=entry.get("rag_name"),  # v3.8
                 )
                 # Set scraped URLs using property setter (handles JSON serialization)
                 if entry.get("augmentation_urls"):
