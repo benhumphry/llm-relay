@@ -1,19 +1,38 @@
 """
 Web scraper for fetching and extracting text content from URLs.
 
-Uses httpx for fetching and a simple HTML-to-text conversion that
-doesn't require external dependencies like BeautifulSoup.
+Uses:
+- trafilatura for HTML web page extraction
+- Docling for static documents (PDF, DOCX, PPTX, etc.)
 """
 
 import logging
 import re
+import tempfile
 from dataclasses import dataclass
 from html import unescape
+from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+# Content types that Docling can handle
+DOCLING_CONTENT_TYPES = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/msword": ".doc",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.ms-excel": ".xls",
+}
+
+# File extensions that Docling can handle
+DOCLING_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".doc", ".ppt", ".xls"}
 
 
 @dataclass
@@ -25,20 +44,20 @@ class ScrapeResult:
     content: str
     success: bool
     error: Optional[str] = None
+    content_type: Optional[str] = None
 
 
 class WebScraper:
     """
     Web scraper for fetching and extracting text content from URLs.
 
-    Uses a simple HTML-to-text approach that extracts meaningful content
-    while removing scripts, styles, and navigation elements.
+    Uses trafilatura for HTML pages and Docling for static documents.
     """
 
     def __init__(
         self,
         timeout: float = 30.0,
-        max_content_length: int = 100000,
+        max_content_length: int = 10_000_000,  # 10MB for documents
         user_agent: str = "Mozilla/5.0 (compatible; LLMRelay/1.0; +https://github.com/benhumphry/llm-relay)",
     ):
         """
@@ -57,6 +76,10 @@ class WebScraper:
         """
         Scrape content from a URL.
 
+        Automatically detects content type and uses the appropriate parser:
+        - trafilatura for HTML pages
+        - Docling for PDFs, DOCX, PPTX, etc.
+
         Args:
             url: URL to scrape
 
@@ -64,6 +87,15 @@ class WebScraper:
             ScrapeResult with extracted content
         """
         try:
+            # Check if URL points to a document by extension
+            parsed = urlparse(url)
+            path_lower = parsed.path.lower()
+            extension = Path(path_lower).suffix
+
+            if extension in DOCLING_EXTENSIONS:
+                return self._scrape_document(url, extension)
+
+            # Fetch the URL to check content type
             with httpx.Client(
                 timeout=self.timeout,
                 follow_redirects=True,
@@ -72,32 +104,38 @@ class WebScraper:
                 response = client.get(url)
                 response.raise_for_status()
 
-                # Check content type
-                content_type = response.headers.get("content-type", "")
-                if "text/html" not in content_type and "text/plain" not in content_type:
-                    return ScrapeResult(
-                        url=url,
-                        title="",
-                        content="",
-                        success=False,
-                        error=f"Unsupported content type: {content_type}",
+                content_type = (
+                    response.headers.get("content-type", "").split(";")[0].strip()
+                )
+
+                # Check if it's a document type
+                if content_type in DOCLING_CONTENT_TYPES:
+                    return self._scrape_document_from_response(
+                        url, response.content, content_type
                     )
 
-                # Check content length
-                content = response.text
-                if len(content) > self.max_content_length:
-                    content = content[: self.max_content_length]
+                # Handle HTML with trafilatura
+                if "text/html" in content_type or not content_type:
+                    return self._scrape_html(url, response.text)
 
-                # Extract title and content
-                title = self._extract_title(content)
-                text = self._html_to_text(content)
+                # Handle plain text
+                if "text/plain" in content_type:
+                    return ScrapeResult(
+                        url=url,
+                        title=Path(parsed.path).name or url,
+                        content=response.text[:100000],  # Limit plain text
+                        success=True,
+                        content_type=content_type,
+                    )
 
-                logger.info(f"Scraped {len(text)} chars from {url}")
+                # Unsupported content type
                 return ScrapeResult(
                     url=url,
-                    title=title,
-                    content=text,
-                    success=True,
+                    title="",
+                    content="",
+                    success=False,
+                    error=f"Unsupported content type: {content_type}",
+                    content_type=content_type,
                 )
 
         except httpx.TimeoutException:
@@ -126,6 +164,160 @@ class WebScraper:
                 content="",
                 success=False,
                 error=str(e),
+            )
+
+    def _scrape_html(self, url: str, html: str) -> ScrapeResult:
+        """
+        Extract content from HTML using trafilatura.
+
+        Falls back to basic regex extraction if trafilatura fails.
+        """
+        title = ""
+        content = ""
+
+        try:
+            import trafilatura
+
+            # Extract with trafilatura
+            downloaded = trafilatura.extract(
+                html,
+                include_comments=False,
+                include_tables=True,
+                no_fallback=False,
+                favor_precision=False,
+                favor_recall=True,
+            )
+
+            if downloaded:
+                content = downloaded
+
+            # Extract title separately (trafilatura doesn't always get it)
+            title = self._extract_title(html)
+
+            if content:
+                logger.info(
+                    f"Extracted {len(content)} chars from {url} using trafilatura"
+                )
+                return ScrapeResult(
+                    url=url,
+                    title=title,
+                    content=content,
+                    success=True,
+                    content_type="text/html",
+                )
+
+        except ImportError:
+            logger.warning("trafilatura not installed, using fallback HTML extraction")
+        except Exception as e:
+            logger.warning(f"trafilatura extraction failed for {url}: {e}")
+
+        # Fallback to basic extraction
+        title = title or self._extract_title(html)
+        content = self._html_to_text_fallback(html)
+
+        logger.info(f"Extracted {len(content)} chars from {url} using fallback")
+        return ScrapeResult(
+            url=url,
+            title=title,
+            content=content,
+            success=True,
+            content_type="text/html",
+        )
+
+    def _scrape_document(self, url: str, extension: str) -> ScrapeResult:
+        """
+        Fetch and parse a document URL using Docling.
+        """
+        try:
+            with httpx.Client(
+                timeout=self.timeout,
+                follow_redirects=True,
+                headers={"User-Agent": self.user_agent},
+            ) as client:
+                response = client.get(url)
+                response.raise_for_status()
+
+                content_type = (
+                    response.headers.get("content-type", "").split(";")[0].strip()
+                )
+                return self._scrape_document_from_response(
+                    url,
+                    response.content,
+                    content_type or f"application/{extension[1:]}",
+                )
+
+        except Exception as e:
+            logger.warning(f"Error fetching document {url}: {e}")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error=str(e),
+            )
+
+    def _scrape_document_from_response(
+        self, url: str, content: bytes, content_type: str
+    ) -> ScrapeResult:
+        """
+        Parse document content using Docling.
+        """
+        try:
+            from docling.document_converter import DocumentConverter
+
+            # Get file extension for content type
+            extension = DOCLING_CONTENT_TYPES.get(content_type, ".pdf")
+
+            # Write to temp file (Docling needs a file path)
+            with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as f:
+                f.write(content)
+                temp_path = Path(f.name)
+
+            try:
+                # Parse with Docling
+                converter = DocumentConverter()
+                result = converter.convert(temp_path)
+
+                # Extract text
+                text = result.document.export_to_markdown()
+
+                # Try to get title from metadata or filename
+                title = Path(urlparse(url).path).stem or url
+
+                logger.info(
+                    f"Extracted {len(text)} chars from document {url} using Docling"
+                )
+                return ScrapeResult(
+                    url=url,
+                    title=title,
+                    content=text,
+                    success=True,
+                    content_type=content_type,
+                )
+
+            finally:
+                # Clean up temp file
+                temp_path.unlink(missing_ok=True)
+
+        except ImportError:
+            logger.warning("Docling not installed, cannot parse document")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error="Docling not installed for document parsing",
+                content_type=content_type,
+            )
+        except Exception as e:
+            logger.warning(f"Docling extraction failed for {url}: {e}")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error=f"Document parsing failed: {e}",
+                content_type=content_type,
             )
 
     def scrape_multiple(self, urls: list[str], max_urls: int = 3) -> list[ScrapeResult]:
@@ -194,15 +386,11 @@ class WebScraper:
             return unescape(match.group(1).strip())
         return ""
 
-    def _html_to_text(self, html: str) -> str:
+    def _html_to_text_fallback(self, html: str) -> str:
         """
-        Convert HTML to plain text.
+        Fallback HTML to text conversion using regex.
 
-        This is a simple implementation that:
-        1. Removes script and style tags
-        2. Removes HTML tags
-        3. Cleans up whitespace
-        4. Decodes HTML entities
+        Used when trafilatura is not available or fails.
         """
         # Remove script and style elements entirely
         html = re.sub(
@@ -212,7 +400,7 @@ class WebScraper:
             r"<style[^>]*>.*?</style>", "", html, flags=re.IGNORECASE | re.DOTALL
         )
 
-        # Remove nav, header, footer, aside elements (often contain non-content)
+        # Remove nav, header, footer, aside elements
         html = re.sub(r"<nav[^>]*>.*?</nav>", "", html, flags=re.IGNORECASE | re.DOTALL)
         html = re.sub(
             r"<header[^>]*>.*?</header>", "", html, flags=re.IGNORECASE | re.DOTALL
@@ -238,11 +426,10 @@ class WebScraper:
         # Clean up whitespace
         lines = []
         for line in html.split("\n"):
-            line = " ".join(line.split())  # Normalize whitespace
+            line = " ".join(line.split())
             if line:
                 lines.append(line)
 
-        # Join and limit consecutive newlines
         text = "\n".join(lines)
         text = re.sub(r"\n{3,}", "\n\n", text)
 
