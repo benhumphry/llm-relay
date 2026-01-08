@@ -251,9 +251,11 @@ content %}
                                             <div class="flex flex-wrap gap-2">
                                                 <template x-for="candidate in router.candidates" :key="candidate.model">
                                                     <div class="flex items-center gap-1">
-                                                        <div class="badge badge-outline font-mono text-xs gap-1">
-                                                            <span x-text="candidate.model"></span>
-                                                            <span class="text-base-content/50" x-text="'(' + getCandidateRequests(router.name, candidate.model) + ')'"></span>
+                                                        <div class="tooltip" :data-tip="candidate.description || 'No description'">
+                                                            <div class="badge badge-outline font-mono text-xs gap-1">
+                                                                <span x-text="candidate.model"></span>
+                                                                <span class="text-base-content/50" x-text="'(' + getCandidateRequests(router.name, candidate.model) + ')'"></span>
+                                                            </div>
                                                         </div>
                                                         <template x-if="getRedirectWarning(router.id, candidate.model)">
                                                             <div class="tooltip" :data-tip="'Redirected to: ' + getRedirectWarning(router.id, candidate.model)?.target">
@@ -269,12 +271,12 @@ content %}
                                             </div>
                                         </div>
                                         <!-- Candidate Distribution Chart -->
-                                        <div class="md:col-span-2 lg:col-span-3" x-show="getRouterRequests(router.name) > 0">
+                                        <div class="md:col-span-2 lg:col-span-3">
                                             <div class="text-xs text-base-content/50 uppercase mb-2">Candidate Distribution</div>
-                                            <div class="space-y-1">
+                                            <div class="space-y-2">
                                                 <template x-for="candidate in getSortedCandidates(router)" :key="candidate.model">
                                                     <div class="flex items-center gap-2">
-                                                        <div class="w-32 truncate font-mono text-xs" x-text="candidate.model.split('/').pop()"></div>
+                                                        <div class="w-32 truncate font-mono text-xs tooltip tooltip-right" :data-tip="candidate.description || candidate.model" x-text="candidate.model.split('/').pop()"></div>
                                                         <div class="flex-1 h-4 bg-base-300 rounded overflow-hidden">
                                                             <div
                                                                 class="h-full bg-primary"
