@@ -141,7 +141,7 @@ Clean web interface for:
 
 ## Installation
 
-### Docker Compose
+### Docker Compose (Recommended)
 
 ```yaml
 services:
@@ -159,7 +159,19 @@ volumes:
   llm-relay-data:
 ```
 
-### Environment Variables
+### Production & Advanced Setup
+
+For production deployments, PostgreSQL is recommended. For Smart Cache, Smart Augmentor, and Smart RAG features, ChromaDB is required.
+
+See **[INSTALLATION.md](INSTALLATION.md)** for:
+- PostgreSQL setup
+- ChromaDB integration (vector storage for smart features)
+- SearXNG integration (web search for Smart Augmentor)
+- Full environment variable reference
+- Docker Swarm deployment
+- Troubleshooting guide
+
+### Quick Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -167,12 +179,7 @@ volumes:
 | `ADMIN_PORT` | 8080 | Admin UI port |
 | `ADMIN_PASSWORD` | (random) | Admin UI password |
 | `DATABASE_URL` | SQLite | PostgreSQL URL for production |
-
-API keys support Docker secrets via `_FILE` suffix:
-```yaml
-environment:
-  - ANTHROPIC_API_KEY_FILE=/run/secrets/anthropic_key
-```
+| `CHROMA_URL` | (none) | ChromaDB URL (enables smart features) |
 
 ### Without Docker
 
