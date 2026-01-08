@@ -21,6 +21,7 @@ COPY db/ ./db/
 COPY admin/ ./admin/
 COPY tracking/ ./tracking/
 COPY routing/ ./routing/
+COPY context/ ./context/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
 

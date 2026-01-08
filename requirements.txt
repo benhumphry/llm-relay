@@ -11,3 +11,6 @@ alembic>=1.13.0
 bcrypt>=4.0.0
 cryptography>=41.0.0
 psycopg2-binary>=2.9.0  # PostgreSQL driver (optional - for external DB)
+
+# v3.x: Context features (Smart Cache, Augmentor, RAG)
+chromadb>=0.4.0  # Vector database for semantic search/caching

@@ -896,6 +896,75 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         return jsonify({"success": True})
 
     # -------------------------------------------------------------------------
+    # ChromaDB Status
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/chroma/status", methods=["GET"])
+    @require_auth_api
+    def chroma_status():
+        """Check ChromaDB connection status and list collections."""
+        try:
+            from context import (
+                get_chroma_client,
+                get_chroma_url,
+                get_collection_prefix,
+                is_chroma_available,
+                list_collections,
+            )
+        except ImportError:
+            return jsonify(
+                {
+                    "available": False,
+                    "error": "context module not available",
+                }
+            )
+
+        url = get_chroma_url()
+        prefix = get_collection_prefix()
+
+        result = {
+            "url": url,
+            "prefix": prefix,
+            "available": False,
+        }
+
+        if is_chroma_available():
+            result["available"] = True
+            try:
+                collections = list_collections()
+                result["collections"] = collections
+                result["collection_count"] = len(collections)
+
+                # Get document counts per collection
+                from context import CollectionWrapper
+
+                collection_stats = []
+                for coll_name in collections:
+                    try:
+                        wrapper = CollectionWrapper(coll_name)
+                        collection_stats.append(
+                            {
+                                "name": coll_name,
+                                "count": wrapper.count(),
+                            }
+                        )
+                    except Exception:
+                        collection_stats.append(
+                            {
+                                "name": coll_name,
+                                "count": -1,
+                                "error": "Could not get count",
+                            }
+                        )
+                result["collection_stats"] = collection_stats
+            except Exception as e:
+                result["error"] = str(e)
+        else:
+            result["error"] = f"ChromaDB not reachable at {url}"
+
+        return jsonify(result)
+
+    # -------------------------------------------------------------------------
     # Config Import/Export
     # -------------------------------------------------------------------------
 
@@ -2150,12 +2219,13 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             )
             if has_filters:
                 # Query from RequestLog when filtering
+                # Note: RequestLog.tag may contain comma-separated tags like "ben,testing"
+                # We need to split and aggregate by individual tags
                 query = db.query(
                     RequestLog.tag,
-                    func.count(RequestLog.id).label("requests"),
-                    func.sum(RequestLog.input_tokens).label("input_tokens"),
-                    func.sum(RequestLog.output_tokens).label("output_tokens"),
-                    func.sum(RequestLog.cost).label("cost"),
+                    RequestLog.input_tokens,
+                    RequestLog.output_tokens,
+                    RequestLog.cost,
                 ).filter(
                     RequestLog.timestamp >= filters["start_date"],
                     RequestLog.tag.isnot(None),
@@ -2187,24 +2257,45 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 if filters["aliases"]:
                     query = query.filter(RequestLog.alias.in_(filters["aliases"]))
 
-                results = (
-                    query.group_by(RequestLog.tag)
-                    .order_by(func.count(RequestLog.id).desc())
-                    .all()
+                rows = query.all()
+
+                # Split comma-separated tags and aggregate by individual tag
+                tag_stats: dict[str, dict] = {}
+                for row in rows:
+                    # Split "ben,testing" into ["ben", "testing"]
+                    individual_tags = [
+                        t.strip() for t in (row.tag or "").split(",") if t.strip()
+                    ]
+                    for tag in individual_tags:
+                        if tag not in tag_stats:
+                            tag_stats[tag] = {
+                                "requests": 0,
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                                "cost": 0.0,
+                            }
+                        tag_stats[tag]["requests"] += 1
+                        tag_stats[tag]["input_tokens"] += row.input_tokens or 0
+                        tag_stats[tag]["output_tokens"] += row.output_tokens or 0
+                        tag_stats[tag]["cost"] += row.cost or 0.0
+
+                # Sort by request count descending
+                sorted_tags = sorted(
+                    tag_stats.items(), key=lambda x: x[1]["requests"], reverse=True
                 )
 
                 return jsonify(
                     [
                         {
-                            "tag": r.tag,
-                            "requests": r.requests or 0,
-                            "input_tokens": r.input_tokens or 0,
-                            "output_tokens": r.output_tokens or 0,
-                            "total_tokens": (r.input_tokens or 0)
-                            + (r.output_tokens or 0),
-                            "cost": round(r.cost or 0, 4),
+                            "tag": tag,
+                            "requests": stats["requests"],
+                            "input_tokens": stats["input_tokens"],
+                            "output_tokens": stats["output_tokens"],
+                            "total_tokens": stats["input_tokens"]
+                            + stats["output_tokens"],
+                            "cost": round(stats["cost"], 4),
                         }
-                        for r in results
+                        for tag, stats in sorted_tags
                     ]
                 )
             else:
