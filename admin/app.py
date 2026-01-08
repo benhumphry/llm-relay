@@ -4277,4 +4277,309 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 }
             )
 
+    # -------------------------------------------------------------------------
+    # Smart Cache API (v3.3)
+    # -------------------------------------------------------------------------
+
+    @admin.route("/caches")
+    @require_auth
+    def caches_page():
+        """Smart Caches management page."""
+        return render_template("caches.html")
+
+    @admin.route("/api/caches", methods=["GET"])
+    @require_auth_api
+    def list_caches():
+        """List all smart caches."""
+        from db import get_all_smart_caches
+
+        caches = get_all_smart_caches()
+        return jsonify([c.to_dict() for c in caches])
+
+    @admin.route("/api/caches/<int:cache_id>", methods=["GET"])
+    @require_auth_api
+    def get_cache(cache_id: int):
+        """Get a single smart cache by ID."""
+        from db import get_smart_cache_by_id
+
+        cache = get_smart_cache_by_id(cache_id)
+        if not cache:
+            return jsonify({"error": "Cache not found"}), 404
+        return jsonify(cache.to_dict())
+
+    @admin.route("/api/caches", methods=["POST"])
+    @require_auth_api
+    def create_cache_endpoint():
+        """Create a new smart cache."""
+        from context.chroma import is_chroma_available
+        from db import cache_name_available, create_smart_cache
+
+        # Check if ChromaDB is available
+        if not is_chroma_available():
+            return jsonify(
+                {
+                    "error": "ChromaDB is not configured. Set CHROMA_URL environment variable to enable Smart Cache."
+                }
+            ), 503
+
+        data = request.get_json() or {}
+
+        # Validate required fields
+        if not data.get("name"):
+            return jsonify({"error": "Name is required"}), 400
+        if not data.get("target_model"):
+            return jsonify({"error": "Target model is required"}), 400
+
+        name = data["name"].lower().strip()
+
+        # Check if name is available
+        if not cache_name_available(name):
+            return jsonify({"error": f"Cache name '{name}' is already in use"}), 409
+
+        # Check if name conflicts with an existing model, alias, or router
+        try:
+            from providers import registry
+
+            resolved = registry.resolve_model(name)
+            # If we get here without using default fallback, the name matches something
+            if not resolved.is_default_fallback:
+                return jsonify(
+                    {
+                        "error": f"Name '{name}' conflicts with an existing model, alias, or router"
+                    }
+                ), 409
+        except ValueError:
+            # Model not found - that's fine, the name is available
+            pass
+
+        # Validate similarity threshold
+        similarity_threshold = data.get("similarity_threshold", 0.95)
+        if not (0.0 <= similarity_threshold <= 1.0):
+            return jsonify(
+                {"error": "Similarity threshold must be between 0.0 and 1.0"}
+            ), 400
+
+        try:
+            cache = create_smart_cache(
+                name=name,
+                target_model=data["target_model"],
+                similarity_threshold=similarity_threshold,
+                match_system_prompt=data.get("match_system_prompt", True),
+                match_last_message_only=data.get("match_last_message_only", False),
+                cache_ttl_hours=data.get("cache_ttl_hours", 168),
+                min_cached_tokens=data.get("min_cached_tokens", 50),
+                max_cached_tokens=data.get("max_cached_tokens", 4000),
+                tags=data.get("tags", []),
+                description=data.get("description"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(cache.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/caches/<int:cache_id>", methods=["PUT"])
+    @require_auth_api
+    def update_cache_endpoint(cache_id: int):
+        """Update an existing smart cache."""
+        from db import (
+            cache_name_available,
+            get_smart_cache_by_id,
+            update_smart_cache,
+        )
+
+        data = request.get_json() or {}
+
+        # Check cache exists
+        existing = get_smart_cache_by_id(cache_id)
+        if not existing:
+            return jsonify({"error": "Cache not found"}), 404
+
+        # If name is being changed, validate it
+        new_name = data.get("name")
+        if new_name and new_name.lower().strip() != existing.name:
+            new_name = new_name.lower().strip()
+            if not cache_name_available(new_name, exclude_id=cache_id):
+                return jsonify(
+                    {"error": f"Cache name '{new_name}' is already in use"}
+                ), 409
+
+            # Check if new name conflicts with an existing model, alias, or router
+            try:
+                from providers import registry
+
+                resolved = registry.resolve_model(new_name)
+                if not resolved.is_default_fallback:
+                    return jsonify(
+                        {
+                            "error": f"Name '{new_name}' conflicts with an existing model, alias, or router"
+                        }
+                    ), 409
+            except ValueError:
+                pass
+
+        # Validate similarity threshold if provided
+        if "similarity_threshold" in data:
+            if not (0.0 <= data["similarity_threshold"] <= 1.0):
+                return jsonify(
+                    {"error": "Similarity threshold must be between 0.0 and 1.0"}
+                ), 400
+
+        try:
+            cache = update_smart_cache(
+                cache_id=cache_id,
+                name=data.get("name"),
+                target_model=data.get("target_model"),
+                similarity_threshold=data.get("similarity_threshold"),
+                match_system_prompt=data.get("match_system_prompt"),
+                match_last_message_only=data.get("match_last_message_only"),
+                cache_ttl_hours=data.get("cache_ttl_hours"),
+                min_cached_tokens=data.get("min_cached_tokens"),
+                max_cached_tokens=data.get("max_cached_tokens"),
+                tags=data.get("tags"),
+                description=data.get("description"),
+                enabled=data.get("enabled"),
+            )
+            if not cache:
+                return jsonify({"error": "Cache not found"}), 404
+            return jsonify(cache.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/caches/<int:cache_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_cache_endpoint(cache_id: int):
+        """Delete a smart cache."""
+        from context.chroma import delete_collection
+        from db import delete_smart_cache, get_smart_cache_by_id
+
+        # Get the cache to find its collection name
+        cache = get_smart_cache_by_id(cache_id)
+        if not cache:
+            return jsonify({"error": "Cache not found"}), 404
+
+        # Delete the ChromaDB collection if it exists
+        if cache.chroma_collection:
+            delete_collection(cache.chroma_collection)
+
+        # Delete the cache from database
+        if delete_smart_cache(cache_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Failed to delete cache"}), 500
+
+    @admin.route("/api/caches/<int:cache_id>/clear", methods=["POST"])
+    @require_auth_api
+    def clear_cache_endpoint(cache_id: int):
+        """Clear all cached entries for a smart cache."""
+        from context.chroma import is_chroma_available
+        from db import get_smart_cache_by_id, reset_smart_cache_stats
+        from routing import SmartCacheEngine
+
+        if not is_chroma_available():
+            return jsonify({"error": "ChromaDB is not available"}), 503
+
+        cache = get_smart_cache_by_id(cache_id)
+        if not cache:
+            return jsonify({"error": "Cache not found"}), 404
+
+        try:
+            # Create engine and clear the collection
+            engine = SmartCacheEngine(cache, registry)
+
+            # Get count before clearing
+            count_before = engine.collection.count()
+            logger.info(
+                f"Clearing cache '{cache.name}' - entries before: {count_before}"
+            )
+
+            engine.clear_cache()
+
+            # Verify it's empty
+            count_after = engine.collection.count()
+            logger.info(f"Cache '{cache.name}' cleared - entries after: {count_after}")
+
+            # Note: We don't reset statistics - they have historical value
+            # and represent total usage over time, not just current cache contents
+
+            return jsonify({"success": True, "entries_cleared": count_before})
+        except Exception as e:
+            logger.error(f"Failed to clear cache: {e}")
+            return jsonify({"error": f"Failed to clear cache: {str(e)}"}), 500
+
+    @admin.route("/api/caches/<int:cache_id>/stats", methods=["GET"])
+    @require_auth_api
+    def get_cache_stats_endpoint(cache_id: int):
+        """Get detailed statistics for a smart cache."""
+        from context.chroma import is_chroma_available
+        from db import get_smart_cache_by_id
+        from routing import SmartCacheEngine
+
+        cache = get_smart_cache_by_id(cache_id)
+        if not cache:
+            return jsonify({"error": "Cache not found"}), 404
+
+        result = cache.to_dict()
+
+        # Add ChromaDB stats if available
+        if is_chroma_available():
+            try:
+                engine = SmartCacheEngine(cache, registry)
+                chroma_stats = engine.get_cache_stats()
+                result["chroma_entries"] = chroma_stats.get("entries", 0)
+            except Exception as e:
+                result["chroma_error"] = str(e)
+        else:
+            result["chroma_available"] = False
+
+        return jsonify(result)
+
+    @admin.route("/api/caches/validate/<name>", methods=["GET"])
+    @require_auth_api
+    def validate_cache_name(name: str):
+        """Check if a cache name is available."""
+        from db import cache_name_available
+
+        name = name.lower().strip()
+        exclude_id = request.args.get("exclude_id", type=int)
+
+        # Check if name is taken by another cache
+        if not cache_name_available(name, exclude_id=exclude_id):
+            return jsonify(
+                {"available": False, "reason": "Name is already used by another cache"}
+            )
+
+        # Check if name conflicts with an existing model, alias, or router
+        try:
+            from providers import registry
+
+            resolved = registry.resolve_model(name)
+            if not resolved.is_default_fallback:
+                return jsonify(
+                    {
+                        "available": False,
+                        "reason": "Name conflicts with an existing model, alias, or router",
+                    }
+                )
+        except ValueError:
+            pass
+
+        return jsonify({"available": True})
+
+    @admin.route("/api/caches/chroma-status", methods=["GET"])
+    @require_auth_api
+    def get_cache_chroma_status():
+        """Check if ChromaDB is available for smart caches."""
+        from context.chroma import (
+            get_chroma_url,
+            is_chroma_available,
+            is_chroma_configured,
+        )
+
+        return jsonify(
+            {
+                "configured": is_chroma_configured(),
+                "available": is_chroma_available(),
+                "url": get_chroma_url(),
+            }
+        )
+
     return admin

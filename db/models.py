@@ -803,6 +803,116 @@ class SmartRouter(Base):
         }
 
 
+# ============================================================================
+# Smart Cache Model (v3.3)
+# ============================================================================
+
+
+class SmartCache(Base):
+    """
+    Smart caches that return cached responses for semantically similar queries.
+
+    A smart cache uses ChromaDB to find semantically similar past queries and
+    returns cached responses when similarity exceeds the threshold, reducing
+    token usage and costs.
+
+    Requires ChromaDB to be configured (CHROMA_URL environment variable).
+    """
+
+    __tablename__ = "smart_caches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+
+    # Target model to use on cache miss
+    target_model: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # "provider_id/model_id"
+
+    # Cache behavior
+    similarity_threshold: Mapped[float] = mapped_column(
+        Float, default=0.95
+    )  # 0.0-1.0, higher = stricter matching
+    match_system_prompt: Mapped[bool] = mapped_column(
+        Boolean, default=True
+    )  # Include system prompt in cache key
+    match_last_message_only: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Only match last user message (ignores conversation history)
+    cache_ttl_hours: Mapped[int] = mapped_column(Integer, default=168)  # 7 days default
+    min_cached_tokens: Mapped[int] = mapped_column(
+        Integer, default=50
+    )  # Don't cache very short responses (filters out titles, etc.)
+    max_cached_tokens: Mapped[int] = mapped_column(
+        Integer, default=4000
+    )  # Don't cache very long responses
+
+    # ChromaDB collection name (auto-generated if null)
+    chroma_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Statistics (updated periodically)
+    total_requests: Mapped[int] = mapped_column(Integer, default=0)
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
+    cost_saved: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Optional tags for usage tracking
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        return json.loads(self.tags_json) if self.tags_json else []
+
+    @tags.setter
+    def tags(self, value: list[str]):
+        """Set tags from a list."""
+        self.tags_json = json.dumps(value) if value else "[]"
+
+    @property
+    def hit_rate(self) -> float:
+        """Calculate cache hit rate as a percentage."""
+        if self.total_requests == 0:
+            return 0.0
+        return (self.cache_hits / self.total_requests) * 100
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "target_model": self.target_model,
+            "similarity_threshold": self.similarity_threshold,
+            "match_system_prompt": self.match_system_prompt,
+            "match_last_message_only": self.match_last_message_only,
+            "cache_ttl_hours": self.cache_ttl_hours,
+            "min_cached_tokens": self.min_cached_tokens,
+            "max_cached_tokens": self.max_cached_tokens,
+            "chroma_collection": self.chroma_collection,
+            "total_requests": self.total_requests,
+            "cache_hits": self.cache_hits,
+            "tokens_saved": self.tokens_saved,
+            "cost_saved": self.cost_saved,
+            "hit_rate": self.hit_rate,
+            "tags": self.tags,
+            "description": self.description,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 # Future tables for v2.2+ (defined here for reference, not created yet)
 #
 # class ApiKey(Base):

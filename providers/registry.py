@@ -42,6 +42,11 @@ class ResolvedModel:
         return self._routing_result is not None
 
     @property
+    def has_cache(self) -> bool:
+        """Check if this resolution came from a smart cache."""
+        return False  # Regular ResolvedModel is never from cache
+
+    @property
     def router_name(self) -> str | None:
         """Get the router name if this came from a smart router."""
         if self._routing_result:
@@ -53,6 +58,38 @@ class ResolvedModel:
         """Get designator usage info if this came from a smart router."""
         if self._routing_result:
             return self._routing_result.designator_usage
+        return None
+
+
+@dataclass
+class CacheResolvedModel(ResolvedModel):
+    """
+    Extended ResolvedModel that includes smart cache information.
+
+    When resolve_model() returns a CacheResolvedModel, the proxy should:
+    1. Check cache_result.is_cache_hit
+    2. If hit: return cached_response directly
+    3. If miss: forward to provider, then call cache_engine.store_response()
+    """
+
+    cache_result: "object" = None  # CacheResult from SmartCacheEngine.lookup()
+    cache_engine: "object" = None  # SmartCacheEngine instance for storing responses
+
+    @property
+    def has_cache(self) -> bool:
+        """Check if this resolution came from a smart cache."""
+        return True
+
+    @property
+    def is_cache_hit(self) -> bool:
+        """Check if this is a cache hit."""
+        return self.cache_result and self.cache_result.is_cache_hit
+
+    @property
+    def cached_response(self) -> dict | None:
+        """Get the cached response if this is a cache hit."""
+        if self.cache_result and self.cache_result.is_cache_hit:
+            return self.cache_result.cached_response
         return None
 
 
@@ -103,31 +140,38 @@ class ProviderRegistry:
         messages: list[dict] | None = None,
         system: str | None = None,
         session_key: str | None = None,
-    ) -> ResolvedModel:
+    ) -> "ResolvedModel | CacheResolvedModel":
         """
         Resolve a model name to a provider and model ID.
 
         Resolution order:
         1. Check if it's a smart router (v3.2) - requires messages
-        2. Check if it's an alias (v3.1)
-        3. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        4. Check each configured provider's models
-        5. Fall back to default provider/model
+        2. Check if it's a smart cache (v3.3) - requires ChromaDB, returns CacheResolvedModel
+        3. Check if it's an alias (v3.1)
+        4. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        5. Check each configured provider's models
+        6. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
-            messages: Optional message list (required for smart router)
-            system: Optional system prompt (for smart router context)
+            messages: Optional message list (required for smart router/cache)
+            system: Optional system prompt (for smart router/cache context)
             session_key: Optional session key (for per_session routing)
 
         Returns:
             ResolvedModel with provider, model_id, and optional alias info
+            OR CacheResolvedModel for smart cache lookups
 
         Raises:
             ValueError: If model not found and no default configured
         """
-        from db import get_alias_by_name, get_smart_router_by_name
-        from routing import SmartRouterEngine
+        from context.chroma import is_chroma_available
+        from db import (
+            get_alias_by_name,
+            get_smart_cache_by_name,
+            get_smart_router_by_name,
+        )
+        from routing import SmartCacheEngine, SmartRouterEngine
 
         name = model_name.lower().strip()
 
@@ -162,7 +206,56 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 2: Check if it's an alias (v3.1)
+        # Step 2: Check if it's a smart cache (v3.3)
+        cache = get_smart_cache_by_name(name)
+        if cache and cache.enabled:
+            # Smart caches require ChromaDB
+            if is_chroma_available():
+                if messages is not None:
+                    logger.debug(f"Using smart cache '{name}'")
+                    engine = SmartCacheEngine(cache, self)
+                    cache_result = engine.lookup(messages, system)
+                    # Return a special CacheResolvedModel that the proxy can handle
+                    return CacheResolvedModel(
+                        provider=cache_result.resolved.provider,
+                        model_id=cache_result.resolved.model_id,
+                        alias_name=cache.name,
+                        alias_tags=cache.tags or [],
+                        cache_result=cache_result,
+                        cache_engine=engine,
+                    )
+                else:
+                    # No messages - just resolve to target model
+                    logger.debug(
+                        f"Smart cache '{name}' called without messages, resolving target"
+                    )
+                    try:
+                        target_result = self._resolve_actual_model(cache.target_model)
+                        return ResolvedModel(
+                            provider=target_result.provider,
+                            model_id=target_result.model_id,
+                            alias_name=cache.name,
+                            alias_tags=cache.tags or [],
+                        )
+                    except ValueError:
+                        pass  # Fall through to normal resolution
+            else:
+                logger.warning(
+                    f"Smart cache '{name}' requested but ChromaDB not available, "
+                    "falling back to target model"
+                )
+                try:
+                    target_result = self._resolve_actual_model(cache.target_model)
+                    return ResolvedModel(
+                        provider=target_result.provider,
+                        model_id=target_result.model_id,
+                        alias_name=cache.name,
+                        alias_tags=cache.tags or [],
+                    )
+                except ValueError:
+                    pass  # Fall through to normal resolution
+
+        # Step 3: Check if it's an alias (v3.1)
         alias = get_alias_by_name(name)
         if alias and alias.enabled:
             logger.debug(f"Resolving alias '{name}' -> '{alias.target_model}'")
@@ -191,7 +284,7 @@ class ProviderRegistry:
                             alias_tags=alias.tags or [],
                         )
 
-        # Step 3-5: Normal model resolution
+        # Step 4-6: Normal model resolution
         return self._resolve_actual_model(name)
 
     def _resolve_actual_model(self, model_name: str) -> ResolvedModel:
@@ -274,12 +367,17 @@ class ProviderRegistry:
 
     def list_all_models(self) -> list[dict]:
         """
-        Get combined model list from all available providers, aliases, and smart routers.
+        Get combined model list from all available providers, aliases, smart routers, and smart caches.
 
         Returns list of model info dicts suitable for /api/tags response.
         Models are already filtered for enabled status in load_models_for_provider().
         """
-        from db import get_enabled_aliases, get_enabled_smart_routers
+        from context.chroma import is_chroma_available
+        from db import (
+            get_enabled_aliases,
+            get_enabled_smart_caches,
+            get_enabled_smart_routers,
+        )
 
         models = []
         seen = set()
@@ -325,6 +423,28 @@ class ProviderRegistry:
                 }
             )
 
+        # Add smart caches (only if ChromaDB is available)
+        if is_chroma_available():
+            caches = get_enabled_smart_caches()
+            for cache_name, cache in caches.items():
+                seen.add(cache_name)
+                models.append(
+                    {
+                        "name": cache_name,
+                        "model": cache_name,
+                        "provider": "smart-cache",
+                        "details": {
+                            "family": "smart-cache",
+                            "parameter_size": "",
+                            "quantization_level": "",
+                        },
+                        "description": cache.description
+                        or f"Cached responses for {cache.target_model}",
+                        "context_length": 0,
+                        "capabilities": ["caching"],
+                    }
+                )
+
         # Add provider models
         for provider in self.get_available_providers():
             for model_id, info in provider.get_models().items():
@@ -358,9 +478,26 @@ class ProviderRegistry:
         Get combined model list in OpenAI format.
 
         Returns list of model info dicts suitable for /v1/models response.
-        Includes aliases, smart routers, and provider models.
+        Includes aliases, smart routers, smart caches, and provider models.
         """
-        from db import get_enabled_aliases, get_enabled_smart_routers
+        from context.chroma import is_chroma_available
+        from db import (
+            get_enabled_aliases,
+            get_enabled_smart_caches,
+            get_enabled_smart_routers,
+        )
+        """
+        Get combined model list in OpenAI format.
+
+        Returns list of model info dicts suitable for /v1/models response.
+        Includes aliases, smart routers, smart caches, and provider models.
+        """
+        from context.chroma import is_chroma_available
+        from db import (
+            get_enabled_aliases,
+            get_enabled_smart_caches,
+            get_enabled_smart_routers,
+        )
 
         models = []
         seen = set()
@@ -388,6 +525,19 @@ class ProviderRegistry:
                     "owned_by": "smart-router",
                 }
             )
+
+        # Add smart caches (only if ChromaDB is available)
+        if is_chroma_available():
+            caches = get_enabled_smart_caches()
+            for cache_name in caches.keys():
+                seen.add(cache_name)
+                models.append(
+                    {
+                        "id": cache_name,
+                        "object": "model",
+                        "owned_by": "smart-cache",
+                    }
+                )
 
         # Add provider models
         for provider in self.get_available_providers():

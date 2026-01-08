@@ -34,12 +34,25 @@ from .models import (
     Provider,
     RequestLog,
     Setting,
+    SmartCache,
     SmartRouter,
 )
 from .seed import (
     ensure_seeded,
     seed_models_from_litellm,
     seed_providers,
+)
+from .smart_caches import (
+    cache_name_available,
+    create_smart_cache,
+    delete_smart_cache,
+    get_all_smart_caches,
+    get_enabled_smart_caches,
+    get_smart_cache_by_id,
+    get_smart_cache_by_name,
+    reset_smart_cache_stats,
+    update_smart_cache,
+    update_smart_cache_stats,
 )
 from .smart_routers import (
     create_smart_router,
@@ -99,6 +112,18 @@ __all__ = [
     "delete_smart_router",
     "router_name_available",
     "get_enabled_smart_routers",
+    # Smart Caches (v3.3)
+    "SmartCache",
+    "get_all_smart_caches",
+    "get_smart_cache_by_name",
+    "get_smart_cache_by_id",
+    "create_smart_cache",
+    "update_smart_cache",
+    "update_smart_cache_stats",
+    "reset_smart_cache_stats",
+    "delete_smart_cache",
+    "cache_name_available",
+    "get_enabled_smart_caches",
     # Seeding
     "ensure_seeded",
     "seed_providers",

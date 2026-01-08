@@ -625,7 +625,11 @@ def stream_ollama_response(
             cost = stream_result.get("cost") if stream_result else None
             # Pass the full stream_result for extended token info
             on_complete(
-                input_tokens, output_tokens, cost=cost, stream_result=stream_result
+                input_tokens,
+                output_tokens,
+                cost=cost,
+                stream_result=stream_result,
+                full_content=llm_full,
             )
 
     except Exception as e:
@@ -706,7 +710,11 @@ def stream_openai_response(
             cost = stream_result.get("cost") if stream_result else None
             # Pass the full stream_result for extended token info
             on_complete(
-                input_tokens, output_tokens, cost=cost, stream_result=stream_result
+                input_tokens,
+                output_tokens,
+                cost=cost,
+                stream_result=stream_result,
+                full_content=llm_full,
             )
 
     except Exception as e:
@@ -849,6 +857,57 @@ def chat():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
+    # Handle Smart Cache hits (v3.3)
+    if resolved.has_cache and resolved.is_cache_hit:
+        cached_response = resolved.cached_response
+        cache_engine = resolved.cache_engine
+        cache_id = cache_engine.cache.id
+        cache_name = cache_engine.cache.name
+
+        # Estimate tokens saved from cached response
+        cached_content = cached_response.get("content", "")
+        tokens_saved = len(cached_content) // 4  # Rough estimate
+
+        logger.info(f"Cache hit for '{cache_name}' - returning cached response")
+
+        # Update cache statistics
+        from db import update_smart_cache_stats
+
+        update_smart_cache_stats(
+            cache_id=cache_id,
+            increment_requests=1,
+            increment_hits=1,
+            increment_tokens_saved=tokens_saved,
+        )
+
+        # Log the cache hit request
+        track_completion(
+            provider_id="cache",
+            model_id=cache_name,
+            model_name=clean_model_name,
+            endpoint="/api/chat",
+            input_tokens=0,
+            output_tokens=tokens_saved,
+            status_code=200,
+            cost=0.0,
+            tag=tag,
+            alias=cache_name,
+        )
+
+        # Convert to Ollama format and return
+        return jsonify(
+            {
+                "model": clean_model_name,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "message": {
+                    "role": "assistant",
+                    "content": cached_content,
+                },
+                "done": True,
+                "x_cache": {"hit": True, "cache_name": cache_name},
+            }
+        )
+
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/api/chat")
 
@@ -895,10 +954,18 @@ def chat():
             prov_name = provider.name  # Capture for closure
             captured_alias = alias_name  # Capture alias for closure (v3.1)
             captured_router = router_name  # Capture router for closure (v3.2)
+            captured_resolved = resolved  # Capture for cache storage (v3.3)
+            captured_messages = messages  # Capture for cache storage (v3.3)
+            captured_system = system_prompt  # Capture for cache storage (v3.3)
 
             # Create callback to track after stream completes
             def on_stream_complete(
-                input_tokens, output_tokens, error=None, cost=None, stream_result=None
+                input_tokens,
+                output_tokens,
+                error=None,
+                cost=None,
+                stream_result=None,
+                full_content=None,
             ):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
@@ -934,6 +1001,34 @@ def chat():
                     alias=captured_alias,
                     router_name=captured_router,
                 )
+
+                # Store response in smart cache on cache miss (v3.3)
+                if (
+                    full_content
+                    and not error
+                    and captured_resolved.has_cache
+                    and not captured_resolved.is_cache_hit
+                ):
+                    try:
+                        cache_engine = captured_resolved.cache_engine
+                        cache_engine.store_response(
+                            messages=captured_messages,
+                            system=captured_system,
+                            response={"content": full_content},
+                            output_tokens=output_tokens,
+                        )
+                        # Update cache request count (miss)
+                        from db import update_smart_cache_stats
+
+                        update_smart_cache_stats(
+                            cache_id=cache_engine.cache.id,
+                            increment_requests=1,
+                        )
+                        logger.debug(
+                            f"Stored streaming response in cache '{cache_engine.cache.name}'"
+                        )
+                    except Exception as cache_err:
+                        logger.warning(f"Failed to store in cache: {cache_err}")
 
             return Response(
                 stream_ollama_response(
@@ -986,6 +1081,30 @@ def chat():
                 alias=alias_name,
                 router_name=router_name,
             )
+
+            # Store response in smart cache on cache miss (v3.3)
+            if resolved.has_cache and not resolved.is_cache_hit:
+                try:
+                    cache_engine = resolved.cache_engine
+                    cache_engine.store_response(
+                        messages=messages,
+                        system=system_prompt,
+                        response={"content": llm_content},
+                        output_tokens=result.get("output_tokens", 0),
+                    )
+                    # Update cache request count (miss)
+                    from db import update_smart_cache_stats
+
+                    update_smart_cache_stats(
+                        cache_id=cache_engine.cache.id,
+                        increment_requests=1,
+                    )
+                    logger.debug(
+                        f"Stored response in cache '{cache_engine.cache.name}'"
+                    )
+                except Exception as cache_err:
+                    logger.warning(f"Failed to store in cache: {cache_err}")
+
             return jsonify(response_obj)
 
     except Exception as e:
@@ -1336,6 +1455,71 @@ def openai_chat_completions():
             }
         ), 400
 
+    # Handle Smart Cache hits (v3.3)
+    if resolved.has_cache and resolved.is_cache_hit:
+        cached_response = resolved.cached_response
+        cache_engine = resolved.cache_engine
+        cache_id = cache_engine.cache.id
+        cache_name = cache_engine.cache.name
+
+        # Estimate tokens saved from cached response
+        cached_content = cached_response.get("content", "")
+        tokens_saved = len(cached_content) // 4  # Rough estimate
+
+        logger.info(
+            f"Cache hit for '{cache_name}' - returning cached response (OpenAI format)"
+        )
+
+        # Update cache statistics
+        from db import update_smart_cache_stats
+
+        update_smart_cache_stats(
+            cache_id=cache_id,
+            increment_requests=1,
+            increment_hits=1,
+            increment_tokens_saved=tokens_saved,
+        )
+
+        # Log the cache hit request
+        track_completion(
+            provider_id="cache",
+            model_id=cache_name,
+            model_name=clean_model_name,
+            endpoint="/v1/chat/completions",
+            input_tokens=0,
+            output_tokens=tokens_saved,
+            status_code=200,
+            cost=0.0,
+            tag=tag,
+            alias=cache_name,
+        )
+
+        # Return OpenAI-compatible response
+        return jsonify(
+            {
+                "id": f"chatcmpl-cache-{cache_id}",
+                "object": "chat.completion",
+                "created": int(datetime.now(timezone.utc).timestamp()),
+                "model": clean_model_name,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": cached_content,
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": tokens_saved,
+                    "total_tokens": tokens_saved,
+                },
+                "x_cache": {"hit": True, "cache_name": cache_name},
+            }
+        )
+
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/v1/chat/completions")
 
@@ -1392,10 +1576,18 @@ def openai_chat_completions():
             prov_name = provider.name
             captured_alias = alias_name  # Capture alias for closure (v3.1)
             captured_router = router_name  # Capture router for closure (v3.2)
+            captured_resolved = resolved  # Capture for cache storage (v3.3)
+            captured_messages = messages  # Capture for cache storage (v3.3)
+            captured_system = system_prompt  # Capture for cache storage (v3.3)
 
             # Create callback to track after stream completes
             def on_stream_complete(
-                input_tokens, output_tokens, error=None, cost=None, stream_result=None
+                input_tokens,
+                output_tokens,
+                error=None,
+                cost=None,
+                stream_result=None,
+                full_content=None,
             ):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
@@ -1431,6 +1623,34 @@ def openai_chat_completions():
                     alias=captured_alias,
                     router_name=captured_router,
                 )
+
+                # Store response in smart cache on cache miss (v3.3)
+                if (
+                    full_content
+                    and not error
+                    and captured_resolved.has_cache
+                    and not captured_resolved.is_cache_hit
+                ):
+                    try:
+                        cache_engine = captured_resolved.cache_engine
+                        cache_engine.store_response(
+                            messages=captured_messages,
+                            system=captured_system,
+                            response={"content": full_content},
+                            output_tokens=output_tokens,
+                        )
+                        # Update cache request count (miss)
+                        from db import update_smart_cache_stats
+
+                        update_smart_cache_stats(
+                            cache_id=cache_engine.cache.id,
+                            increment_requests=1,
+                        )
+                        logger.debug(
+                            f"Stored streaming response in cache '{cache_engine.cache.name}'"
+                        )
+                    except Exception as cache_err:
+                        logger.warning(f"Failed to store in cache: {cache_err}")
 
             return Response(
                 stream_openai_response(
@@ -1500,6 +1720,29 @@ def openai_chat_completions():
                 alias=alias_name,
                 router_name=router_name,
             )
+
+            # Store response in smart cache on cache miss (v3.3)
+            if resolved.has_cache and not resolved.is_cache_hit:
+                try:
+                    cache_engine = resolved.cache_engine
+                    cache_engine.store_response(
+                        messages=messages,
+                        system=system_prompt,
+                        response={"content": llm_content},
+                        output_tokens=result.get("output_tokens", 0),
+                    )
+                    # Update cache request count (miss)
+                    from db import update_smart_cache_stats
+
+                    update_smart_cache_stats(
+                        cache_id=cache_engine.cache.id,
+                        increment_requests=1,
+                    )
+                    logger.debug(
+                        f"Stored response in cache '{cache_engine.cache.name}'"
+                    )
+                except Exception as cache_err:
+                    logger.warning(f"Failed to store in cache: {cache_err}")
 
             return jsonify(response_obj)
 

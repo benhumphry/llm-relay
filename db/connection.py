@@ -492,6 +492,32 @@ def _run_migrations(engine) -> None:
                 )
                 conn.commit()
 
+    # Migration: Add match_last_message_only column to smart_caches table (v3.3)
+    if "smart_caches" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("smart_caches")
+        }
+
+        if "match_last_message_only" not in existing_columns:
+            logger.info("Adding match_last_message_only column to smart_caches table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_caches ADD COLUMN match_last_message_only BOOLEAN DEFAULT false"
+                    )
+                )
+                conn.commit()
+
+        if "min_cached_tokens" not in existing_columns:
+            logger.info("Adding min_cached_tokens column to smart_caches table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_caches ADD COLUMN min_cached_tokens INTEGER DEFAULT 50"
+                    )
+                )
+                conn.commit()
+
 
 def init_db(drop_all: bool = False) -> None:
     """
