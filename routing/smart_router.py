@@ -273,9 +273,14 @@ class SmartRouterEngine:
         Get candidate models with their metadata.
 
         Returns list of dicts with model info including context_length,
-        capabilities, costs, and descriptions.
+        capabilities, costs, descriptions, and optionally model intelligence.
         """
         candidates = []
+
+        # Get model intelligence if enabled
+        intelligence_map = {}
+        if self.router.use_model_intelligence:
+            intelligence_map = self._get_model_intelligence()
 
         for candidate in self.router.candidates:
             model_ref = candidate.get("model", "")
@@ -296,6 +301,7 @@ class SmartRouterEngine:
                             "input_cost": model_info.input_cost,
                             "output_cost": model_info.output_cost,
                             "description": getattr(model_info, "description", None),
+                            "intelligence": intelligence_map.get(model_ref),
                         }
                     )
                 else:
@@ -309,6 +315,7 @@ class SmartRouterEngine:
                             "input_cost": None,
                             "output_cost": None,
                             "description": None,
+                            "intelligence": intelligence_map.get(model_ref),
                         }
                     )
             except ValueError:
@@ -317,6 +324,34 @@ class SmartRouterEngine:
                 continue
 
         return candidates
+
+    def _get_model_intelligence(self) -> dict[str, str]:
+        """
+        Get cached model intelligence for candidates.
+
+        Returns dict mapping model_id to intelligence text.
+        """
+        try:
+            from context import is_chroma_available
+
+            if not is_chroma_available():
+                logger.debug("ChromaDB not available, skipping model intelligence")
+                return {}
+
+            from context.model_intelligence import ModelIntelligence
+
+            mi = ModelIntelligence()
+            intel_map = mi.get_intelligence_for_candidates(self.router.candidates)
+
+            # Convert to simple string map
+            return {
+                model_id: intel.to_prompt_text()
+                for model_id, intel in intel_map.items()
+            }
+
+        except Exception as e:
+            logger.warning(f"Error getting model intelligence: {e}")
+            return {}
 
     def _filter_candidates_by_context(
         self, candidates: list[dict], token_count: int
@@ -414,7 +449,7 @@ class SmartRouterEngine:
         has_images: bool,
     ) -> str:
         """Build the prompt for the designator LLM."""
-        # Build model list with notes (which may contain synced descriptions or custom notes)
+        # Build model list with notes and intelligence
         model_lines = []
         for c in candidates:
             caps = ", ".join(c.get("capabilities", [])) or "general"
@@ -431,6 +466,15 @@ class SmartRouterEngine:
                 if len(notes) > 300:
                     notes = notes[:297] + "..."
                 line += f"\n  Notes: {notes}"
+
+            # Add model intelligence if available (web-gathered assessments)
+            intelligence = c.get("intelligence")
+            if intelligence:
+                # Truncate long intelligence to keep prompt size reasonable
+                if len(intelligence) > 400:
+                    intelligence = intelligence[:397] + "..."
+                line += f"\n  Assessment: {intelligence}"
+
             model_lines.append(line)
 
         models_section = "\n".join(model_lines)

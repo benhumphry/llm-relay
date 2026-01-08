@@ -29,6 +29,7 @@ db/                   # Database layer
   models.py           # SQLAlchemy models
   connection.py       # DB connection and migrations
   aliases.py          # Alias CRUD operations
+  redirects.py        # Redirect CRUD operations (wildcard support)
   smart_routers.py    # Smart router CRUD operations
   smart_caches.py     # Smart cache CRUD operations
   smart_augmentors.py # Smart augmentor CRUD operations
@@ -50,6 +51,7 @@ augmentation/         # Web search and scraping
   scraper.py          # URL content scraping
 context/              # ChromaDB integration
   chroma.py           # ChromaDB client wrapper and collection management
+  model_intelligence.py # Web-gathered model assessments for smart routers
 admin/                # Admin dashboard
   app.py              # Admin API endpoints and pages
   templates/          # Jinja2 templates with Alpine.js
@@ -60,7 +62,7 @@ config/               # Configuration
 ## Key Concepts
 
 ### Model Resolution (providers/registry.py)
-Resolution order: Smart Router -> Smart Cache -> Smart Augmentor -> Alias -> Provider prefix -> Provider search -> Default fallback
+Resolution order: Redirect -> Smart Router -> Smart Cache -> Smart Augmentor -> Alias -> Provider prefix -> Provider search -> Default fallback
 
 ### ResolvedModel
 Dataclass returned by `registry.resolve_model()` containing provider, model_id, and metadata about how it was resolved (alias, router, default fallback).
@@ -68,11 +70,25 @@ Dataclass returned by `registry.resolve_model()` containing provider, model_id, 
 ### Usage Tracking (tracking/usage_tracker.py)
 Async background service that batches request logs and updates daily statistics. Tracks tokens, costs, and attributes to tags extracted from API keys.
 
+### Redirects (db/redirects.py)
+Transparent model name mappings checked first in resolution. Unlike aliases, redirects:
+- Are checked before smart routers (first in resolution order)
+- Support wildcard patterns (e.g., `openrouter/anthropic/*` -> `anthropic/*`)
+- Are transparent to the caller (no alias tracking in logs)
+
+Use cases: model upgrades (`gpt-4` -> `gpt-5`), provider switches (`openrouter/anthropic/*` -> `anthropic/*`).
+
 ### Aliases (db/aliases.py)
 Simple name -> target_model mappings for user-friendly model names.
 
 ### Smart Routers (routing/smart_router.py)
 Use a designator LLM to intelligently route requests to the best candidate model based on query content. The designator receives candidate model info including descriptions to help make informed routing decisions.
+
+Key settings:
+- `use_model_intelligence` - Enhance designator with web-gathered model assessments (strengths, weaknesses, best use cases). Requires ChromaDB.
+
+### Model Intelligence (context/model_intelligence.py)
+Web-gathered balanced assessments of LLM models for Smart Router designators. Searches for model reviews/benchmarks and summarizes into strengths, weaknesses, best_for, and avoid_for categories. Cached in ChromaDB with TTL-based expiry.
 
 ### Smart Caches (routing/smart_cache.py)
 Semantic response caching using ChromaDB. Caches LLM responses and returns them for semantically similar queries, reducing token usage and costs. Key settings:
@@ -152,3 +168,25 @@ Migrations run automatically on startup via `db/connection.py:run_migrations()`.
   - Startup log in `proxy.py`
   - Admin UI settings page (via `version` template variable)
   - Docker image (copied at build time)
+
+## Development Workflow
+
+### Docker Compose Files
+- `docker-compose.yml` - Production config, pulls from `ghcr.io/benhumphry/llm-relay:latest`
+- `docker-compose.dev.yml` - Development config, builds locally with hot reload
+
+### Building and Testing Changes
+```bash
+# Build and deploy to dev instance (does NOT affect production)
+docker compose -f docker-compose.dev.yml up -d --build
+
+# View dev logs
+docker logs -f llm-relay-dev
+
+# Production uses the ghcr.io image - do NOT use `docker compose up -d --build` 
+# on docker-compose.yml as it will rebuild and restart production
+```
+
+### Dev vs Production Ports
+- Production (`llm-relay-llm-relay-1`): ports 11434, 8080
+- Development (`llm-relay-dev`): ports 11435, 8081

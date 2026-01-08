@@ -647,6 +647,16 @@ content %}
                                                     >designator</span
                                                 >
                                             </div>
+                                            <!-- Augmentor -->
+                                            <div x-show="log.augmentor_name">
+                                                <div class="text-xs text-base-content/50 uppercase mb-1">Augmentor</div>
+                                                <span class="badge badge-info badge-sm" x-text="log.augmentor_name"></span>
+                                                <span
+                                                    x-show="log.is_designator"
+                                                    class="badge badge-ghost badge-xs ml-1"
+                                                    >designator</span
+                                                >
+                                            </div>
                                             <!-- All Tags -->
                                             <div x-show="log.tag">
                                                 <div class="text-xs text-base-content/50 uppercase mb-1">All Tags</div>

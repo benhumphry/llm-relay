@@ -470,6 +470,15 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        # v3.5: Add augmentor_name column
+        if "augmentor_name" not in existing_columns:
+            migrations.append(
+                (
+                    "augmentor_name",
+                    "ALTER TABLE request_logs ADD COLUMN augmentor_name VARCHAR(100)",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for request_logs table (v3.2)"
@@ -516,6 +525,52 @@ def _run_migrations(engine) -> None:
                         "ALTER TABLE smart_caches ADD COLUMN min_cached_tokens INTEGER DEFAULT 50"
                     )
                 )
+                conn.commit()
+
+    # Migration: Add use_model_intelligence column to smart_routers table (v3.6)
+    if "smart_routers" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("smart_routers")
+        }
+
+        if "use_model_intelligence" not in existing_columns:
+            logger.info("Adding use_model_intelligence column to smart_routers table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_routers ADD COLUMN use_model_intelligence BOOLEAN DEFAULT false"
+                    )
+                )
+                conn.commit()
+
+        if "search_provider" not in existing_columns:
+            logger.info("Adding search_provider column to smart_routers table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_routers ADD COLUMN search_provider VARCHAR(50)"
+                    )
+                )
+                conn.commit()
+
+        if "intelligence_model" not in existing_columns:
+            logger.info("Adding intelligence_model column to smart_routers table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_routers ADD COLUMN intelligence_model VARCHAR(150)"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add tags_json column to redirects table (v3.7)
+    if "redirects" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("redirects")}
+
+        if "tags_json" not in existing_columns:
+            logger.info("Adding tags_json column to redirects table")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE redirects ADD COLUMN tags_json TEXT"))
                 conn.commit()
 
 

@@ -67,6 +67,30 @@ def list_search_providers() -> list[dict]:
     return result
 
 
+def get_default_search_provider() -> "SearchProvider | None":
+    """
+    Get the first configured search provider.
+
+    Preference order: searxng, then any other configured provider.
+
+    Returns:
+        SearchProvider instance or None if no provider is configured
+    """
+    # Prefer SearXNG as it's self-hosted and doesn't require API keys
+    if "searxng" in _providers:
+        provider = _providers["searxng"]()
+        if provider.is_configured():
+            return provider
+
+    # Fall back to any configured provider
+    for name, provider_class in _providers.items():
+        provider = provider_class()
+        if provider.is_configured():
+            return provider
+
+    return None
+
+
 # Import and register providers
 from .searxng import SearXNGProvider
 
@@ -82,6 +106,7 @@ except ImportError:
 
 __all__ = [
     "get_search_provider",
+    "get_default_search_provider",
     "list_search_providers",
     "register_provider",
 ]

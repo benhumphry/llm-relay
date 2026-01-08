@@ -500,6 +500,11 @@ class RequestLog(Base):
         String(100), nullable=True, index=True
     )
 
+    # Smart augmentor tracking (v3.5)
+    augmentor_name: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+
     # Request details
     provider_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -546,6 +551,7 @@ class RequestLog(Base):
             "alias": self.alias,
             "is_designator": self.is_designator,
             "router_name": self.router_name,
+            "augmentor_name": self.augmentor_name,
             "provider_id": self.provider_id,
             "model_id": self.model_id,
             "endpoint": self.endpoint,
@@ -757,6 +763,15 @@ class SmartRouter(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Model Intelligence (v3.6) - enhance designator with web-gathered model assessments
+    use_model_intelligence: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Search provider for model intelligence (e.g., "searxng", "perplexity")
+    search_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Model to use for summarizing search results into intelligence
+    intelligence_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -798,6 +813,9 @@ class SmartRouter(Base):
             "tags": self.tags,
             "description": self.description,
             "enabled": self.enabled,
+            "use_model_intelligence": self.use_model_intelligence,
+            "search_provider": self.search_provider,
+            "intelligence_model": self.intelligence_model,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -1023,6 +1041,85 @@ class SmartAugmentor(Base):
             "tags": self.tags,
             "description": self.description,
             "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ============================================================================
+# Redirect Model (v3.7)
+# ============================================================================
+
+
+class Redirect(Base):
+    """
+    Model redirects that transparently map one model name to another.
+
+    Redirects allow migrating from old model names to new ones, or pointing
+    provider-prefixed names to other providers. Unlike aliases, redirects:
+    - Are checked first in resolution order (before smart routers)
+    - Support wildcard patterns (e.g., "openrouter/anthropic/*" -> "anthropic/*")
+    - Can optionally track usage via tags (like aliases)
+
+    Examples:
+    - "gpt-4" -> "gpt-5" (model upgrade)
+    - "openrouter/anthropic/claude-3-opus" -> "anthropic/claude-3-opus" (provider switch)
+    """
+
+    __tablename__ = "redirects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(
+        String(150), unique=True, nullable=False, index=True
+    )  # Model name to redirect from (can include wildcards)
+    target: Mapped[str] = mapped_column(
+        String(150), nullable=False
+    )  # Model name to redirect to
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Tags for usage tracking (stored as JSON array string)
+    tags_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Statistics
+    redirect_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        if not self.tags_json:
+            return []
+        import json
+
+        try:
+            return json.loads(self.tags_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @tags.setter
+    def tags(self, value: list[str]) -> None:
+        """Set tags from a list."""
+        import json
+
+        self.tags_json = json.dumps(value) if value else None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "source": self.source,
+            "target": self.target,
+            "description": self.description,
+            "enabled": self.enabled,
+            "tags": self.tags,
+            "redirect_count": self.redirect_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

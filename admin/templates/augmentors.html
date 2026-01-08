@@ -8,7 +8,7 @@ content %}
         <div>
             <h1 class="text-2xl font-bold">Smart Augmentors</h1>
             <p class="text-base-content/60">
-                Enhance LLM requests with web search results and URL content
+                Enhance LLM requests with web search and URL scraping
             </p>
         </div>
         <button @click="openAddModal()" class="btn btn-primary btn-sm">
@@ -59,9 +59,8 @@ content %}
                     No Smart Augmentors Configured
                 </h3>
                 <p class="mt-2 text-base-content/60 max-w-md mx-auto">
-                    Smart augmentors use a designator LLM to decide when to fetch
-                    web search results or scrape URLs, injecting current information
-                    into your LLM requests.
+                    Smart augmentors use a designator LLM to decide when to search the web
+                    or scrape URLs, injecting relevant context into requests.
                 </p>
                 <button @click="openAddModal()" class="btn btn-primary mt-4">
                     Create Your First Augmentor
@@ -70,256 +69,298 @@ content %}
         </div>
     </template>
 
-    <!-- Augmentor Cards -->
+    <!-- Augmentor Table -->
     <template x-if="!loading && augmentors.length > 0">
-        <div class="grid gap-4">
-            <template x-for="augmentor in augmentors" :key="augmentor.id">
-                <div class="card bg-base-100 shadow-lg">
-                    <div class="card-body">
-                        <div
-                            class="flex flex-col lg:flex-row justify-between gap-4"
-                        >
-                            <!-- Augmentor Info -->
-                            <div class="flex-1">
-                                <div class="flex items-center gap-3 mb-2">
-                                    <h2
-                                        class="card-title font-mono"
-                                        x-text="augmentor.name"
-                                    ></h2>
+        <div class="card bg-base-100 shadow-lg">
+            <div class="overflow-x-auto">
+                <table class="table table-fixed">
+                    <thead>
+                        <tr>
+                            <th class="w-8"></th>
+                            <th class="w-28">Name</th>
+                            <th class="w-1/5">Designator</th>
+                            <th class="w-1/5">Target</th>
+                            <th class="w-24">Tags</th>
+                            <th class="w-20 text-right">Requests</th>
+                            <th class="w-24 text-right">Augmented</th>
+                            <th class="w-20">Status</th>
+                            <th class="w-24 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <template x-for="augmentor in augmentors" :key="augmentor.id">
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
+                                @click="toggleExpand(augmentor.id)"
+                                class="cursor-pointer hover:bg-base-200"
+                            >
+                                <td class="w-8">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 transition-transform"
+                                        :class="{'rotate-90': expandedRows.includes(augmentor.id)}"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
+                                </td>
+                                <td>
+                                    <div class="font-mono font-medium" x-text="augmentor.name"></div>
+                                </td>
+                                <td>
+                                    <div class="font-mono text-sm text-base-content/70" x-text="augmentor.designator_model"></div>
+                                </td>
+                                <td>
+                                    <div class="font-mono text-sm text-base-content/70" x-text="augmentor.target_model"></div>
+                                </td>
+                                <td>
+                                    <template x-for="tag in (augmentor.tags || []).slice(0, 2)" :key="tag">
+                                        <span class="badge badge-outline badge-xs mr-1" x-text="tag"></span>
+                                    </template>
                                     <span
-                                        class="badge"
+                                        x-show="(augmentor.tags || []).length > 2"
+                                        class="text-xs text-base-content/50"
+                                        x-text="'+' + ((augmentor.tags || []).length - 2)"
+                                    ></span>
+                                    <span
+                                        x-show="!augmentor.tags || augmentor.tags.length === 0"
+                                        class="text-base-content/40 text-sm"
+                                    >-</span>
+                                </td>
+                                <td class="text-right">
+                                    <span class="font-mono text-sm" x-text="augmentor.total_requests || 0"></span>
+                                </td>
+                                <td class="text-right">
+                                    <span class="font-mono text-sm" x-text="augmentor.augmented_requests || 0"></span>
+                                    <span class="text-xs text-base-content/50" x-text="'(' + (augmentor.augmentation_rate || 0).toFixed(0) + '%)'"></span>
+                                </td>
+                                <td>
+                                    <span
+                                        class="badge badge-sm"
                                         :class="augmentor.enabled ? 'badge-success' : 'badge-ghost'"
                                         x-text="augmentor.enabled ? 'Enabled' : 'Disabled'"
                                     ></span>
-                                    <span
-                                        class="badge badge-outline"
-                                        x-text="augmentor.search_provider"
-                                    ></span>
-                                </div>
-                                <p
-                                    class="text-base-content/60 text-sm mb-3"
-                                    x-text="augmentor.description || augmentor.purpose || 'Augments requests for ' + augmentor.target_model"
-                                ></p>
-
-                                <!-- Target & Designator Models -->
-                                <div
-                                    class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm"
-                                >
-                                    <div>
-                                        <span class="text-base-content/50"
-                                            >Target Model:</span
+                                </td>
+                                <td class="text-right" @click.stop>
+                                    <div class="flex justify-end gap-1">
+                                        <button
+                                            @click="openEditModal(augmentor)"
+                                            class="btn btn-ghost btn-sm"
+                                            title="Edit augmentor"
                                         >
-                                        <span
-                                            class="font-mono ml-2"
-                                            x-text="augmentor.target_model"
-                                        ></span>
-                                    </div>
-                                    <div>
-                                        <span class="text-base-content/50"
-                                            >Designator:</span
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="confirmDelete(augmentor)"
+                                            class="btn btn-ghost btn-sm text-error"
+                                            title="Delete augmentor"
                                         >
-                                        <span
-                                            class="font-mono ml-2"
-                                            x-text="augmentor.designator_model"
-                                        ></span>
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                        </button>
                                     </div>
-                                </div>
-
-                                <!-- Tags -->
-                                <template x-if="augmentor.tags && augmentor.tags.length > 0">
-                                    <div class="flex gap-1 mt-2">
-                                        <template x-for="tag in augmentor.tags" :key="tag">
-                                            <span class="badge badge-sm" x-text="tag"></span>
-                                        </template>
+                                </td>
+                            </tr>
+                            <!-- Expanded Details Row -->
+                            <tr x-show="expandedRows.includes(augmentor.id)" x-transition>
+                                <td colspan="9" class="bg-base-200 p-0">
+                                    <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                        <!-- Purpose/Description -->
+                                        <div x-show="augmentor.purpose || augmentor.description" class="md:col-span-2">
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Purpose</div>
+                                            <div class="text-sm" x-text="augmentor.description || augmentor.purpose"></div>
+                                        </div>
+                                        <!-- Designator Model -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Designator Model</div>
+                                            <div class="font-mono text-xs" x-text="augmentor.designator_model"></div>
+                                        </div>
+                                        <!-- Target Model -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Target Model</div>
+                                            <div class="font-mono text-xs" x-text="augmentor.target_model"></div>
+                                        </div>
+                                        <!-- Search Provider -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Search Provider</div>
+                                            <div class="text-sm capitalize" x-text="augmentor.search_provider || 'searxng'"></div>
+                                        </div>
+                                        <!-- Limits -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Limits</div>
+                                            <div class="text-xs">
+                                                Search: <span class="font-mono" x-text="augmentor.max_search_results"></span>,
+                                                Scrape: <span class="font-mono" x-text="augmentor.max_scrape_urls"></span>
+                                            </div>
+                                        </div>
+                                        <!-- Max Context Tokens -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Max Context</div>
+                                            <div class="text-sm"><span class="font-mono" x-text="augmentor.max_context_tokens"></span> tokens</div>
+                                        </div>
+                                        <!-- All Tags -->
+                                        <div x-show="augmentor.tags && augmentor.tags.length > 0">
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">All Tags</div>
+                                            <div class="flex flex-wrap gap-1">
+                                                <template x-for="tag in augmentor.tags" :key="tag">
+                                                    <span class="badge badge-primary badge-sm" x-text="tag"></span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <!-- Stats -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Statistics</div>
+                                            <div class="text-xs space-y-1">
+                                                <div>Search requests: <span class="font-mono" x-text="augmentor.search_requests || 0"></span></div>
+                                                <div>Scrape requests: <span class="font-mono" x-text="augmentor.scrape_requests || 0"></span></div>
+                                            </div>
+                                        </div>
                                     </div>
-                                </template>
-                            </div>
-
-                            <!-- Stats -->
-                            <div
-                                class="flex flex-row lg:flex-col gap-4 lg:gap-2 text-right"
-                            >
-                                <div class="stat p-0">
-                                    <div class="stat-title text-xs">Requests</div>
-                                    <div
-                                        class="stat-value text-lg"
-                                        x-text="augmentor.total_requests"
-                                    ></div>
-                                </div>
-                                <div class="stat p-0">
-                                    <div class="stat-title text-xs">Augmented</div>
-                                    <div
-                                        class="stat-value text-lg text-primary"
-                                        x-text="augmentor.augmented_requests"
-                                    ></div>
-                                </div>
-                                <div class="stat p-0">
-                                    <div class="stat-title text-xs">Aug. Rate</div>
-                                    <div
-                                        class="stat-value text-lg"
-                                        x-text="augmentor.augmentation_rate.toFixed(1) + '%'"
-                                    ></div>
-                                </div>
-                            </div>
-
-                            <!-- Actions -->
-                            <div class="flex flex-row lg:flex-col gap-2">
-                                <button
-                                    @click="openEditModal(augmentor)"
-                                    class="btn btn-sm btn-ghost"
-                                    title="Edit"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                                        />
-                                    </svg>
-                                </button>
-                                <button
-                                    @click="confirmDelete(augmentor)"
-                                    class="btn btn-sm btn-ghost text-error"
-                                    title="Delete"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                        />
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </template>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+                </table>
+            </div>
         </div>
     </template>
 
     <!-- Add/Edit Modal -->
-    <dialog id="augmentor_modal" class="modal" :class="{ 'modal-open': showModal }">
+    <div class="modal" :class="{ 'modal-open': showModal }">
         <div class="modal-box max-w-2xl">
             <h3 class="font-bold text-lg" x-text="editingAugmentor ? 'Edit Augmentor' : 'Add Augmentor'"></h3>
-
-            <form @submit.prevent="saveAugmentor()" class="mt-4 space-y-4">
+            <form @submit.prevent="saveAugmentor()">
                 <!-- Name -->
-                <div class="form-control">
+                <div class="form-control mt-4">
                     <label class="label">
-                        <span class="label-text">Name</span>
+                        <span class="label-text">Augmentor Name</span>
                     </label>
                     <input
                         type="text"
                         x-model="form.name"
                         class="input input-bordered font-mono"
-                        placeholder="research-assistant"
+                        :class="{ 'input-error': formErrors.name }"
+                        placeholder="e.g., research-assistant, news-helper"
                         required
                         :disabled="editingAugmentor"
                     />
+                    <label class="label" x-show="formErrors.name">
+                        <span class="label-text-alt text-error" x-text="formErrors.name"></span>
+                    </label>
+                </div>
+
+                <!-- Designator Model -->
+                <div class="form-control mt-4">
                     <label class="label">
-                        <span class="label-text-alt">Use this name as the model to access this augmentor</span>
+                        <span class="label-text">Designator Model</span>
+                    </label>
+                    <select
+                        x-model="form.designator_model"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="">Select a model...</option>
+                        <template x-for="model in availableModels" :key="model.id">
+                            <option :value="model.id" x-text="`${model.id} (${model.family})`"></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt">Fast/cheap model to decide what augmentation is needed</span>
                     </label>
                 </div>
 
                 <!-- Target Model -->
-                <div class="form-control">
+                <div class="form-control mt-4">
                     <label class="label">
                         <span class="label-text">Target Model</span>
                     </label>
-                    <input
-                        type="text"
+                    <select
                         x-model="form.target_model"
-                        class="input input-bordered font-mono"
-                        placeholder="anthropic/claude-sonnet"
+                        class="select select-bordered"
                         required
-                    />
+                    >
+                        <option value="">Select a model...</option>
+                        <template x-for="model in availableModels" :key="model.id">
+                            <option :value="model.id" x-text="`${model.id} (${model.family})`"></option>
+                        </template>
+                    </select>
                     <label class="label">
                         <span class="label-text-alt">Model to forward augmented requests to</span>
                     </label>
                 </div>
 
-                <!-- Designator Model -->
-                <div class="form-control">
-                    <label class="label">
-                        <span class="label-text">Designator Model</span>
-                    </label>
-                    <input
-                        type="text"
-                        x-model="form.designator_model"
-                        class="input input-bordered font-mono"
-                        placeholder="openai/gpt-4o-mini"
-                        required
-                    />
-                    <label class="label">
-                        <span class="label-text-alt">Fast/cheap model to decide augmentation strategy</span>
-                    </label>
-                </div>
-
                 <!-- Purpose -->
-                <div class="form-control">
+                <div class="form-control mt-4">
                     <label class="label">
                         <span class="label-text">Purpose</span>
                     </label>
                     <textarea
                         x-model="form.purpose"
                         class="textarea textarea-bordered"
-                        placeholder="Research assistant for current events and news"
+                        placeholder="e.g., Research assistant for current events and recent data"
                         rows="2"
                     ></textarea>
                     <label class="label">
-                        <span class="label-text-alt">Context for the designator to decide when to search/scrape</span>
+                        <span class="label-text-alt">Context for the designator to decide when to augment</span>
                     </label>
                 </div>
 
                 <!-- Search Provider -->
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">Search Provider</span>
-                        </label>
-                        <select x-model="form.search_provider" class="select select-bordered">
-                            <template x-for="provider in searchProviders" :key="provider.name">
-                                <option :value="provider.name" x-text="provider.name + (provider.configured ? '' : ' (not configured)')"></option>
-                            </template>
-                        </select>
-                    </div>
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">Provider URL (optional)</span>
-                        </label>
-                        <input
-                            type="text"
-                            x-model="form.search_provider_url"
-                            class="input input-bordered"
-                            placeholder="http://localhost:8888"
-                        />
-                    </div>
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Search Provider</span>
+                    </label>
+                    <select
+                        x-model="form.search_provider"
+                        class="select select-bordered"
+                    >
+                        <template x-for="provider in searchProviders" :key="provider.name">
+                            <option :value="provider.name" x-text="provider.name + (provider.configured ? '' : ' (not configured)')"></option>
+                        </template>
+                    </select>
                 </div>
 
                 <!-- Limits -->
-                <div class="grid grid-cols-3 gap-4">
+                <div class="grid grid-cols-3 gap-4 mt-4">
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text">Max Search Results</span>
                         </label>
                         <input
                             type="number"
-                            x-model.number="form.max_search_results"
+                            x-model="form.max_search_results"
                             class="input input-bordered"
                             min="1"
                             max="20"
@@ -331,7 +372,7 @@ content %}
                         </label>
                         <input
                             type="number"
-                            x-model.number="form.max_scrape_urls"
+                            x-model="form.max_scrape_urls"
                             class="input input-bordered"
                             min="1"
                             max="10"
@@ -343,7 +384,7 @@ content %}
                         </label>
                         <input
                             type="number"
-                            x-model.number="form.max_context_tokens"
+                            x-model="form.max_context_tokens"
                             class="input input-bordered"
                             min="500"
                             max="32000"
@@ -352,78 +393,89 @@ content %}
                 </div>
 
                 <!-- Tags -->
-                <div class="form-control">
+                <div class="form-control mt-4">
                     <label class="label">
-                        <span class="label-text">Tags</span>
+                        <span class="label-text">Tags (optional)</span>
                     </label>
                     <input
                         type="text"
-                        x-model="form.tags_input"
+                        x-model="form.tagsInput"
                         class="input input-bordered"
-                        placeholder="research, augmented"
+                        placeholder="e.g., research, team-a"
                     />
                     <label class="label">
-                        <span class="label-text-alt">Comma-separated tags for cost attribution</span>
+                        <span class="label-text-alt">Comma-separated tags for usage tracking</span>
                     </label>
                 </div>
 
                 <!-- Description -->
-                <div class="form-control">
+                <div class="form-control mt-4">
                     <label class="label">
-                        <span class="label-text">Description</span>
+                        <span class="label-text">Description (optional)</span>
                     </label>
-                    <input
-                        type="text"
+                    <textarea
                         x-model="form.description"
-                        class="input input-bordered"
-                        placeholder="Optional description"
-                    />
+                        class="textarea textarea-bordered"
+                        placeholder="What is this augmentor for?"
+                        rows="2"
+                    ></textarea>
                 </div>
 
                 <!-- Enabled -->
-                <div class="form-control">
-                    <label class="label cursor-pointer justify-start gap-4">
-                        <input type="checkbox" x-model="form.enabled" class="toggle toggle-primary" />
+                <div class="form-control mt-4">
+                    <label class="label cursor-pointer justify-start gap-3">
+                        <input
+                            type="checkbox"
+                            x-model="form.enabled"
+                            class="toggle toggle-primary"
+                        />
                         <span class="label-text">Enabled</span>
                     </label>
                 </div>
 
-                <!-- Actions -->
                 <div class="modal-action">
-                    <button type="button" @click="closeModal()" class="btn">Cancel</button>
-                    <button type="submit" class="btn btn-primary" :disabled="saving">
-                        <span x-show="saving" class="loading loading-spinner loading-sm"></span>
+                    <button type="button" @click="closeModal()" class="btn btn-ghost">
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                        :disabled="saving"
+                    >
                         <span x-text="editingAugmentor ? 'Save Changes' : 'Create Augmentor'"></span>
                     </button>
                 </div>
             </form>
         </div>
-        <form method="dialog" class="modal-backdrop">
-            <button @click="closeModal()">close</button>
-        </form>
-    </dialog>
+        <div class="modal-backdrop" @click="closeModal()"></div>
+    </div>
 
     <!-- Delete Confirmation Modal -->
-    <dialog id="delete_modal" class="modal" :class="{ 'modal-open': showDeleteModal }">
+    <div class="modal" :class="{ 'modal-open': showDeleteModal }">
         <div class="modal-box">
             <h3 class="font-bold text-lg">Delete Augmentor</h3>
             <p class="py-4">
-                Are you sure you want to delete
+                Are you sure you want to delete the augmentor
                 <span class="font-mono font-bold" x-text="deletingAugmentor?.name"></span>?
                 This action cannot be undone.
             </p>
             <div class="modal-action">
-                <button @click="showDeleteModal = false" class="btn">Cancel</button>
-                <button @click="deleteAugmentor()" class="btn btn-error" :disabled="deleting">
-                    <span x-show="deleting" class="loading loading-spinner loading-sm"></span>
+                <button @click="showDeleteModal = false" class="btn btn-ghost">
+                    Cancel
+                </button>
+                <button
+                    @click="deleteAugmentor()"
+                    class="btn btn-error"
+                    :class="{ 'loading': deleting }"
+                    :disabled="deleting"
+                >
                     Delete
                 </button>
             </div>
         </div>
-        <form method="dialog" class="modal-backdrop">
-            <button @click="showDeleteModal = false">close</button>
-        </form>
-    </dialog>
+        <div class="modal-backdrop" @click="showDeleteModal = false"></div>
+    </div>
 </div>
 
 <script>
@@ -431,7 +483,9 @@ content %}
         return {
             loading: true,
             augmentors: [],
+            availableModels: [],
             searchProviders: [],
+            expandedRows: [],
             showModal: false,
             showDeleteModal: false,
             editingAugmentor: null,
@@ -439,71 +493,87 @@ content %}
             saving: false,
             deleting: false,
             form: {
-                name: "",
-                target_model: "",
-                designator_model: "openai/gpt-4o-mini",
-                purpose: "",
-                search_provider: "searxng",
-                search_provider_url: "",
+                name: '',
+                designator_model: '',
+                target_model: '',
+                purpose: '',
+                search_provider: 'searxng',
                 max_search_results: 5,
                 max_scrape_urls: 3,
                 max_context_tokens: 4000,
-                tags_input: "",
-                description: "",
+                tagsInput: '',
+                description: '',
                 enabled: true,
             },
+            formErrors: {},
 
             async init() {
-                await this.loadAugmentors();
-                await this.loadSearchProviders();
+                await Promise.all([
+                    this.loadAugmentors(),
+                    this.loadAvailableModels(),
+                    this.loadSearchProviders(),
+                ]);
+                this.loading = false;
             },
 
             async loadAugmentors() {
-                this.loading = true;
                 try {
-                    const response = await fetch("/api/augmentors");
+                    const response = await fetch('/api/augmentors');
                     if (response.ok) {
                         this.augmentors = await response.json();
                     }
                 } catch (error) {
-                    console.error("Failed to load augmentors:", error);
-                } finally {
-                    this.loading = false;
+                    console.error('Failed to load augmentors:', error);
+                }
+            },
+
+            async loadAvailableModels() {
+                try {
+                    const response = await fetch('/api/augmentors/models');
+                    if (response.ok) {
+                        this.availableModels = await response.json();
+                    }
+                } catch (error) {
+                    console.error('Failed to load available models:', error);
                 }
             },
 
             async loadSearchProviders() {
                 try {
-                    const response = await fetch("/api/search-providers");
+                    const response = await fetch('/api/search-providers');
                     if (response.ok) {
                         this.searchProviders = await response.json();
                     }
                 } catch (error) {
-                    console.error("Failed to load search providers:", error);
-                    // Fallback
-                    this.searchProviders = [
-                        { name: "searxng", configured: false },
-                        { name: "perplexity", configured: false },
-                    ];
+                    console.error('Failed to load search providers:', error);
+                }
+            },
+
+            toggleExpand(id) {
+                const idx = this.expandedRows.indexOf(id);
+                if (idx >= 0) {
+                    this.expandedRows.splice(idx, 1);
+                } else {
+                    this.expandedRows.push(id);
                 }
             },
 
             openAddModal() {
                 this.editingAugmentor = null;
                 this.form = {
-                    name: "",
-                    target_model: "",
-                    designator_model: "openai/gpt-4o-mini",
-                    purpose: "",
-                    search_provider: "searxng",
-                    search_provider_url: "",
+                    name: '',
+                    designator_model: '',
+                    target_model: '',
+                    purpose: '',
+                    search_provider: 'searxng',
                     max_search_results: 5,
                     max_scrape_urls: 3,
                     max_context_tokens: 4000,
-                    tags_input: "",
-                    description: "",
+                    tagsInput: '',
+                    description: '',
                     enabled: true,
                 };
+                this.formErrors = {};
                 this.showModal = true;
             },
 
@@ -511,71 +581,78 @@ content %}
                 this.editingAugmentor = augmentor;
                 this.form = {
                     name: augmentor.name,
-                    target_model: augmentor.target_model,
                     designator_model: augmentor.designator_model,
-                    purpose: augmentor.purpose || "",
-                    search_provider: augmentor.search_provider,
-                    search_provider_url: augmentor.search_provider_url || "",
+                    target_model: augmentor.target_model,
+                    purpose: augmentor.purpose || '',
+                    search_provider: augmentor.search_provider || 'searxng',
                     max_search_results: augmentor.max_search_results,
                     max_scrape_urls: augmentor.max_scrape_urls,
                     max_context_tokens: augmentor.max_context_tokens,
-                    tags_input: (augmentor.tags || []).join(", "),
-                    description: augmentor.description || "",
+                    tagsInput: (augmentor.tags || []).join(', '),
+                    description: augmentor.description || '',
                     enabled: augmentor.enabled,
                 };
+                this.formErrors = {};
                 this.showModal = true;
             },
 
             closeModal() {
                 this.showModal = false;
                 this.editingAugmentor = null;
+                this.formErrors = {};
             },
 
             async saveAugmentor() {
+                this.formErrors = {};
                 this.saving = true;
+
+                const tags = this.form.tagsInput
+                    .split(',')
+                    .map(t => t.trim().toLowerCase())
+                    .filter(t => t.length > 0);
+
+                const payload = {
+                    name: this.form.name.toLowerCase().trim(),
+                    designator_model: this.form.designator_model,
+                    target_model: this.form.target_model,
+                    purpose: this.form.purpose || null,
+                    search_provider: this.form.search_provider,
+                    max_search_results: parseInt(this.form.max_search_results),
+                    max_scrape_urls: parseInt(this.form.max_scrape_urls),
+                    max_context_tokens: parseInt(this.form.max_context_tokens),
+                    tags: tags,
+                    description: this.form.description || null,
+                    enabled: this.form.enabled,
+                };
+
                 try {
-                    const tags = this.form.tags_input
-                        .split(",")
-                        .map((t) => t.trim())
-                        .filter((t) => t);
-
-                    const payload = {
-                        name: this.form.name,
-                        target_model: this.form.target_model,
-                        designator_model: this.form.designator_model,
-                        purpose: this.form.purpose || null,
-                        search_provider: this.form.search_provider,
-                        search_provider_url: this.form.search_provider_url || null,
-                        max_search_results: this.form.max_search_results,
-                        max_scrape_urls: this.form.max_scrape_urls,
-                        max_context_tokens: this.form.max_context_tokens,
-                        tags: tags,
-                        description: this.form.description || null,
-                        enabled: this.form.enabled,
-                    };
-
                     const url = this.editingAugmentor
                         ? `/api/augmentors/${this.editingAugmentor.id}`
-                        : "/api/augmentors";
-
-                    const method = this.editingAugmentor ? "PUT" : "POST";
+                        : '/api/augmentors';
+                    const method = this.editingAugmentor ? 'PUT' : 'POST';
 
                     const response = await fetch(url, {
                         method: method,
-                        headers: { "Content-Type": "application/json" },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload),
                     });
 
-                    if (response.ok) {
-                        await this.loadAugmentors();
-                        this.closeModal();
-                    } else {
-                        const data = await response.json();
-                        alert(data.error || "Failed to save augmentor");
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        if (data.error && data.error.includes('name')) {
+                            this.formErrors.name = data.error;
+                        } else {
+                            alert(data.error || 'Failed to save augmentor');
+                        }
+                        return;
                     }
+
+                    await this.loadAugmentors();
+                    this.closeModal();
                 } catch (error) {
-                    console.error("Failed to save augmentor:", error);
-                    alert("Failed to save augmentor");
+                    console.error('Failed to save augmentor:', error);
+                    alert('Failed to save augmentor');
                 } finally {
                     this.saving = false;
                 }
@@ -591,12 +668,9 @@ content %}
 
                 this.deleting = true;
                 try {
-                    const response = await fetch(
-                        `/api/augmentors/${this.deletingAugmentor.id}`,
-                        {
-                            method: "DELETE",
-                        }
-                    );
+                    const response = await fetch(`/api/augmentors/${this.deletingAugmentor.id}`, {
+                        method: 'DELETE',
+                    });
 
                     if (response.ok) {
                         await this.loadAugmentors();
@@ -604,11 +678,11 @@ content %}
                         this.deletingAugmentor = null;
                     } else {
                         const data = await response.json();
-                        alert(data.error || "Failed to delete augmentor");
+                        alert(data.error || 'Failed to delete augmentor');
                     }
                 } catch (error) {
-                    console.error("Failed to delete augmentor:", error);
-                    alert("Failed to delete augmentor");
+                    console.error('Failed to delete augmentor:', error);
+                    alert('Failed to delete augmentor');
                 } finally {
                     this.deleting = false;
                 }

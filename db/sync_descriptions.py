@@ -2,9 +2,13 @@
 Sync model descriptions from provider APIs and OpenRouter.
 
 Strategy:
-1. Fetch descriptions from each provider's API (if API key available)
+1. Fetch descriptions from each enabled provider's API (using base_url from DB)
 2. Overlay with OpenRouter's richer descriptions (public API, no key needed)
 3. Store in the Model table's description field
+
+Most providers use OpenAI-compatible /models endpoints, which may or may not
+include descriptions. Provider-specific fetch functions are only needed when
+the API differs significantly (e.g., Google's Gemini API).
 """
 
 import logging
@@ -14,7 +18,7 @@ from typing import Optional
 import httpx
 
 from .connection import get_db_context
-from .models import Model
+from .models import Model, Provider
 
 logger = logging.getLogger(__name__)
 
@@ -270,111 +274,6 @@ def fetch_anthropic_descriptions(api_key: str) -> dict[str, str]:
     return {}
 
 
-def fetch_openai_descriptions(api_key: str) -> dict[str, str]:
-    """
-    Fetch model info from OpenAI's API.
-
-    Note: OpenAI's API returns minimal metadata (id, created, owned_by).
-    No descriptions available.
-    """
-    descriptions = {}
-    try:
-        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            response = client.get(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            response.raise_for_status()
-            data = response.json()
-            logger.info(
-                f"OpenAI has {len(data.get('data', []))} models (no descriptions available)"
-            )
-    except Exception as e:
-        logger.warning(f"Failed to fetch OpenAI models: {e}")
-
-    return descriptions
-
-
-def fetch_groq_descriptions(api_key: str) -> dict[str, str]:
-    """
-    Fetch model info from Groq's API.
-
-    Groq's models endpoint returns id, owned_by, and active status.
-    No descriptions available.
-    """
-    descriptions = {}
-    try:
-        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            response = client.get(
-                "https://api.groq.com/openai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            response.raise_for_status()
-            data = response.json()
-            logger.info(
-                f"Groq has {len(data.get('data', []))} models (no descriptions available)"
-            )
-    except Exception as e:
-        logger.warning(f"Failed to fetch Groq models: {e}")
-
-    return descriptions
-
-
-def fetch_mistral_descriptions(api_key: str) -> dict[str, str]:
-    """
-    Fetch model info from Mistral's API.
-
-    Mistral returns id, owned_by, capabilities, and description.
-    """
-    descriptions = {}
-    try:
-        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            response = client.get(
-                "https://api.mistral.ai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            for model in data.get("data", []):
-                model_id = model.get("id", "")
-                description = model.get("description", "")
-
-                if model_id and description:
-                    descriptions[model_id] = description
-
-            logger.info(f"Fetched {len(descriptions)} descriptions from Mistral")
-
-    except Exception as e:
-        logger.warning(f"Failed to fetch Mistral models: {e}")
-
-    return descriptions
-
-
-def fetch_perplexity_descriptions(api_key: str) -> dict[str, str]:
-    """
-    Fetch model info from Perplexity's API.
-
-    Perplexity uses OpenAI-compatible API but doesn't provide descriptions.
-    """
-    descriptions = {}
-    try:
-        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            response = client.get(
-                "https://api.perplexity.ai/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            response.raise_for_status()
-            data = response.json()
-            logger.info(
-                f"Perplexity has {len(data.get('data', []))} models (no descriptions available)"
-            )
-    except Exception as e:
-        logger.warning(f"Failed to fetch Perplexity models: {e}")
-
-    return descriptions
-
-
 def fetch_cohere_descriptions(api_key: str) -> dict[str, str]:
     """
     Fetch model info from Cohere's API.
@@ -406,23 +305,43 @@ def fetch_cohere_descriptions(api_key: str) -> dict[str, str]:
     return descriptions
 
 
-def fetch_xai_descriptions(api_key: str) -> dict[str, str]:
+def fetch_openai_compatible_descriptions(
+    base_url: str, api_key: str, provider_id: str
+) -> dict[str, str]:
     """
-    Fetch model info from xAI's API.
+    Fetch model descriptions from an OpenAI-compatible /models endpoint.
 
-    xAI uses OpenAI-compatible API.
+    Most providers use this format. The endpoint returns model objects that
+    may or may not include a 'description' field.
+
+    Args:
+        base_url: Provider's base URL (e.g., "https://api.openai.com/v1")
+        api_key: API key for authentication
+        provider_id: Provider identifier for logging
+
+    Returns:
+        Dict mapping model_id to description
     """
     descriptions = {}
+
+    # Normalize base URL - ensure it ends with /models
+    url = base_url.rstrip("/")
+    if not url.endswith("/models"):
+        url = f"{url}/models"
+
     try:
         with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
             response = client.get(
-                "https://api.x.ai/v1/models",
+                url,
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             response.raise_for_status()
             data = response.json()
 
-            for model in data.get("data", []):
+            # Standard OpenAI format: {"data": [...]}
+            models = data.get("data", [])
+
+            for model in models:
                 model_id = model.get("id", "")
                 description = model.get("description", "")
 
@@ -430,28 +349,33 @@ def fetch_xai_descriptions(api_key: str) -> dict[str, str]:
                     descriptions[model_id] = description
 
             if descriptions:
-                logger.info(f"Fetched {len(descriptions)} descriptions from xAI")
+                logger.info(
+                    f"Fetched {len(descriptions)} descriptions from {provider_id}"
+                )
             else:
                 logger.info(
-                    f"xAI has {len(data.get('data', []))} models (no descriptions available)"
+                    f"{provider_id} has {len(models)} models (no descriptions in API)"
                 )
 
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            logger.debug(f"{provider_id} does not have a /models endpoint")
+        else:
+            logger.warning(
+                f"Failed to fetch {provider_id} models: HTTP {e.response.status_code}"
+            )
     except Exception as e:
-        logger.warning(f"Failed to fetch xAI models: {e}")
+        logger.warning(f"Failed to fetch {provider_id} models: {e}")
 
     return descriptions
 
 
-# Provider configuration: maps provider_id to (env_var, fetch_function)
-PROVIDER_FETCH_CONFIG = {
-    "gemini": ("GOOGLE_API_KEY", fetch_google_descriptions),
-    "anthropic": ("ANTHROPIC_API_KEY", fetch_anthropic_descriptions),
-    "openai": ("OPENAI_API_KEY", fetch_openai_descriptions),
-    "groq": ("GROQ_API_KEY", fetch_groq_descriptions),
-    "mistral": ("MISTRAL_API_KEY", fetch_mistral_descriptions),
-    "perplexity": ("PERPLEXITY_API_KEY", fetch_perplexity_descriptions),
-    "cohere": ("COHERE_API_KEY", fetch_cohere_descriptions),
-    "xai": ("XAI_API_KEY", fetch_xai_descriptions),
+# Provider-specific fetch functions for providers with non-standard APIs.
+# All other providers use fetch_openai_compatible_descriptions() with their base_url.
+PROVIDER_SPECIFIC_FETCH = {
+    "gemini": fetch_google_descriptions,  # Uses different endpoint format with API key as query param
+    "anthropic": fetch_anthropic_descriptions,  # Uses x-api-key header instead of Bearer
+    "cohere": fetch_cohere_descriptions,  # Uses {"models": [...]} instead of {"data": [...]}
 }
 
 
@@ -459,30 +383,24 @@ def get_available_description_providers() -> list[dict]:
     """
     Get list of providers that can be synced for descriptions.
 
-    Returns enabled providers from the database. OpenRouter can provide descriptions
-    for any provider's models, so all enabled providers are valid sync targets.
+    Returns only enabled providers that have an API key configured.
+    OpenRouter is always included as it provides descriptions for all providers.
 
     Returns:
         List of dicts with provider_id and has_api_key status
     """
-    from .connection import get_db_context
-    from .models import Provider
-
     providers = []
     seen = set()
 
-    # Get all enabled providers from database
+    # Get all enabled providers from database that have API keys
     with get_db_context() as db:
         db_providers = db.query(Provider).filter(Provider.enabled == True).all()
         for p in db_providers:
             if p.id not in seen:
-                providers.append(
-                    {
-                        "id": p.id,
-                        "has_api_key": True,  # All enabled DB providers have API keys configured
-                    }
-                )
-                seen.add(p.id)
+                api_key = _get_provider_api_key(p)
+                if api_key:
+                    providers.append({"id": p.id, "has_api_key": True})
+                    seen.add(p.id)
 
     # Always include OpenRouter (provides descriptions for all providers)
     if "openrouter" not in seen:
@@ -494,11 +412,34 @@ def get_available_description_providers() -> list[dict]:
     return providers
 
 
+def _get_provider_api_key(provider: "Provider") -> str | None:
+    """Get API key for a provider from env var or encrypted storage."""
+    # First try env var
+    if provider.api_key_env:
+        api_key = os.environ.get(provider.api_key_env)
+        if api_key:
+            return api_key
+
+    # Then try encrypted key in DB
+    if provider.api_key_encrypted:
+        try:
+            from config.encryption import decrypt_api_key
+
+            return decrypt_api_key(provider.api_key_encrypted)
+        except Exception:
+            pass
+
+    return None
+
+
 def fetch_all_provider_descriptions(
     provider_filter: str | None = None,
 ) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
     """
-    Fetch descriptions from enabled providers that have fetch functions.
+    Fetch descriptions from all enabled providers.
+
+    Uses provider-specific fetch functions for non-standard APIs (Google, Anthropic, Cohere),
+    and a generic OpenAI-compatible fetch for all other providers.
 
     Args:
         provider_filter: If set, only fetch from this provider
@@ -506,45 +447,49 @@ def fetch_all_provider_descriptions(
     Returns:
         Tuple of:
         - Dict mapping provider_id to {model_id: description}
-        - Dict mapping provider_id to status ("success", "no_descriptions", "no_api_key", "error")
+        - Dict mapping provider_id to status ("success", "no_descriptions", "no_api_key", "error", "no_endpoint")
     """
-    from .connection import get_db_context
-    from .models import Provider
-
     all_descriptions = {}
     status = {}
 
-    # Get enabled providers from database
+    # Get all enabled providers from database with their config
     with get_db_context() as db:
-        enabled_providers = {
-            p.id for p in db.query(Provider).filter(Provider.enabled == True).all()
-        }
+        query = db.query(Provider).filter(Provider.enabled == True)
+        if provider_filter:
+            query = query.filter(Provider.id == provider_filter)
+        providers = query.all()
 
-    # Only process providers that are both enabled AND have fetch functions
-    for provider_id, (env_var, fetch_func) in PROVIDER_FETCH_CONFIG.items():
-        # Skip if not enabled in database
-        if provider_id not in enabled_providers:
-            continue
+        for provider in providers:
+            provider_id = provider.id
 
-        # Skip if filtering to a specific provider
-        if provider_filter and provider_filter != provider_id:
-            continue
+            # Check if we have a provider-specific handler or a base_url for generic fetch
+            has_specific_handler = provider_id in PROVIDER_SPECIFIC_FETCH
+            if not has_specific_handler and not provider.base_url:
+                status[provider_id] = "no_endpoint"
+                continue
 
-        api_key = os.environ.get(env_var)
-        if not api_key:
-            status[provider_id] = "no_api_key"
-            continue
+            # Get API key - skip providers without one (don't report them)
+            api_key = _get_provider_api_key(provider)
+            if not api_key:
+                continue
 
-        try:
-            descriptions = fetch_func(api_key)
-            if descriptions:
-                all_descriptions[provider_id] = descriptions
-                status[provider_id] = "success"
-            else:
-                status[provider_id] = "no_descriptions"
-        except Exception as e:
-            logger.warning(f"Error fetching from {provider_id}: {e}")
-            status[provider_id] = "error"
+            try:
+                # Use provider-specific fetch if available, otherwise generic
+                if has_specific_handler:
+                    descriptions = PROVIDER_SPECIFIC_FETCH[provider_id](api_key)
+                else:
+                    descriptions = fetch_openai_compatible_descriptions(
+                        provider.base_url, api_key, provider_id
+                    )
+
+                if descriptions:
+                    all_descriptions[provider_id] = descriptions
+                    status[provider_id] = "success"
+                else:
+                    status[provider_id] = "no_descriptions"
+            except Exception as e:
+                logger.warning(f"Error fetching from {provider_id}: {e}")
+                status[provider_id] = "error"
 
     return all_descriptions, status
 

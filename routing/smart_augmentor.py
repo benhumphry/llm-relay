@@ -217,17 +217,22 @@ Respond with ONLY your decision (e.g., "direct" or "search:UK foreign policy 202
             )
             provider = designator_resolved.provider
 
-            # Call the provider's chat method
-            response = provider.chat(
+            # Call the provider's chat_completion method (same as smart router)
+            result = provider.chat_completion(
                 model=designator_resolved.model_id,
                 messages=[{"role": "user", "content": prompt}],
-                stream=False,
-                temperature=0.0,  # Deterministic
-                max_tokens=100,  # Short response expected
+                system=None,  # System is built into the prompt
+                options={
+                    "max_tokens": 100,
+                    "temperature": 0,
+                },
             )
 
-            decision = response.get("message", {}).get("content", "").strip()
-            usage = response.get("usage", {})
+            decision = result.get("content", "").strip()
+            usage = {
+                "prompt_tokens": result.get("input_tokens", 0),
+                "completion_tokens": result.get("output_tokens", 0),
+            }
 
             logger.debug(f"Designator response: {decision}")
             return decision, usage
@@ -323,11 +328,19 @@ Respond with ONLY your decision (e.g., "direct" or "search:UK foreign policy 202
         self, original_system: str | None, augmented_context: str
     ) -> str:
         """Inject augmented context into the system prompt."""
+        from datetime import datetime
+
+        # Always include current date for temporal context
+        current_date = datetime.utcnow().strftime("%Y-%m-%d")
+
         if not augmented_context.strip():
+            # Even without augmentation, add the date if we were called
             return original_system or ""
 
         context_block = f"""
 <augmented_context>
+Today's date: {current_date}
+
 The following information was retrieved from the web to help answer the user's question.
 Use this information to provide an accurate, up-to-date response.
 

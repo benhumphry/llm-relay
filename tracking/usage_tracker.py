@@ -77,6 +77,8 @@ class UsageTracker:
         # Smart router tracking (v3.2)
         is_designator: bool = False,
         router_name: Optional[str] = None,
+        # Smart augmentor tracking (v3.5)
+        augmentor_name: Optional[str] = None,
     ):
         """
         Queue a request log entry.
@@ -130,6 +132,7 @@ class UsageTracker:
                 "alias": alias,
                 "is_designator": is_designator,
                 "router_name": router_name,
+                "augmentor_name": augmentor_name,
             }
         )
 
@@ -205,6 +208,7 @@ class UsageTracker:
                     cost=cost,
                     is_designator=entry.get("is_designator", False),  # v3.2
                     router_name=entry.get("router_name"),  # v3.2
+                    augmentor_name=entry.get("augmentor_name"),  # v3.5
                 )
                 db.add(log)
         except Exception as e:

@@ -22,6 +22,7 @@ COPY admin/ ./admin/
 COPY tracking/ ./tracking/
 COPY routing/ ./routing/
 COPY context/ ./context/
+COPY augmentation/ ./augmentation/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
 

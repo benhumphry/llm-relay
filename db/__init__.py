@@ -32,11 +32,23 @@ from .models import (
     ModelOverride,
     OllamaInstance,
     Provider,
+    Redirect,
     RequestLog,
     Setting,
     SmartAugmentor,
     SmartCache,
     SmartRouter,
+)
+from .redirects import (
+    create_redirect,
+    delete_redirect,
+    find_matching_redirect,
+    get_all_redirects,
+    get_enabled_redirects,
+    get_redirect_by_id,
+    get_redirect_by_source,
+    increment_redirect_count,
+    update_redirect,
 )
 from .seed import (
     ensure_seeded,
@@ -47,6 +59,7 @@ from .smart_augmentors import (
     create_smart_augmentor,
     delete_smart_augmentor,
     get_all_smart_augmentors,
+    get_enabled_smart_augmentors,
     get_smart_augmentor_by_id,
     get_smart_augmentor_by_name,
     update_smart_augmentor,
@@ -137,6 +150,7 @@ __all__ = [
     # Smart Augmentors (v3.4)
     "SmartAugmentor",
     "get_all_smart_augmentors",
+    "get_enabled_smart_augmentors",
     "get_smart_augmentor_by_name",
     "get_smart_augmentor_by_id",
     "create_smart_augmentor",
@@ -152,4 +166,15 @@ __all__ = [
     "get_model_description",
     "get_descriptions_for_models",
     "get_available_description_providers",
+    # Redirects (v3.7)
+    "Redirect",
+    "get_all_redirects",
+    "get_redirect_by_id",
+    "get_redirect_by_source",
+    "find_matching_redirect",
+    "create_redirect",
+    "update_redirect",
+    "delete_redirect",
+    "increment_redirect_count",
+    "get_enabled_redirects",
 ]

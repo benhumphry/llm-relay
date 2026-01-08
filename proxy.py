@@ -218,6 +218,8 @@ def track_completion(
     # Smart router tracking (v3.2)
     is_designator: bool = False,
     router_name: str | None = None,
+    # Smart augmentor tracking (v3.5)
+    augmentor_name: str | None = None,
 ):
     """
     Track a completed request.
@@ -285,6 +287,7 @@ def track_completion(
         cache_read_tokens=cache_read_tokens,
         is_designator=is_designator,
         router_name=router_name,
+        augmentor_name=augmentor_name,
     )
 
 
@@ -863,12 +866,18 @@ def chat():
         cache_engine = resolved.cache_engine
         cache_id = cache_engine.cache.id
         cache_name = cache_engine.cache.name
+        # Use alias_tags which includes merged redirect tags if applicable
+        cache_tags = resolved.alias_tags or resolved.cache_result.cache_tags or []
 
-        # Estimate tokens saved from cached response
+        # Extract content for response
         cached_content = cached_response.get("content", "")
-        tokens_saved = len(cached_content) // 4  # Rough estimate
 
-        logger.info(f"Cache hit for '{cache_name}' - returning cached response")
+        # Use actual output tokens from cache metadata
+        tokens_saved = resolved.cache_result.cached_tokens
+
+        logger.info(
+            f"Cache hit for '{cache_name}' - returning cached response (tokens_saved={tokens_saved})"
+        )
 
         # Update cache statistics
         from db import update_smart_cache_stats
@@ -880,6 +889,13 @@ def chat():
             increment_tokens_saved=tokens_saved,
         )
 
+        # Merge cache tags with request tags (v3.5 fix)
+        cache_hit_tag = tag
+        if cache_tags:
+            existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+            all_tags = list(set(existing_tags + cache_tags))
+            cache_hit_tag = ",".join(all_tags)
+
         # Log the cache hit request
         track_completion(
             provider_id="cache",
@@ -890,7 +906,7 @@ def chat():
             output_tokens=tokens_saved,
             status_code=200,
             cost=0.0,
-            tag=tag,
+            tag=cache_hit_tag,
             alias=cache_name,
         )
 
@@ -910,9 +926,11 @@ def chat():
 
     # Handle Smart Augmentor context injection (v3.4)
     augmentor_name = None
+    augmentor_tags = []
     if getattr(resolved, "has_augmentation", False):
         augmentation_result = resolved.augmentation_result
         augmentor_name = augmentation_result.augmentor_name
+        augmentor_tags = augmentation_result.augmentor_tags or []
 
         # Swap in augmented content
         if augmentation_result.augmented_system is not None:
@@ -936,10 +954,18 @@ def chat():
             increment_scrape=1 if "scrape" in aug_type else 0,
         )
 
-        # Log designator usage for augmentor
+        # Log designator usage for augmentor (v3.5 fix: include tags and augmentor_name)
         if augmentation_result.designator_usage:
             designator_model = augmentation_result.designator_model or "unknown"
             designator_usage = augmentation_result.designator_usage
+
+            # Merge augmentor tags with request tags for designator logging
+            designator_tag = tag
+            if augmentor_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + augmentor_tags))
+                designator_tag = ",".join(all_tags)
+
             track_completion(
                 provider_id=designator_model.split("/")[0]
                 if "/" in designator_model
@@ -952,17 +978,19 @@ def chat():
                 input_tokens=designator_usage.get("prompt_tokens", 0),
                 output_tokens=designator_usage.get("completion_tokens", 0),
                 status_code=200,
-                tag=tag,
+                tag=designator_tag,
                 is_designator=True,
+                augmentor_name=augmentor_name,
             )
 
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/api/chat")
 
-    # Merge alias tags with request tags (v3.1)
-    if alias_tags:
+    # Merge alias/augmentor tags with request tags (v3.1, v3.5)
+    all_entity_tags = alias_tags + augmentor_tags
+    if all_entity_tags:
         existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-        all_tags = list(set(existing_tags + alias_tags))
+        all_tags = list(set(existing_tags + all_entity_tags))
         tag = ",".join(all_tags)
 
     # Filter out images if provider doesn't support vision
@@ -1509,13 +1537,17 @@ def openai_chat_completions():
         cache_engine = resolved.cache_engine
         cache_id = cache_engine.cache.id
         cache_name = cache_engine.cache.name
+        # Use alias_tags which includes merged redirect tags if applicable
+        cache_tags = resolved.alias_tags or resolved.cache_result.cache_tags or []
 
-        # Estimate tokens saved from cached response
+        # Extract content for response
         cached_content = cached_response.get("content", "")
-        tokens_saved = len(cached_content) // 4  # Rough estimate
+
+        # Use actual output tokens from cache metadata
+        tokens_saved = resolved.cache_result.cached_tokens
 
         logger.info(
-            f"Cache hit for '{cache_name}' - returning cached response (OpenAI format)"
+            f"Cache hit for '{cache_name}' - returning cached response (OpenAI format, tokens_saved={tokens_saved})"
         )
 
         # Update cache statistics
@@ -1528,6 +1560,13 @@ def openai_chat_completions():
             increment_tokens_saved=tokens_saved,
         )
 
+        # Merge cache tags with request tags (v3.5 fix)
+        cache_hit_tag = tag
+        if cache_tags:
+            existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+            all_tags = list(set(existing_tags + cache_tags))
+            cache_hit_tag = ",".join(all_tags)
+
         # Log the cache hit request
         track_completion(
             provider_id="cache",
@@ -1538,7 +1577,7 @@ def openai_chat_completions():
             output_tokens=tokens_saved,
             status_code=200,
             cost=0.0,
-            tag=tag,
+            tag=cache_hit_tag,
             alias=cache_name,
         )
 
@@ -1570,9 +1609,11 @@ def openai_chat_completions():
 
     # Handle Smart Augmentor context injection (v3.4)
     augmentor_name = None
+    augmentor_tags = []
     if getattr(resolved, "has_augmentation", False):
         augmentation_result = resolved.augmentation_result
         augmentor_name = augmentation_result.augmentor_name
+        augmentor_tags = augmentation_result.augmentor_tags or []
 
         # Swap in augmented content
         if augmentation_result.augmented_system is not None:
@@ -1596,10 +1637,18 @@ def openai_chat_completions():
             increment_scrape=1 if "scrape" in aug_type else 0,
         )
 
-        # Log designator usage for augmentor
+        # Log designator usage for augmentor (v3.5 fix: include tags and augmentor_name)
         if augmentation_result.designator_usage:
             designator_model = augmentation_result.designator_model or "unknown"
             designator_usage = augmentation_result.designator_usage
+
+            # Merge augmentor tags with request tags for designator logging
+            designator_tag = tag
+            if augmentor_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + augmentor_tags))
+                designator_tag = ",".join(all_tags)
+
             track_completion(
                 provider_id=designator_model.split("/")[0]
                 if "/" in designator_model
@@ -1612,17 +1661,19 @@ def openai_chat_completions():
                 input_tokens=designator_usage.get("prompt_tokens", 0),
                 output_tokens=designator_usage.get("completion_tokens", 0),
                 status_code=200,
-                tag=tag,
+                tag=designator_tag,
                 is_designator=True,
+                augmentor_name=augmentor_name,
             )
 
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/v1/chat/completions")
 
-    # Merge alias tags with request tags (v3.1)
-    if alias_tags:
+    # Merge alias/augmentor tags with request tags (v3.1, v3.5)
+    all_entity_tags = alias_tags + augmentor_tags
+    if all_entity_tags:
         existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-        all_tags = list(set(existing_tags + alias_tags))
+        all_tags = list(set(existing_tags + all_entity_tags))
         tag = ",".join(all_tags)
 
     # Filter out images if provider doesn't support vision

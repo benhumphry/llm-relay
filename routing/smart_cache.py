@@ -35,6 +35,7 @@ class CacheResult:
     # Cache hit information
     is_cache_hit: bool = False
     cached_response: dict | None = None  # Full response dict on cache hit
+    cached_tokens: int = 0  # Output tokens from cached response (for logging)
 
     # Cache miss - caller should forward to model
     # After getting response, call store_response() to cache it
@@ -197,7 +198,7 @@ class SmartCacheEngine:
 
                     logger.info(
                         f"Cache hit for '{self.cache.name}' "
-                        f"(similarity={similarity:.4f})"
+                        f"(similarity={similarity:.4f}, tokens={cached_tokens})"
                     )
                     return CacheResult(
                         resolved=resolved,
@@ -205,6 +206,7 @@ class SmartCacheEngine:
                         cache_tags=self.cache.tags,
                         is_cache_hit=True,
                         cached_response=cached_response,
+                        cached_tokens=cached_tokens,
                         similarity_score=similarity,
                     )
                 except json.JSONDecodeError:

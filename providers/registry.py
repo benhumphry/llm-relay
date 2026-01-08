@@ -185,13 +185,14 @@ class ProviderRegistry:
         Resolve a model name to a provider and model ID.
 
         Resolution order:
-        1. Check if it's a smart router (v3.2) - requires messages
-        2. Check if it's a smart cache (v3.3) - requires ChromaDB, returns CacheResolvedModel
-        3. Check if it's a smart augmentor (v3.4) - returns AugmentorResolvedModel
-        4. Check if it's an alias (v3.1)
-        5. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        6. Check each configured provider's models
-        7. Fall back to default provider/model
+        1. Check for redirects (v3.7) - transparent model name mapping
+        2. Check if it's a smart router (v3.2) - requires messages
+        3. Check if it's a smart cache (v3.3) - requires ChromaDB, returns CacheResolvedModel
+        4. Check if it's a smart augmentor (v3.4) - returns AugmentorResolvedModel
+        5. Check if it's an alias (v3.1)
+        6. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        7. Check each configured provider's models
+        8. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
@@ -209,10 +210,12 @@ class ProviderRegistry:
         """
         from context.chroma import is_chroma_available
         from db import (
+            find_matching_redirect,
             get_alias_by_name,
             get_smart_augmentor_by_name,
             get_smart_cache_by_name,
             get_smart_router_by_name,
+            increment_redirect_count,
         )
         from routing import SmartAugmentorEngine, SmartCacheEngine, SmartRouterEngine
 
@@ -222,7 +225,41 @@ class ProviderRegistry:
         if name.endswith(":latest"):
             name = name[:-7]
 
-        # Step 1: Check if it's a smart router (v3.2)
+        # Step 1: Check for redirects (v3.7)
+        # Try exact match first, then try with provider-prefix converted to slash format
+        # This handles both "anthropic/claude-3" and "anthropic-claude-3" formats
+        redirect_match = find_matching_redirect(name)
+        if not redirect_match and "-" in name and "/" not in name:
+            # Convert first hyphen to slash for provider-prefix format
+            # e.g., "anthropic-claude-opus-4-1" -> "anthropic/claude-opus-4-1"
+            for provider_name in self._providers.keys():
+                prefix = f"{provider_name}-"
+                if name.startswith(prefix):
+                    slash_name = f"{provider_name}/{name[len(prefix) :]}"
+                    redirect_match = find_matching_redirect(slash_name)
+                    break
+        if redirect_match:
+            redirect, resolved_target = redirect_match
+            logger.debug(f"Redirect: {name} -> {resolved_target}")
+            # Increment redirect counter (fire and forget)
+            try:
+                increment_redirect_count(redirect.id)
+            except Exception:
+                pass
+            # Recursively resolve the target (allows chaining)
+            result = self.resolve_model(resolved_target, messages, system, session_key)
+            # If redirect has tags, merge them with existing tags and set alias
+            if redirect.tags:
+                # Merge redirect tags with any existing tags from the resolved target
+                existing_tags = result.alias_tags or []
+                merged_tags = list(redirect.tags) + [
+                    t for t in existing_tags if t not in redirect.tags
+                ]
+                result.alias_name = redirect.source
+                result.alias_tags = merged_tags
+            return result
+
+        # Step 2: Check if it's a smart router (v3.2)
         router = get_smart_router_by_name(name)
         if router and router.enabled:
             if messages is not None:
@@ -249,7 +286,7 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 2: Check if it's a smart cache (v3.3)
+        # Step 3: Check if it's a smart cache (v3.3)
         cache = get_smart_cache_by_name(name)
         if cache and cache.enabled:
             # Smart caches require ChromaDB
@@ -298,7 +335,7 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 3: Check if it's a smart augmentor (v3.4)
+        # Step 4: Check if it's a smart augmentor (v3.4)
         augmentor = get_smart_augmentor_by_name(name)
         if augmentor and augmentor.enabled:
             if messages is not None:
@@ -329,7 +366,7 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 4: Check if it's an alias (v3.1)
+        # Step 5: Check if it's an alias (v3.1)
         alias = get_alias_by_name(name)
         if alias and alias.enabled:
             logger.debug(f"Resolving alias '{name}' -> '{alias.target_model}'")
@@ -449,6 +486,7 @@ class ProviderRegistry:
         from context.chroma import is_chroma_available
         from db import (
             get_enabled_aliases,
+            get_enabled_smart_augmentors,
             get_enabled_smart_caches,
             get_enabled_smart_routers,
         )
@@ -518,6 +556,28 @@ class ProviderRegistry:
                         "capabilities": ["caching"],
                     }
                 )
+
+        # Add smart augmentors
+        augmentors = get_enabled_smart_augmentors()
+        for augmentor_name, augmentor in augmentors.items():
+            seen.add(augmentor_name)
+            models.append(
+                {
+                    "name": augmentor_name,
+                    "model": augmentor_name,
+                    "provider": "smart-augmentor",
+                    "details": {
+                        "family": "smart-augmentor",
+                        "parameter_size": "",
+                        "quantization_level": "",
+                    },
+                    "description": augmentor.description
+                    or augmentor.purpose
+                    or f"Augments requests for {augmentor.target_model}",
+                    "context_length": 0,
+                    "capabilities": ["search", "scrape"],
+                }
+            )
 
         # Add provider models
         for provider in self.get_available_providers():

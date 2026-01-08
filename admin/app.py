@@ -3766,6 +3766,176 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 )
         return jsonify(models)
 
+    @admin.route("/api/aliases/stats", methods=["GET"])
+    @require_auth_api
+    def get_alias_stats():
+        """Get request counts for all aliases."""
+        with get_db_context() as db:
+            # Count requests per alias
+            stats = (
+                db.query(
+                    RequestLog.alias,
+                    func.count(RequestLog.id).label("requests"),
+                )
+                .filter(RequestLog.alias.isnot(None))
+                .group_by(RequestLog.alias)
+                .all()
+            )
+            return jsonify({row.alias: row.requests for row in stats})
+
+    # -------------------------------------------------------------------------
+    # Redirects API (v3.7)
+    # -------------------------------------------------------------------------
+
+    @admin.route("/redirects")
+    @require_auth
+    def redirects_page():
+        """Redirects management page."""
+        return render_template("redirects.html")
+
+    @admin.route("/api/redirects", methods=["GET"])
+    @require_auth_api
+    def list_redirects():
+        """List all redirects."""
+        from db import get_all_redirects
+
+        redirects = get_all_redirects()
+        return jsonify([r.to_dict() for r in redirects])
+
+    @admin.route("/api/redirects/<int:redirect_id>", methods=["GET"])
+    @require_auth_api
+    def get_redirect(redirect_id: int):
+        """Get a single redirect by ID."""
+        from db import get_redirect_by_id
+
+        redirect = get_redirect_by_id(redirect_id)
+        if not redirect:
+            return jsonify({"error": "Redirect not found"}), 404
+        return jsonify(redirect.to_dict())
+
+    @admin.route("/api/redirects", methods=["POST"])
+    @require_auth_api
+    def create_redirect_endpoint():
+        """Create a new redirect."""
+        from db import create_redirect, get_redirect_by_source
+
+        data = request.get_json() or {}
+
+        # Validate required fields
+        if not data.get("source"):
+            return jsonify({"error": "Source pattern is required"}), 400
+        if not data.get("target"):
+            return jsonify({"error": "Target is required"}), 400
+
+        source = data["source"].lower().strip()
+        target = data["target"].lower().strip()
+
+        # Check if source already exists
+        existing = get_redirect_by_source(source)
+        if existing:
+            return jsonify(
+                {"error": f"Redirect for source '{source}' already exists"}
+            ), 409
+
+        # Parse tags
+        tags = data.get("tags", [])
+        if isinstance(tags, str):
+            tags = [t.strip().lower() for t in tags.split(",") if t.strip()]
+
+        try:
+            redirect = create_redirect(
+                source=source,
+                target=target,
+                description=data.get("description"),
+                enabled=data.get("enabled", True),
+                tags=tags if tags else None,
+            )
+            return jsonify(redirect.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/redirects/<int:redirect_id>", methods=["PUT"])
+    @require_auth_api
+    def update_redirect_endpoint(redirect_id: int):
+        """Update an existing redirect."""
+        from db import get_redirect_by_id, get_redirect_by_source, update_redirect
+
+        data = request.get_json() or {}
+
+        # Check redirect exists
+        existing = get_redirect_by_id(redirect_id)
+        if not existing:
+            return jsonify({"error": "Redirect not found"}), 404
+
+        # If source is being changed, check for conflicts
+        new_source = data.get("source")
+        if new_source and new_source.lower().strip() != existing.source:
+            new_source = new_source.lower().strip()
+            conflict = get_redirect_by_source(new_source)
+            if conflict and conflict.id != redirect_id:
+                return jsonify(
+                    {"error": f"Redirect for source '{new_source}' already exists"}
+                ), 409
+
+        # Parse tags if provided
+        tags = None
+        if "tags" in data:
+            tags = data["tags"]
+            if isinstance(tags, str):
+                tags = [t.strip().lower() for t in tags.split(",") if t.strip()]
+
+        try:
+            redirect = update_redirect(
+                redirect_id=redirect_id,
+                source=data.get("source"),
+                target=data.get("target"),
+                description=data.get("description"),
+                enabled=data.get("enabled"),
+                tags=tags,
+            )
+            if not redirect:
+                return jsonify({"error": "Redirect not found"}), 404
+            return jsonify(redirect.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/redirects/<int:redirect_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_redirect_endpoint(redirect_id: int):
+        """Delete a redirect."""
+        from db import delete_redirect
+
+        if delete_redirect(redirect_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Redirect not found"}), 404
+
+    @admin.route("/api/redirects/check", methods=["POST"])
+    @require_auth_api
+    def check_redirects():
+        """Check if any model names would be affected by redirects.
+
+        Used by Smart Routers UI to warn when candidates/designator are redirected.
+        """
+        from db import find_matching_redirect
+
+        data = request.get_json() or {}
+        models = data.get("models", [])
+
+        results = {}
+        for model in models:
+            match = find_matching_redirect(model)
+            if match:
+                redirect, target = match
+                results[model] = {
+                    "redirected": True,
+                    "target": target,
+                    "redirect_id": redirect.id,
+                }
+            else:
+                results[model] = {"redirected": False}
+
+        return jsonify(results)
+
     # -------------------------------------------------------------------------
     # Smart Router API (v3.2)
     # -------------------------------------------------------------------------
@@ -3850,6 +4020,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 tags=data.get("tags", []),
                 description=data.get("description"),
                 enabled=data.get("enabled", True),
+                use_model_intelligence=data.get("use_model_intelligence", False),
+                search_provider=data.get("search_provider"),
+                intelligence_model=data.get("intelligence_model"),
             )
             return jsonify(router.to_dict()), 201
         except ValueError as e:
@@ -3908,6 +4081,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 tags=data.get("tags"),
                 description=data.get("description"),
                 enabled=data.get("enabled"),
+                use_model_intelligence=data.get("use_model_intelligence"),
+                search_provider=data.get("search_provider"),
+                intelligence_model=data.get("intelligence_model"),
             )
             if not router:
                 return jsonify({"error": "Router not found"}), 404
@@ -3962,6 +4138,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def list_available_models_for_router():
         """List all available models that can be used as router candidates/designators."""
         models = []
+
+        # Only provider models - no aliases/routers/augmentors to avoid circular routing
         for provider in registry.get_available_providers():
             for model_id, info in provider.get_models().items():
                 models.append(
@@ -4276,6 +4454,274 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "total": critical_count + warning_count,
                 }
             )
+
+    @admin.route("/api/routers/stats", methods=["GET"])
+    @require_auth_api
+    def get_router_stats():
+        """Get request counts and candidate distribution for all routers."""
+        from sqlalchemy import func
+
+        with get_db_context() as db:
+            # Count total requests per router (excluding designator calls)
+            router_stats = (
+                db.query(
+                    RequestLog.router_name,
+                    func.count(RequestLog.id).label("requests"),
+                )
+                .filter(
+                    RequestLog.router_name.isnot(None),
+                    RequestLog.is_designator == False,
+                )
+                .group_by(RequestLog.router_name)
+                .all()
+            )
+
+            # Get candidate distribution per router
+            candidate_stats = (
+                db.query(
+                    RequestLog.router_name,
+                    RequestLog.model_id,
+                    func.count(RequestLog.id).label("requests"),
+                )
+                .filter(
+                    RequestLog.router_name.isnot(None),
+                    RequestLog.is_designator == False,
+                )
+                .group_by(RequestLog.router_name, RequestLog.model_id)
+                .all()
+            )
+
+            # Build response
+            result = {}
+            for row in router_stats:
+                result[row.router_name] = {
+                    "requests": row.requests,
+                    "candidates": {},
+                }
+
+            for row in candidate_stats:
+                if row.router_name in result:
+                    result[row.router_name]["candidates"][row.model_id] = row.requests
+
+            return jsonify(result)
+
+    # -------------------------------------------------------------------------
+    # Model Intelligence API (v3.6)
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/model-intelligence", methods=["GET"])
+    @require_auth_api
+    def list_model_intelligence():
+        """List all cached model intelligence entries."""
+        from context import is_chroma_available
+
+        if not is_chroma_available():
+            return jsonify({"error": "ChromaDB not available", "entries": []}), 200
+
+        try:
+            from context.model_intelligence import ModelIntelligence
+
+            mi = ModelIntelligence()
+            entries = mi.get_all_cached()
+
+            return jsonify(
+                {
+                    "entries": [
+                        {
+                            "model_id": e.model_id,
+                            "intelligence": e.intelligence,
+                            "strengths": e.strengths,
+                            "weaknesses": e.weaknesses,
+                            "best_for": e.best_for,
+                            "avoid_for": e.avoid_for,
+                            "sources": e.sources,
+                            "generated_at": e.generated_at.isoformat(),
+                            "expires_at": e.expires_at.isoformat(),
+                            "expired": e.is_expired(),
+                        }
+                        for e in entries
+                    ]
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error listing model intelligence: {e}")
+            return jsonify({"error": str(e), "entries": []}), 500
+
+    @admin.route("/api/model-intelligence/<path:model_id>", methods=["GET"])
+    @require_auth_api
+    def get_model_intelligence(model_id: str):
+        """Get cached intelligence for a specific model."""
+        from context import is_chroma_available
+
+        if not is_chroma_available():
+            return jsonify({"error": "ChromaDB not available"}), 503
+
+        try:
+            from context.model_intelligence import ModelIntelligence
+
+            mi = ModelIntelligence()
+            intel = mi.get_intelligence(model_id)
+
+            if not intel:
+                return jsonify({"error": "No intelligence found for model"}), 404
+
+            return jsonify(
+                {
+                    "model_id": intel.model_id,
+                    "intelligence": intel.intelligence,
+                    "strengths": intel.strengths,
+                    "weaknesses": intel.weaknesses,
+                    "best_for": intel.best_for,
+                    "avoid_for": intel.avoid_for,
+                    "sources": intel.sources,
+                    "generated_at": intel.generated_at.isoformat(),
+                    "expires_at": intel.expires_at.isoformat(),
+                    "expired": intel.is_expired(),
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error getting model intelligence: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/model-intelligence/refresh", methods=["POST"])
+    @require_auth_api
+    def refresh_model_intelligence():
+        """Refresh intelligence for specified models."""
+        from context import is_chroma_available
+
+        if not is_chroma_available():
+            return jsonify({"error": "ChromaDB not available"}), 503
+
+        data = request.get_json() or {}
+        model_ids = data.get("model_ids", [])
+        force = data.get("force", False)
+
+        if not model_ids:
+            return jsonify({"error": "model_ids is required"}), 400
+
+        try:
+            from context.model_intelligence import ModelIntelligence
+
+            mi = ModelIntelligence()
+            results = mi.refresh_models(model_ids, force=force)
+
+            return jsonify(
+                {
+                    "refreshed": list(results.keys()),
+                    "count": len(results),
+                    "details": {
+                        model_id: {
+                            "intelligence": intel.intelligence[:200] + "..."
+                            if len(intel.intelligence) > 200
+                            else intel.intelligence,
+                            "strengths": intel.strengths,
+                            "weaknesses": intel.weaknesses,
+                        }
+                        for model_id, intel in results.items()
+                    },
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error refreshing model intelligence: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route(
+        "/api/model-intelligence/refresh-router/<int:router_id>", methods=["POST"]
+    )
+    @require_auth_api
+    def refresh_router_model_intelligence(router_id: int):
+        """Refresh intelligence for all candidates in a smart router."""
+        from context import is_chroma_available
+        from db import get_smart_router_by_id
+
+        if not is_chroma_available():
+            return jsonify({"error": "ChromaDB not available"}), 503
+
+        router = get_smart_router_by_id(router_id)
+        if not router:
+            return jsonify({"error": "Router not found"}), 404
+
+        # Get all candidate model IDs
+        model_ids = [c.get("model") for c in router.candidates if c.get("model")]
+
+        if not model_ids:
+            return jsonify({"error": "Router has no candidates"}), 400
+
+        if not router.intelligence_model:
+            return jsonify(
+                {
+                    "error": "No summarizer model configured. Please select a model in the Intelligence Settings."
+                }
+            ), 400
+
+        data = request.get_json() or {}
+        force = data.get("force", False)
+
+        try:
+            from context.model_intelligence import ModelIntelligence
+
+            mi = ModelIntelligence(
+                summarizer_model=router.intelligence_model,
+                search_provider=router.search_provider,
+            )
+            # Use comparative refresh to get relative assessments between candidates
+            results = mi.refresh_models_comparative(model_ids, force=force)
+
+            return jsonify(
+                {
+                    "router": router.name,
+                    "refreshed": list(results.keys()),
+                    "count": len(results),
+                    "total_candidates": len(model_ids),
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error refreshing router model intelligence: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/model-intelligence/<path:model_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_model_intelligence(model_id: str):
+        """Delete cached intelligence for a specific model."""
+        from context import is_chroma_available
+
+        if not is_chroma_available():
+            return jsonify({"error": "ChromaDB not available"}), 503
+
+        try:
+            from context.model_intelligence import ModelIntelligence
+
+            mi = ModelIntelligence()
+            success = mi.delete_intelligence(model_id)
+
+            if success:
+                return jsonify({"success": True, "deleted": model_id})
+            return jsonify({"error": "Failed to delete intelligence"}), 500
+        except Exception as e:
+            logger.error(f"Error deleting model intelligence: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/model-intelligence/clear", methods=["DELETE"])
+    @require_auth_api
+    def clear_all_model_intelligence():
+        """Clear all cached model intelligence."""
+        from context import is_chroma_available
+
+        if not is_chroma_available():
+            return jsonify({"error": "ChromaDB not available"}), 503
+
+        try:
+            from context.model_intelligence import ModelIntelligence
+
+            mi = ModelIntelligence()
+            success = mi.clear_all()
+
+            if success:
+                return jsonify({"success": True})
+            return jsonify({"error": "Failed to clear intelligence"}), 500
+        except Exception as e:
+            logger.error(f"Error clearing model intelligence: {e}")
+            return jsonify({"error": str(e)}), 500
 
     # -------------------------------------------------------------------------
     # Smart Cache API (v3.3)

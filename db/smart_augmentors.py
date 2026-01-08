@@ -341,6 +341,20 @@ def get_smart_augmentor_names() -> dict[str, SmartAugmentor]:
         return {a.name.lower(): _augmentor_to_detached(a) for a in augmentors}
 
 
+def get_enabled_smart_augmentors() -> dict[str, SmartAugmentor]:
+    """
+    Get a mapping of enabled augmentor names to augmentor objects.
+
+    Returns:
+        Dict mapping lowercase names to enabled SmartAugmentor objects
+    """
+    with get_db_context() as session:
+        augmentors = (
+            session.query(SmartAugmentor).filter(SmartAugmentor.enabled == True).all()
+        )
+        return {a.name.lower(): _augmentor_to_detached(a) for a in augmentors}
+
+
 def _augmentor_to_detached(augmentor: SmartAugmentor) -> SmartAugmentor:
     """
     Create a detached copy of a smart augmentor with all data loaded.

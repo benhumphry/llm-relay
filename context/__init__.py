@@ -77,4 +77,15 @@ __all__ = [
     "format_document_chunks",
     "format_cached_response",
     "merge_contexts",
+    # Model Intelligence
+    "ModelIntelligence",
 ]
+
+
+# Lazy import for ModelIntelligence (requires ChromaDB)
+def __getattr__(name):
+    if name == "ModelIntelligence":
+        from .model_intelligence import ModelIntelligence
+
+        return ModelIntelligence
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

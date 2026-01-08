@@ -60,6 +60,9 @@ def create_smart_router(
     tags: list[str] | None = None,
     description: str | None = None,
     enabled: bool = True,
+    use_model_intelligence: bool = False,
+    search_provider: str | None = None,
+    intelligence_model: str | None = None,
     db: Optional[Session] = None,
 ) -> SmartRouter:
     """
@@ -76,6 +79,9 @@ def create_smart_router(
         tags: Optional list of tags to assign to requests
         description: Optional description
         enabled: Whether the router is enabled (default True)
+        use_model_intelligence: Whether to use web-gathered model intelligence (default False)
+        search_provider: Search provider for model intelligence (e.g., "searxng")
+        intelligence_model: Model to use for summarizing search results
         db: Optional database session
 
     Returns:
@@ -100,6 +106,9 @@ def create_smart_router(
             session_ttl=session_ttl,
             description=description,
             enabled=enabled,
+            use_model_intelligence=use_model_intelligence,
+            search_provider=search_provider,
+            intelligence_model=intelligence_model,
         )
         router.candidates = candidates
         if tags:
@@ -131,6 +140,9 @@ def update_smart_router(
     tags: list[str] | None = None,
     description: str | None = None,
     enabled: bool | None = None,
+    use_model_intelligence: bool | None = None,
+    search_provider: str | None = None,
+    intelligence_model: str | None = None,
     db: Optional[Session] = None,
 ) -> Optional[SmartRouter]:
     """
@@ -148,6 +160,9 @@ def update_smart_router(
         tags: New tags list (optional, pass empty list to clear)
         description: New description (optional)
         enabled: New enabled state (optional)
+        use_model_intelligence: New model intelligence state (optional)
+        search_provider: New search provider (optional)
+        intelligence_model: New intelligence model (optional)
         db: Optional database session
 
     Returns:
@@ -197,6 +212,17 @@ def update_smart_router(
 
         if enabled is not None:
             router.enabled = enabled
+
+        if use_model_intelligence is not None:
+            router.use_model_intelligence = use_model_intelligence
+
+        if search_provider is not None:
+            router.search_provider = search_provider if search_provider else None
+
+        if intelligence_model is not None:
+            router.intelligence_model = (
+                intelligence_model if intelligence_model else None
+            )
 
         session.flush()
         logger.info(f"Updated smart router: {router.name}")
@@ -309,6 +335,9 @@ def _router_to_detached(router: SmartRouter) -> SmartRouter:
         tags_json=router.tags_json,
         description=router.description,
         enabled=router.enabled,
+        use_model_intelligence=router.use_model_intelligence,
+        search_provider=router.search_provider,
+        intelligence_model=router.intelligence_model,
     )
     detached.id = router.id
     detached.created_at = router.created_at

@@ -1,14 +1,14 @@
-{% extends "base.html" %} {% block title %}Aliases{% endblock %} {% block content
+{% extends "base.html" %} {% block title %}Redirects{% endblock %} {% block content
 %}
-<div x-data="aliasesPage()" x-init="init()">
+<div x-data="redirectsPage()" x-init="init()">
     <!-- Header -->
     <div
         class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
     >
         <div>
-            <h1 class="text-2xl font-bold">Model Aliases</h1>
+            <h1 class="text-2xl font-bold">Model Redirects</h1>
             <p class="text-base-content/60">
-                Create shortcuts for models with optional tag assignment
+                Transparently redirect model requests to different targets
             </p>
         </div>
         <button @click="openAddModal()" class="btn btn-primary btn-sm">
@@ -26,7 +26,7 @@
                     d="M12 4v16m8-8H4"
                 />
             </svg>
-            Add Alias
+            Add Redirect
         </button>
     </div>
 
@@ -37,8 +37,8 @@
         </div>
     </template>
 
-    <!-- No Aliases Configured -->
-    <template x-if="!loading && aliases.length === 0">
+    <!-- No Redirects Configured -->
+    <template x-if="!loading && redirects.length === 0">
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body text-center py-12">
                 <svg
@@ -52,50 +52,51 @@
                         stroke-linecap="round"
                         stroke-linejoin="round"
                         stroke-width="2"
-                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"
+                        d="M13 7l5 5m0 0l-5 5m5-5H6"
                     />
                 </svg>
-                <h3 class="mt-4 text-lg font-medium">No Aliases Configured</h3>
+                <h3 class="mt-4 text-lg font-medium">No Redirects Configured</h3>
                 <p class="mt-2 text-base-content/60 max-w-md mx-auto">
-                    Aliases let you create memorable shortcuts like "gpt4" that
-                    point to any model. You can also assign tags for usage
-                    tracking.
+                    Redirects let you transparently map model requests to different targets.
+                    Useful for model upgrades (gpt-4 to gpt-5) or provider switches
+                    (openrouter/anthropic/* to anthropic/*).
                 </p>
                 <button @click="openAddModal()" class="btn btn-primary mt-4">
-                    Create Your First Alias
+                    Create Your First Redirect
                 </button>
             </div>
         </div>
     </template>
 
-    <!-- Alias Table -->
-    <template x-if="!loading && aliases.length > 0">
+    <!-- Redirect Table -->
+    <template x-if="!loading && redirects.length > 0">
         <div class="card bg-base-100 shadow-lg">
             <div class="overflow-x-auto">
                 <table class="table table-fixed">
                     <thead>
                         <tr>
                             <th class="w-8"></th>
-                            <th class="w-1/6">Name</th>
-                            <th class="w-1/4">Target</th>
+                            <th class="w-1/5">Source</th>
+                            <th class="w-8 text-center"></th>
+                            <th class="w-1/5">Target</th>
                             <th class="w-1/6">Tags</th>
-                            <th class="w-20 text-right">Requests</th>
+                            <th class="w-20 text-right">Redirects</th>
                             <th class="w-20">Status</th>
                             <th class="w-24 text-right">Actions</th>
                         </tr>
                     </thead>
-                    <template x-for="alias in aliases" :key="alias.id">
+                    <template x-for="redirect in redirects" :key="redirect.id">
                         <tbody>
                             <!-- Main Row -->
                             <tr
-                                @click="toggleExpand(alias.id)"
+                                @click="toggleExpand(redirect.id)"
                                 class="cursor-pointer hover:bg-base-200"
                             >
                                 <td class="w-8">
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
                                         class="h-4 w-4 transition-transform"
-                                        :class="{'rotate-90': expandedRows.includes(alias.id)}"
+                                        :class="{'rotate-90': expandedRows.includes(redirect.id)}"
                                         fill="none"
                                         viewBox="0 0 24 24"
                                         stroke="currentColor"
@@ -109,41 +110,58 @@
                                     </svg>
                                 </td>
                                 <td>
-                                    <div class="font-mono font-medium" x-text="alias.name"></div>
+                                    <div class="font-mono font-medium text-sm" x-text="redirect.source"></div>
+                                    <span x-show="redirect.source.includes('*')" class="badge badge-outline badge-xs ml-1">wildcard</span>
+                                </td>
+                                <td class="text-center">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/50"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M13 7l5 5m0 0l-5 5m5-5H6"
+                                        />
+                                    </svg>
                                 </td>
                                 <td>
-                                    <div class="font-mono text-sm text-base-content/70" x-text="alias.target_model"></div>
+                                    <div class="font-mono text-sm text-base-content/70" x-text="redirect.target"></div>
                                 </td>
                                 <td>
-                                    <template x-for="tag in (alias.tags || []).slice(0, 2)" :key="tag">
+                                    <template x-for="tag in (redirect.tags || []).slice(0, 2)" :key="tag">
                                         <span class="badge badge-outline badge-xs mr-1" x-text="tag"></span>
                                     </template>
                                     <span
-                                        x-show="(alias.tags || []).length > 2"
+                                        x-show="(redirect.tags || []).length > 2"
                                         class="text-xs text-base-content/50"
-                                        x-text="'+' + ((alias.tags || []).length - 2)"
+                                        x-text="'+' + ((redirect.tags || []).length - 2)"
                                     ></span>
                                     <span
-                                        x-show="!alias.tags || alias.tags.length === 0"
+                                        x-show="!redirect.tags || redirect.tags.length === 0"
                                         class="text-base-content/40 text-sm"
                                     >-</span>
                                 </td>
                                 <td class="text-right">
-                                    <span class="font-mono text-sm" x-text="stats[alias.name] || 0"></span>
+                                    <span class="font-mono text-sm" x-text="redirect.redirect_count || 0"></span>
                                 </td>
                                 <td>
                                     <span
                                         class="badge badge-sm"
-                                        :class="alias.enabled ? 'badge-success' : 'badge-ghost'"
-                                        x-text="alias.enabled ? 'Enabled' : 'Disabled'"
+                                        :class="redirect.enabled ? 'badge-success' : 'badge-ghost'"
+                                        x-text="redirect.enabled ? 'Enabled' : 'Disabled'"
                                     ></span>
                                 </td>
                                 <td class="text-right" @click.stop>
                                     <div class="flex justify-end gap-1">
                                         <button
-                                            @click="openEditModal(alias)"
+                                            @click="openEditModal(redirect)"
                                             class="btn btn-ghost btn-sm"
-                                            title="Edit alias"
+                                            title="Edit redirect"
                                         >
                                             <svg
                                                 xmlns="http://www.w3.org/2000/svg"
@@ -161,9 +179,9 @@
                                             </svg>
                                         </button>
                                         <button
-                                            @click="confirmDelete(alias)"
+                                            @click="confirmDelete(redirect)"
                                             class="btn btn-ghost btn-sm text-error"
-                                            title="Delete alias"
+                                            title="Delete redirect"
                                         >
                                             <svg
                                                 xmlns="http://www.w3.org/2000/svg"
@@ -184,32 +202,42 @@
                                 </td>
                             </tr>
                             <!-- Expanded Details Row -->
-                            <tr x-show="expandedRows.includes(alias.id)" x-transition>
-                                <td colspan="7" class="bg-base-200 p-0">
+                            <tr x-show="expandedRows.includes(redirect.id)" x-transition>
+                                <td colspan="8" class="bg-base-200 p-0">
                                     <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                         <!-- Description -->
-                                        <div x-show="alias.description">
+                                        <div x-show="redirect.description" class="col-span-2">
                                             <div class="text-xs text-base-content/50 uppercase mb-1">Description</div>
-                                            <div class="text-sm" x-text="alias.description"></div>
+                                            <div class="text-sm" x-text="redirect.description"></div>
                                         </div>
-                                        <!-- Full Target Path -->
+                                        <!-- Source Pattern -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Target Model</div>
-                                            <div class="font-mono text-xs" x-text="alias.target_model"></div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Source Pattern</div>
+                                            <div class="font-mono text-xs" x-text="redirect.source"></div>
+                                        </div>
+                                        <!-- Target -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Target</div>
+                                            <div class="font-mono text-xs" x-text="redirect.target"></div>
                                         </div>
                                         <!-- All Tags -->
-                                        <div x-show="alias.tags && alias.tags.length > 0">
+                                        <div x-show="redirect.tags && redirect.tags.length > 0">
                                             <div class="text-xs text-base-content/50 uppercase mb-1">All Tags</div>
                                             <div class="flex flex-wrap gap-1">
-                                                <template x-for="tag in alias.tags" :key="tag">
+                                                <template x-for="tag in redirect.tags" :key="tag">
                                                     <span class="badge badge-primary badge-sm" x-text="tag"></span>
                                                 </template>
                                             </div>
                                         </div>
+                                        <!-- Redirect Count -->
+                                        <div>
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Total Redirects</div>
+                                            <div class="text-sm font-mono" x-text="redirect.redirect_count || 0"></div>
+                                        </div>
                                         <!-- Created -->
-                                        <div x-show="alias.created_at">
+                                        <div x-show="redirect.created_at">
                                             <div class="text-xs text-base-content/50 uppercase mb-1">Created</div>
-                                            <div class="text-xs" x-text="formatDate(alias.created_at)"></div>
+                                            <div class="text-xs" x-text="formatDate(redirect.created_at)"></div>
                                         </div>
                                     </div>
                                 </td>
@@ -224,45 +252,45 @@
     <!-- Add/Edit Modal -->
     <div class="modal" :class="{ 'modal-open': showModal }">
         <div class="modal-box max-w-lg">
-            <h3 class="font-bold text-lg" x-text="editingAlias ? 'Edit Alias' : 'Add Alias'"></h3>
-            <form @submit.prevent="saveAlias()">
+            <h3 class="font-bold text-lg" x-text="editingRedirect ? 'Edit Redirect' : 'Add Redirect'"></h3>
+            <form @submit.prevent="saveRedirect()">
                 <div class="form-control mt-4">
                     <label class="label">
-                        <span class="label-text">Alias Name</span>
+                        <span class="label-text">Source Pattern</span>
                     </label>
                     <input
                         type="text"
-                        x-model="form.name"
+                        x-model="form.source"
                         class="input input-bordered font-mono"
-                        :class="{ 'input-error': formErrors.name }"
-                        placeholder="e.g., gpt4, claude, fast-model"
+                        :class="{ 'input-error': formErrors.source }"
+                        placeholder="e.g., gpt-4, openrouter/anthropic/*"
                         required
-                        :disabled="editingAlias"
                     />
-                    <label class="label" x-show="formErrors.name">
-                        <span class="label-text-alt text-error" x-text="formErrors.name"></span>
+                    <label class="label" x-show="formErrors.source">
+                        <span class="label-text-alt text-error" x-text="formErrors.source"></span>
                     </label>
-                    <label class="label" x-show="!formErrors.name">
-                        <span class="label-text-alt">Clients can request this name instead of the full model ID</span>
+                    <label class="label" x-show="!formErrors.source">
+                        <span class="label-text-alt">Model name to redirect from. Supports * wildcards (e.g., openrouter/anthropic/*)</span>
                     </label>
                 </div>
 
                 <div class="form-control mt-4">
                     <label class="label">
-                        <span class="label-text">Target Model</span>
+                        <span class="label-text">Target</span>
                     </label>
-                    <select
-                        x-model="form.target_model"
-                        class="select select-bordered"
+                    <input
+                        type="text"
+                        x-model="form.target"
+                        class="input input-bordered font-mono"
+                        :class="{ 'input-error': formErrors.target }"
+                        placeholder="e.g., gpt-5, anthropic/*"
                         required
-                    >
-                        <option value="">Select a model...</option>
-                        <template x-for="model in availableModels" :key="model.id">
-                            <option :value="model.id" x-text="`${model.id} (${model.family})`"></option>
-                        </template>
-                    </select>
-                    <label class="label">
-                        <span class="label-text-alt">The actual model that will be used</span>
+                    />
+                    <label class="label" x-show="formErrors.target">
+                        <span class="label-text-alt text-error" x-text="formErrors.target"></span>
+                    </label>
+                    <label class="label" x-show="!formErrors.target">
+                        <span class="label-text-alt">Model name to redirect to. Use * in target to preserve matched portion from source</span>
                     </label>
                 </div>
 
@@ -274,10 +302,10 @@
                         type="text"
                         x-model="form.tagsInput"
                         class="input input-bordered"
-                        placeholder="e.g., project-a, team-1"
+                        placeholder="e.g., deprecated, migration"
                     />
                     <label class="label">
-                        <span class="label-text-alt">Comma-separated tags to assign to requests using this alias</span>
+                        <span class="label-text-alt">Comma-separated tags for usage tracking in logs</span>
                     </label>
                 </div>
 
@@ -288,7 +316,7 @@
                     <textarea
                         x-model="form.description"
                         class="textarea textarea-bordered"
-                        placeholder="What is this alias for?"
+                        placeholder="Why does this redirect exist?"
                         rows="2"
                     ></textarea>
                 </div>
@@ -304,6 +332,16 @@
                     </label>
                 </div>
 
+                <!-- Examples -->
+                <div class="mt-4 p-3 bg-base-200 rounded-lg text-xs">
+                    <div class="font-medium mb-2">Examples:</div>
+                    <div class="space-y-1 font-mono text-base-content/70">
+                        <div>gpt-4 -> openai/gpt-4o <span class="text-base-content/50">(model upgrade)</span></div>
+                        <div>claude-3-opus -> anthropic/claude-3-opus <span class="text-base-content/50">(add provider prefix)</span></div>
+                        <div>old-ollama/* -> new-ollama/* <span class="text-base-content/50">(server migration)</span></div>
+                    </div>
+                </div>
+
                 <div class="modal-action">
                     <button type="button" @click="closeModal()" class="btn btn-ghost">
                         Cancel
@@ -314,7 +352,7 @@
                         :class="{ 'loading': saving }"
                         :disabled="saving"
                     >
-                        <span x-text="editingAlias ? 'Save Changes' : 'Create Alias'"></span>
+                        <span x-text="editingRedirect ? 'Save Changes' : 'Create Redirect'"></span>
                     </button>
                 </div>
             </form>
@@ -325,10 +363,10 @@
     <!-- Delete Confirmation Modal -->
     <div class="modal" :class="{ 'modal-open': showDeleteModal }">
         <div class="modal-box">
-            <h3 class="font-bold text-lg">Delete Alias</h3>
+            <h3 class="font-bold text-lg">Delete Redirect</h3>
             <p class="py-4">
-                Are you sure you want to delete the alias
-                <span class="font-mono font-bold" x-text="deletingAlias?.name"></span>?
+                Are you sure you want to delete the redirect
+                <span class="font-mono font-bold" x-text="deletingRedirect?.source"></span>?
                 This action cannot be undone.
             </p>
             <div class="modal-action">
@@ -336,7 +374,7 @@
                     Cancel
                 </button>
                 <button
-                    @click="deleteAlias()"
+                    @click="deleteRedirect()"
                     class="btn btn-error"
                     :class="{ 'loading': deleting }"
                     :disabled="deleting"
@@ -350,23 +388,20 @@
 </div>
 
 <script>
-    function aliasesPage() {
+    function redirectsPage() {
         return {
             loading: true,
-            aliases: [],
-            stats: {},
-            availableModels: [],
+            redirects: [],
             expandedRows: [],
             showModal: false,
             showDeleteModal: false,
-            editingAlias: null,
-            deletingAlias: null,
+            editingRedirect: null,
+            deletingRedirect: null,
             saving: false,
             deleting: false,
-            redirectWarnings: {},  // { aliasId: { modelName: { redirected: true, target: 'x' } } }
             form: {
-                name: '',
-                target_model: '',
+                source: '',
+                target: '',
                 tagsInput: '',
                 description: '',
                 enabled: true,
@@ -374,44 +409,18 @@
             formErrors: {},
 
             async init() {
-                await Promise.all([
-                    this.loadAliases(),
-                    this.loadAvailableModels(),
-                    this.loadStats(),
-                ]);
+                await this.loadRedirects();
                 this.loading = false;
             },
 
-            async loadAliases() {
+            async loadRedirects() {
                 try {
-                    const response = await fetch('/api/aliases');
+                    const response = await fetch('/api/redirects');
                     if (response.ok) {
-                        this.aliases = await response.json();
+                        this.redirects = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load aliases:', error);
-                }
-            },
-
-            async loadStats() {
-                try {
-                    const response = await fetch('/api/aliases/stats');
-                    if (response.ok) {
-                        this.stats = await response.json();
-                    }
-                } catch (error) {
-                    console.error('Failed to load alias stats:', error);
-                }
-            },
-
-            async loadAvailableModels() {
-                try {
-                    const response = await fetch('/api/aliases/models');
-                    if (response.ok) {
-                        this.availableModels = await response.json();
-                    }
-                } catch (error) {
-                    console.error('Failed to load available models:', error);
+                    console.error('Failed to load redirects:', error);
                 }
             },
 
@@ -431,10 +440,10 @@
             },
 
             openAddModal() {
-                this.editingAlias = null;
+                this.editingRedirect = null;
                 this.form = {
-                    name: '',
-                    target_model: '',
+                    source: '',
+                    target: '',
                     tagsInput: '',
                     description: '',
                     enabled: true,
@@ -443,14 +452,14 @@
                 this.showModal = true;
             },
 
-            openEditModal(alias) {
-                this.editingAlias = alias;
+            openEditModal(redirect) {
+                this.editingRedirect = redirect;
                 this.form = {
-                    name: alias.name,
-                    target_model: alias.target_model,
-                    tagsInput: (alias.tags || []).join(', '),
-                    description: alias.description || '',
-                    enabled: alias.enabled,
+                    source: redirect.source,
+                    target: redirect.target,
+                    tagsInput: (redirect.tags || []).join(', '),
+                    description: redirect.description || '',
+                    enabled: redirect.enabled,
                 };
                 this.formErrors = {};
                 this.showModal = true;
@@ -458,33 +467,32 @@
 
             closeModal() {
                 this.showModal = false;
-                this.editingAlias = null;
+                this.editingRedirect = null;
                 this.formErrors = {};
             },
 
-            async saveAlias() {
+            async saveRedirect() {
                 this.formErrors = {};
                 this.saving = true;
 
-                // Parse tags from comma-separated input
                 const tags = this.form.tagsInput
                     .split(',')
                     .map(t => t.trim().toLowerCase())
                     .filter(t => t.length > 0);
 
                 const payload = {
-                    name: this.form.name.toLowerCase().trim(),
-                    target_model: this.form.target_model,
+                    source: this.form.source.toLowerCase().trim(),
+                    target: this.form.target.toLowerCase().trim(),
                     tags: tags,
                     description: this.form.description || null,
                     enabled: this.form.enabled,
                 };
 
                 try {
-                    const url = this.editingAlias
-                        ? `/api/aliases/${this.editingAlias.id}`
-                        : '/api/aliases';
-                    const method = this.editingAlias ? 'PUT' : 'POST';
+                    const url = this.editingRedirect
+                        ? `/api/redirects/${this.editingRedirect.id}`
+                        : '/api/redirects';
+                    const method = this.editingRedirect ? 'PUT' : 'POST';
 
                     const response = await fetch(url, {
                         method: method,
@@ -495,49 +503,49 @@
                     const data = await response.json();
 
                     if (!response.ok) {
-                        if (data.error && data.error.includes('name')) {
-                            this.formErrors.name = data.error;
+                        if (data.error && data.error.includes('source')) {
+                            this.formErrors.source = data.error;
                         } else {
-                            alert(data.error || 'Failed to save alias');
+                            alert(data.error || 'Failed to save redirect');
                         }
                         return;
                     }
 
-                    await this.loadAliases();
+                    await this.loadRedirects();
                     this.closeModal();
                 } catch (error) {
-                    console.error('Failed to save alias:', error);
-                    alert('Failed to save alias');
+                    console.error('Failed to save redirect:', error);
+                    alert('Failed to save redirect');
                 } finally {
                     this.saving = false;
                 }
             },
 
-            confirmDelete(alias) {
-                this.deletingAlias = alias;
+            confirmDelete(redirect) {
+                this.deletingRedirect = redirect;
                 this.showDeleteModal = true;
             },
 
-            async deleteAlias() {
-                if (!this.deletingAlias) return;
+            async deleteRedirect() {
+                if (!this.deletingRedirect) return;
 
                 this.deleting = true;
                 try {
-                    const response = await fetch(`/api/aliases/${this.deletingAlias.id}`, {
+                    const response = await fetch(`/api/redirects/${this.deletingRedirect.id}`, {
                         method: 'DELETE',
                     });
 
                     if (response.ok) {
-                        await this.loadAliases();
+                        await this.loadRedirects();
                         this.showDeleteModal = false;
-                        this.deletingAlias = null;
+                        this.deletingRedirect = null;
                     } else {
                         const data = await response.json();
-                        alert(data.error || 'Failed to delete alias');
+                        alert(data.error || 'Failed to delete redirect');
                     }
                 } catch (error) {
-                    console.error('Failed to delete alias:', error);
-                    alert('Failed to delete alias');
+                    console.error('Failed to delete redirect:', error);
+                    alert('Failed to delete redirect');
                 } finally {
                     this.deleting = false;
                 }
