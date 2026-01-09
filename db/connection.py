@@ -520,6 +520,24 @@ def _run_migrations(engine) -> None:
                     conn.execute(text(sql))
                 conn.commit()
 
+    # Migration: Alter augmentation_query column to TEXT (v3.10)
+    if "request_logs" in inspector.get_table_names():
+        # Check if column type needs to be changed (VARCHAR -> TEXT)
+        # This is safe to run multiple times - TEXT can hold any VARCHAR data
+        try:
+            with engine.connect() as conn:
+                # PostgreSQL syntax
+                conn.execute(
+                    text(
+                        "ALTER TABLE request_logs ALTER COLUMN augmentation_query TYPE TEXT"
+                    )
+                )
+                conn.commit()
+                logger.info("Migrated augmentation_query column to TEXT (v3.10)")
+        except Exception:
+            # SQLite doesn't support ALTER COLUMN TYPE, but SQLite TEXT is already unlimited
+            pass
+
     # Migration: Add router_name column to daily_stats table (v3.2)
     if "daily_stats" in inspector.get_table_names():
         existing_columns = {col["name"] for col in inspector.get_columns("daily_stats")}

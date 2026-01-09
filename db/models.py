@@ -523,7 +523,7 @@ class RequestLog(Base):
         String(20), nullable=True
     )  # "direct"|"search"|"scrape"|"search+scrape"
     augmentation_query: Mapped[Optional[str]] = mapped_column(
-        String(500), nullable=True
+        Text, nullable=True
     )  # Search query used (if any)
     augmentation_urls: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True
