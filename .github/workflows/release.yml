@@ -10,37 +10,20 @@ env:
     IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-    build-and-push:
+    build-amd64:
         runs-on: ubuntu-latest
         permissions:
-            contents: write
+            contents: read
             packages: write
 
         steps:
             - name: Free up disk space
               run: |
-                  echo "Before cleanup:"
-                  df -h
-                  # Remove large unnecessary tools
                   sudo rm -rf /usr/share/dotnet
                   sudo rm -rf /usr/local/lib/android
                   sudo rm -rf /opt/ghc
-                  sudo rm -rf /opt/hostedtoolcache/CodeQL
-                  sudo rm -rf /opt/hostedtoolcache/go
-                  sudo rm -rf /opt/hostedtoolcache/node
-                  sudo rm -rf /opt/hostedtoolcache/Python
-                  sudo rm -rf /opt/hostedtoolcache/Ruby
-                  sudo rm -rf /usr/local/share/boost
-                  sudo rm -rf /usr/share/swift
-                  sudo rm -rf /usr/local/.ghcup
-                  sudo rm -rf /usr/local/graalvm
-                  sudo rm -rf /usr/local/julia*
-                  # Clean apt cache
-                  sudo apt-get clean
-                  # Remove Docker images and build cache
+                  sudo rm -rf /opt/hostedtoolcache
                   sudo docker image prune --all --force
-                  sudo docker builder prune --all --force
-                  echo "After cleanup:"
                   df -h
 
             - name: Checkout repository
@@ -61,22 +44,115 @@ jobs:
               uses: docker/metadata-action@v5
               with:
                   images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-                  tags: |
-                      type=semver,pattern={{version}}
-                      type=semver,pattern={{major}}.{{minor}}
-                      type=semver,pattern={{major}}
-                      type=raw,value=latest,enable={{is_default_branch}}
 
-            - name: Build and push Docker image
+            - name: Build and push amd64
               uses: docker/build-push-action@v5
               with:
                   context: .
                   push: true
-                  tags: ${{ steps.meta.outputs.tags }}
+                  tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-amd64
                   labels: ${{ steps.meta.outputs.labels }}
-                  platforms: linux/amd64,linux/arm64
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
+                  platforms: linux/amd64
+                  cache-from: type=gha,scope=amd64
+                  cache-to: type=gha,mode=max,scope=amd64
+
+    build-arm64:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
+
+        steps:
+            - name: Free up disk space
+              run: |
+                  sudo rm -rf /usr/share/dotnet
+                  sudo rm -rf /usr/local/lib/android
+                  sudo rm -rf /opt/ghc
+                  sudo rm -rf /opt/hostedtoolcache
+                  sudo docker image prune --all --force
+                  df -h
+
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up QEMU
+              uses: docker/setup-qemu-action@v3
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Extract metadata for Docker
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+            - name: Build and push arm64
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  push: true
+                  tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}-arm64
+                  labels: ${{ steps.meta.outputs.labels }}
+                  platforms: linux/arm64
+                  cache-from: type=gha,scope=arm64
+                  cache-to: type=gha,mode=max,scope=arm64
+
+    create-manifest:
+        runs-on: ubuntu-latest
+        needs: [build-amd64, build-arm64]
+        permissions:
+            contents: write
+            packages: write
+
+        steps:
+            - name: Log in to Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Create and push manifest
+              run: |
+                  VERSION=${{ github.ref_name }}
+                  IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+                  # Create manifest for version tag (e.g., v1.5.1)
+                  docker manifest create ${IMAGE}:${VERSION} \
+                      ${IMAGE}:${VERSION}-amd64 \
+                      ${IMAGE}:${VERSION}-arm64
+                  docker manifest push ${IMAGE}:${VERSION}
+
+                  # Create manifest for minor version (e.g., 1.5)
+                  MINOR=$(echo ${VERSION} | sed 's/^v//' | cut -d. -f1,2)
+                  docker manifest create ${IMAGE}:${MINOR} \
+                      ${IMAGE}:${VERSION}-amd64 \
+                      ${IMAGE}:${VERSION}-arm64
+                  docker manifest push ${IMAGE}:${MINOR}
+
+                  # Create manifest for major version (e.g., 1)
+                  MAJOR=$(echo ${VERSION} | sed 's/^v//' | cut -d. -f1)
+                  docker manifest create ${IMAGE}:${MAJOR} \
+                      ${IMAGE}:${VERSION}-amd64 \
+                      ${IMAGE}:${VERSION}-arm64
+                  docker manifest push ${IMAGE}:${MAJOR}
+
+                  # Create manifest for latest
+                  docker manifest create ${IMAGE}:latest \
+                      ${IMAGE}:${VERSION}-amd64 \
+                      ${IMAGE}:${VERSION}-arm64
+                  docker manifest push ${IMAGE}:latest
+
+            - name: Checkout repository
+              uses: actions/checkout@v4
 
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v1
