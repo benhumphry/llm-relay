@@ -5692,6 +5692,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         vision_patterns = [
             "vision",
             "llava",
+            "granite-docling",
             "granite3.2-vision",
             "moondream",
             "bakllava",
