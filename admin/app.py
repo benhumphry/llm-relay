@@ -5256,6 +5256,33 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             }
         )
 
+    @admin.route("/api/caches/models", methods=["GET"])
+    @require_auth_api
+    def list_available_models_for_cache():
+        """List all available models that can be used as cache targets."""
+        models = []
+
+        # Only provider models - no aliases/routers/caches to avoid circular routing
+        for provider in registry.get_available_providers():
+            for model_id, info in provider.get_models().items():
+                models.append(
+                    {
+                        "id": f"{provider.name}/{model_id}",
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "family": info.family,
+                        "description": info.description,
+                        "context_length": info.context_length,
+                        "capabilities": info.capabilities,
+                        "input_cost": info.input_cost,
+                        "output_cost": info.output_cost,
+                    }
+                )
+
+        # Sort by provider, then model_id
+        models.sort(key=lambda m: (m["provider"], m["model_id"]))
+        return jsonify(models)
+
     # =========================================================================
     # Smart Augmentors (v3.4)
     # =========================================================================
