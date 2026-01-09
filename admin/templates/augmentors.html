@@ -82,7 +82,6 @@ content %}
                             <th class="w-1/5">Target</th>
                             <th class="w-24">Tags</th>
                             <th class="w-20 text-right">Requests</th>
-                            <th class="w-24 text-right">Augmented</th>
                             <th class="w-20">Status</th>
                             <th class="w-24 text-right">Actions</th>
                         </tr>
@@ -136,10 +135,6 @@ content %}
                                 </td>
                                 <td class="text-right">
                                     <span class="font-mono text-sm" x-text="augmentor.total_requests || 0"></span>
-                                </td>
-                                <td class="text-right">
-                                    <span class="font-mono text-sm" x-text="augmentor.augmented_requests || 0"></span>
-                                    <span class="text-xs text-base-content/50" x-text="'(' + (augmentor.augmentation_rate || 0).toFixed(0) + '%)'"></span>
                                 </td>
                                 <td>
                                     <span
@@ -195,7 +190,7 @@ content %}
                             </tr>
                             <!-- Expanded Details Row -->
                             <tr x-show="expandedRows.includes(augmentor.id)" x-transition>
-                                <td colspan="9" class="bg-base-200 p-0">
+                                <td colspan="8" class="bg-base-200 p-0">
                                     <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                                         <!-- Description -->
                                         <div x-show="augmentor.description" class="md:col-span-2">
