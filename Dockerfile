@@ -14,11 +14,14 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Reinstall PyTorch with CUDA 12.1 support (compatible with host drivers 525.60.13+)
-# Dependencies like docling-ibm-models pull in CUDA 12.8 which requires newer drivers
-RUN pip install --no-cache-dir --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# Reinstall PyTorch with CUDA 12.6 to ensure Pascal GPU support (sm_61)
+# CUDA 12.8+ builds dropped Pascal/Maxwell support, cu126 is the last to include sm_61
+# See: https://dev-discuss.pytorch.org/t/cuda-toolkit-version-and-architecture-support-update-maxwell-and-pascal-architecture-support-removed-in-cuda-12-8-and-12-9-builds/3128
+RUN pip install --no-cache-dir --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu126
 
 # Copy application
 COPY VERSION .
