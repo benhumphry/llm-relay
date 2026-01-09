@@ -245,9 +245,32 @@ class OpenAICompatibleProvider(LLMProvider):
         return self._client
 
     def _get_model_info(self, model: str) -> ModelInfo | None:
-        """Get ModelInfo for a model."""
+        """Get ModelInfo for a model.
+
+        First checks the models dict (populated from database).
+        Falls back to YAML overrides for models not in the database.
+        """
         if model in self._models:
             return self._models[model]
+
+        # Fall back to YAML overrides for unknown models (e.g., new o3 variants)
+        from config.override_loader import get_model_overrides
+
+        overrides = get_model_overrides(self.id, model)
+        if overrides:
+            # Build a minimal ModelInfo from overrides
+            unsupported = set(overrides.get("unsupported_params", []))
+            return ModelInfo(
+                family="unknown",
+                description="",
+                context_length=128000,
+                unsupported_params=unsupported,
+                supports_system_prompt=overrides.get("supports_system_prompt", True),
+                use_max_completion_tokens=overrides.get(
+                    "use_max_completion_tokens", False
+                ),
+            )
+
         return None
 
     def _convert_image_format(self, content: list) -> list:
