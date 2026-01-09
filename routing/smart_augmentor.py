@@ -169,12 +169,8 @@ class SmartAugmentorEngine:
             Tuple of (decision string, usage dict)
         """
         # Build the designator prompt
-        purpose_context = ""
-        if self.augmentor.purpose:
-            purpose_context = f"\nPURPOSE: {self.augmentor.purpose}\n"
-
         prompt = f"""Generate an optimized web search query for the user's question.
-{purpose_context}
+
 RULES:
 - Extract key concepts
 - Add context like "2024", "latest", "news" where relevant
