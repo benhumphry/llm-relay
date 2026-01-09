@@ -103,12 +103,12 @@ class SmartAugmentorEngine:
         decision, designator_usage = self._call_designator(query_preview)
 
         if decision is None or decision.startswith("direct"):
-            # Fallback to search with the user's query if designator fails or returns direct
+            # Fallback to search+scrape with the user's query if designator fails or returns direct
             logger.info(
-                f"Augmentor '{self.augmentor.name}' decision: fallback to search "
+                f"Augmentor '{self.augmentor.name}' decision: fallback to search+scrape "
                 f"(designator returned: {decision})"
             )
-            decision = f"search:{query_preview}"
+            decision = f"search+scrape:{query_preview}"
 
         # Parse the decision
         augmentation_type, context = self._parse_decision(decision)
@@ -119,19 +119,22 @@ class SmartAugmentorEngine:
         search_query = None
         scraped_urls = []
 
-        if augmentation_type in ("search", "search+scrape"):
+        # For "search" type, always scrape top results too (search alone just gives links)
+        if augmentation_type == "search":
+            augmentation_type = "search+scrape"
+
+        if augmentation_type == "search+scrape":
             search_query = context or query_preview
             search_results = self._execute_search(search_query)
             if search_results:
                 augmented_context += search_results + "\n\n"
 
-                # If search+scrape, scrape top results
-                if augmentation_type == "search+scrape":
-                    urls = self._extract_urls_from_search(search_results)
-                    if urls:
-                        scrape_results, scraped_urls = self._execute_scrape(urls)
-                        if scrape_results:
-                            augmented_context += scrape_results
+                # Always scrape top results to get actual content
+                urls = self._extract_urls_from_search(search_results)
+                if urls:
+                    scrape_results, scraped_urls = self._execute_scrape(urls)
+                    if scrape_results:
+                        augmented_context += scrape_results
 
         elif augmentation_type == "scrape":
             urls = self._parse_urls(context)
@@ -188,17 +191,21 @@ class SmartAugmentorEngine:
         if self.augmentor.purpose:
             purpose_context = f"\nPURPOSE: {self.augmentor.purpose}\n"
 
-        prompt = f"""You are an augmentation assistant. Analyze the user's query and decide how to find external information to help provide a better, more current answer.
+        prompt = f"""You are a search query optimizer. Given the user's question, generate the best web search query to find relevant, current information.
 {purpose_context}
-OPTIONS:
-- search:query terms - Search the web for information (use for most queries - news, facts, current events, how-to, etc.)
-- scrape:url1,url2 - Fetch specific URLs mentioned by the user
-- search+scrape:query - Search then fetch top results for comprehensive research
+OUTPUT FORMAT:
+search:your optimized search query
+
+RULES:
+- Extract key concepts from the question
+- Add relevant context words (e.g., "2024", "latest", "news")
+- Keep queries concise but specific
+- If the user mentions specific URLs, respond with: scrape:url1,url2
 
 USER QUERY:
 {query_preview}
 
-Respond with ONLY your decision (e.g., "search:UK foreign policy 2024" or "scrape:https://example.com"). Do not explain."""
+Respond with ONLY "search:query" (e.g., "search:UK foreign policy changes 2024"). Do not explain."""
 
         try:
             # Resolve and call the designator model
@@ -213,7 +220,7 @@ Respond with ONLY your decision (e.g., "search:UK foreign policy 2024" or "scrap
                 messages=[{"role": "user", "content": prompt}],
                 system=None,  # System is built into the prompt
                 options={
-                    "max_tokens": 100,
+                    "max_tokens": 200,
                     "temperature": 0,
                 },
             )
