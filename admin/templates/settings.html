@@ -1898,16 +1898,26 @@ content %}
                             visionProvider = 'ollama';
                         }
 
+                        // Save vision_model to restore after DOM renders with options
+                        const savedVisionModel = webData.vision_model || '';
+
                         this.webSettings = {
                             search_provider: webData.search_provider || '',
                             search_url: webData.search_url || '',
                             scraper_provider: webData.scraper_provider || 'builtin',
                             jina_api_configured: webData.jina_api_configured || false,
                             vision_provider: visionProvider,
-                            vision_model: webData.vision_model || '',
+                            vision_model: '',  // Set after options render
                             vision_ollama_instance: visionOllamaInstance,
                             vision_ollama_url: webData.vision_ollama_url || '',
                         };
+
+                        // Restore vision_model after DOM renders with dropdown options
+                        if (savedVisionModel) {
+                            this.$nextTick(() => {
+                                this.webSettings.vision_model = savedVisionModel;
+                            });
+                        }
                     }
                 } catch (err) {
                     console.error('Failed to load web settings:', err);

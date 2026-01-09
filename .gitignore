@@ -37,3 +37,6 @@ db/data/
 # Development files (local testing)
 docker-compose.dev.yml
 dev-config/
+
+# Claude Code instructions (local only)
+CLAUDE.md

@@ -157,12 +157,11 @@ Requires ChromaDB (`CHROMA_URL` environment variable).
 
 ### Smart Augmentors
 
-Context augmentation via web search and URL scraping. A fast designator LLM analyzes each query and decides how to augment:
+Context augmentation via web search and URL scraping. Every request is automatically augmented:
 
-- **direct** — Pass through unchanged (coding, creative tasks)
-- **search** — Search the web and inject results (current events, recent data)
-- **scrape** — Fetch specific URLs mentioned by the user
-- **search+scrape** — Search then scrape top results for comprehensive research
+1. A designator LLM generates an optimized search query
+2. Web search is performed and top results scraped for full content
+3. Combined context is injected into the request
 
 Requires a search provider (SearXNG or Perplexity).
 

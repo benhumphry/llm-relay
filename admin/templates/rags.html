@@ -982,16 +982,20 @@ content %}
                     visionOllamaInstance = instance?.name || '';
                 }
 
+                // Save model values to restore after DOM renders with options
+                const savedEmbeddingModel = rag.embedding_model || '';
+                const savedVisionModel = rag.vision_model || '';
+
                 this.form = {
                     name: rag.name,
                     source_path: rag.source_path,
                     target_model: '',
                     embedding_provider: embeddingProvider,
-                    embedding_model: rag.embedding_model || '',
+                    embedding_model: '',  // Set after options render
                     ollama_instance: ollamaInstance,
                     ollama_url: rag.ollama_url || '',
                     vision_provider: visionProvider,
-                    vision_model: rag.vision_model || '',
+                    vision_model: '',  // Set after options render
                     vision_ollama_instance: visionOllamaInstance,
                     vision_ollama_url: rag.vision_ollama_url || '',
                     index_schedule: isPreset ? (rag.index_schedule || '') : 'custom',
@@ -1008,8 +1012,11 @@ content %}
                 this.formErrors = {};
                 this.showModal = true;
 
+                // Restore model selections after DOM renders with dropdown options
                 this.$nextTick(() => {
                     this.form.target_model = rag.target_model;
+                    this.form.embedding_model = savedEmbeddingModel;
+                    this.form.vision_model = savedVisionModel;
                 });
             },
 

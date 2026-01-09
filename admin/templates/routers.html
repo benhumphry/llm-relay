@@ -794,7 +794,7 @@ content %}
                     tagsInput: (router.tags || []).join(', '),
                     enabled: router.enabled,
                     use_model_intelligence: router.use_model_intelligence || false,
-                    intelligence_model: router.intelligence_model || '',
+                    intelligence_model: '',  // Set after options render
                 };
                 this.formErrors = {};
                 this.showModal = true;
@@ -803,6 +803,7 @@ content %}
                 this.$nextTick(async () => {
                     this.form.designator_model = router.designator_model;
                     this.form.fallback_model = router.fallback_model;
+                    this.form.intelligence_model = router.intelligence_model || '';
                     // Update only the model field, preserving descriptions already set
                     candidates.forEach((c, i) => {
                         this.form.candidates[i].model = c.model;
