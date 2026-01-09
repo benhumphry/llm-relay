@@ -174,8 +174,11 @@ class RAGRetriever:
             RetrievalResult with relevant chunks
         """
         # Apply defaults for reranking (always on by default)
+        # Use global setting if not specified
         if rerank_provider is None:
-            rerank_provider = "local"
+            from rag.reranker import get_global_rerank_provider
+
+            rerank_provider = get_global_rerank_provider()
         if rerank_model is None:
             rerank_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
         if rerank_top_n is None:

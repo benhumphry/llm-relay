@@ -218,6 +218,7 @@ class Setting(Base):
     KEY_WEB_SEARCH_PROVIDER = "web_search_provider"  # "searxng" or "perplexity"
     KEY_WEB_SEARCH_URL = "web_search_url"  # Override URL for SearXNG
     KEY_WEB_SCRAPER_PROVIDER = "web_scraper_provider"  # "builtin" or "jina"
+    KEY_WEB_RERANK_PROVIDER = "web_rerank_provider"  # "local" or "jina"
     # Note: Jina API key is configured via JINA_API_KEY env var
 
     # Vision model settings for document parsing (v3.9)

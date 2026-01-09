@@ -343,12 +343,11 @@ SEARCH QUERY:"""
         Returns:
             List of URLs, reranked by relevance
         """
-        # Apply defaults for reranking (always on)
-        rerank_provider = getattr(self.augmentor, "rerank_provider", None) or "local"
-        rerank_model = (
-            getattr(self.augmentor, "rerank_model", None)
-            or "cross-encoder/ms-marco-MiniLM-L-6-v2"
-        )
+        # Use global rerank provider setting
+        from rag.reranker import get_global_rerank_provider
+
+        rerank_provider = get_global_rerank_provider()
+        rerank_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
         try:
             from rag.reranker import rerank_urls

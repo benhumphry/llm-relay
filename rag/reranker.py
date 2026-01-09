@@ -323,6 +323,29 @@ def rerank_urls(
     return [d["url"] for d in ranked if d.get("url")]
 
 
+def get_global_rerank_provider() -> str:
+    """
+    Get the globally configured rerank provider from Settings.
+
+    Returns:
+        Provider name ("local" or "jina"), defaults to "local"
+    """
+    try:
+        from db import Setting, get_db_context
+
+        with get_db_context() as db:
+            setting = (
+                db.query(Setting)
+                .filter(Setting.key == Setting.KEY_WEB_RERANK_PROVIDER)
+                .first()
+            )
+            if setting and setting.value:
+                return setting.value
+    except Exception as e:
+        logger.warning(f"Failed to get rerank provider setting: {e}")
+    return "local"  # Default
+
+
 # Available reranker providers (for UI dropdown)
 RERANKER_PROVIDERS = [
     {

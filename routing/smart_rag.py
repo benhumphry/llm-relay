@@ -133,9 +133,10 @@ class SmartRAGEngine:
                 ollama_url=self.rag.ollama_url,
                 max_results=self.rag.max_results,
                 similarity_threshold=self.rag.similarity_threshold,
-                rerank_provider=self.rag.rerank_provider,
-                rerank_model=self.rag.rerank_model,
-                rerank_top_n=self.rag.rerank_top_n,
+                # Rerank settings now come from global Settings
+                # rerank_top_n still uses max_results as fetch count
+                rerank_top_n=self.rag.max_results
+                * 4,  # Fetch 4x max_results, then rerank
             )
         except Exception as e:
             logger.error(f"RAG retrieval failed: {e}")

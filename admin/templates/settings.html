@@ -1250,6 +1250,32 @@ content %}
                         </div>
                     </template>
 
+                    <!-- Rerank Provider -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Rerank Provider</span>
+                        </label>
+                        <select
+                            x-model="webSettings.rerank_provider"
+                            class="select select-bordered"
+                        >
+                            <option value="local">Local (cross-encoder/ms-marco-MiniLM-L-6-v2)</option>
+                            <option value="jina">Jina Reranker (requires API key)</option>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt">Used by Smart RAGs and Augmentors to rerank retrieved results</span>
+                        </label>
+                    </div>
+
+                    <template x-if="webSettings.rerank_provider === 'jina' && !webSettings.jina_api_configured">
+                        <div class="alert alert-warning py-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <span class="text-sm">Jina reranker requires JINA_API_KEY to be set</span>
+                        </div>
+                    </template>
+
                     <!-- Document Parsing Divider -->
                     <div class="divider mt-4">Document Parsing (Vision Model)</div>
 
@@ -1572,6 +1598,7 @@ content %}
                 search_provider: '',
                 search_url: '',
                 scraper_provider: 'builtin',
+                rerank_provider: 'local',
                 jina_api_configured: false,
                 vision_provider: 'local',
                 vision_model: '',
@@ -1907,6 +1934,7 @@ content %}
                             search_provider: webData.search_provider || '',
                             search_url: webData.search_url || '',
                             scraper_provider: webData.scraper_provider || 'builtin',
+                            rerank_provider: webData.rerank_provider || 'local',
                             jina_api_configured: webData.jina_api_configured || false,
                             vision_provider: visionProvider,
                             vision_model: '',  // Set after options render
@@ -2000,6 +2028,7 @@ content %}
                         search_provider: this.webSettings.search_provider,
                         search_url: this.webSettings.search_url,
                         scraper_provider: this.webSettings.scraper_provider,
+                        rerank_provider: this.webSettings.rerank_provider,
                         vision_provider: visionProvider,
                         vision_model: this.webSettings.vision_model,
                         vision_ollama_url: visionOllamaUrl || '',

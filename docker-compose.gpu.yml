@@ -1,0 +1,40 @@
+# LLM Relay - GPU Support Overlay
+#
+# Enables NVIDIA GPU acceleration for local ML models:
+#   - Embeddings (sentence-transformers)
+#   - Cross-encoder reranking
+#   - Docling document parsing
+#
+# Requirements:
+#   - NVIDIA GPU with CUDA support
+#   - NVIDIA drivers installed on host (with nvidia_uvm module for CUDA compute)
+#   - NVIDIA Container Toolkit (nvidia-container-toolkit)
+#
+# Verify GPU is working:
+#   docker exec llm-relay python -c "import torch; print(torch.cuda.is_available())"
+#
+# Common issues:
+#   - "CUDA unknown error": nvidia_uvm kernel module not loaded
+#     Fix: sudo modprobe nvidia_uvm (or reinstall drivers with CUDA support)
+#   - CUDA version mismatch: Host driver too old for PyTorch CUDA version
+#     The Dockerfile installs PyTorch with CUDA 12.1 (requires driver 525.60.13+)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Or for development:
+#   docker compose -f docker-compose.dev.yml up -d  # (GPU already enabled in dev)
+
+services:
+    llm-relay:
+        runtime: nvidia
+        environment:
+            - NVIDIA_VISIBLE_DEVICES=all
+            - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - driver: nvidia
+                          count: all
+                          capabilities: [gpu, compute, utility]

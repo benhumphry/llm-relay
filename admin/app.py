@@ -909,6 +909,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER,
             Setting.KEY_WEB_SEARCH_URL,
             Setting.KEY_WEB_SCRAPER_PROVIDER,
+            Setting.KEY_WEB_RERANK_PROVIDER,
             Setting.KEY_VISION_PROVIDER,
             Setting.KEY_VISION_MODEL,
             Setting.KEY_VISION_OLLAMA_URL,
@@ -928,6 +929,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "search_url": settings_dict.get(Setting.KEY_WEB_SEARCH_URL) or "",
                 "scraper_provider": settings_dict.get(Setting.KEY_WEB_SCRAPER_PROVIDER)
                 or "builtin",
+                "rerank_provider": settings_dict.get(Setting.KEY_WEB_RERANK_PROVIDER)
+                or "local",
                 "jina_api_configured": jina_api_configured,
                 "vision_provider": settings_dict.get(Setting.KEY_VISION_PROVIDER)
                 or "local",
@@ -953,6 +956,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if scraper_provider not in ("builtin", "jina"):
             return jsonify({"error": "Invalid scraper provider"}), 400
 
+        # Validate rerank provider
+        rerank_provider = data.get("rerank_provider", "local")
+        if rerank_provider not in ("local", "jina"):
+            return jsonify({"error": "Invalid rerank provider"}), 400
+
         # Vision provider can be "local", "ollama:<instance>", or any provider name
         vision_provider = data.get("vision_provider", "local")
         vision_model = data.get("vision_model", "")
@@ -963,6 +971,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER: search_provider,
             Setting.KEY_WEB_SEARCH_URL: data.get("search_url", ""),
             Setting.KEY_WEB_SCRAPER_PROVIDER: scraper_provider,
+            Setting.KEY_WEB_RERANK_PROVIDER: rerank_provider,
             Setting.KEY_VISION_PROVIDER: vision_provider,
             Setting.KEY_VISION_MODEL: vision_model,
             Setting.KEY_VISION_OLLAMA_URL: vision_ollama_url,
