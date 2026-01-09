@@ -254,19 +254,24 @@ class RAGIndexer:
             logger.error(f"RAG {rag_id} not found")
             return False
 
-        logger.info(f"Starting indexing for RAG '{rag.name}' from {rag.source_path}")
+        source_desc = rag.source_path if rag.source_type == "local" else f"MCP:{rag.mcp_server_config.get('name', 'unknown') if rag.mcp_server_config else 'unknown'}"
+        logger.info(f"Starting indexing for RAG '{rag.name}' from {source_desc}")
 
         # Update status to indexing
         update_smart_rag_index_status(rag_id, "indexing")
 
         try:
-            # Check source path exists
-            source_path = Path(rag.source_path)
-            if not source_path.exists():
-                raise ValueError(f"Source path does not exist: {rag.source_path}")
+            # Get document source based on source_type
+            from mcp.sources import get_document_source
 
-            if not source_path.is_dir():
-                raise ValueError(f"Source path is not a directory: {rag.source_path}")
+            source = get_document_source(
+                source_type=rag.source_type,
+                source_path=rag.source_path,
+                mcp_config=rag.mcp_server_config,
+            )
+
+            if not source.is_available():
+                raise ValueError(f"Document source not available: {source_desc}")
 
             # Get embedding provider
             embedding_provider = _get_embedding_provider_for_rag(
@@ -298,30 +303,45 @@ class RAGIndexer:
             documents = []
             doc_count = 0
 
-            all_files = list(self._find_documents(source_path))
-            total_files = len(all_files)
+            # List all documents from the source
+            all_docs = list(source.list_documents())
+            total_files = len(all_docs)
             logger.info(f"Found {total_files} documents to index")
 
-            for file_idx, file_path in enumerate(all_files):
-                relative_path = str(file_path.relative_to(source_path))
+            for file_idx, doc_info in enumerate(all_docs):
                 logger.info(
-                    f"Processing document {file_idx + 1}/{total_files}: {relative_path}"
+                    f"Processing document {file_idx + 1}/{total_files}: {doc_info.name}"
                 )
                 try:
-                    chunks = self._process_document(
-                        file_path,
-                        rag.chunk_size,
-                        rag.chunk_overlap,
-                        vision_provider=rag.vision_provider,
-                        vision_model=rag.vision_model,
-                        vision_ollama_url=rag.vision_ollama_url,
-                    )
+                    # Process document based on source type
+                    if rag.source_type == "local":
+                        # For local files, use the existing file-based processing
+                        chunks = self._process_document(
+                            Path(doc_info.uri),
+                            rag.chunk_size,
+                            rag.chunk_overlap,
+                            vision_provider=rag.vision_provider,
+                            vision_model=rag.vision_model,
+                            vision_ollama_url=rag.vision_ollama_url,
+                        )
+                    else:
+                        # For MCP sources, read content and process
+                        content = source.read_document(doc_info.uri)
+                        if content:
+                            chunks = self._process_content(
+                                content,
+                                rag.chunk_size,
+                                rag.chunk_overlap,
+                            )
+                        else:
+                            chunks = []
+
                     for chunk in chunks:
-                        chunk["source_file"] = relative_path
+                        chunk["source_file"] = doc_info.name
                     documents.extend(chunks)
                     doc_count += 1
                     logger.info(
-                        f"Completed {relative_path}: {len(chunks)} chunks "
+                        f"Completed {doc_info.name}: {len(chunks)} chunks "
                         f"(total: {len(documents)} chunks from {doc_count} docs)"
                     )
 
@@ -333,10 +353,10 @@ class RAGIndexer:
                         chunk_count=len(documents),
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to process {file_path}: {e}")
+                    logger.warning(f"Failed to process {doc_info.uri}: {e}")
 
             if not documents:
-                logger.warning(f"No documents found in {rag.source_path}")
+                logger.warning(f"No documents found in {source_desc}")
                 update_smart_rag_index_status(
                     rag_id,
                     "ready",
@@ -535,6 +555,78 @@ class RAGIndexer:
             return []
 
         return self._chunk_text(text, chunk_size, chunk_overlap)
+
+    def _process_content(
+        self,
+        content: "DocumentContent",
+        chunk_size: int,
+        chunk_overlap: int,
+    ) -> list[dict]:
+        """
+        Process document content from an MCP source.
+
+        Handles both text and binary content.
+
+        Args:
+            content: DocumentContent from MCP source
+            chunk_size: Target chunk size in characters
+            chunk_overlap: Overlap between chunks
+
+        Returns:
+            List of chunk dicts with 'content' and 'chunk_index'
+        """
+        from mcp.sources import DocumentContent
+
+        # If we have text content, chunk it directly
+        if content.text:
+            text = content.text
+
+            # Handle HTML content
+            if content.mime_type and "html" in content.mime_type.lower():
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(text, "html.parser")
+                    text = soup.get_text(separator="\n")
+                except ImportError:
+                    import re
+                    text = re.sub(r"<[^>]+>", "", text)
+
+            return self._chunk_text(text, chunk_size, chunk_overlap)
+
+        # If we have binary content, try to extract text
+        if content.binary:
+            mime = content.mime_type or ""
+
+            # PDF
+            if "pdf" in mime.lower():
+                try:
+                    import io
+                    import pypdf
+                    reader = pypdf.PdfReader(io.BytesIO(content.binary))
+                    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                    return self._chunk_text(text, chunk_size, chunk_overlap)
+                except Exception as e:
+                    logger.warning(f"Failed to extract text from PDF: {e}")
+                    return []
+
+            # DOCX
+            if "wordprocessingml" in mime.lower() or content.name.endswith(".docx"):
+                try:
+                    import io
+                    from docx import Document
+                    doc = Document(io.BytesIO(content.binary))
+                    text = "\n".join(para.text for para in doc.paragraphs)
+                    return self._chunk_text(text, chunk_size, chunk_overlap)
+                except Exception as e:
+                    logger.warning(f"Failed to extract text from DOCX: {e}")
+                    return []
+
+            # For images and other binary formats, we can't extract text
+            # without vision models - skip for now
+            logger.debug(f"Skipping binary content with mime type: {mime}")
+            return []
+
+        return []
 
     def _chunk_text(self, text: str, chunk_size: int, chunk_overlap: int) -> list[dict]:
         """

@@ -1202,10 +1202,20 @@ class SmartRAG(Base):
         String(100), unique=True, nullable=False, index=True
     )
 
-    # Document source (Docker-mapped folder)
-    source_path: Mapped[str] = mapped_column(
-        String(500), nullable=False
-    )  # e.g., "/data/documents"
+    # Document source configuration
+    source_type: Mapped[str] = mapped_column(
+        String(20), default="local"
+    )  # "local" | "mcp"
+
+    # Local source (Docker-mapped folder)
+    source_path: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # e.g., "/data/documents" (for local source type)
+
+    # MCP source configuration (JSON object with server config)
+    mcp_server_config_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # MCP server connection config (for mcp source type)
 
     # Target model to forward augmented requests to
     target_model: Mapped[str] = mapped_column(
@@ -1296,6 +1306,18 @@ class SmartRAG(Base):
         self.tags_json = json.dumps(value) if value else "[]"
 
     @property
+    def mcp_server_config(self) -> dict | None:
+        """Get MCP server config as a dict."""
+        if not self.mcp_server_config_json:
+            return None
+        return json.loads(self.mcp_server_config_json)
+
+    @mcp_server_config.setter
+    def mcp_server_config(self, value: dict | None):
+        """Set MCP server config from a dict."""
+        self.mcp_server_config_json = json.dumps(value) if value else None
+
+    @property
     def injection_rate(self) -> float:
         """Calculate context injection rate as a percentage."""
         if self.total_requests == 0:
@@ -1307,7 +1329,9 @@ class SmartRAG(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "source_type": self.source_type,
             "source_path": self.source_path,
+            "mcp_server_config": self.mcp_server_config,
             "target_model": self.target_model,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,

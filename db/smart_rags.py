@@ -52,8 +52,10 @@ def get_smart_rag_by_id(
 
 def create_smart_rag(
     name: str,
-    source_path: str,
     target_model: str,
+    source_type: str = "local",
+    source_path: str | None = None,
+    mcp_server_config: dict | None = None,
     embedding_provider: str = "local",
     embedding_model: str | None = None,
     ollama_url: str | None = None,
@@ -76,8 +78,10 @@ def create_smart_rag(
 
     Args:
         name: Unique name for the RAG
-        source_path: Path to document folder (Docker-mapped)
         target_model: Model to forward requests to ("provider/model")
+        source_type: Document source type ("local" or "mcp")
+        source_path: Path to document folder for local sources
+        mcp_server_config: MCP server configuration dict for MCP sources
         embedding_provider: Embedding provider ("local", "ollama", "openai")
         embedding_model: Model name for Ollama/OpenAI embeddings
         ollama_url: Override URL for Ollama instance
@@ -110,6 +114,7 @@ def create_smart_rag(
 
         rag = SmartRAG(
             name=name,
+            source_type=source_type,
             source_path=source_path,
             target_model=target_model,
             embedding_provider=embedding_provider,
@@ -130,6 +135,8 @@ def create_smart_rag(
         )
         if tags:
             rag.tags = tags
+        if mcp_server_config:
+            rag.mcp_server_config = mcp_server_config
 
         session.add(rag)
         session.flush()  # Get the ID
@@ -152,7 +159,9 @@ def create_smart_rag(
 def update_smart_rag(
     rag_id: int,
     name: str | None = None,
+    source_type: str | None = None,
     source_path: str | None = None,
+    mcp_server_config: dict | None = None,
     target_model: str | None = None,
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
@@ -212,8 +221,14 @@ def update_smart_rag(
                 raise ValueError(f"Smart RAG with name '{name}' already exists")
             rag.name = name
 
+        if source_type is not None:
+            rag.source_type = source_type
+
         if source_path is not None:
             rag.source_path = source_path
+
+        if mcp_server_config is not None:
+            rag.mcp_server_config = mcp_server_config
 
         if target_model is not None:
             rag.target_model = target_model
@@ -513,7 +528,9 @@ def _rag_to_detached(rag: SmartRAG) -> SmartRAG:
     """
     detached = SmartRAG(
         name=rag.name,
+        source_type=rag.source_type,
         source_path=rag.source_path,
+        mcp_server_config_json=rag.mcp_server_config_json,
         target_model=rag.target_model,
         embedding_provider=rag.embedding_provider,
         embedding_model=rag.embedding_model,

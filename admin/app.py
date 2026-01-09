@@ -5803,9 +5803,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if not name:
             return jsonify({"error": "Name is required"}), 400
 
-        source_path = data.get("source_path", "").strip()
-        if not source_path:
-            return jsonify({"error": "Source path is required"}), 400
+        source_type = data.get("source_type", "local")
+        source_path = data.get("source_path", "").strip() if data.get("source_path") else None
+        mcp_server_config = data.get("mcp_server_config")
+
+        # Validate source configuration
+        if source_type == "local":
+            if not source_path:
+                return jsonify({"error": "Source path is required for local sources"}), 400
+        elif source_type == "mcp":
+            if not mcp_server_config or not mcp_server_config.get("name"):
+                return jsonify({"error": "MCP server configuration is required"}), 400
+        else:
+            return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
         target_model = data.get("target_model", "").strip()
         if not target_model:
@@ -5814,7 +5824,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         try:
             rag = create_smart_rag(
                 name=name,
+                source_type=source_type,
                 source_path=source_path,
+                mcp_server_config=mcp_server_config,
                 target_model=target_model,
                 embedding_provider=data.get("embedding_provider", "local"),
                 embedding_model=data.get("embedding_model"),
@@ -5850,7 +5862,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             rag = update_smart_rag(
                 rag_id=rag_id,
                 name=data.get("name"),
+                source_type=data.get("source_type"),
                 source_path=data.get("source_path"),
+                mcp_server_config=data.get("mcp_server_config"),
                 target_model=data.get("target_model"),
                 embedding_provider=data.get("embedding_provider"),
                 embedding_model=data.get("embedding_model"),

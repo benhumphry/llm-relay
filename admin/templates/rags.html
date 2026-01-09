@@ -59,8 +59,8 @@ content %}
                     No Smart RAGs Configured
                 </h3>
                 <p class="mt-2 text-base-content/60 max-w-md mx-auto">
-                    Smart RAGs index documents from local folders and inject relevant
-                    context into LLM requests using semantic search.
+                    Smart RAGs index documents from local folders and inject
+                    relevant context into LLM requests using semantic search.
                 </p>
                 <button @click="openAddModal()" class="btn btn-primary mt-4">
                     Create Your First RAG
@@ -78,7 +78,7 @@ content %}
                         <tr>
                             <th class="w-8"></th>
                             <th class="w-28">Name</th>
-                            <th class="w-1/5">Source Path</th>
+                            <th class="w-1/5">Source</th>
                             <th class="w-1/5">Target</th>
                             <th class="w-20">Index</th>
                             <th class="w-24 text-right">Docs</th>
@@ -112,13 +112,30 @@ content %}
                                     </svg>
                                 </td>
                                 <td>
-                                    <div class="font-mono font-medium" x-text="rag.name"></div>
+                                    <div
+                                        class="font-mono font-medium"
+                                        x-text="rag.name"
+                                    ></div>
                                 </td>
                                 <td>
-                                    <div class="font-mono text-sm text-base-content/70 truncate" x-text="rag.source_path" :title="rag.source_path"></div>
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="badge badge-sm"
+                                            :class="rag.source_type === 'mcp' ? 'badge-info' : 'badge-ghost'"
+                                            x-text="rag.source_type === 'mcp' ? 'MCP' : 'Local'"
+                                        ></span>
+                                        <span
+                                            class="font-mono text-sm text-base-content/70 truncate"
+                                            x-text="rag.source_type === 'mcp' ? (rag.mcp_server_config?.name || 'Unknown') : rag.source_path"
+                                            :title="rag.source_type === 'mcp' ? (rag.mcp_server_config?.name || '') : rag.source_path"
+                                        ></span>
+                                    </div>
                                 </td>
                                 <td>
-                                    <div class="font-mono text-sm text-base-content/70" x-text="rag.target_model"></div>
+                                    <div
+                                        class="font-mono text-sm text-base-content/70"
+                                        x-text="rag.target_model"
+                                    ></div>
                                 </td>
                                 <td>
                                     <div class="flex items-center gap-2">
@@ -139,10 +156,16 @@ content %}
                                     </div>
                                 </td>
                                 <td class="text-right">
-                                    <span class="font-mono text-sm" x-text="rag.document_count || 0"></span>
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="rag.document_count || 0"
+                                    ></span>
                                 </td>
                                 <td class="text-right">
-                                    <span class="font-mono text-sm" x-text="rag.chunk_count || 0"></span>
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="rag.chunk_count || 0"
+                                    ></span>
                                 </td>
                                 <td>
                                     <span
@@ -247,73 +270,184 @@ content %}
                                 </td>
                             </tr>
                             <!-- Expanded Details Row -->
-                            <tr x-show="expandedRows.includes(rag.id)" x-transition>
+                            <tr
+                                x-show="expandedRows.includes(rag.id)"
+                                x-transition
+                            >
                                 <td colspan="9" class="bg-base-200 p-0">
-                                    <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                    <div
+                                        class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
+                                    >
                                         <!-- Description -->
-                                        <div x-show="rag.description" class="md:col-span-2">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Description</div>
-                                            <div class="text-sm" x-text="rag.description"></div>
+                                        <div
+                                            x-show="rag.description"
+                                            class="md:col-span-2"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Description
+                                            </div>
+                                            <div
+                                                class="text-sm"
+                                                x-text="rag.description"
+                                            ></div>
                                         </div>
                                         <!-- Embedding Provider -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Embedding</div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Embedding
+                                            </div>
                                             <div class="font-mono text-xs">
-                                                <span x-text="rag.embedding_provider"></span>
-                                                <span x-show="rag.embedding_model" x-text="' / ' + rag.embedding_model"></span>
+                                                <span
+                                                    x-text="rag.embedding_provider"
+                                                ></span>
+                                                <span
+                                                    x-show="rag.embedding_model"
+                                                    x-text="' / ' + rag.embedding_model"
+                                                ></span>
                                             </div>
                                         </div>
                                         <!-- Target Model -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Target Model</div>
-                                            <div class="font-mono text-xs" x-text="rag.target_model"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Target Model
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="rag.target_model"
+                                            ></div>
                                         </div>
                                         <!-- Index Schedule -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Schedule</div>
-                                            <div class="text-xs" x-text="rag.index_schedule || 'Manual only'"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Schedule
+                                            </div>
+                                            <div
+                                                class="text-xs"
+                                                x-text="rag.index_schedule || 'Manual only'"
+                                            ></div>
                                         </div>
                                         <!-- Last Indexed -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Last Indexed</div>
-                                            <div class="text-xs" x-text="rag.last_indexed ? new Date(rag.last_indexed).toLocaleString() : 'Never'"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Last Indexed
+                                            </div>
+                                            <div
+                                                class="text-xs"
+                                                x-text="rag.last_indexed ? new Date(rag.last_indexed).toLocaleString() : 'Never'"
+                                            ></div>
                                         </div>
                                         <!-- Retrieval Settings -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Retrieval</div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Retrieval
+                                            </div>
                                             <div class="text-xs">
-                                                Max: <span class="font-mono" x-text="rag.max_results"></span>,
-                                                Threshold: <span class="font-mono" x-text="rag.similarity_threshold"></span>
+                                                Max:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="rag.max_results"
+                                                ></span
+                                                >, Threshold:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="rag.similarity_threshold"
+                                                ></span>
                                             </div>
                                         </div>
                                         <!-- Chunking -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Chunking</div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Chunking
+                                            </div>
                                             <div class="text-xs">
-                                                Size: <span class="font-mono" x-text="rag.chunk_size"></span>,
-                                                Overlap: <span class="font-mono" x-text="rag.chunk_overlap"></span>
+                                                Size:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="rag.chunk_size"
+                                                ></span
+                                                >, Overlap:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="rag.chunk_overlap"
+                                                ></span>
                                             </div>
                                         </div>
                                         <!-- Error (if any) -->
-                                        <div x-show="rag.index_error" class="md:col-span-2">
-                                            <div class="text-xs text-error uppercase mb-1">Index Error</div>
-                                            <div class="text-xs text-error" x-text="rag.index_error"></div>
+                                        <div
+                                            x-show="rag.index_error"
+                                            class="md:col-span-2"
+                                        >
+                                            <div
+                                                class="text-xs text-error uppercase mb-1"
+                                            >
+                                                Index Error
+                                            </div>
+                                            <div
+                                                class="text-xs text-error"
+                                                x-text="rag.index_error"
+                                            ></div>
                                         </div>
                                         <!-- All Tags -->
-                                        <div x-show="rag.tags && rag.tags.length > 0">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Tags</div>
+                                        <div
+                                            x-show="rag.tags && rag.tags.length > 0"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Tags
+                                            </div>
                                             <div class="flex flex-wrap gap-1">
-                                                <template x-for="tag in rag.tags" :key="tag">
-                                                    <span class="badge badge-primary badge-sm" x-text="tag"></span>
+                                                <template
+                                                    x-for="tag in rag.tags"
+                                                    :key="tag"
+                                                >
+                                                    <span
+                                                        class="badge badge-primary badge-sm"
+                                                        x-text="tag"
+                                                    ></span>
                                                 </template>
                                             </div>
                                         </div>
                                         <!-- Stats -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Statistics</div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Statistics
+                                            </div>
                                             <div class="text-xs space-y-1">
-                                                <div>Total requests: <span class="font-mono" x-text="rag.total_requests || 0"></span></div>
-                                                <div>Context injected: <span class="font-mono" x-text="rag.context_injections || 0"></span> (<span x-text="(rag.injection_rate || 0).toFixed(0)"></span>%)</div>
+                                                <div>
+                                                    Total requests:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="rag.total_requests || 0"
+                                                    ></span>
+                                                </div>
+                                                <div>
+                                                    Context injected:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="rag.context_injections || 0"
+                                                    ></span>
+                                                    (<span
+                                                        x-text="(rag.injection_rate || 0).toFixed(0)"
+                                                    ></span
+                                                    >%)
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -329,7 +463,10 @@ content %}
     <!-- Add/Edit Modal -->
     <div class="modal" :class="{ 'modal-open': showModal }">
         <div class="modal-box max-w-2xl">
-            <h3 class="font-bold text-lg" x-text="editingRag ? 'Edit RAG' : 'Add RAG'"></h3>
+            <h3
+                class="font-bold text-lg"
+                x-text="editingRag ? 'Edit RAG' : 'Add RAG'"
+            ></h3>
             <form @submit.prevent="saveRag()">
                 <!-- Name -->
                 <div class="form-control mt-4">
@@ -346,12 +483,33 @@ content %}
                         :disabled="editingRag"
                     />
                     <label class="label" x-show="formErrors.name">
-                        <span class="label-text-alt text-error" x-text="formErrors.name"></span>
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.name"
+                        ></span>
                     </label>
                 </div>
 
-                <!-- Source Path -->
+                <!-- Source Type -->
                 <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Source Type</span>
+                    </label>
+                    <select
+                        x-model="form.source_type"
+                        @change="onSourceTypeChange()"
+                        class="select select-bordered"
+                    >
+                        <option value="local">Local Filesystem</option>
+                        <option value="mcp">MCP Server</option>
+                    </select>
+                </div>
+
+                <!-- Source Path (for local source) -->
+                <div
+                    class="form-control mt-4"
+                    x-show="form.source_type === 'local'"
+                >
                     <label class="label">
                         <span class="label-text">Source Path</span>
                     </label>
@@ -361,11 +519,135 @@ content %}
                         class="input input-bordered font-mono"
                         :class="{ 'input-error': formErrors.source_path }"
                         placeholder="e.g., /data/documents"
-                        required
+                        :required="form.source_type === 'local'"
                     />
                     <label class="label">
-                        <span class="label-text-alt">Docker-mounted folder containing documents to index</span>
+                        <span class="label-text-alt"
+                            >Docker-mounted folder containing documents to
+                            index</span
+                        >
                     </label>
+                </div>
+
+                <!-- MCP Server Configuration (for mcp source) -->
+                <div x-show="form.source_type === 'mcp'" class="mt-4 space-y-4">
+                    <div class="alert alert-info">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-5 w-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <span class="text-sm"
+                            >Connect to an MCP server to index documents from
+                            Google Drive, Notion, S3, etc.</span
+                        >
+                    </div>
+
+                    <!-- MCP Server Name -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Server Name</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.mcp_name"
+                            class="input input-bordered"
+                            placeholder="e.g., gdrive, notion"
+                            :required="form.source_type === 'mcp'"
+                        />
+                    </div>
+
+                    <!-- MCP Transport Type -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Transport</span>
+                        </label>
+                        <select
+                            x-model="form.mcp_transport"
+                            class="select select-bordered"
+                        >
+                            <option value="stdio">Stdio (subprocess)</option>
+                            <option value="http">HTTP</option>
+                        </select>
+                    </div>
+
+                    <!-- Stdio Configuration -->
+                    <template x-if="form.mcp_transport === 'stdio'">
+                        <div class="space-y-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Command</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    x-model="form.mcp_command"
+                                    class="input input-bordered font-mono"
+                                    placeholder="e.g., npx, uvx, python"
+                                />
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Arguments</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    x-model="form.mcp_args"
+                                    class="input input-bordered font-mono"
+                                    placeholder="e.g., -y @anthropic/mcp-server-gdrive"
+                                />
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Space-separated arguments</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- HTTP Configuration -->
+                    <template x-if="form.mcp_transport === 'http'">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">MCP Server URL</span>
+                            </label>
+                            <input
+                                type="text"
+                                x-model="form.mcp_url"
+                                class="input input-bordered font-mono"
+                                placeholder="e.g., http://localhost:8000/mcp"
+                            />
+                        </div>
+                    </template>
+
+                    <!-- URI Patterns (optional) -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >URI Patterns (optional)</span
+                            >
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.mcp_uri_patterns"
+                            class="input input-bordered font-mono"
+                            placeholder="e.g., file://**/*.pdf, gdrive://**/*"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Comma-separated glob patterns to filter
+                                resources</span
+                            >
+                        </label>
+                    </div>
                 </div>
 
                 <!-- Target Model -->
@@ -379,12 +661,20 @@ content %}
                         required
                     >
                         <option value="">Select a model...</option>
-                        <template x-for="model in availableModels" :key="model.id">
-                            <option :value="model.id" x-text="`${model.id} (${model.family})`"></option>
+                        <template
+                            x-for="model in availableModels"
+                            :key="model.id"
+                        >
+                            <option
+                                :value="model.id"
+                                x-text="`${model.id} (${model.family})`"
+                            ></option>
                         </template>
                     </select>
                     <label class="label">
-                        <span class="label-text-alt">Model to forward requests to</span>
+                        <span class="label-text-alt"
+                            >Model to forward requests to</span
+                        >
                     </label>
                 </div>
 
@@ -398,25 +688,39 @@ content %}
                         @change="onEmbeddingProviderChange()"
                         class="select select-bordered"
                     >
-                        <option value="local">Local (sentence-transformers)</option>
+                        <option value="local">
+                            Local (sentence-transformers)
+                        </option>
                         <template x-if="embeddingModels.ollama?.available">
                             <option value="ollama">Ollama</option>
                         </template>
-                        <template x-for="provider in embeddingModels.providers || []" :key="provider.name">
-                            <option :value="provider.name" x-text="provider.name"></option>
+                        <template
+                            x-for="provider in embeddingModels.providers || []"
+                            :key="provider.name"
+                        >
+                            <option
+                                :value="provider.name"
+                                x-text="provider.name"
+                            ></option>
                         </template>
                     </select>
                 </div>
 
                 <!-- Local Embedding Info -->
                 <div x-show="form.embedding_provider === 'local'" class="mt-2">
-                    <div class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3">
-                        Uses bundled <span class="font-mono">BAAI/bge-small-en-v1.5</span> model. No external dependencies required.
+                    <div
+                        class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
+                    >
+                        Uses bundled
+                        <span class="font-mono">BAAI/bge-small-en-v1.5</span>
+                        model. No external dependencies required.
                     </div>
                 </div>
 
                 <!-- Ollama Instance & Model (shown when ollama selected) -->
-                <template x-if="form.embedding_provider === 'ollama' && embeddingModels.ollama?.available">
+                <template
+                    x-if="form.embedding_provider === 'ollama' && embeddingModels.ollama?.available"
+                >
                     <div class="grid grid-cols-2 gap-4 mt-2">
                         <div class="form-control">
                             <label class="label">
@@ -427,8 +731,14 @@ content %}
                                 @change="onOllamaInstanceChange()"
                                 class="select select-bordered"
                             >
-                                <template x-for="instance in embeddingModels.ollama.instances" :key="instance.name">
-                                    <option :value="instance.name" x-text="instance.name + ' (' + instance.url + ')'"></option>
+                                <template
+                                    x-for="instance in embeddingModels.ollama.instances"
+                                    :key="instance.name"
+                                >
+                                    <option
+                                        :value="instance.name"
+                                        x-text="instance.name + ' (' + instance.url + ')'"
+                                    ></option>
                                 </template>
                             </select>
                         </div>
@@ -441,8 +751,14 @@ content %}
                                 class="select select-bordered font-mono"
                             >
                                 <option value="">Select a model...</option>
-                                <template x-for="model in getOllamaModels()" :key="model.id">
-                                    <option :value="model.id" x-text="model.name"></option>
+                                <template
+                                    x-for="model in getOllamaModels()"
+                                    :key="model.id"
+                                >
+                                    <option
+                                        :value="model.id"
+                                        x-text="model.name"
+                                    ></option>
                                 </template>
                             </select>
                         </div>
@@ -460,8 +776,14 @@ content %}
                             class="select select-bordered font-mono"
                         >
                             <option value="">Select a model...</option>
-                            <template x-for="model in getProviderModels()" :key="model.id">
-                                <option :value="model.id" x-text="model.name"></option>
+                            <template
+                                x-for="model in getProviderModels()"
+                                :key="model.id"
+                            >
+                                <option
+                                    :value="model.id"
+                                    x-text="model.name"
+                                ></option>
                             </template>
                         </select>
                     </div>
@@ -484,24 +806,38 @@ content %}
                         <template x-if="visionModels.ollama?.available">
                             <option value="ollama">Ollama</option>
                         </template>
-                        <template x-for="provider in visionModels.providers || []" :key="provider.name">
-                            <option :value="provider.name" x-text="provider.name"></option>
+                        <template
+                            x-for="provider in visionModels.providers || []"
+                            :key="provider.name"
+                        >
+                            <option
+                                :value="provider.name"
+                                x-text="provider.name"
+                            ></option>
                         </template>
                     </select>
                     <label class="label">
-                        <span class="label-text-alt">For parsing complex PDFs, images, and scanned documents</span>
+                        <span class="label-text-alt"
+                            >For parsing complex PDFs, images, and scanned
+                            documents</span
+                        >
                     </label>
                 </div>
 
                 <!-- Local Vision Info -->
                 <div x-show="form.vision_provider === 'local'" class="mt-2">
-                    <div class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3">
-                        Uses bundled Docling models for document parsing. Runs on CPU/GPU.
+                    <div
+                        class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
+                    >
+                        Uses bundled Docling models for document parsing. Runs
+                        on CPU/GPU.
                     </div>
                 </div>
 
                 <!-- Ollama Vision Instance & Model -->
-                <template x-if="form.vision_provider === 'ollama' && visionModels.ollama?.available">
+                <template
+                    x-if="form.vision_provider === 'ollama' && visionModels.ollama?.available"
+                >
                     <div class="grid grid-cols-2 gap-4 mt-2">
                         <div class="form-control">
                             <label class="label">
@@ -512,8 +848,14 @@ content %}
                                 @change="onVisionOllamaInstanceChange()"
                                 class="select select-bordered"
                             >
-                                <template x-for="instance in visionModels.ollama.instances" :key="instance.name">
-                                    <option :value="instance.name" x-text="instance.name + ' (' + instance.url + ')'"></option>
+                                <template
+                                    x-for="instance in visionModels.ollama.instances"
+                                    :key="instance.name"
+                                >
+                                    <option
+                                        :value="instance.name"
+                                        x-text="instance.name + ' (' + instance.url + ')'"
+                                    ></option>
                                 </template>
                             </select>
                         </div>
@@ -526,8 +868,14 @@ content %}
                                 class="select select-bordered font-mono"
                             >
                                 <option value="">Select a model...</option>
-                                <template x-for="model in getOllamaVisionModels()" :key="model.id">
-                                    <option :value="model.id" x-text="model.name"></option>
+                                <template
+                                    x-for="model in getOllamaVisionModels()"
+                                    :key="model.id"
+                                >
+                                    <option
+                                        :value="model.id"
+                                        x-text="model.name"
+                                    ></option>
                                 </template>
                             </select>
                         </div>
@@ -545,8 +893,14 @@ content %}
                             class="select select-bordered font-mono"
                         >
                             <option value="">Select a model...</option>
-                            <template x-for="model in getProviderVisionModels()" :key="model.id">
-                                <option :value="model.id" x-text="model.name"></option>
+                            <template
+                                x-for="model in getProviderVisionModels()"
+                                :key="model.id"
+                            >
+                                <option
+                                    :value="model.id"
+                                    x-text="model.name"
+                                ></option>
                             </template>
                         </select>
                     </div>
@@ -565,11 +919,16 @@ content %}
                         <option value="0 * * * *">Every hour</option>
                         <option value="0 */6 * * *">Every 6 hours</option>
                         <option value="0 2 * * *">Daily at 2 AM</option>
-                        <option value="0 2 * * 0">Weekly on Sunday at 2 AM</option>
+                        <option value="0 2 * * 0">
+                            Weekly on Sunday at 2 AM
+                        </option>
                         <option value="custom">Custom cron...</option>
                     </select>
                 </div>
-                <div class="form-control mt-2" x-show="form.index_schedule === 'custom'">
+                <div
+                    class="form-control mt-2"
+                    x-show="form.index_schedule === 'custom'"
+                >
                     <input
                         type="text"
                         x-model="form.custom_schedule"
@@ -659,7 +1018,9 @@ content %}
                         placeholder="e.g., docs, team-a"
                     />
                     <label class="label">
-                        <span class="label-text-alt">Comma-separated tags for usage tracking</span>
+                        <span class="label-text-alt"
+                            >Comma-separated tags for usage tracking</span
+                        >
                     </label>
                 </div>
 
@@ -689,7 +1050,11 @@ content %}
                 </div>
 
                 <div class="modal-action">
-                    <button type="button" @click="closeModal()" class="btn btn-ghost">
+                    <button
+                        type="button"
+                        @click="closeModal()"
+                        class="btn btn-ghost"
+                    >
                         Cancel
                     </button>
                     <button
@@ -698,7 +1063,9 @@ content %}
                         :class="{ 'loading': saving }"
                         :disabled="saving"
                     >
-                        <span x-text="editingRag ? 'Save Changes' : 'Create RAG'"></span>
+                        <span
+                            x-text="editingRag ? 'Save Changes' : 'Create RAG'"
+                        ></span>
                     </button>
                 </div>
             </form>
@@ -712,8 +1079,11 @@ content %}
             <h3 class="font-bold text-lg">Delete RAG</h3>
             <p class="py-4">
                 Are you sure you want to delete the RAG
-                <span class="font-mono font-bold" x-text="deletingRag?.name"></span>?
-                This will also delete the indexed documents from ChromaDB.
+                <span
+                    class="font-mono font-bold"
+                    x-text="deletingRag?.name"
+                ></span
+                >? This will also delete the indexed documents from ChromaDB.
             </p>
             <div class="modal-action">
                 <button @click="showDeleteModal = false" class="btn btn-ghost">
@@ -751,26 +1121,35 @@ content %}
             saving: false,
             deleting: false,
             form: {
-                name: '',
-                source_path: '',
-                target_model: '',
-                embedding_provider: 'local',
-                embedding_model: '',
-                ollama_instance: '',
-                ollama_url: '',
-                vision_provider: 'local',
-                vision_model: '',
-                vision_ollama_instance: '',
-                vision_ollama_url: '',
-                index_schedule: '',
-                custom_schedule: '',
+                name: "",
+                source_type: "local",
+                source_path: "",
+                // MCP fields
+                mcp_name: "",
+                mcp_transport: "stdio",
+                mcp_command: "",
+                mcp_args: "",
+                mcp_url: "",
+                mcp_uri_patterns: "",
+                // Other fields
+                target_model: "",
+                embedding_provider: "local",
+                embedding_model: "",
+                ollama_instance: "",
+                ollama_url: "",
+                vision_provider: "local",
+                vision_model: "",
+                vision_ollama_instance: "",
+                vision_ollama_url: "",
+                index_schedule: "",
+                custom_schedule: "",
                 max_results: 5,
                 similarity_threshold: 0.7,
                 max_context_tokens: 4000,
                 chunk_size: 512,
                 chunk_overlap: 50,
-                tagsInput: '',
-                description: '',
+                tagsInput: "",
+                description: "",
                 enabled: true,
             },
             formErrors: {},
@@ -787,58 +1166,77 @@ content %}
 
             async loadRags() {
                 try {
-                    const response = await fetch('/api/rags');
+                    const response = await fetch("/api/rags");
                     if (response.ok) {
                         this.rags = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load RAGs:', error);
+                    console.error("Failed to load RAGs:", error);
                 }
             },
 
             async loadAvailableModels() {
                 try {
-                    const response = await fetch('/api/rags/models');
+                    const response = await fetch("/api/rags/models");
                     if (response.ok) {
                         this.availableModels = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load available models:', error);
+                    console.error("Failed to load available models:", error);
                 }
             },
 
             async loadEmbeddingModels() {
                 try {
-                    const response = await fetch('/api/rags/embedding-models');
+                    const response = await fetch("/api/rags/embedding-models");
                     if (response.ok) {
                         this.embeddingModels = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load embedding models:', error);
+                    console.error("Failed to load embedding models:", error);
                 }
             },
 
             async loadVisionModels() {
                 try {
-                    const response = await fetch('/api/rags/vision-models');
+                    const response = await fetch("/api/rags/vision-models");
                     if (response.ok) {
                         this.visionModels = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load vision models:', error);
+                    console.error("Failed to load vision models:", error);
+                }
+            },
+
+            onSourceTypeChange() {
+                // Reset source-specific fields when type changes
+                if (this.form.source_type === "local") {
+                    this.form.mcp_name = "";
+                    this.form.mcp_transport = "stdio";
+                    this.form.mcp_command = "";
+                    this.form.mcp_args = "";
+                    this.form.mcp_url = "";
+                    this.form.mcp_uri_patterns = "";
+                } else {
+                    this.form.source_path = "";
                 }
             },
 
             onEmbeddingProviderChange() {
                 // Reset model selection when provider changes
-                this.form.embedding_model = '';
-                this.form.ollama_instance = '';
-                this.form.ollama_url = '';
+                this.form.embedding_model = "";
+                this.form.ollama_instance = "";
+                this.form.ollama_url = "";
 
                 // Set defaults based on provider
-                if (this.form.embedding_provider === 'ollama' && this.embeddingModels.ollama?.instances?.length > 0) {
-                    this.form.ollama_instance = this.embeddingModels.ollama.instances[0].name;
-                    this.form.ollama_url = this.embeddingModels.ollama.instances[0].url;
+                if (
+                    this.form.embedding_provider === "ollama" &&
+                    this.embeddingModels.ollama?.instances?.length > 0
+                ) {
+                    this.form.ollama_instance =
+                        this.embeddingModels.ollama.instances[0].name;
+                    this.form.ollama_url =
+                        this.embeddingModels.ollama.instances[0].url;
                 } else if (this.isProviderEmbedding()) {
                     const providerModels = this.getProviderModels();
                     if (providerModels.length > 0) {
@@ -849,40 +1247,56 @@ content %}
 
             onOllamaInstanceChange() {
                 // Update URL when instance changes
-                const instance = this.embeddingModels.ollama?.instances?.find(i => i.name === this.form.ollama_instance);
+                const instance = this.embeddingModels.ollama?.instances?.find(
+                    (i) => i.name === this.form.ollama_instance,
+                );
                 if (instance) {
                     this.form.ollama_url = instance.url;
-                    this.form.embedding_model = ''; // Reset model selection
+                    this.form.embedding_model = ""; // Reset model selection
                 }
             },
 
             getOllamaModels() {
-                const instance = this.embeddingModels.ollama?.instances?.find(i => i.name === this.form.ollama_instance);
+                const instance = this.embeddingModels.ollama?.instances?.find(
+                    (i) => i.name === this.form.ollama_instance,
+                );
                 return instance?.models || [];
             },
 
             isProviderEmbedding() {
                 // Check if current selection is a provider (not local or ollama)
-                if (this.form.embedding_provider === 'local' || this.form.embedding_provider === 'ollama') {
+                if (
+                    this.form.embedding_provider === "local" ||
+                    this.form.embedding_provider === "ollama"
+                ) {
                     return false;
                 }
-                return (this.embeddingModels.providers || []).some(p => p.name === this.form.embedding_provider);
+                return (this.embeddingModels.providers || []).some(
+                    (p) => p.name === this.form.embedding_provider,
+                );
             },
 
             getProviderModels() {
-                const provider = (this.embeddingModels.providers || []).find(p => p.name === this.form.embedding_provider);
+                const provider = (this.embeddingModels.providers || []).find(
+                    (p) => p.name === this.form.embedding_provider,
+                );
                 return provider?.models || [];
             },
 
             // Vision model helpers
             onVisionProviderChange() {
-                this.form.vision_model = '';
-                this.form.vision_ollama_instance = '';
-                this.form.vision_ollama_url = '';
+                this.form.vision_model = "";
+                this.form.vision_ollama_instance = "";
+                this.form.vision_ollama_url = "";
 
-                if (this.form.vision_provider === 'ollama' && this.visionModels.ollama?.instances?.length > 0) {
-                    this.form.vision_ollama_instance = this.visionModels.ollama.instances[0].name;
-                    this.form.vision_ollama_url = this.visionModels.ollama.instances[0].url;
+                if (
+                    this.form.vision_provider === "ollama" &&
+                    this.visionModels.ollama?.instances?.length > 0
+                ) {
+                    this.form.vision_ollama_instance =
+                        this.visionModels.ollama.instances[0].name;
+                    this.form.vision_ollama_url =
+                        this.visionModels.ollama.instances[0].url;
                 } else if (this.isProviderVision()) {
                     const providerModels = this.getProviderVisionModels();
                     if (providerModels.length > 0) {
@@ -892,27 +1306,38 @@ content %}
             },
 
             onVisionOllamaInstanceChange() {
-                const instance = this.visionModels.ollama?.instances?.find(i => i.name === this.form.vision_ollama_instance);
+                const instance = this.visionModels.ollama?.instances?.find(
+                    (i) => i.name === this.form.vision_ollama_instance,
+                );
                 if (instance) {
                     this.form.vision_ollama_url = instance.url;
-                    this.form.vision_model = '';
+                    this.form.vision_model = "";
                 }
             },
 
             getOllamaVisionModels() {
-                const instance = this.visionModels.ollama?.instances?.find(i => i.name === this.form.vision_ollama_instance);
+                const instance = this.visionModels.ollama?.instances?.find(
+                    (i) => i.name === this.form.vision_ollama_instance,
+                );
                 return instance?.models || [];
             },
 
             isProviderVision() {
-                if (this.form.vision_provider === 'local' || this.form.vision_provider === 'ollama') {
+                if (
+                    this.form.vision_provider === "local" ||
+                    this.form.vision_provider === "ollama"
+                ) {
                     return false;
                 }
-                return (this.visionModels.providers || []).some(p => p.name === this.form.vision_provider);
+                return (this.visionModels.providers || []).some(
+                    (p) => p.name === this.form.vision_provider,
+                );
             },
 
             getProviderVisionModels() {
-                const provider = (this.visionModels.providers || []).find(p => p.name === this.form.vision_provider);
+                const provider = (this.visionModels.providers || []).find(
+                    (p) => p.name === this.form.vision_provider,
+                );
                 return provider?.models || [];
             },
 
@@ -928,26 +1353,35 @@ content %}
             openAddModal() {
                 this.editingRag = null;
                 this.form = {
-                    name: '',
-                    source_path: '/data/documents',
-                    target_model: '',
-                    embedding_provider: 'local',
-                    embedding_model: '',
-                    ollama_instance: '',
-                    ollama_url: '',
-                    vision_provider: 'local',
-                    vision_model: '',
-                    vision_ollama_instance: '',
-                    vision_ollama_url: '',
-                    index_schedule: '',
-                    custom_schedule: '',
+                    name: "",
+                    source_type: "local",
+                    source_path: "/data/documents",
+                    // MCP fields
+                    mcp_name: "",
+                    mcp_transport: "stdio",
+                    mcp_command: "",
+                    mcp_args: "",
+                    mcp_url: "",
+                    mcp_uri_patterns: "",
+                    // Other fields
+                    target_model: "",
+                    embedding_provider: "local",
+                    embedding_model: "",
+                    ollama_instance: "",
+                    ollama_url: "",
+                    vision_provider: "local",
+                    vision_model: "",
+                    vision_ollama_instance: "",
+                    vision_ollama_url: "",
+                    index_schedule: "",
+                    custom_schedule: "",
                     max_results: 5,
                     similarity_threshold: 0.7,
                     max_context_tokens: 4000,
                     chunk_size: 512,
                     chunk_overlap: 50,
-                    tagsInput: '',
-                    description: '',
+                    tagsInput: "",
+                    description: "",
                     enabled: true,
                 };
                 this.formErrors = {};
@@ -956,57 +1390,90 @@ content %}
 
             openEditModal(rag) {
                 this.editingRag = rag;
-                const schedulePresets = ['', '0 * * * *', '0 */6 * * *', '0 2 * * *', '0 2 * * 0'];
-                const isPreset = schedulePresets.includes(rag.index_schedule || '');
+                const schedulePresets = [
+                    "",
+                    "0 * * * *",
+                    "0 */6 * * *",
+                    "0 2 * * *",
+                    "0 2 * * 0",
+                ];
+                const isPreset = schedulePresets.includes(
+                    rag.index_schedule || "",
+                );
 
                 // Parse embedding provider - could be "ollama:instance_name" or just "provider_name"
-                let embeddingProvider = rag.embedding_provider || 'local';
-                let ollamaInstance = '';
-                if (embeddingProvider.startsWith('ollama:')) {
-                    ollamaInstance = embeddingProvider.split(':')[1];
-                    embeddingProvider = 'ollama';
-                } else if (embeddingProvider === 'ollama' && rag.ollama_url) {
+                let embeddingProvider = rag.embedding_provider || "local";
+                let ollamaInstance = "";
+                if (embeddingProvider.startsWith("ollama:")) {
+                    ollamaInstance = embeddingProvider.split(":")[1];
+                    embeddingProvider = "ollama";
+                } else if (embeddingProvider === "ollama" && rag.ollama_url) {
                     // Find instance by URL
-                    const instance = (this.embeddingModels.ollama?.instances || []).find(i => i.url === rag.ollama_url);
-                    ollamaInstance = instance?.name || '';
+                    const instance = (
+                        this.embeddingModels.ollama?.instances || []
+                    ).find((i) => i.url === rag.ollama_url);
+                    ollamaInstance = instance?.name || "";
                 }
 
                 // Parse vision provider similarly
-                let visionProvider = rag.vision_provider || 'local';
-                let visionOllamaInstance = '';
-                if (visionProvider.startsWith('ollama:')) {
-                    visionOllamaInstance = visionProvider.split(':')[1];
-                    visionProvider = 'ollama';
-                } else if (visionProvider === 'ollama' && rag.vision_ollama_url) {
-                    const instance = (this.visionModels.ollama?.instances || []).find(i => i.url === rag.vision_ollama_url);
-                    visionOllamaInstance = instance?.name || '';
+                let visionProvider = rag.vision_provider || "local";
+                let visionOllamaInstance = "";
+                if (visionProvider.startsWith("ollama:")) {
+                    visionOllamaInstance = visionProvider.split(":")[1];
+                    visionProvider = "ollama";
+                } else if (
+                    visionProvider === "ollama" &&
+                    rag.vision_ollama_url
+                ) {
+                    const instance = (
+                        this.visionModels.ollama?.instances || []
+                    ).find((i) => i.url === rag.vision_ollama_url);
+                    visionOllamaInstance = instance?.name || "";
                 }
 
                 // Save model values to restore after DOM renders with options
-                const savedEmbeddingModel = rag.embedding_model || '';
-                const savedVisionModel = rag.vision_model || '';
+                const savedEmbeddingModel = rag.embedding_model || "";
+                const savedVisionModel = rag.vision_model || "";
+
+                // Parse MCP config if present
+                const mcpConfig = rag.mcp_server_config || {};
+                const mcpArgs = (mcpConfig.args || []).join(" ");
+                const mcpUriPatterns = (mcpConfig.uri_patterns || []).join(
+                    ", ",
+                );
 
                 this.form = {
                     name: rag.name,
-                    source_path: rag.source_path,
-                    target_model: '',
+                    source_type: rag.source_type || "local",
+                    source_path: rag.source_path || "",
+                    // MCP fields
+                    mcp_name: mcpConfig.name || "",
+                    mcp_transport: mcpConfig.transport || "stdio",
+                    mcp_command: mcpConfig.command || "",
+                    mcp_args: mcpArgs,
+                    mcp_url: mcpConfig.url || "",
+                    mcp_uri_patterns: mcpUriPatterns,
+                    // Other fields
+                    target_model: "",
                     embedding_provider: embeddingProvider,
-                    embedding_model: '',  // Set after options render
+                    embedding_model: "", // Set after options render
                     ollama_instance: ollamaInstance,
-                    ollama_url: rag.ollama_url || '',
+                    ollama_url: rag.ollama_url || "",
                     vision_provider: visionProvider,
-                    vision_model: '',  // Set after options render
+                    vision_model: "", // Set after options render
                     vision_ollama_instance: visionOllamaInstance,
-                    vision_ollama_url: rag.vision_ollama_url || '',
-                    index_schedule: isPreset ? (rag.index_schedule || '') : 'custom',
-                    custom_schedule: isPreset ? '' : (rag.index_schedule || ''),
+                    vision_ollama_url: rag.vision_ollama_url || "",
+                    index_schedule: isPreset
+                        ? rag.index_schedule || ""
+                        : "custom",
+                    custom_schedule: isPreset ? "" : rag.index_schedule || "",
                     max_results: rag.max_results,
                     similarity_threshold: rag.similarity_threshold,
                     max_context_tokens: rag.max_context_tokens,
                     chunk_size: rag.chunk_size,
                     chunk_overlap: rag.chunk_overlap,
-                    tagsInput: (rag.tags || []).join(', '),
-                    description: rag.description || '',
+                    tagsInput: (rag.tags || []).join(", "),
+                    description: rag.description || "",
                     enabled: rag.enabled,
                 };
                 this.formErrors = {};
@@ -1031,18 +1498,22 @@ content %}
                 this.saving = true;
 
                 const tags = this.form.tagsInput
-                    .split(',')
-                    .map(t => t.trim().toLowerCase())
-                    .filter(t => t.length > 0);
+                    .split(",")
+                    .map((t) => t.trim().toLowerCase())
+                    .filter((t) => t.length > 0);
 
-                const schedule = this.form.index_schedule === 'custom'
-                    ? this.form.custom_schedule
-                    : this.form.index_schedule;
+                const schedule =
+                    this.form.index_schedule === "custom"
+                        ? this.form.custom_schedule
+                        : this.form.index_schedule;
 
                 // Format embedding provider - for Ollama, include instance name
                 let embeddingProvider = this.form.embedding_provider;
                 let ollamaUrl = null;
-                if (this.form.embedding_provider === 'ollama' && this.form.ollama_instance) {
+                if (
+                    this.form.embedding_provider === "ollama" &&
+                    this.form.ollama_instance
+                ) {
                     embeddingProvider = `ollama:${this.form.ollama_instance}`;
                     ollamaUrl = this.form.ollama_url;
                 }
@@ -1050,14 +1521,42 @@ content %}
                 // Format vision provider similarly
                 let visionProvider = this.form.vision_provider;
                 let visionOllamaUrl = null;
-                if (this.form.vision_provider === 'ollama' && this.form.vision_ollama_instance) {
+                if (
+                    this.form.vision_provider === "ollama" &&
+                    this.form.vision_ollama_instance
+                ) {
                     visionProvider = `ollama:${this.form.vision_ollama_instance}`;
                     visionOllamaUrl = this.form.vision_ollama_url;
                 }
 
+                // Build MCP server config if using MCP source
+                let mcpServerConfig = null;
+                if (this.form.source_type === "mcp") {
+                    const uriPatterns = this.form.mcp_uri_patterns
+                        .split(",")
+                        .map((p) => p.trim())
+                        .filter((p) => p.length > 0);
+
+                    mcpServerConfig = {
+                        name: this.form.mcp_name.trim(),
+                        transport: this.form.mcp_transport,
+                        command: this.form.mcp_command.trim() || null,
+                        args: this.form.mcp_args
+                            .split(/\s+/)
+                            .filter((a) => a.length > 0),
+                        url: this.form.mcp_url.trim() || null,
+                        uri_patterns: uriPatterns,
+                    };
+                }
+
                 const payload = {
                     name: this.form.name.toLowerCase().trim(),
-                    source_path: this.form.source_path.trim(),
+                    source_type: this.form.source_type,
+                    source_path:
+                        this.form.source_type === "local"
+                            ? this.form.source_path.trim()
+                            : null,
+                    mcp_server_config: mcpServerConfig,
                     target_model: this.form.target_model,
                     embedding_provider: embeddingProvider,
                     embedding_model: this.form.embedding_model || null,
@@ -1067,7 +1566,9 @@ content %}
                     vision_ollama_url: visionOllamaUrl,
                     index_schedule: schedule || null,
                     max_results: parseInt(this.form.max_results),
-                    similarity_threshold: parseFloat(this.form.similarity_threshold),
+                    similarity_threshold: parseFloat(
+                        this.form.similarity_threshold,
+                    ),
                     max_context_tokens: parseInt(this.form.max_context_tokens),
                     chunk_size: parseInt(this.form.chunk_size),
                     chunk_overlap: parseInt(this.form.chunk_overlap),
@@ -1079,24 +1580,24 @@ content %}
                 try {
                     const url = this.editingRag
                         ? `/api/rags/${this.editingRag.id}`
-                        : '/api/rags';
-                    const method = this.editingRag ? 'PUT' : 'POST';
+                        : "/api/rags";
+                    const method = this.editingRag ? "PUT" : "POST";
 
                     const response = await fetch(url, {
                         method: method,
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(payload),
                     });
 
                     const data = await response.json();
 
                     if (!response.ok) {
-                        if (data.error && data.error.includes('name')) {
+                        if (data.error && data.error.includes("name")) {
                             this.formErrors.name = data.error;
-                        } else if (data.error && data.error.includes('path')) {
+                        } else if (data.error && data.error.includes("path")) {
                             this.formErrors.source_path = data.error;
                         } else {
-                            alert(data.error || 'Failed to save RAG');
+                            alert(data.error || "Failed to save RAG");
                         }
                         return;
                     }
@@ -1104,8 +1605,8 @@ content %}
                     await this.loadRags();
                     this.closeModal();
                 } catch (error) {
-                    console.error('Failed to save RAG:', error);
-                    alert('Failed to save RAG');
+                    console.error("Failed to save RAG:", error);
+                    alert("Failed to save RAG");
                 } finally {
                     this.saving = false;
                 }
@@ -1115,20 +1616,22 @@ content %}
                 this.indexingRags.push(rag.id);
                 try {
                     const response = await fetch(`/api/rags/${rag.id}/index`, {
-                        method: 'POST',
+                        method: "POST",
                     });
 
                     if (!response.ok) {
                         const data = await response.json();
-                        alert(data.error || 'Failed to start indexing');
+                        alert(data.error || "Failed to start indexing");
                     }
 
                     // Poll for status updates
                     this.pollIndexStatus(rag.id);
                 } catch (error) {
-                    console.error('Failed to start indexing:', error);
-                    alert('Failed to start indexing');
-                    this.indexingRags = this.indexingRags.filter(id => id !== rag.id);
+                    console.error("Failed to start indexing:", error);
+                    alert("Failed to start indexing");
+                    this.indexingRags = this.indexingRags.filter(
+                        (id) => id !== rag.id,
+                    );
                 }
             },
 
@@ -1136,11 +1639,13 @@ content %}
                 // Poll every 2 seconds until indexing is done
                 const poll = async () => {
                     await this.loadRags();
-                    const rag = this.rags.find(r => r.id === ragId);
-                    if (rag && rag.index_status === 'indexing') {
+                    const rag = this.rags.find((r) => r.id === ragId);
+                    if (rag && rag.index_status === "indexing") {
                         setTimeout(poll, 2000);
                     } else {
-                        this.indexingRags = this.indexingRags.filter(id => id !== ragId);
+                        this.indexingRags = this.indexingRags.filter(
+                            (id) => id !== ragId,
+                        );
                     }
                 };
                 setTimeout(poll, 2000);
@@ -1149,22 +1654,29 @@ content %}
             async cancelIndex(rag) {
                 this.cancellingRags.push(rag.id);
                 try {
-                    const response = await fetch(`/api/rags/${rag.id}/cancel-index`, {
-                        method: 'POST',
-                    });
+                    const response = await fetch(
+                        `/api/rags/${rag.id}/cancel-index`,
+                        {
+                            method: "POST",
+                        },
+                    );
 
                     if (!response.ok) {
                         const data = await response.json();
-                        alert(data.error || 'Failed to cancel indexing');
+                        alert(data.error || "Failed to cancel indexing");
                     }
 
                     await this.loadRags();
                 } catch (error) {
-                    console.error('Failed to cancel indexing:', error);
-                    alert('Failed to cancel indexing');
+                    console.error("Failed to cancel indexing:", error);
+                    alert("Failed to cancel indexing");
                 } finally {
-                    this.cancellingRags = this.cancellingRags.filter(id => id !== rag.id);
-                    this.indexingRags = this.indexingRags.filter(id => id !== rag.id);
+                    this.cancellingRags = this.cancellingRags.filter(
+                        (id) => id !== rag.id,
+                    );
+                    this.indexingRags = this.indexingRags.filter(
+                        (id) => id !== rag.id,
+                    );
                 }
             },
 
@@ -1178,9 +1690,12 @@ content %}
 
                 this.deleting = true;
                 try {
-                    const response = await fetch(`/api/rags/${this.deletingRag.id}`, {
-                        method: 'DELETE',
-                    });
+                    const response = await fetch(
+                        `/api/rags/${this.deletingRag.id}`,
+                        {
+                            method: "DELETE",
+                        },
+                    );
 
                     if (response.ok) {
                         await this.loadRags();
@@ -1188,11 +1703,11 @@ content %}
                         this.deletingRag = null;
                     } else {
                         const data = await response.json();
-                        alert(data.error || 'Failed to delete RAG');
+                        alert(data.error || "Failed to delete RAG");
                     }
                 } catch (error) {
-                    console.error('Failed to delete RAG:', error);
-                    alert('Failed to delete RAG');
+                    console.error("Failed to delete RAG:", error);
+                    alert("Failed to delete RAG");
                 } finally {
                     this.deleting = false;
                 }

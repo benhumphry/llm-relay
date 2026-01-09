@@ -698,6 +698,37 @@ def _run_migrations(engine) -> None:
                     conn.execute(text(sql))
                 conn.commit()
 
+    # Migration: Add MCP source columns to smart_rags table (v1.6)
+    if "smart_rags" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("smart_rags")}
+
+        migrations = []
+
+        if "source_type" not in existing_columns:
+            migrations.append(
+                (
+                    "source_type",
+                    "ALTER TABLE smart_rags ADD COLUMN source_type VARCHAR(20) DEFAULT 'local'",
+                )
+            )
+        if "mcp_server_config_json" not in existing_columns:
+            migrations.append(
+                (
+                    "mcp_server_config_json",
+                    "ALTER TABLE smart_rags ADD COLUMN mcp_server_config_json TEXT",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for smart_rags table (v1.6 MCP)"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
     # Migration: Add scraper and reranking columns to smart_augmentors table (v1.5)
     if "smart_augmentors" in inspector.get_table_names():
         existing_columns = {
