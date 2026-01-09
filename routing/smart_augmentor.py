@@ -102,46 +102,28 @@ class SmartAugmentorEngine:
         # Call designator to decide augmentation
         decision, designator_usage = self._call_designator(query_preview)
 
-        if decision is None or decision.startswith("direct"):
-            # Fallback to search+scrape with the user's query if designator fails or returns direct
-            logger.info(
-                f"Augmentor '{self.augmentor.name}' decision: fallback to search+scrape "
-                f"(designator returned: {decision})"
-            )
-            decision = f"search+scrape:{query_preview}"
+        # Extract search query from designator response
+        search_query = self._extract_search_query(decision, query_preview)
+        logger.info(
+            f"Augmentor '{self.augmentor.name}' search query: {search_query[:100]}..."
+            if len(search_query) > 100
+            else f"Augmentor '{self.augmentor.name}' search query: {search_query}"
+        )
 
-        # Parse the decision
-        augmentation_type, context = self._parse_decision(decision)
-        logger.info(f"Augmentor '{self.augmentor.name}' decision: {augmentation_type}")
-
-        # Execute augmentation
+        # Always search and scrape
         augmented_context = ""
-        search_query = None
         scraped_urls = []
 
-        # For "search" type, always scrape top results too (search alone just gives links)
-        if augmentation_type == "search":
-            augmentation_type = "search+scrape"
+        search_results = self._execute_search(search_query)
+        if search_results:
+            augmented_context += search_results + "\n\n"
 
-        if augmentation_type == "search+scrape":
-            search_query = context or query_preview
-            search_results = self._execute_search(search_query)
-            if search_results:
-                augmented_context += search_results + "\n\n"
-
-                # Always scrape top results to get actual content
-                urls = self._extract_urls_from_search(search_results)
-                if urls:
-                    scrape_results, scraped_urls = self._execute_scrape(urls)
-                    if scrape_results:
-                        augmented_context += scrape_results
-
-        elif augmentation_type == "scrape":
-            urls = self._parse_urls(context)
+            # Scrape top results to get actual content
+            urls = self._extract_urls_from_search(search_results)
             if urls:
                 scrape_results, scraped_urls = self._execute_scrape(urls)
                 if scrape_results:
-                    augmented_context = scrape_results
+                    augmented_context += scrape_results
 
         # Inject context into system prompt
         augmented_system = self._inject_context(system, augmented_context)
@@ -153,7 +135,7 @@ class SmartAugmentorEngine:
             augmentor_tags=self.augmentor.tags,
             augmented_system=augmented_system,
             augmented_messages=messages,
-            augmentation_type=augmentation_type,
+            augmentation_type="search+scrape",
             search_query=search_query,
             scraped_urls=scraped_urls,
             designator_usage=designator_usage,
@@ -191,21 +173,18 @@ class SmartAugmentorEngine:
         if self.augmentor.purpose:
             purpose_context = f"\nPURPOSE: {self.augmentor.purpose}\n"
 
-        prompt = f"""You are a search query optimizer. Given the user's question, generate the best web search query to find relevant, current information.
+        prompt = f"""Generate an optimized web search query for the user's question.
 {purpose_context}
-OUTPUT FORMAT:
-search:your optimized search query
-
 RULES:
-- Extract key concepts from the question
-- Add relevant context words (e.g., "2024", "latest", "news")
-- Keep queries concise but specific
-- If the user mentions specific URLs, respond with: scrape:url1,url2
+- Extract key concepts
+- Add context like "2024", "latest", "news" where relevant
+- Keep it concise (3-8 words ideal)
+- Output ONLY the search query, nothing else
 
-USER QUERY:
+USER QUESTION:
 {query_preview}
 
-Respond with ONLY "search:query" (e.g., "search:UK foreign policy changes 2024"). Do not explain."""
+SEARCH QUERY:"""
 
         try:
             # Resolve and call the designator model
@@ -238,24 +217,36 @@ Respond with ONLY "search:query" (e.g., "search:UK foreign policy changes 2024")
             logger.error(f"Designator call failed: {e}")
             return None, None
 
-    def _parse_decision(self, decision: str) -> tuple[str, str]:
+    def _extract_search_query(self, decision: str | None, fallback_query: str) -> str:
         """
-        Parse the designator's decision.
+        Extract the search query from the designator's response.
+
+        Args:
+            decision: The designator's response (may be None or malformed)
+            fallback_query: The original user query to use as fallback
 
         Returns:
-            Tuple of (augmentation_type, context/query)
+            The search query to use
         """
-        decision_lower = decision.lower().strip()
+        if not decision:
+            return fallback_query
 
-        if decision_lower.startswith("search+scrape:"):
-            return "search+scrape", decision[14:].strip()
-        elif decision_lower.startswith("search:"):
-            return "search", decision[7:].strip()
-        elif decision_lower.startswith("scrape:"):
-            return "scrape", decision[7:].strip()
-        else:
-            # Default to search with the raw decision as query
-            return "search", decision.strip()
+        decision = decision.strip()
+
+        # Try to extract query from "search:query" format
+        decision_lower = decision.lower()
+        if decision_lower.startswith("search:"):
+            query = decision[7:].strip()
+            if query:
+                return query
+
+        # If designator returned something else, use it as-is if it looks like a query
+        # (not too long, doesn't look like an explanation)
+        if len(decision) < 200 and not decision.startswith("I "):
+            return decision
+
+        # Fall back to the original user query
+        return fallback_query
 
     def _execute_search(self, query: str) -> str:
         """Execute a web search and return formatted results."""
