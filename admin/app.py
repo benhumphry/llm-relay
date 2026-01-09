@@ -905,6 +905,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Get web search and scraping settings."""
         import os
 
+        # Check GPU availability for local models
+        gpu_available = False
+        gpu_name = None
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                gpu_available = True
+                gpu_name = torch.cuda.get_device_name(0)
+        except Exception:
+            pass
+
         keys = [
             Setting.KEY_WEB_SEARCH_PROVIDER,
             Setting.KEY_WEB_SEARCH_URL,
@@ -937,6 +949,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "vision_model": settings_dict.get(Setting.KEY_VISION_MODEL) or "",
                 "vision_ollama_url": settings_dict.get(Setting.KEY_VISION_OLLAMA_URL)
                 or "",
+                "gpu_available": gpu_available,
+                "gpu_name": gpu_name,
             }
         )
 
