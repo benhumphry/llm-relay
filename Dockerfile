@@ -47,15 +47,20 @@ COPY config/ ./config/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Create non-root user and data directory
+# Create non-root user and data directory with models subfolder
 RUN useradd -m -u 1000 appuser && \
-    mkdir -p /data && \
+    mkdir -p /data/models && \
     chown -R appuser:appuser /app /data
 
 # Default ports
 ENV PORT=11434
 ENV ADMIN_PORT=8080
 ENV HOST=0.0.0.0
+
+# Configure Hugging Face to cache models in /data/models (persistent volume)
+# Users can pre-download or swap models by mounting this directory
+ENV HF_HOME=/data/models
+ENV TRANSFORMERS_CACHE=/data/models
 
 # Expose both API and Admin ports
 EXPOSE 11434
