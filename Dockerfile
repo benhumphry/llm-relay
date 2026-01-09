@@ -15,18 +15,13 @@ WORKDIR /app
 # Install dependencies
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Reinstall PyTorch with appropriate version for architecture:
-# - amd64: CUDA 12.6 for Pascal GPU support (sm_61). CUDA 12.8+ dropped Pascal/Maxwell.
-# - arm64: CPU-only (no CUDA wheels available for ARM)
+# Install PyTorch first with cu126 (for Pascal GPU support on amd64)
+# CUDA 12.8+ dropped Pascal/Maxwell support, cu126 is the last to include sm_61
 # See: https://dev-discuss.pytorch.org/t/cuda-toolkit-version-and-architecture-support-update-maxwell-and-pascal-architecture-support-removed-in-cuda-12-8-and-12-9-builds/3128
-RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        pip install --no-cache-dir --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu126; \
-    else \
-        pip install --no-cache-dir --force-reinstall torch torchvision; \
-    fi
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+# Install remaining dependencies (will use already-installed PyTorch)
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY VERSION .
