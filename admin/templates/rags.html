@@ -121,16 +121,22 @@ content %}
                                     <div class="font-mono text-sm text-base-content/70" x-text="rag.target_model"></div>
                                 </td>
                                 <td>
-                                    <span
-                                        class="badge badge-sm"
-                                        :class="{
-                                            'badge-success': rag.index_status === 'ready',
-                                            'badge-warning': rag.index_status === 'indexing',
-                                            'badge-error': rag.index_status === 'error',
-                                            'badge-ghost': rag.index_status === 'pending'
-                                        }"
-                                        x-text="rag.index_status"
-                                    ></span>
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="badge badge-sm"
+                                            :class="{
+                                                'badge-success': rag.index_status === 'ready',
+                                                'badge-warning': rag.index_status === 'indexing',
+                                                'badge-error': rag.index_status === 'error',
+                                                'badge-ghost': rag.index_status === 'pending'
+                                            }"
+                                            x-text="rag.index_status"
+                                        ></span>
+                                        <span
+                                            x-show="rag.index_status === 'indexing'"
+                                            class="loading loading-spinner loading-xs"
+                                        ></span>
+                                    </div>
                                 </td>
                                 <td class="text-right">
                                     <span class="font-mono text-sm" x-text="rag.document_count || 0"></span>

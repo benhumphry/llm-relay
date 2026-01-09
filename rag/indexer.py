@@ -287,6 +287,14 @@ class RAGIndexer:
                         chunk["source_file"] = str(file_path.relative_to(source_path))
                     documents.extend(chunks)
                     doc_count += 1
+
+                    # Update progress after each document
+                    update_smart_rag_index_status(
+                        rag_id,
+                        "indexing",
+                        document_count=doc_count,
+                        chunk_count=len(documents),
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to process {file_path}: {e}")
 
