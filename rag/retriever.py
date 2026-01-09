@@ -149,9 +149,14 @@ class RAGRetriever:
         ollama_url: Optional[str] = None,
         max_results: int = 5,
         similarity_threshold: float = 0.7,
+        rerank_provider: Optional[str] = None,
+        rerank_model: Optional[str] = None,
+        rerank_top_n: Optional[int] = None,
     ) -> RetrievalResult:
         """
         Retrieve relevant chunks for a query.
+
+        Always reranks results using a cross-encoder for better relevance.
 
         Args:
             collection_name: ChromaDB collection to search
@@ -161,10 +166,21 @@ class RAGRetriever:
             ollama_url: Ollama URL override
             max_results: Maximum chunks to return
             similarity_threshold: Minimum similarity score (0-1)
+            rerank_provider: Reranking provider ("local" or "jina")
+            rerank_model: Model for reranking
+            rerank_top_n: Fetch this many from ChromaDB before reranking
 
         Returns:
             RetrievalResult with relevant chunks
         """
+        # Apply defaults for reranking (always on by default)
+        if rerank_provider is None:
+            rerank_provider = "local"
+        if rerank_model is None:
+            rerank_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        if rerank_top_n is None:
+            rerank_top_n = 20
+
         from .embeddings import get_embedding_provider
 
         try:
@@ -193,11 +209,12 @@ class RAGRetriever:
             logger.error(f"Failed to embed query: {e}")
             return RetrievalResult(chunks=[], query=query, total_tokens=0)
 
-        # Query ChromaDB
+        # Query ChromaDB - fetch more results for reranking
+        fetch_count = rerank_top_n
         try:
             results = collection.query(
                 query_embeddings=[query_embedding],
-                n_results=max_results,
+                n_results=fetch_count,
                 include=["documents", "metadatas", "distances"],
             )
         except Exception as e:
@@ -234,8 +251,55 @@ class RAGRetriever:
                         score=similarity,
                     )
                     chunks.append(chunk)
-                    # Rough token estimate (4 chars per token)
-                    total_tokens += len(doc) // 4
+
+        # Always rerank for better relevance
+        if chunks:
+            try:
+                from .reranker import rerank_documents
+
+                # Convert chunks to dicts for reranking
+                chunk_dicts = [
+                    {
+                        "content": c.content,
+                        "source_file": c.source_file,
+                        "chunk_index": c.chunk_index,
+                        "original_score": c.score,
+                    }
+                    for c in chunks
+                ]
+
+                # Rerank
+                reranked = rerank_documents(
+                    query=query,
+                    documents=chunk_dicts,
+                    model_name=rerank_model,
+                    top_k=max_results,
+                    provider_type=rerank_provider,
+                )
+
+                # Convert back to RetrievedChunk, using rerank_score
+                chunks = [
+                    RetrievedChunk(
+                        content=d["content"],
+                        source_file=d["source_file"],
+                        chunk_index=d["chunk_index"],
+                        score=d.get("rerank_score", d.get("original_score", 0)),
+                    )
+                    for d in reranked
+                ]
+
+                logger.debug(
+                    f"Reranked {len(chunk_dicts)} chunks to {len(chunks)} using {rerank_provider}/{rerank_model}"
+                )
+            except Exception as e:
+                logger.warning(f"Reranking failed, using original order: {e}")
+                # Fall back to original chunks, limited to max_results
+                chunks = chunks[:max_results]
+
+        # Calculate total tokens
+        for chunk in chunks:
+            # Rough token estimate (4 chars per token)
+            total_tokens += len(chunk.content) // 4
 
         logger.debug(
             f"Retrieved {len(chunks)} chunks for query (threshold={similarity_threshold})"

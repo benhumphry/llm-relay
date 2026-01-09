@@ -160,10 +160,12 @@ Requires ChromaDB (`CHROMA_URL` environment variable).
 Context augmentation via web search and URL scraping. Every request is automatically augmented:
 
 1. A designator LLM generates an optimized search query
-2. Web search is performed and top results scraped for full content
-3. Combined context is injected into the request
+2. Web search is performed (SearXNG, Perplexity, or Jina)
+3. URLs are reranked by relevance using cross-encoder
+4. Top results are scraped for full content (built-in or Jina Reader)
+5. Combined context is injected into the request
 
-Requires a search provider (SearXNG or Perplexity).
+Requires a search provider (SearXNG, Perplexity, or Jina).
 
 ### Smart RAGs
 
@@ -173,6 +175,7 @@ Document-based context augmentation using RAG (Retrieval-Augmented Generation). 
 - **Flexible embeddings** — Local (bundled), Ollama, or any configured provider
 - **Vision model offloading** — Offload PDF parsing to Ollama or cloud vision models (e.g., granite3.2-vision)
 - **Semantic search** — ChromaDB vector storage with configurable similarity threshold
+- **Cross-encoder reranking** — Improves retrieval quality with always-on reranking
 - **Scheduled indexing** — Cron-based re-indexing for updated documents
 
 Mount your document folders into the container, create a Smart RAG pointing to the path, and requests to that model name automatically include relevant document context.
@@ -229,6 +232,7 @@ See **[INSTALLATION.md](INSTALLATION.md)** for:
 | `DATABASE_URL` | SQLite | PostgreSQL URL for production |
 | `CHROMA_URL` | (none) | ChromaDB URL (enables Smart Cache, Model Intelligence) |
 | `SEARXNG_URL` | (none) | SearXNG URL (enables Smart Augmentor search) |
+| `JINA_API_KEY` | (none) | Jina API key (enables Jina Search, Reranker) |
 
 ### Without Docker
 
@@ -248,6 +252,14 @@ python proxy.py
 ### OpenAI API
 - `GET /v1/models` — List models
 - `POST /v1/chat/completions` — Chat completion
+
+## Documentation
+
+- [Getting Started](docs/guides/getting-started.md) - First-time setup walkthrough
+- [Smart Routers](docs/guides/smart-routers.md) - Intelligent model routing
+- [Smart Caches](docs/guides/smart-caches.md) - Semantic response caching
+- [Smart Augmentors](docs/guides/smart-augmentors.md) - Web search augmentation
+- [Smart RAGs](docs/guides/smart-rags.md) - Document RAG setup
 
 ## License
 

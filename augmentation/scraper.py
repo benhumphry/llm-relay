@@ -47,6 +47,139 @@ class ScrapeResult:
     content_type: Optional[str] = None
 
 
+class JinaScraper:
+    """
+    Jina Reader API scraper for JavaScript-heavy sites.
+
+    Uses Jina's r.jina.ai service to fetch and parse web content,
+    returning clean markdown. Handles JavaScript rendering automatically.
+
+    See: https://jina.ai/reader/
+    """
+
+    JINA_URL = "https://r.jina.ai/"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        timeout: float = 30.0,
+    ):
+        """
+        Initialize the Jina scraper.
+
+        Args:
+            api_key: Jina API key (optional, for higher rate limits)
+            timeout: Request timeout in seconds
+        """
+        import os
+
+        self.api_key = api_key or os.environ.get("JINA_API_KEY")
+        self.timeout = timeout
+
+    def scrape(self, url: str) -> ScrapeResult:
+        """
+        Scrape URL via Jina Reader API.
+
+        Args:
+            url: URL to scrape
+
+        Returns:
+            ScrapeResult with extracted content as markdown
+        """
+        try:
+            headers = {"Accept": "text/markdown"}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.get(
+                    f"{self.JINA_URL}{url}",
+                    headers=headers,
+                )
+                response.raise_for_status()
+
+                content = response.text
+
+                # Jina returns markdown with title as first H1
+                title = ""
+                if content.startswith("# "):
+                    first_newline = content.find("\n")
+                    if first_newline > 0:
+                        title = content[2:first_newline].strip()
+
+                logger.info(f"Scraped {len(content)} chars from {url} via Jina")
+                return ScrapeResult(
+                    url=url,
+                    title=title,
+                    content=content,
+                    success=True,
+                    content_type="text/markdown",
+                )
+
+        except httpx.TimeoutException:
+            logger.warning(f"Jina timeout for {url}")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error="Request timed out",
+            )
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Jina HTTP error for {url}: {e.response.status_code}")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error=f"HTTP {e.response.status_code}",
+            )
+        except Exception as e:
+            logger.warning(f"Jina scrape failed for {url}: {e}")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error=str(e),
+            )
+
+    def scrape_multiple(self, urls: list[str], max_urls: int = 3) -> list[ScrapeResult]:
+        """Scrape multiple URLs."""
+        results = []
+        for url in urls[:max_urls]:
+            result = self.scrape(url)
+            results.append(result)
+        return results
+
+    def format_results(self, results: list[ScrapeResult], max_chars: int = 4000) -> str:
+        """Format scrape results for LLM context (same as WebScraper)."""
+        if not results:
+            return "No web content fetched."
+
+        successful = [r for r in results if r.success]
+        if not successful:
+            return "Failed to fetch any web content."
+
+        lines = ["## Web Content\n"]
+        chars_per_result = max_chars // len(successful)
+
+        for result in successful:
+            header = f"### {result.title or result.url}\n"
+            header += f"Source: {result.url}\n\n"
+
+            available = chars_per_result - len(header)
+            content = (
+                result.content[:available]
+                if len(result.content) > available
+                else result.content
+            )
+
+            lines.append(header + content + "\n")
+
+        return "\n".join(lines)
+
+
 class WebScraper:
     """
     Web scraper for fetching and extracting text content from URLs.

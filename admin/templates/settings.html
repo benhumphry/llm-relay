@@ -1212,7 +1212,7 @@ content %}
                         </div>
                     </template>
 
-                    <!-- Scraper Provider (hidden - Jina not yet implemented)
+                    <!-- Scraper Provider -->
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text">Web Scraper</span>
@@ -1221,9 +1221,12 @@ content %}
                             x-model="webSettings.scraper_provider"
                             class="select select-bordered"
                         >
-                            <option value="builtin">Built-in (httpx + BeautifulSoup)</option>
+                            <option value="builtin">Built-in (httpx + trafilatura)</option>
                             <option value="jina">Jina Reader (handles JS-heavy sites)</option>
                         </select>
+                        <label class="label">
+                            <span class="label-text-alt">Used by Smart Augmentors to extract content from web pages</span>
+                        </label>
                     </div>
 
                     <template x-if="webSettings.scraper_provider === 'jina'">
@@ -1241,12 +1244,11 @@ content %}
                                     </span>
                                 </template>
                                 <template x-if="!webSettings.jina_api_configured">
-                                    <span class="text-base-content/50">Not configured (optional - set JINA_API_KEY for higher rate limits)</span>
+                                    <span class="text-base-content/50">Optional - set JINA_API_KEY env var for higher rate limits</span>
                                 </template>
                             </div>
                         </div>
                     </template>
-                    -->
 
                     <!-- Document Parsing Divider -->
                     <div class="divider mt-4">Document Parsing (Vision Model)</div>

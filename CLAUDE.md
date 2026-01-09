@@ -29,10 +29,10 @@ db/                   # Database layer
   seed.py             # LiteLLM pricing data sync
 tracking/             # Usage tracking
   usage_tracker.py    # Async request logging and statistics
-routing/              # Smart features (router, cache, augmentor)
+routing/              # Smart features (router, cache, augmentor, rag)
 augmentation/         # Web search and scraping
-  search/             # Search provider implementations (SearXNG, Perplexity)
-  scraper.py          # URL content scraping
+  search/             # Search providers (SearXNG, Perplexity, Jina)
+  scraper.py          # URL content scraping (builtin + Jina)
 context/              # ChromaDB integration
   chroma.py           # ChromaDB client wrapper
   model_intelligence.py # Web-gathered model assessments
@@ -42,7 +42,11 @@ admin/                # Admin dashboard
 rag/                  # Smart RAG (document retrieval)
   embeddings.py       # Embedding providers (local, Ollama, OpenAI)
   indexer.py          # Document indexing with Docling
-  retriever.py        # ChromaDB semantic search
+  retriever.py        # ChromaDB semantic search with reranking
+  reranker.py         # Cross-encoder reranking (local + Jina)
+docs/                 # Documentation
+  guides/             # Feature guides (getting-started, smart-*)
+  PLANNED_FEATURES.md # Roadmap
 ```
 
 ## Key Concepts

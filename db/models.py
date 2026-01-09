@@ -1029,6 +1029,14 @@ class SmartAugmentor(Base):
         Integer, default=4000
     )  # Max tokens for injected context
 
+    # Re-ranking config (always enabled, uses local cross-encoder by default)
+    rerank_provider: Mapped[str] = mapped_column(
+        String(50), default="local"
+    )  # "local" | "jina"
+    rerank_model: Mapped[str] = mapped_column(
+        String(150), default="cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+
     # Statistics
     total_requests: Mapped[int] = mapped_column(Integer, default=0)
     augmented_requests: Mapped[int] = mapped_column(Integer, default=0)  # Non-direct
@@ -1077,6 +1085,8 @@ class SmartAugmentor(Base):
             "max_search_results": self.max_search_results,
             "max_scrape_urls": self.max_scrape_urls,
             "max_context_tokens": self.max_context_tokens,
+            "rerank_provider": self.rerank_provider,
+            "rerank_model": self.rerank_model,
             "total_requests": self.total_requests,
             "augmented_requests": self.augmented_requests,
             "search_requests": self.search_requests,
@@ -1240,6 +1250,17 @@ class SmartRAG(Base):
     similarity_threshold: Mapped[float] = mapped_column(Float, default=0.7)
     max_context_tokens: Mapped[int] = mapped_column(Integer, default=4000)
 
+    # Re-ranking configuration (always enabled, uses local cross-encoder by default)
+    rerank_provider: Mapped[str] = mapped_column(
+        String(50), default="local"
+    )  # "local" | "jina"
+    rerank_model: Mapped[str] = mapped_column(
+        String(150), default="cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+    rerank_top_n: Mapped[int] = mapped_column(
+        Integer, default=20
+    )  # Fetch this many from ChromaDB, then rerank to max_results
+
     # ChromaDB collection name (auto-generated as "smartrag_{id}")
     collection_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
@@ -1304,6 +1325,9 @@ class SmartRAG(Base):
             "max_results": self.max_results,
             "similarity_threshold": self.similarity_threshold,
             "max_context_tokens": self.max_context_tokens,
+            "rerank_provider": self.rerank_provider,
+            "rerank_model": self.rerank_model,
+            "rerank_top_n": self.rerank_top_n,
             "collection_name": self.collection_name,
             "document_count": self.document_count,
             "chunk_count": self.chunk_count,

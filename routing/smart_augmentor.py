@@ -114,16 +114,17 @@ class SmartAugmentorEngine:
         augmented_context = ""
         scraped_urls = []
 
-        search_results = self._execute_search(search_query)
+        search_results, urls_with_context = self._execute_search(search_query)
         if search_results:
             augmented_context += search_results + "\n\n"
 
-            # Scrape top results to get actual content
-            urls = self._extract_urls_from_search(search_results)
-            if urls:
-                scrape_results, scraped_urls = self._execute_scrape(urls)
-                if scrape_results:
-                    augmented_context += scrape_results
+            # Rerank URLs before scraping for better relevance
+            if urls_with_context:
+                urls = self._rerank_urls(search_query, urls_with_context)
+                if urls:
+                    scrape_results, scraped_urls = self._execute_scrape(urls)
+                    if scrape_results:
+                        augmented_context += scrape_results
 
         # Inject context into system prompt
         augmented_system = self._inject_context(system, augmented_context)
@@ -158,6 +159,24 @@ class SmartAugmentorEngine:
                             texts.append(block.get("text", ""))
                     return " ".join(texts)[:max_chars]
         return ""
+
+    def _get_scraper_provider(self) -> str:
+        """Get the globally configured scraper provider from Settings."""
+        try:
+            from db import Setting, get_db_context
+
+            with get_db_context() as db:
+                setting = (
+                    db.query(Setting)
+                    .filter(Setting.key == Setting.KEY_WEB_SCRAPER_PROVIDER)
+                    .first()
+                )
+                if setting and setting.value:
+                    return setting.value
+        except Exception as e:
+            logger.warning(f"Failed to get scraper provider setting: {e}")
+
+        return "builtin"  # Default
 
     def _call_designator(
         self, query_preview: str
@@ -244,35 +263,64 @@ SEARCH QUERY:"""
         # Fall back to the original user query
         return fallback_query
 
-    def _execute_search(self, query: str) -> str:
-        """Execute a web search and return formatted results."""
+    def _execute_search(self, query: str) -> tuple[str, list[dict]]:
+        """
+        Execute a web search and return formatted results plus raw data for reranking.
+
+        Returns:
+            Tuple of (formatted results string, list of {url, title, snippet} dicts)
+        """
         from augmentation import get_configured_search_provider
 
         provider = get_configured_search_provider()
 
         if not provider:
             logger.warning("No search provider configured or available")
-            return ""
+            return "", []
 
         try:
             results = provider.search(
                 query, max_results=self.augmentor.max_search_results
             )
-            return provider.format_results(results)
+            formatted = provider.format_results(results)
+
+            # Extract structured data for reranking
+            urls_with_context = [
+                {
+                    "url": r.url,
+                    "title": r.title or "",
+                    "snippet": r.snippet or "",
+                }
+                for r in results
+                if r.url
+            ]
+
+            return formatted, urls_with_context
         except Exception as e:
             logger.error(f"Search failed: {e}")
-            return ""
+            return "", []
 
     def _execute_scrape(self, urls: list[str]) -> tuple[str, list[str]]:
         """
         Scrape URLs and return formatted content.
 
+        Uses globally configured scraper provider (builtin or jina) from Settings.
+
         Returns:
             Tuple of (formatted content, list of successfully scraped URLs)
         """
-        from augmentation import WebScraper
+        # Get scraper provider from global settings
+        scraper_provider = self._get_scraper_provider()
 
-        scraper = WebScraper()
+        if scraper_provider == "jina":
+            from augmentation.scraper import JinaScraper
+
+            scraper = JinaScraper()
+        else:
+            from augmentation import WebScraper
+
+            scraper = WebScraper()
+
         results = scraper.scrape_multiple(urls, max_urls=self.augmentor.max_scrape_urls)
 
         # Calculate available tokens for scraping
@@ -284,8 +332,43 @@ SEARCH QUERY:"""
 
         return formatted, scraped_urls
 
+    def _rerank_urls(self, query: str, urls_with_context: list[dict]) -> list[str]:
+        """
+        Rerank URLs by relevance to query before scraping.
+
+        Args:
+            query: Search query
+            urls_with_context: List of {url, title, snippet} dicts
+
+        Returns:
+            List of URLs, reranked by relevance
+        """
+        # Apply defaults for reranking (always on)
+        rerank_provider = getattr(self.augmentor, "rerank_provider", None) or "local"
+        rerank_model = (
+            getattr(self.augmentor, "rerank_model", None)
+            or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        )
+
+        try:
+            from rag.reranker import rerank_urls
+
+            return rerank_urls(
+                query=query,
+                urls_with_context=urls_with_context,
+                model_name=rerank_model,
+                top_k=self.augmentor.max_scrape_urls,
+                provider_type=rerank_provider,
+            )
+        except Exception as e:
+            logger.warning(f"URL reranking failed, using original order: {e}")
+            # Fall back to original order
+            return [
+                u["url"] for u in urls_with_context[: self.augmentor.max_scrape_urls]
+            ]
+
     def _extract_urls_from_search(self, search_results: str) -> list[str]:
-        """Extract URLs from formatted search results."""
+        """Extract URLs from formatted search results (deprecated, use _rerank_urls)."""
         urls = []
         for line in search_results.split("\n"):
             if line.startswith("URL:"):

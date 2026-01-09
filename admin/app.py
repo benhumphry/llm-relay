@@ -945,7 +945,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         # Validate search provider
         search_provider = data.get("search_provider", "")
-        if search_provider and search_provider not in ("searxng", "perplexity"):
+        if search_provider and search_provider not in ("searxng", "perplexity", "jina"):
             return jsonify({"error": "Invalid search provider"}), 400
 
         # Validate scraper provider

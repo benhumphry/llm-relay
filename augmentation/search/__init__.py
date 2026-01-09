@@ -136,6 +136,14 @@ try:
 except ImportError:
     pass
 
+# Jina provider (requires JINA_API_KEY)
+try:
+    from .jina import JinaSearchProvider
+
+    register_provider(JinaSearchProvider)
+except ImportError:
+    pass
+
 __all__ = [
     "get_search_provider",
     "get_default_search_provider",

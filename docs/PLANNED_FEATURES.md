@@ -6,144 +6,125 @@ This document covers the near-term v1.x enhancements and the v2.0 feature set.
 
 ---
 
-# v1.x Enhancements (Near-Term)
+# Completed in v1.5
 
-## 1. Additional Document Sources for Smart RAG
+## Re-ranking for RAG and Augmentor
 
-**Goal**: Extend Smart RAG beyond local Docker-mounted folders to support cloud storage and document management systems.
+Cross-encoder reranking is now always-on for both Smart RAG and Smart Augmentors.
 
-### Document Source Types
+- **Default model**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (~48MB, runs locally)
+- **Optional**: Jina Reranker API (requires `JINA_API_KEY`)
 
-| Source | Description | Priority |
-|--------|-------------|----------|
-| **File Upload** | Direct upload via Admin UI, stored in `/data/uploads` | High |
-| **WebDAV/Nextcloud** | Connect to WebDAV-compatible storage | Medium |
-| **Google Drive** | OAuth-based Google Drive integration | Medium |
-| **Paperless-ngx** | API integration with Paperless document management | Low |
+### How It Works
 
-### Implementation Phases
-1. **Upload Source** (simplest, immediate value)
-2. **WebDAV Source** (covers Nextcloud, ownCloud, many NAS devices)
-3. **Google Drive** (requires OAuth flow, more complex)
-4. **Paperless** (niche but useful for document management users)
+| Feature | Flow |
+|---------|------|
+| **Smart RAG** | Query → Embed → Top-n chunks → Rerank → Top-k |
+| **Smart Augmentor** | Search → Get URLs with titles/snippets → Rerank → Scrape top URLs |
+
+## Jina Integration
+
+Three Jina services are now supported:
+
+| Service | Endpoint | API Key Required |
+|---------|----------|------------------|
+| **Jina Scraper** | `r.jina.ai` | No (optional for rate limits) |
+| **Jina Search** | `s.jina.ai` | Yes |
+| **Jina Reranker** | `api.jina.ai/v1/rerank` | Yes |
+
+## Global Web Settings
+
+Search provider and scraper provider are now configured globally in Settings, not per-augmentor.
+
+## Documentation Guides
+
+Created comprehensive guides in `docs/guides/`:
+- `getting-started.md` - First-time setup walkthrough
+- `smart-routers.md` - Intelligent model routing
+- `smart-caches.md` - Semantic response caching
+- `smart-augmentors.md` - Web search augmentation
+- `smart-rags.md` - Document RAG setup
 
 ---
 
-## 2. Additional Scraping Providers
+# v1.x Enhancements (Near-Term)
 
-**Goal**: Better web scraping for JavaScript-heavy sites.
+## v1.6: MCP Integration for Document Sources
+
+**Goal**: Replace file upload/WebDAV with MCP (Model Context Protocol) for flexible document source integration.
+
+### Why MCP?
+- Connect to any document source via MCP servers
+- Growing ecosystem: Google Drive, Notion, Confluence, S3, databases
+- Implement once, support many sources
+- Future-proof architecture
+
+### Planned Sources via MCP
+| Source | MCP Server | Priority |
+|--------|------------|----------|
+| Google Drive | `mcp-gdrive` | High |
+| Notion | `mcp-notion` | High |
+| S3/MinIO | `mcp-s3` | Medium |
+| Confluence | `mcp-confluence` | Medium |
+| Local Files | Built-in | Already supported |
+
+## v1.7: Smart Tags & Inline Tags
+
+**Goal**: Tag-based routing and augmentation with inline query syntax.
+
+### Smart Tags
+Define tags that trigger specific routing or augmentation:
+
+| Tag Name | Target Model | Augmentor | RAG | System Prefix |
+|----------|--------------|-----------|-----|---------------|
+| `augment` | `claude-sonnet-4-5` | web-search | - | - |
+| `research` | `smart-research-router` | web-search | docs-rag | - |
+| `fast` | `groq:llama-3.3-70b` | - | - | - |
+| `creative` | `claude-sonnet-4-5` | - | - | "Be creative..." |
+
+### Inline Tag Syntax
+Add tags directly in queries:
+
+```
+What's the weather in London? #tag:augmentor #tag:alice
+```
+
+The system:
+1. Extracts `#tag:*` patterns from message
+2. Removes them from query sent to LLM
+3. Applies as tracking tags
+4. Triggers Smart Tags if configured
+
+### Use Cases
+- Per-message control in conversations
+- Works with any client (Open WebUI, Cursor, etc.)
+- Combines with existing tagging methods (bearer, header, model suffix)
+
+---
+
+## Additional Search Providers
 
 | Provider | Description | Status |
 |----------|-------------|--------|
-| `builtin` | httpx + BeautifulSoup | Implemented |
-| `jina` | Jina Reader API (handles JS, free tier) | Planned |
-| `firecrawl` | Self-hostable, structured extraction | Planned |
+| `searxng` | Self-hosted metasearch | Implemented |
+| `perplexity` | Perplexity API | Implemented |
+| `jina` | Jina Search API | Implemented (v1.5) |
+| `tavily` | AI-focused search API | Planned |
+| `brave` | Privacy-focused search | Planned |
 
 ---
 
-## 3. Additional Search Providers
+## Image & Audio API Endpoints
 
-**Goal**: More options beyond SearXNG and Perplexity.
-
-| Provider | Description |
-|----------|-------------|
-| Tavily | AI-focused search API |
-| Brave Search | Privacy-focused, good API |
-| Google Custom Search | Official Google API |
-
----
-
-## 4. Documentation & Guides
-
-**Goal**: Comprehensive documentation for users to get the most out of LLM Relay.
-
-### Documentation Structure
-
-```
-docs/
-  README.md              # Overview and quick links
-  INSTALLATION.md        # Existing, enhanced
-  
-  guides/
-    getting-started.md   # First-time setup walkthrough
-    smart-routers.md     # How to configure intelligent routing
-    smart-caches.md      # Semantic caching best practices
-    smart-augmentors.md  # Web search augmentation guide
-    smart-rags.md        # Document RAG setup and tuning
-    smart-pipes.md       # (v2) Pipeline builder guide
-    
-  reference/
-    api.md               # Full API reference (Ollama + OpenAI)
-    models.md            # Recommended models for each role
-    providers.md         # Provider setup and configuration
-    environment.md       # All environment variables
-    
-  use-cases/
-    research-assistant.md    # Web-augmented research workflow
-    document-qa.md           # RAG for internal docs
-    cost-optimization.md     # Using caches and routing to reduce costs
-    multi-provider.md        # Unified access to multiple providers
-    openwebui-setup.md       # Integration with Open WebUI
-```
-
-### Recommended Models Guide
-
-| Role | Recommended Models | Notes |
-|------|-------------------|-------|
-| **Designator (routing/gates)** | `openai/gpt-4o-mini`, `groq/llama-3.3-70b` | Fast, cheap, good at classification |
-| **Summarizer (intelligence)** | `anthropic/claude-sonnet-4`, `openai/gpt-4o` | Good at synthesis |
-| **Embeddings** | `local` (bundled), `ollama/nomic-embed-text` | Local is free, Ollama for better quality |
-| **Vision (PDF parsing)** | `ollama/granite3.2-vision`, `ollama/granite-docling` | Granite-docling optimized for documents |
-| **General chat** | User preference | Claude, GPT-4o, Gemini all excellent |
-| **Coding** | `anthropic/claude-sonnet-4`, `deepseek/deepseek-chat` | Strong coding capabilities |
-| **Fast/cheap** | `groq/llama-3.3-70b`, `cerebras/llama-3.3-70b` | Sub-second responses |
-
----
-
-## 5. Re-ranking for RAG and Augmentor
-
-**Goal**: Improve retrieval quality by re-ranking results with a cross-encoder model.
-
-### Problem
-- Embedding-based retrieval (bi-encoder) is fast but can miss semantic nuances
-- Web search results are ranked by the search engine, not by relevance to the specific query
-- Top-k results may not be the most relevant
-
-### Solution
-Add an optional re-ranking step using a cross-encoder model. Fetch more results than needed, then re-rank to get the most relevant top-k.
-
-### Where It Applies
-
-| Feature | Current Flow | With Re-ranking |
-|---------|--------------|-----------------|
-| **Smart RAG** | Query → Embed → Top-k chunks | Query → Embed → Top-n chunks → Re-rank → Top-k |
-| **Smart Augmentor** | Search → Scrape top results | Search → Re-rank URLs → Scrape top results |
-
-### Model Options
-| Model | Size | Speed | Quality |
-|-------|------|-------|---------|
-| `cross-encoder/ms-marco-MiniLM-L-6-v2` | 80MB | Fast | Good |
-| `cross-encoder/ms-marco-MiniLM-L-12-v2` | 130MB | Medium | Better |
-| `BAAI/bge-reranker-base` | 270MB | Slower | Best |
-
----
-
-## 6. Image & Audio API Endpoints
-
-**Goal**: Add image generation and audio transcription endpoints - valuable for routing between self-hosted and cloud services.
+**Goal**: Add image generation and audio transcription endpoints.
 
 ### New Endpoints
 
 | Endpoint | Description | Providers |
 |----------|-------------|-----------|
-| `POST /v1/images/generations` | Image generation | OpenAI (DALL-E), local (Stable Diffusion via Ollama/ComfyUI) |
-| `POST /v1/audio/transcriptions` | Speech-to-text | OpenAI (Whisper), local (Whisper via Ollama), Groq |
-| `POST /v1/audio/speech` | Text-to-speech | OpenAI, ElevenLabs, local |
-
-### Why This Matters
-- **Cost optimization**: Route to local Stable Diffusion for bulk image generation, OpenAI for quality
-- **Unified API**: Same endpoint works with cloud or self-hosted models
-- **Smart routing potential**: Could route based on quality requirements, speed, cost
+| `POST /v1/images/generations` | Image generation | OpenAI (DALL-E), local (SD via ComfyUI) |
+| `POST /v1/audio/transcriptions` | Speech-to-text | OpenAI (Whisper), Groq |
+| `POST /v1/audio/speech` | Text-to-speech | OpenAI, ElevenLabs |
 
 ---
 
@@ -203,13 +184,6 @@ The `gate` node enables conditional routing based on a designator LLM's yes/no d
                └─────────────────┘
 ```
 
-### Visual Editor (Admin UI)
-- Drag-and-drop node placement
-- Connection drawing between nodes
-- Node configuration panels
-- Pipeline validation (must have entry, must reach terminal)
-- Live preview/test
-
 ---
 
 ## 2. Smart Query Studio
@@ -223,20 +197,6 @@ The `gate` node enables conditional routing based on a designator LLM's yes/no d
 - **Blind A/B Testing**: Compare models without knowing which is which
 - **Pipeline Testing**: Test Smart Pipes before deploying
 
-### Blind Test Flow
-1. User selects two models to compare
-2. System randomly assigns A and B
-3. User sends message, both models respond (labeled A/B)
-4. User votes for preferred response
-5. Results revealed, statistics tracked
-
-### Aggregate Statistics
-Track win rates across all blind tests to build a preference database:
-- Feed back into Model Intelligence for Smart Routers
-- Show "Community rankings" in Query Studio
-- Help users decide which models to use for different tasks
-- Provide real-world preference data beyond benchmarks
-
 ---
 
 ## 3. Model Sync Subscription Service
@@ -244,52 +204,33 @@ Track win rates across all blind tests to build a preference database:
 **Goal**: High-quality, regularly updated model metadata as a subscription.
 
 ### What We Provide
-1. **Model Intelligence Database**
-   - Regularly refreshed assessments for 100+ models
-   - Comparative analysis between popular model pairs
-   - Benchmark scores, pricing, capabilities
-
-2. **Pricing Data**
-   - Scraped from provider pricing pages
-   - More accurate than LiteLLM (handles edge cases)
-   - Updated daily
-
-3. **Model Availability**
-   - Which models are currently available per provider
-   - Deprecation notices
-   - New model announcements
-
-### Pricing Tiers
-| Tier | Price | Features |
-|------|-------|----------|
-| Free | $0 | LiteLLM pricing only (current behavior) |
-| Basic | $5/mo | Daily pricing sync, weekly intelligence |
-| Pro | $15/mo | Daily everything, priority updates, API access |
-
-### Implementation
-- Separate standalone project/repo
-- FastAPI service with PostgreSQL
-- Stripe for subscriptions
-- LLM Relay syncs on startup + daily
+1. **Model Intelligence Database** - Regularly refreshed assessments for 100+ models
+2. **Pricing Data** - Scraped from provider pricing pages, more accurate than LiteLLM
+3. **Model Availability** - Deprecation notices, new model announcements
 
 ---
 
 # Implementation Priority
 
-## Phase 1: v1.5 (Near-term)
-1. File upload document source for RAG
-2. Jina scraper provider
-3. Re-ranking for RAG and Augmentor (cross-encoder model)
-4. Documentation: Getting started, Smart features guides
+## Phase 1: v1.5 (Completed)
+- [x] Re-ranking for RAG and Augmentor (cross-encoder model)
+- [x] Jina scraper provider
+- [x] Jina search provider
+- [x] Jina reranker provider
+- [x] Global web settings (search + scraper)
+- [x] Documentation guides
 
 ## Phase 2: v1.6
-1. WebDAV document source
-2. Tavily/Brave search providers
-3. Image generation endpoint (`/v1/images/generations`)
-4. Audio transcription endpoint (`/v1/audio/transcriptions`)
-5. Documentation: Reference docs, use case guides
+- [ ] MCP integration for document sources
+- [ ] Additional search providers (Tavily, Brave)
 
-## Phase 3: v2.0
-1. Smart Pipe Studio (visual pipeline builder)
-2. Smart Query Studio (chat interface)
-3. Model Sync subscription service (separate project)
+## Phase 3: v1.7
+- [ ] Smart Tags
+- [ ] Inline tag syntax (`#tag:name`)
+- [ ] Image generation endpoint
+- [ ] Audio transcription endpoint
+
+## Phase 4: v2.0
+- [ ] Smart Pipe Studio (visual pipeline builder)
+- [ ] Smart Query Studio (chat interface)
+- [ ] Model Sync subscription service

@@ -660,6 +660,84 @@ def _run_migrations(engine) -> None:
                     conn.execute(text(sql))
                 conn.commit()
 
+    # Migration: Add reranking columns to smart_rags table (v1.5)
+    if "smart_rags" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("smart_rags")}
+
+        migrations = []
+
+        if "rerank_provider" not in existing_columns:
+            migrations.append(
+                (
+                    "rerank_provider",
+                    "ALTER TABLE smart_rags ADD COLUMN rerank_provider VARCHAR(50) DEFAULT 'local'",
+                )
+            )
+        if "rerank_model" not in existing_columns:
+            migrations.append(
+                (
+                    "rerank_model",
+                    "ALTER TABLE smart_rags ADD COLUMN rerank_model VARCHAR(150) DEFAULT 'cross-encoder/ms-marco-MiniLM-L-6-v2'",
+                )
+            )
+        if "rerank_top_n" not in existing_columns:
+            migrations.append(
+                (
+                    "rerank_top_n",
+                    "ALTER TABLE smart_rags ADD COLUMN rerank_top_n INTEGER DEFAULT 20",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for smart_rags table (v1.5 reranking)"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add scraper and reranking columns to smart_augmentors table (v1.5)
+    if "smart_augmentors" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("smart_augmentors")
+        }
+
+        migrations = []
+
+        if "scraper_provider" not in existing_columns:
+            migrations.append(
+                (
+                    "scraper_provider",
+                    "ALTER TABLE smart_augmentors ADD COLUMN scraper_provider VARCHAR(50) DEFAULT 'builtin'",
+                )
+            )
+        if "rerank_provider" not in existing_columns:
+            migrations.append(
+                (
+                    "rerank_provider",
+                    "ALTER TABLE smart_augmentors ADD COLUMN rerank_provider VARCHAR(50) DEFAULT 'local'",
+                )
+            )
+        if "rerank_model" not in existing_columns:
+            migrations.append(
+                (
+                    "rerank_model",
+                    "ALTER TABLE smart_augmentors ADD COLUMN rerank_model VARCHAR(150) DEFAULT 'cross-encoder/ms-marco-MiniLM-L-6-v2'",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for smart_augmentors table (v1.5)"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
 
 def init_db(drop_all: bool = False) -> None:
     """
