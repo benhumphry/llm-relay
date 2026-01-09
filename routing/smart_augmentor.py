@@ -103,21 +103,12 @@ class SmartAugmentorEngine:
         decision, designator_usage = self._call_designator(query_preview)
 
         if decision is None or decision.startswith("direct"):
-            # No augmentation needed
+            # Fallback to search with the user's query if designator fails or returns direct
             logger.info(
-                f"Augmentor '{self.augmentor.name}' decision: direct (no augmentation)"
+                f"Augmentor '{self.augmentor.name}' decision: fallback to search "
+                f"(designator returned: {decision})"
             )
-            return AugmentationResult(
-                resolved=resolved,
-                augmentor_id=self.augmentor.id,
-                augmentor_name=self.augmentor.name,
-                augmentor_tags=self.augmentor.tags,
-                augmented_system=system,
-                augmented_messages=messages,
-                augmentation_type="direct",
-                designator_usage=designator_usage,
-                designator_model=self.augmentor.designator_model,
-            )
+            decision = f"search:{query_preview}"
 
         # Parse the decision
         augmentation_type, context = self._parse_decision(decision)
@@ -197,18 +188,17 @@ class SmartAugmentorEngine:
         if self.augmentor.purpose:
             purpose_context = f"\nPURPOSE: {self.augmentor.purpose}\n"
 
-        prompt = f"""You are an augmentation assistant. Analyze the user's query and decide what external information would help provide a better, more current answer.
+        prompt = f"""You are an augmentation assistant. Analyze the user's query and decide how to find external information to help provide a better, more current answer.
 {purpose_context}
 OPTIONS:
-- direct - No external info needed (use for simple questions, creative tasks, coding, etc.)
-- search:query terms - Search the web for current information (use for news, current events, recent data)
+- search:query terms - Search the web for information (use for most queries - news, facts, current events, how-to, etc.)
 - scrape:url1,url2 - Fetch specific URLs mentioned by the user
 - search+scrape:query - Search then fetch top results for comprehensive research
 
 USER QUERY:
 {query_preview}
 
-Respond with ONLY your decision (e.g., "direct" or "search:UK foreign policy 2024"). Do not explain."""
+Respond with ONLY your decision (e.g., "search:UK foreign policy 2024" or "scrape:https://example.com"). Do not explain."""
 
         try:
             # Resolve and call the designator model
@@ -248,16 +238,17 @@ Respond with ONLY your decision (e.g., "direct" or "search:UK foreign policy 202
         Returns:
             Tuple of (augmentation_type, context/query)
         """
-        decision = decision.lower().strip()
+        decision_lower = decision.lower().strip()
 
-        if decision.startswith("search+scrape:"):
+        if decision_lower.startswith("search+scrape:"):
             return "search+scrape", decision[14:].strip()
-        elif decision.startswith("search:"):
+        elif decision_lower.startswith("search:"):
             return "search", decision[7:].strip()
-        elif decision.startswith("scrape:"):
+        elif decision_lower.startswith("scrape:"):
             return "scrape", decision[7:].strip()
         else:
-            return "direct", ""
+            # Default to search with the raw decision as query
+            return "search", decision.strip()
 
     def _execute_search(self, query: str) -> str:
         """Execute a web search and return formatted results."""
