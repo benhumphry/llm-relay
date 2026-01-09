@@ -5892,6 +5892,25 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             logger.error(f"Failed to start indexing: {e}")
             return jsonify({"error": str(e)}), 500
 
+    @admin.route("/api/rags/<int:rag_id>/cancel-index", methods=["POST"])
+    @require_auth_api
+    def cancel_rag_indexing(rag_id: int):
+        """Cancel/reset a stuck indexing job."""
+        from db import get_smart_rag_by_id
+        from rag import get_indexer
+
+        rag = get_smart_rag_by_id(rag_id)
+        if not rag:
+            return jsonify({"error": "RAG not found"}), 404
+
+        try:
+            indexer = get_indexer()
+            indexer.cancel_indexing(rag_id)
+            return jsonify({"success": True, "message": "Indexing cancelled"})
+        except Exception as e:
+            logger.error(f"Failed to cancel indexing: {e}")
+            return jsonify({"error": str(e)}), 500
+
     @admin.route("/api/rags/embedding-providers", methods=["GET"])
     @require_auth_api
     def list_embedding_providers():

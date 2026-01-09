@@ -182,6 +182,31 @@ class RAGIndexer:
         """Run indexing job (called by scheduler)."""
         self.index_rag(rag_id, background=True)
 
+    def cancel_indexing(self, rag_id: int) -> bool:
+        """
+        Cancel and reset a stuck indexing job.
+
+        This doesn't actually kill the thread (Python threads can't be killed),
+        but it resets the status so a new indexing job can be started.
+        """
+        from db import update_smart_rag_index_status
+
+        with self._lock:
+            if rag_id in self._indexing_jobs:
+                del self._indexing_jobs[rag_id]
+
+        # Reset status to pending
+        update_smart_rag_index_status(rag_id, "pending")
+        logger.info(f"Cancelled/reset indexing for RAG {rag_id}")
+        return True
+
+    def is_indexing(self, rag_id: int) -> bool:
+        """Check if a RAG is currently being indexed."""
+        with self._lock:
+            if rag_id in self._indexing_jobs:
+                return self._indexing_jobs[rag_id].is_alive()
+        return False
+
     def index_rag(self, rag_id: int, background: bool = False) -> bool:
         """
         Index all documents for a SmartRAG.
@@ -273,7 +298,15 @@ class RAGIndexer:
             documents = []
             doc_count = 0
 
-            for file_path in self._find_documents(source_path):
+            all_files = list(self._find_documents(source_path))
+            total_files = len(all_files)
+            logger.info(f"Found {total_files} documents to index")
+
+            for file_idx, file_path in enumerate(all_files):
+                relative_path = str(file_path.relative_to(source_path))
+                logger.info(
+                    f"Processing document {file_idx + 1}/{total_files}: {relative_path}"
+                )
                 try:
                     chunks = self._process_document(
                         file_path,
@@ -284,9 +317,13 @@ class RAGIndexer:
                         vision_ollama_url=rag.vision_ollama_url,
                     )
                     for chunk in chunks:
-                        chunk["source_file"] = str(file_path.relative_to(source_path))
+                        chunk["source_file"] = relative_path
                     documents.extend(chunks)
                     doc_count += 1
+                    logger.info(
+                        f"Completed {relative_path}: {len(chunks)} chunks "
+                        f"(total: {len(documents)} chunks from {doc_count} docs)"
+                    )
 
                     # Update progress after each document
                     update_smart_rag_index_status(
