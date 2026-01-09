@@ -1,4 +1,7 @@
-# LLM Relay - GPU Support Overlay
+# LLM Relay - GPU Support (Local Build)
+#
+# Builds with PyTorch CUDA 12.6 for Pascal GPU support (sm_61).
+# The published ghcr.io image uses cu128 which dropped Pascal support.
 #
 # Enables NVIDIA GPU acceleration for local ML models:
 #   - Embeddings (sentence-transformers)
@@ -6,27 +9,29 @@
 #   - Docling document parsing
 #
 # Requirements:
-#   - NVIDIA GPU with CUDA support
-#   - NVIDIA drivers installed on host (with nvidia_uvm module for CUDA compute)
+#   - NVIDIA GPU with CUDA support (Pascal or newer: GTX 10xx, Quadro P-series, etc.)
+#   - NVIDIA drivers 525.60.13+ installed on host
 #   - NVIDIA Container Toolkit (nvidia-container-toolkit)
 #
+# Usage (build and run with GPU):
+#   docker compose -f docker-compose.gpu.yml up -d --build
+#
 # Verify GPU is working:
-#   docker exec llm-relay python -c "import torch; print(torch.cuda.is_available())"
-#
-# Common issues:
-#   - "CUDA unknown error": nvidia_uvm kernel module not loaded
-#     Fix: sudo modprobe nvidia_uvm (or reinstall drivers with CUDA support)
-#   - CUDA version mismatch: Host driver too old for PyTorch CUDA version
-#     The Dockerfile installs PyTorch with CUDA 12.1 (requires driver 525.60.13+)
-#
-# Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
-#
-# Or for development:
-#   docker compose -f docker-compose.dev.yml up -d  # (GPU already enabled in dev)
+#   docker exec llm-relay-gpu python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}')"
 
 services:
     llm-relay:
+        build:
+            context: .
+            dockerfile: Dockerfile.gpu
+        container_name: llm-relay-gpu
+        ports:
+            - "11434:11434"
+            - "8080:8080"
+        volumes:
+            - llm-relay-data:/data
+        env_file:
+            - .env
         runtime: nvidia
         environment:
             - NVIDIA_VISIBLE_DEVICES=all
@@ -38,3 +43,7 @@ services:
                         - driver: nvidia
                           count: all
                           capabilities: [gpu, compute, utility]
+        restart: unless-stopped
+
+volumes:
+    llm-relay-data:
