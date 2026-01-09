@@ -5527,22 +5527,39 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "providers": [],
         }
 
-        # Check Ollama instances
+        # Check Ollama instances for embedding models
         ollama_instances = []
+        # Common embedding model names/patterns
+        embedding_patterns = [
+            "embed",
+            "nomic-embed",
+            "bge",
+            "mxbai-embed",
+            "all-minilm",
+            "snowflake-arctic-embed",
+            "paraphrase",
+            "e5-",
+            "gte-",
+        ]
+
         for provider in _get_ollama_providers():
             if provider.is_configured():
-                # Get all models from this instance
                 raw_models = provider.get_raw_models()
                 models = []
                 for model in raw_models:
-                    name = model.get("name", "")
-                    models.append(
-                        {
-                            "id": name,
-                            "name": name,
-                            "size": model.get("size"),
-                        }
+                    name = model.get("name", "").lower()
+                    # Check if this looks like an embedding model
+                    is_embedding = any(
+                        pattern in name for pattern in embedding_patterns
                     )
+                    if is_embedding:
+                        models.append(
+                            {
+                                "id": model.get("name", ""),
+                                "name": model.get("name", ""),
+                                "size": model.get("size"),
+                            }
+                        )
                 if models:
                     ollama_instances.append(
                         {
