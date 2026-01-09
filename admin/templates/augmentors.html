@@ -197,10 +197,10 @@ content %}
                             <tr x-show="expandedRows.includes(augmentor.id)" x-transition>
                                 <td colspan="9" class="bg-base-200 p-0">
                                     <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                                        <!-- Purpose/Description -->
-                                        <div x-show="augmentor.purpose || augmentor.description" class="md:col-span-2">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Purpose</div>
-                                            <div class="text-sm" x-text="augmentor.description || augmentor.purpose"></div>
+                                        <!-- Description -->
+                                        <div x-show="augmentor.description" class="md:col-span-2">
+                                            <div class="text-xs text-base-content/50 uppercase mb-1">Description</div>
+                                            <div class="text-sm" x-text="augmentor.description"></div>
                                         </div>
                                         <!-- Designator Model -->
                                         <div>
@@ -313,22 +313,6 @@ content %}
                     </select>
                     <label class="label">
                         <span class="label-text-alt">Model to forward augmented requests to</span>
-                    </label>
-                </div>
-
-                <!-- Purpose -->
-                <div class="form-control mt-4">
-                    <label class="label">
-                        <span class="label-text">Purpose</span>
-                    </label>
-                    <textarea
-                        x-model="form.purpose"
-                        class="textarea textarea-bordered"
-                        placeholder="e.g., Research assistant for current events and recent data"
-                        rows="2"
-                    ></textarea>
-                    <label class="label">
-                        <span class="label-text-alt">Context for the designator to decide when to augment</span>
                     </label>
                 </div>
 
@@ -482,7 +466,6 @@ content %}
                 name: '',
                 designator_model: '',
                 target_model: '',
-                purpose: '',
                 max_search_results: 5,
                 max_scrape_urls: 3,
                 max_context_tokens: 4000,
@@ -537,7 +520,6 @@ content %}
                     name: '',
                     designator_model: '',
                     target_model: '',
-                    purpose: 'Research assistant that augments queries with current web information when needed.',
                     max_search_results: 5,
                     max_scrape_urls: 3,
                     max_context_tokens: 4000,
@@ -556,7 +538,6 @@ content %}
                     name: augmentor.name,
                     designator_model: '',
                     target_model: '',
-                    purpose: augmentor.purpose || '',
                     max_search_results: augmentor.max_search_results,
                     max_scrape_urls: augmentor.max_scrape_urls,
                     max_context_tokens: augmentor.max_context_tokens,
@@ -593,7 +574,6 @@ content %}
                     name: this.form.name.toLowerCase().trim(),
                     designator_model: this.form.designator_model,
                     target_model: this.form.target_model,
-                    purpose: this.form.purpose || null,
                     max_search_results: parseInt(this.form.max_search_results),
                     max_scrape_urls: parseInt(this.form.max_scrape_urls),
                     max_context_tokens: parseInt(this.form.max_context_tokens),
