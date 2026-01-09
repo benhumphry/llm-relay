@@ -261,9 +261,14 @@ class WebScraper:
     ) -> ScrapeResult:
         """
         Parse document content using Docling.
+
+        Uses configurable vision model from settings for document parsing.
         """
         try:
-            from docling.document_converter import DocumentConverter
+            from rag.vision import (
+                get_document_converter,
+                get_vision_config_from_settings,
+            )
 
             # Get file extension for content type
             extension = DOCLING_CONTENT_TYPES.get(content_type, ".pdf")
@@ -274,8 +279,19 @@ class WebScraper:
                 temp_path = Path(f.name)
 
             try:
-                # Parse with Docling
-                converter = DocumentConverter()
+                # Get vision config from settings and create converter
+                vision_config = get_vision_config_from_settings()
+                converter = get_document_converter(
+                    vision_provider=vision_config.provider_type,
+                    vision_model=vision_config.model_name,
+                    vision_ollama_url=vision_config.base_url,
+                )
+
+                logger.debug(
+                    f"Using vision provider '{vision_config.provider_type}' "
+                    f"model '{vision_config.model_name}' for document parsing"
+                )
+
                 result = converter.convert(temp_path)
 
                 # Extract text
@@ -299,8 +315,8 @@ class WebScraper:
                 # Clean up temp file
                 temp_path.unlink(missing_ok=True)
 
-        except ImportError:
-            logger.warning("Docling not installed, cannot parse document")
+        except ImportError as e:
+            logger.warning(f"Docling not installed, cannot parse document: {e}")
             return ScrapeResult(
                 url=url,
                 title="",

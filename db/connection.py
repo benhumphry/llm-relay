@@ -604,6 +604,44 @@ def _run_migrations(engine) -> None:
                 conn.execute(text("ALTER TABLE redirects ADD COLUMN tags_json TEXT"))
                 conn.commit()
 
+    # Migration: Add vision model columns to smart_rags table (v3.9)
+    if "smart_rags" in inspector.get_table_names():
+        existing_columns = {col["name"] for col in inspector.get_columns("smart_rags")}
+
+        migrations = []
+
+        if "vision_provider" not in existing_columns:
+            migrations.append(
+                (
+                    "vision_provider",
+                    "ALTER TABLE smart_rags ADD COLUMN vision_provider VARCHAR(100) DEFAULT 'local'",
+                )
+            )
+        if "vision_model" not in existing_columns:
+            migrations.append(
+                (
+                    "vision_model",
+                    "ALTER TABLE smart_rags ADD COLUMN vision_model VARCHAR(150)",
+                )
+            )
+        if "vision_ollama_url" not in existing_columns:
+            migrations.append(
+                (
+                    "vision_ollama_url",
+                    "ALTER TABLE smart_rags ADD COLUMN vision_ollama_url VARCHAR(500)",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for smart_rags table (v3.9)"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
 
 def init_db(drop_all: bool = False) -> None:
     """

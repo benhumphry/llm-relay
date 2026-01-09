@@ -909,6 +909,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER,
             Setting.KEY_WEB_SEARCH_URL,
             Setting.KEY_WEB_SCRAPER_PROVIDER,
+            Setting.KEY_VISION_PROVIDER,
+            Setting.KEY_VISION_MODEL,
+            Setting.KEY_VISION_OLLAMA_URL,
         ]
 
         with get_db_context() as db:
@@ -926,6 +929,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "scraper_provider": settings_dict.get(Setting.KEY_WEB_SCRAPER_PROVIDER)
                 or "builtin",
                 "jina_api_configured": jina_api_configured,
+                "vision_provider": settings_dict.get(Setting.KEY_VISION_PROVIDER)
+                or "local",
+                "vision_model": settings_dict.get(Setting.KEY_VISION_MODEL) or "",
+                "vision_ollama_url": settings_dict.get(Setting.KEY_VISION_OLLAMA_URL)
+                or "",
             }
         )
 
@@ -945,11 +953,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if scraper_provider not in ("builtin", "jina"):
             return jsonify({"error": "Invalid scraper provider"}), 400
 
+        # Vision provider can be "local", "ollama:<instance>", or any provider name
+        vision_provider = data.get("vision_provider", "local")
+        vision_model = data.get("vision_model", "")
+        vision_ollama_url = data.get("vision_ollama_url", "")
+
         # Save settings (jina_api_key is now via env var JINA_API_KEY)
         settings_to_save = {
             Setting.KEY_WEB_SEARCH_PROVIDER: search_provider,
             Setting.KEY_WEB_SEARCH_URL: data.get("search_url", ""),
             Setting.KEY_WEB_SCRAPER_PROVIDER: scraper_provider,
+            Setting.KEY_VISION_PROVIDER: vision_provider,
+            Setting.KEY_VISION_MODEL: vision_model,
+            Setting.KEY_VISION_OLLAMA_URL: vision_ollama_url,
         }
 
         with get_db_context() as db:
@@ -5429,8 +5445,13 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/rags/embedding-models", methods=["GET"])
     @require_auth_api
     def list_embedding_models_for_rag():
-        """List all available embedding models for RAG."""
-        # Known embedding models for various providers
+        """List all available embedding models for RAG.
+
+        Returns ALL configured providers, with suggested models where known.
+        Providers without known embedding models will have an empty list
+        but users can still enter a custom model name.
+        """
+        # Known embedding models for various providers (suggestions only)
         PROVIDER_EMBEDDING_MODELS = {
             "openai": [
                 {"id": "text-embedding-3-small", "name": "Text Embedding 3 Small"},
@@ -5477,6 +5498,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 {"id": "embed-english-v3.0", "name": "Embed English v3.0"},
                 {"id": "embed-multilingual-v3.0", "name": "Embed Multilingual v3.0"},
                 {"id": "embed-english-light-v3.0", "name": "Embed English Light v3.0"},
+            ],
+            "voyage": [
+                {"id": "voyage-3", "name": "Voyage 3"},
+                {"id": "voyage-3-lite", "name": "Voyage 3 Lite"},
+                {"id": "voyage-code-3", "name": "Voyage Code 3"},
+            ],
+            "mistral": [
+                {"id": "mistral-embed", "name": "Mistral Embed"},
             ],
         }
 
@@ -5527,21 +5556,148 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             result["ollama"]["available"] = True
             result["ollama"]["instances"] = ollama_instances
 
-        # Check all configured providers that support embeddings
+        # Include ALL configured providers (not just those with known embedding models)
         for provider in registry.get_available_providers():
             # Skip Ollama providers (handled above)
             if provider.name.startswith("ollama"):
                 continue
 
-            # Check if provider has known embedding models
             provider_name = provider.name.lower()
-            if provider_name in PROVIDER_EMBEDDING_MODELS:
-                result["providers"].append(
+            # Get suggested models if available, otherwise empty list
+            # (user can enter custom model name)
+            suggested_models = PROVIDER_EMBEDDING_MODELS.get(provider_name, [])
+
+            result["providers"].append(
+                {
+                    "name": provider.name,
+                    "models": suggested_models,
+                    "supports_custom": True,  # All providers support custom model names
+                }
+            )
+
+        return jsonify(result)
+
+    @admin.route("/api/rags/vision-models", methods=["GET"])
+    @require_auth_api
+    def list_vision_models_for_rag():
+        """List all available vision models for document parsing.
+
+        Vision models are used by Docling for parsing complex documents
+        (PDFs with tables, images requiring OCR, etc.).
+        """
+        # Known vision models for various providers (suggestions only)
+        PROVIDER_VISION_MODELS = {
+            "openai": [
+                {"id": "gpt-4o", "name": "GPT-4o"},
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+            ],
+            "anthropic": [
+                {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
+                {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
+                {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku"},
+            ],
+            "openrouter": [
+                {"id": "openai/gpt-4o", "name": "OpenAI GPT-4o"},
+                {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet"},
+                {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5"},
+            ],
+            "google": [
+                {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+                {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+            ],
+            "together": [
+                {
+                    "id": "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+                    "name": "Llama 3.2 11B Vision",
+                },
+                {
+                    "id": "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo",
+                    "name": "Llama 3.2 90B Vision",
+                },
+            ],
+            "fireworks": [
+                {
+                    "id": "accounts/fireworks/models/llama-v3p2-11b-vision-instruct",
+                    "name": "Llama 3.2 11B Vision",
+                },
+            ],
+        }
+
+        result = {
+            "local": {
+                "available": True,
+                "description": "Bundled Docling models (CPU/GPU)",
+                "models": [
                     {
-                        "name": provider.name,
-                        "models": PROVIDER_EMBEDDING_MODELS[provider_name],
+                        "id": "default",
+                        "name": "Docling Default (local processing)",
                     }
-                )
+                ],
+            },
+            "ollama": {
+                "available": False,
+                "instances": [],
+            },
+            "providers": [],
+        }
+
+        # Check Ollama instances for vision models
+        ollama_instances = []
+        # Common vision model names/patterns
+        vision_patterns = [
+            "vision",
+            "llava",
+            "granite3.2-vision",
+            "moondream",
+            "bakllava",
+            "llama3.2-vision",
+        ]
+
+        for provider in _get_ollama_providers():
+            if provider.is_configured():
+                raw_models = provider.get_raw_models()
+                models = []
+                for model in raw_models:
+                    name = model.get("name", "").lower()
+                    # Check if this looks like a vision model
+                    is_vision = any(pattern in name for pattern in vision_patterns)
+                    if is_vision:
+                        models.append(
+                            {
+                                "id": model.get("name", ""),
+                                "name": model.get("name", ""),
+                                "size": model.get("size"),
+                            }
+                        )
+                if models:
+                    ollama_instances.append(
+                        {
+                            "name": provider.name,
+                            "url": provider.base_url,
+                            "models": models,
+                        }
+                    )
+
+        if ollama_instances:
+            result["ollama"]["available"] = True
+            result["ollama"]["instances"] = ollama_instances
+
+        # Include ALL configured providers
+        for provider in registry.get_available_providers():
+            if provider.name.startswith("ollama"):
+                continue
+
+            provider_name = provider.name.lower()
+            suggested_models = PROVIDER_VISION_MODELS.get(provider_name, [])
+
+            result["providers"].append(
+                {
+                    "name": provider.name,
+                    "models": suggested_models,
+                    "supports_custom": True,
+                }
+            )
 
         return jsonify(result)
 
@@ -5595,6 +5751,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 embedding_provider=data.get("embedding_provider", "local"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
+                vision_provider=data.get("vision_provider", "local"),
+                vision_model=data.get("vision_model"),
+                vision_ollama_url=data.get("vision_ollama_url"),
                 index_schedule=data.get("index_schedule"),
                 chunk_size=data.get("chunk_size", 512),
                 chunk_overlap=data.get("chunk_overlap", 50),
@@ -5628,6 +5787,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 embedding_provider=data.get("embedding_provider"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
+                vision_provider=data.get("vision_provider"),
+                vision_model=data.get("vision_model"),
+                vision_ollama_url=data.get("vision_ollama_url"),
                 index_schedule=data.get("index_schedule"),
                 chunk_size=data.get("chunk_size"),
                 chunk_overlap=data.get("chunk_overlap"),

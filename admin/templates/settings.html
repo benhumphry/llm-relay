@@ -1212,7 +1212,7 @@ content %}
                         </div>
                     </template>
 
-                    <!-- Scraper Provider -->
+                    <!-- Scraper Provider (hidden - Jina not yet implemented)
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text">Web Scraper</span>
@@ -1226,7 +1226,6 @@ content %}
                         </select>
                     </div>
 
-                    <!-- Jina API Key status (optional) -->
                     <template x-if="webSettings.scraper_provider === 'jina'">
                         <div class="form-control">
                             <label class="label">
@@ -1247,10 +1246,94 @@ content %}
                             </div>
                         </div>
                     </template>
+                    -->
+
+                    <!-- Document Parsing Divider -->
+                    <div class="divider mt-4">Document Parsing (Vision Model)</div>
+
+                    <!-- Vision Provider -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Vision Provider</span>
+                        </label>
+                        <select
+                            x-model="webSettings.vision_provider"
+                            @change="onVisionProviderChange()"
+                            class="select select-bordered"
+                        >
+                            <option value="local">Local (Docling default)</option>
+                            <option x-show="visionModels.ollama?.available" value="ollama">Ollama</option>
+                            <template x-for="provider in visionModels.providers || []" :key="provider.name">
+                                <option :value="provider.name" x-text="provider.name"></option>
+                            </template>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt">For parsing scraped PDFs and documents</span>
+                        </label>
+                    </div>
+
+                    <!-- Local Vision Info -->
+                    <template x-if="webSettings.vision_provider === 'local'">
+                        <div class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3">
+                            Uses bundled Docling models for document parsing. Runs on CPU/GPU.
+                        </div>
+                    </template>
+
+                    <!-- Ollama Vision Instance & Model -->
+                    <template x-if="webSettings.vision_provider === 'ollama' && visionModels.ollama?.available">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Ollama Instance</span>
+                                </label>
+                                <select
+                                    x-model="webSettings.vision_ollama_instance"
+                                    @change="onVisionOllamaInstanceChange()"
+                                    class="select select-bordered"
+                                >
+                                    <template x-for="instance in visionModels.ollama.instances" :key="instance.name">
+                                        <option :value="instance.name" x-text="instance.name + ' (' + instance.url + ')'"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Vision Model</span>
+                                </label>
+                                <select
+                                    x-model="webSettings.vision_model"
+                                    class="select select-bordered font-mono"
+                                >
+                                    <option value="">Select a model...</option>
+                                    <template x-for="model in getOllamaVisionModels()" :key="model.id">
+                                        <option :value="model.id" x-text="model.name"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Provider Vision Model -->
+                    <template x-if="isProviderVision()">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Vision Model</span>
+                            </label>
+                            <select
+                                x-model="webSettings.vision_model"
+                                class="select select-bordered font-mono"
+                            >
+                                <option value="">Select a model...</option>
+                                <template x-for="model in getProviderVisionModels()" :key="model.id">
+                                    <option :value="model.id" x-text="model.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </template>
 
                     <button
                         @click="saveWebSettings()"
-                        class="btn btn-primary btn-sm"
+                        class="btn btn-primary btn-sm mt-4"
                         :class="{ 'loading': savingWebSettings }"
                     >
                         Save Web Settings
@@ -1488,10 +1571,15 @@ content %}
                 search_url: '',
                 scraper_provider: 'builtin',
                 jina_api_configured: false,
+                vision_provider: 'local',
+                vision_model: '',
+                vision_ollama_instance: '',
+                vision_ollama_url: '',
             },
             availableSearchProviders: [],
             hasAnySearchProvider: false,
             savingWebSettings: false,
+            visionModels: {},
 
             // Computed property for filtered logs
             get filteredDebugLogs() {
@@ -1794,15 +1882,31 @@ content %}
                         this.hasAnySearchProvider = this.availableSearchProviders.length > 0;
                     }
 
+                    // Load vision models
+                    await this.loadVisionModels();
+
                     // Load saved web settings
                     const webRes = await fetch('/api/settings/web');
                     if (webRes.ok) {
                         const webData = await webRes.json();
+
+                        // Parse vision provider - if starts with "ollama:", extract instance name
+                        let visionProvider = webData.vision_provider || 'local';
+                        let visionOllamaInstance = '';
+                        if (visionProvider.startsWith('ollama:')) {
+                            visionOllamaInstance = visionProvider.substring(7);
+                            visionProvider = 'ollama';
+                        }
+
                         this.webSettings = {
                             search_provider: webData.search_provider || '',
                             search_url: webData.search_url || '',
                             scraper_provider: webData.scraper_provider || 'builtin',
                             jina_api_configured: webData.jina_api_configured || false,
+                            vision_provider: visionProvider,
+                            vision_model: webData.vision_model || '',
+                            vision_ollama_instance: visionOllamaInstance,
+                            vision_ollama_url: webData.vision_ollama_url || '',
                         };
                     }
                 } catch (err) {
@@ -1810,13 +1914,89 @@ content %}
                 }
             },
 
+            async loadVisionModels() {
+                try {
+                    const res = await fetch('/api/rags/vision-models');
+                    if (res.ok) {
+                        this.visionModels = await res.json();
+                    }
+                } catch (err) {
+                    console.error('Failed to load vision models:', err);
+                }
+            },
+
+            onVisionProviderChange() {
+                // Reset model when provider changes
+                this.webSettings.vision_model = '';
+                this.webSettings.vision_ollama_instance = '';
+                this.webSettings.vision_ollama_url = '';
+
+                // Auto-select first Ollama instance if switching to Ollama
+                if (this.webSettings.vision_provider === 'ollama' && this.visionModels.ollama?.instances?.length > 0) {
+                    this.webSettings.vision_ollama_instance = this.visionModels.ollama.instances[0].name;
+                    this.webSettings.vision_ollama_url = this.visionModels.ollama.instances[0].url;
+                }
+            },
+
+            onVisionOllamaInstanceChange() {
+                // Reset model when Ollama instance changes
+                this.webSettings.vision_model = '';
+                // Update URL from selected instance
+                const instance = this.visionModels.ollama?.instances?.find(i => i.name === this.webSettings.vision_ollama_instance);
+                if (instance) {
+                    this.webSettings.vision_ollama_url = instance.url;
+                }
+            },
+
+            getOllamaVisionModels() {
+                if (!this.visionModels.ollama?.instances || !this.webSettings.vision_ollama_instance) {
+                    return [];
+                }
+                const instance = this.visionModels.ollama.instances.find(
+                    i => i.name === this.webSettings.vision_ollama_instance
+                );
+                return instance?.models || [];
+            },
+
+            isProviderVision() {
+                const provider = this.webSettings.vision_provider;
+                return provider && provider !== 'local' && provider !== 'ollama';
+            },
+
+            getProviderVisionModels() {
+                if (!this.isProviderVision() || !this.visionModels.providers) {
+                    return [];
+                }
+                const provider = this.visionModels.providers.find(
+                    p => p.name === this.webSettings.vision_provider
+                );
+                return provider?.models || [];
+            },
+
             async saveWebSettings() {
                 this.savingWebSettings = true;
                 try {
+                    // Build vision provider string - combine instance name for Ollama
+                    let visionProvider = this.webSettings.vision_provider;
+                    let visionOllamaUrl = null;
+                    if (this.webSettings.vision_provider === 'ollama' && this.webSettings.vision_ollama_instance) {
+                        visionProvider = `ollama:${this.webSettings.vision_ollama_instance}`;
+                        visionOllamaUrl = this.webSettings.vision_ollama_url;
+                    }
+
+                    const payload = {
+                        search_provider: this.webSettings.search_provider,
+                        search_url: this.webSettings.search_url,
+                        scraper_provider: this.webSettings.scraper_provider,
+                        vision_provider: visionProvider,
+                        vision_model: this.webSettings.vision_model,
+                        vision_ollama_url: visionOllamaUrl || '',
+                    };
+
                     const res = await fetch('/api/settings/web', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(this.webSettings),
+                        body: JSON.stringify(payload),
                     });
 
                     if (res.ok) {

@@ -171,7 +171,8 @@ Requires a search provider (SearXNG or Perplexity).
 Document-based context augmentation using RAG (Retrieval-Augmented Generation). Index local document folders and automatically retrieve relevant context for each query.
 
 - **Multiple formats** — PDF, DOCX, PPTX, HTML, Markdown, images (via Docling)
-- **Flexible embeddings** — Local (bundled), Ollama, or OpenAI
+- **Flexible embeddings** — Local (bundled), Ollama, or any configured provider
+- **Vision model offloading** — Offload PDF parsing to Ollama or cloud vision models (e.g., granite3.2-vision)
 - **Semantic search** — ChromaDB vector storage with configurable similarity threshold
 - **Scheduled indexing** — Cron-based re-indexing for updated documents
 

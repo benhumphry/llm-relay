@@ -219,6 +219,13 @@ class Setting(Base):
     KEY_WEB_SEARCH_URL = "web_search_url"  # Override URL for SearXNG
     KEY_WEB_SCRAPER_PROVIDER = "web_scraper_provider"  # "builtin" or "jina"
     # Note: Jina API key is configured via JINA_API_KEY env var
+
+    # Vision model settings for document parsing (v3.9)
+    KEY_VISION_PROVIDER = (
+        "vision_provider"  # "local", "ollama:<instance>", or provider name
+    )
+    KEY_VISION_MODEL = "vision_model"  # Model name (e.g., "granite3.2-vision:latest")
+    KEY_VISION_OLLAMA_URL = "vision_ollama_url"  # Ollama URL when using ollama provider
     # Usage tracking settings (v2.1)
     KEY_TRACKING_ENABLED = "tracking_enabled"
     KEY_DNS_RESOLUTION_ENABLED = "dns_resolution_enabled"
@@ -1204,6 +1211,16 @@ class SmartRAG(Base):
         String(500), nullable=True
     )  # Ollama instance URL (when using ollama provider)
 
+    # Vision model configuration (for document parsing with Docling)
+    # vision_provider: "local" (default), "ollama:<instance>", or provider name
+    vision_provider: Mapped[str] = mapped_column(String(100), default="local")
+    vision_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )  # Vision model name (e.g., "granite3.2-vision:latest")
+    vision_ollama_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Ollama URL for vision model
+
     # Indexing configuration
     index_schedule: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True
@@ -1273,6 +1290,9 @@ class SmartRAG(Base):
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "ollama_url": self.ollama_url,
+            "vision_provider": self.vision_provider,
+            "vision_model": self.vision_model,
+            "vision_ollama_url": self.vision_ollama_url,
             "index_schedule": self.index_schedule,
             "last_indexed": self.last_indexed.isoformat()
             if self.last_indexed

@@ -127,8 +127,10 @@ How it works:
 Key settings:
 - `source_path` - Docker-mounted folder containing documents (e.g., `/data/documents`)
 - `target_model` - Model to forward augmented requests to
-- `embedding_provider` - "local" (bundled sentence-transformers), "ollama", or "openai"
-- `embedding_model` - Model name for Ollama/OpenAI embeddings
+- `embedding_provider` - "local" (bundled sentence-transformers), "ollama", or any configured provider
+- `embedding_model` - Model name for the embedding provider
+- `vision_provider` - "local" (Docling default), "ollama", or any configured provider for PDF parsing
+- `vision_model` - Vision model for document understanding (e.g., "granite3.2-vision:latest")
 - `chunk_size` / `chunk_overlap` - Document chunking parameters
 - `max_results` - Maximum chunks to retrieve
 - `similarity_threshold` - Minimum similarity score for retrieval (0.0-1.0)
@@ -138,7 +140,12 @@ Key settings:
 Embedding providers:
 - **local** (default) - Bundled `BAAI/bge-small-en-v1.5` model (~130MB), no external deps
 - **ollama** - Uses Ollama's `/api/embeddings` endpoint (nomic-embed-text, mxbai-embed-large, etc.)
-- **openai** - Uses OpenAI's embedding API (text-embedding-3-small) - costs logged to request log
+- **Any configured provider** - Uses provider's embedding API (costs logged to request log)
+
+Vision providers (for PDF parsing):
+- **local** (default) - Bundled Docling models, runs on CPU/GPU
+- **ollama** - Offload to Ollama vision model (e.g., granite3.2-vision) for faster processing
+- **Any configured provider** - Use OpenAI, Anthropic, etc. for document understanding
 
 Requires ChromaDB (set `CHROMA_URL` environment variable).
 

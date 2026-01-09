@@ -276,7 +276,12 @@ class RAGIndexer:
             for file_path in self._find_documents(source_path):
                 try:
                     chunks = self._process_document(
-                        file_path, rag.chunk_size, rag.chunk_overlap
+                        file_path,
+                        rag.chunk_size,
+                        rag.chunk_overlap,
+                        vision_provider=rag.vision_provider,
+                        vision_model=rag.vision_model,
+                        vision_ollama_url=rag.vision_ollama_url,
                     )
                     for chunk in chunks:
                         chunk["source_file"] = str(file_path.relative_to(source_path))
@@ -369,18 +374,39 @@ class RAGIndexer:
                 yield file_path
 
     def _process_document(
-        self, file_path: Path, chunk_size: int, chunk_overlap: int
+        self,
+        file_path: Path,
+        chunk_size: int,
+        chunk_overlap: int,
+        vision_provider: str = "local",
+        vision_model: Optional[str] = None,
+        vision_ollama_url: Optional[str] = None,
     ) -> list[dict]:
         """
         Process a document and return chunks.
 
         Uses Docling for parsing if available, falls back to simple text extraction.
+
+        Args:
+            file_path: Path to the document
+            chunk_size: Target chunk size in characters
+            chunk_overlap: Overlap between chunks
+            vision_provider: Vision model provider ("local", "ollama:<instance>", or provider name)
+            vision_model: Vision model name for remote processing
+            vision_ollama_url: Ollama URL for vision processing
         """
         suffix = file_path.suffix.lower()
 
         # Try Docling first
         try:
-            return self._process_with_docling(file_path, chunk_size, chunk_overlap)
+            return self._process_with_docling(
+                file_path,
+                chunk_size,
+                chunk_overlap,
+                vision_provider=vision_provider,
+                vision_model=vision_model,
+                vision_ollama_url=vision_ollama_url,
+            )
         except ImportError:
             logger.debug("Docling not available, using fallback parser")
         except Exception as e:
@@ -390,12 +416,22 @@ class RAGIndexer:
         return self._process_simple(file_path, suffix, chunk_size, chunk_overlap)
 
     def _process_with_docling(
-        self, file_path: Path, chunk_size: int, chunk_overlap: int
+        self,
+        file_path: Path,
+        chunk_size: int,
+        chunk_overlap: int,
+        vision_provider: str = "local",
+        vision_model: Optional[str] = None,
+        vision_ollama_url: Optional[str] = None,
     ) -> list[dict]:
-        """Process document using Docling."""
-        from docling.document_converter import DocumentConverter
+        """Process document using Docling with configurable vision model."""
+        from .vision import get_document_converter
 
-        converter = DocumentConverter()
+        converter = get_document_converter(
+            vision_provider=vision_provider,
+            vision_model=vision_model,
+            vision_ollama_url=vision_ollama_url,
+        )
         result = converter.convert(str(file_path))
 
         # Get text content

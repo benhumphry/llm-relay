@@ -434,6 +434,91 @@ content %}
                     </div>
                 </template>
 
+                <!-- Divider for Vision Settings -->
+                <div class="divider mt-6">Document Parsing (Vision Model)</div>
+
+                <!-- Vision Provider -->
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text">Vision Provider</span>
+                    </label>
+                    <select
+                        x-model="form.vision_provider"
+                        @change="onVisionProviderChange()"
+                        class="select select-bordered"
+                    >
+                        <option value="local">Local (Docling default)</option>
+                        <template x-if="visionModels.ollama?.available">
+                            <option value="ollama">Ollama</option>
+                        </template>
+                        <template x-for="provider in visionModels.providers || []" :key="provider.name">
+                            <option :value="provider.name" x-text="provider.name"></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt">For parsing complex PDFs, images, and scanned documents</span>
+                    </label>
+                </div>
+
+                <!-- Local Vision Info -->
+                <div x-show="form.vision_provider === 'local'" class="mt-2">
+                    <div class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3">
+                        Uses bundled Docling models for document parsing. Runs on CPU/GPU.
+                    </div>
+                </div>
+
+                <!-- Ollama Vision Instance & Model -->
+                <template x-if="form.vision_provider === 'ollama' && visionModels.ollama?.available">
+                    <div class="grid grid-cols-2 gap-4 mt-2">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Ollama Instance</span>
+                            </label>
+                            <select
+                                x-model="form.vision_ollama_instance"
+                                @change="onVisionOllamaInstanceChange()"
+                                class="select select-bordered"
+                            >
+                                <template x-for="instance in visionModels.ollama.instances" :key="instance.name">
+                                    <option :value="instance.name" x-text="instance.name + ' (' + instance.url + ')'"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Vision Model</span>
+                            </label>
+                            <select
+                                x-model="form.vision_model"
+                                class="select select-bordered font-mono"
+                            >
+                                <option value="">Select a model...</option>
+                                <template x-for="model in getOllamaVisionModels()" :key="model.id">
+                                    <option :value="model.id" x-text="model.name"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Provider Vision Model -->
+                <template x-if="isProviderVision()">
+                    <div class="form-control mt-2">
+                        <label class="label">
+                            <span class="label-text">Vision Model</span>
+                        </label>
+                        <select
+                            x-model="form.vision_model"
+                            class="select select-bordered font-mono"
+                        >
+                            <option value="">Select a model...</option>
+                            <template x-for="model in getProviderVisionModels()" :key="model.id">
+                                <option :value="model.id" x-text="model.name"></option>
+                            </template>
+                        </select>
+                    </div>
+                </template>
+
                 <!-- Index Schedule -->
                 <div class="form-control mt-4">
                     <label class="label">
@@ -622,6 +707,7 @@ content %}
             rags: [],
             availableModels: [],
             embeddingModels: {},
+            visionModels: {},
             expandedRows: [],
             indexingRags: [],
             showModal: false,
@@ -638,6 +724,10 @@ content %}
                 embedding_model: '',
                 ollama_instance: '',
                 ollama_url: '',
+                vision_provider: 'local',
+                vision_model: '',
+                vision_ollama_instance: '',
+                vision_ollama_url: '',
                 index_schedule: '',
                 custom_schedule: '',
                 max_results: 5,
@@ -656,6 +746,7 @@ content %}
                     this.loadRags(),
                     this.loadAvailableModels(),
                     this.loadEmbeddingModels(),
+                    this.loadVisionModels(),
                 ]);
                 this.loading = false;
             },
@@ -690,6 +781,17 @@ content %}
                     }
                 } catch (error) {
                     console.error('Failed to load embedding models:', error);
+                }
+            },
+
+            async loadVisionModels() {
+                try {
+                    const response = await fetch('/api/rags/vision-models');
+                    if (response.ok) {
+                        this.visionModels = await response.json();
+                    }
+                } catch (error) {
+                    console.error('Failed to load vision models:', error);
                 }
             },
 
@@ -738,6 +840,48 @@ content %}
                 return provider?.models || [];
             },
 
+            // Vision model helpers
+            onVisionProviderChange() {
+                this.form.vision_model = '';
+                this.form.vision_ollama_instance = '';
+                this.form.vision_ollama_url = '';
+
+                if (this.form.vision_provider === 'ollama' && this.visionModels.ollama?.instances?.length > 0) {
+                    this.form.vision_ollama_instance = this.visionModels.ollama.instances[0].name;
+                    this.form.vision_ollama_url = this.visionModels.ollama.instances[0].url;
+                } else if (this.isProviderVision()) {
+                    const providerModels = this.getProviderVisionModels();
+                    if (providerModels.length > 0) {
+                        this.form.vision_model = providerModels[0].id;
+                    }
+                }
+            },
+
+            onVisionOllamaInstanceChange() {
+                const instance = this.visionModels.ollama?.instances?.find(i => i.name === this.form.vision_ollama_instance);
+                if (instance) {
+                    this.form.vision_ollama_url = instance.url;
+                    this.form.vision_model = '';
+                }
+            },
+
+            getOllamaVisionModels() {
+                const instance = this.visionModels.ollama?.instances?.find(i => i.name === this.form.vision_ollama_instance);
+                return instance?.models || [];
+            },
+
+            isProviderVision() {
+                if (this.form.vision_provider === 'local' || this.form.vision_provider === 'ollama') {
+                    return false;
+                }
+                return (this.visionModels.providers || []).some(p => p.name === this.form.vision_provider);
+            },
+
+            getProviderVisionModels() {
+                const provider = (this.visionModels.providers || []).find(p => p.name === this.form.vision_provider);
+                return provider?.models || [];
+            },
+
             toggleExpand(id) {
                 const idx = this.expandedRows.indexOf(id);
                 if (idx >= 0) {
@@ -757,6 +901,10 @@ content %}
                     embedding_model: '',
                     ollama_instance: '',
                     ollama_url: '',
+                    vision_provider: 'local',
+                    vision_model: '',
+                    vision_ollama_instance: '',
+                    vision_ollama_url: '',
                     index_schedule: '',
                     custom_schedule: '',
                     max_results: 5,
@@ -789,6 +937,17 @@ content %}
                     ollamaInstance = instance?.name || '';
                 }
 
+                // Parse vision provider similarly
+                let visionProvider = rag.vision_provider || 'local';
+                let visionOllamaInstance = '';
+                if (visionProvider.startsWith('ollama:')) {
+                    visionOllamaInstance = visionProvider.split(':')[1];
+                    visionProvider = 'ollama';
+                } else if (visionProvider === 'ollama' && rag.vision_ollama_url) {
+                    const instance = (this.visionModels.ollama?.instances || []).find(i => i.url === rag.vision_ollama_url);
+                    visionOllamaInstance = instance?.name || '';
+                }
+
                 this.form = {
                     name: rag.name,
                     source_path: rag.source_path,
@@ -797,6 +956,10 @@ content %}
                     embedding_model: rag.embedding_model || '',
                     ollama_instance: ollamaInstance,
                     ollama_url: rag.ollama_url || '',
+                    vision_provider: visionProvider,
+                    vision_model: rag.vision_model || '',
+                    vision_ollama_instance: visionOllamaInstance,
+                    vision_ollama_url: rag.vision_ollama_url || '',
                     index_schedule: isPreset ? (rag.index_schedule || '') : 'custom',
                     custom_schedule: isPreset ? '' : (rag.index_schedule || ''),
                     max_results: rag.max_results,
@@ -843,6 +1006,14 @@ content %}
                     ollamaUrl = this.form.ollama_url;
                 }
 
+                // Format vision provider similarly
+                let visionProvider = this.form.vision_provider;
+                let visionOllamaUrl = null;
+                if (this.form.vision_provider === 'ollama' && this.form.vision_ollama_instance) {
+                    visionProvider = `ollama:${this.form.vision_ollama_instance}`;
+                    visionOllamaUrl = this.form.vision_ollama_url;
+                }
+
                 const payload = {
                     name: this.form.name.toLowerCase().trim(),
                     source_path: this.form.source_path.trim(),
@@ -850,6 +1021,9 @@ content %}
                     embedding_provider: embeddingProvider,
                     embedding_model: this.form.embedding_model || null,
                     ollama_url: ollamaUrl,
+                    vision_provider: visionProvider,
+                    vision_model: this.form.vision_model || null,
+                    vision_ollama_url: visionOllamaUrl,
                     index_schedule: schedule || null,
                     max_results: parseInt(this.form.max_results),
                     similarity_threshold: parseFloat(this.form.similarity_threshold),

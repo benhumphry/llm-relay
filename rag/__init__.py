@@ -23,6 +23,11 @@ from .retriever import (
     RetrievedChunk,
     get_retriever,
 )
+from .vision import (
+    VisionConfig,
+    get_document_converter,
+    get_vision_config_from_settings,
+)
 
 __all__ = [
     # Embeddings
@@ -40,4 +45,8 @@ __all__ = [
     "RetrievalResult",
     "RetrievedChunk",
     "get_retriever",
+    # Vision
+    "VisionConfig",
+    "get_document_converter",
+    "get_vision_config_from_settings",
 ]

@@ -57,6 +57,9 @@ def create_smart_rag(
     embedding_provider: str = "local",
     embedding_model: str | None = None,
     ollama_url: str | None = None,
+    vision_provider: str = "local",
+    vision_model: str | None = None,
+    vision_ollama_url: str | None = None,
     index_schedule: str | None = None,
     chunk_size: int = 512,
     chunk_overlap: int = 50,
@@ -78,6 +81,9 @@ def create_smart_rag(
         embedding_provider: Embedding provider ("local", "ollama", "openai")
         embedding_model: Model name for Ollama/OpenAI embeddings
         ollama_url: Override URL for Ollama instance
+        vision_provider: Vision provider for document parsing ("local", "ollama:<instance>", or provider name)
+        vision_model: Vision model name (e.g., "granite3.2-vision:latest")
+        vision_ollama_url: Override URL for Ollama vision model
         index_schedule: Cron expression for scheduled indexing
         chunk_size: Document chunk size in tokens
         chunk_overlap: Overlap between chunks in tokens
@@ -109,6 +115,9 @@ def create_smart_rag(
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             ollama_url=ollama_url,
+            vision_provider=vision_provider,
+            vision_model=vision_model,
+            vision_ollama_url=vision_ollama_url,
             index_schedule=index_schedule,
             index_status="pending",
             chunk_size=chunk_size,
@@ -148,6 +157,9 @@ def update_smart_rag(
     embedding_provider: str | None = None,
     embedding_model: str | None = None,
     ollama_url: str | None = None,
+    vision_provider: str | None = None,
+    vision_model: str | None = None,
+    vision_ollama_url: str | None = None,
     index_schedule: str | None = None,
     chunk_size: int | None = None,
     chunk_overlap: int | None = None,
@@ -214,6 +226,15 @@ def update_smart_rag(
 
         if ollama_url is not None:
             rag.ollama_url = ollama_url
+
+        if vision_provider is not None:
+            rag.vision_provider = vision_provider
+
+        if vision_model is not None:
+            rag.vision_model = vision_model
+
+        if vision_ollama_url is not None:
+            rag.vision_ollama_url = vision_ollama_url
 
         if index_schedule is not None:
             rag.index_schedule = index_schedule
@@ -497,6 +518,9 @@ def _rag_to_detached(rag: SmartRAG) -> SmartRAG:
         embedding_provider=rag.embedding_provider,
         embedding_model=rag.embedding_model,
         ollama_url=rag.ollama_url,
+        vision_provider=rag.vision_provider,
+        vision_model=rag.vision_model,
+        vision_ollama_url=rag.vision_ollama_url,
         index_schedule=rag.index_schedule,
         last_indexed=rag.last_indexed,
         index_status=rag.index_status,
