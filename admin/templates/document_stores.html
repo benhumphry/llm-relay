@@ -122,13 +122,13 @@ block content %}
                                     <div class="flex items-center gap-2">
                                         <span
                                             class="badge badge-sm"
-                                            :class="store.source_type === 'mcp' ? 'badge-info' : 'badge-ghost'"
-                                            x-text="store.source_type === 'mcp' ? 'MCP' : 'Local'"
+                                            :class="getSourceBadgeClass(store)"
+                                            x-text="getSourceBadgeText(store)"
                                         ></span>
                                         <span
                                             class="font-mono text-sm text-base-content/70 truncate"
-                                            x-text="store.source_type === 'mcp' ? (store.mcp_server_config?.name || 'Unknown') : store.source_path"
-                                            :title="store.source_type === 'mcp' ? (store.mcp_server_config?.name || '') : store.source_path"
+                                            x-text="getSourceDetail(store)"
+                                            :title="getSourceDetail(store)"
                                         ></span>
                                     </div>
                                 </td>
@@ -1718,6 +1718,55 @@ block content %}
                     (c) => c.id === this.form.gcalendar_calendar_id,
                 );
                 this.form.gcalendar_calendar_name = cal ? cal.name : "";
+            },
+
+            // Source display helpers for the table
+            getSourceBadgeClass(store) {
+                if (store.source_type === "local") return "badge-ghost";
+                if (store.source_type === "mcp:gdrive") return "badge-primary";
+                if (store.source_type === "mcp:gmail") return "badge-secondary";
+                if (store.source_type === "mcp:gcalendar")
+                    return "badge-accent";
+                if (
+                    store.source_type === "mcp" ||
+                    store.source_type?.startsWith("mcp:")
+                )
+                    return "badge-info";
+                return "badge-ghost";
+            },
+
+            getSourceBadgeText(store) {
+                if (store.source_type === "local") return "Local";
+                if (store.source_type === "mcp:gdrive") return "Drive";
+                if (store.source_type === "mcp:gmail") return "Gmail";
+                if (store.source_type === "mcp:gcalendar") return "Calendar";
+                if (
+                    store.source_type === "mcp" ||
+                    store.source_type?.startsWith("mcp:")
+                )
+                    return "MCP";
+                return "Local";
+            },
+
+            getSourceDetail(store) {
+                if (store.source_type === "local")
+                    return store.source_path || "";
+                const acct = store.google_account_email || "";
+                if (store.source_type === "mcp:gdrive") {
+                    const folder = store.gdrive_folder_name || "All files";
+                    return acct ? `${acct}: ${folder}` : folder;
+                }
+                if (store.source_type === "mcp:gmail") {
+                    const label = store.gmail_label_name || "All emails";
+                    return acct ? `${acct}: ${label}` : label;
+                }
+                if (store.source_type === "mcp:gcalendar") {
+                    const cal = store.gcalendar_calendar_name || "Primary";
+                    return acct ? `${acct}: ${cal}` : cal;
+                }
+                if (store.source_type === "mcp")
+                    return store.mcp_server_config?.name || "Unknown";
+                return "";
             },
 
             async loadMcpStatus() {

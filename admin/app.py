@@ -5122,11 +5122,23 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/document-stores", methods=["GET"])
     @require_auth_api
     def list_document_stores():
-        """List all document stores."""
+        """List all document stores with Google account info."""
         from db import get_all_document_stores
+        from db.oauth_tokens import get_oauth_token_info
 
         stores = get_all_document_stores()
-        return jsonify([s.to_dict() for s in stores])
+        result = []
+        for s in stores:
+            store_dict = s.to_dict()
+            # Add Google account email if applicable
+            if s.google_account_id:
+                token_info = get_oauth_token_info(s.google_account_id)
+                if token_info:
+                    store_dict["google_account_email"] = token_info.get(
+                        "account_email", ""
+                    )
+            result.append(store_dict)
+        return jsonify(result)
 
     @admin.route("/api/document-stores/<int:store_id>", methods=["GET"])
     @require_auth_api

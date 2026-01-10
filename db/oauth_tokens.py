@@ -171,6 +171,26 @@ def get_oauth_token_by_id(token_id: int) -> Optional[dict]:
             return None
 
 
+def get_oauth_token_info(token_id: int) -> Optional[dict]:
+    """
+    Get OAuth token metadata (not decrypted token data) by ID.
+
+    Args:
+        token_id: Token ID
+
+    Returns:
+        Token metadata dictionary or None if not found
+    """
+    with get_db_context() as session:
+        stmt = select(OAuthToken).where(OAuthToken.id == token_id)
+        token = session.execute(stmt).scalar_one_or_none()
+
+        if not token:
+            return None
+
+        return token.to_dict()
+
+
 def list_oauth_tokens(provider: Optional[str] = None) -> list[dict]:
     """
     List all OAuth tokens (metadata only, not decrypted token data).

@@ -539,6 +539,9 @@ class RAGIndexer:
 
                     for chunk in chunks:
                         chunk["source_file"] = doc_info.name
+                        chunk["source_uri"] = (
+                            doc_info.uri
+                        )  # Unique identifier for ID generation
                     documents.extend(chunks)
                     doc_count += 1
                     logger.info(
@@ -589,20 +592,26 @@ class RAGIndexer:
 
                 ids = [
                     hashlib.md5(
-                        f"{doc['source_file']}:{doc['chunk_index']}".encode()
+                        f"{doc.get('source_uri', doc['source_file'])}:{doc['chunk_index']}".encode()
                     ).hexdigest()
                     for doc in batch
                 ]
-                metadatas = [
-                    {
+                metadatas = []
+                for doc in batch:
+                    meta = {
                         "source_file": doc["source_file"],
+                        "source_uri": doc.get("source_uri", doc["source_file"]),
                         "chunk_index": doc["chunk_index"],
                         "indexed_at": datetime.utcnow().isoformat(),
                         "store_id": store_id,
                         "store_name": store.name,
                     }
-                    for doc in batch
-                ]
+                    # Add document-level metadata (dates, location, etc.)
+                    if doc.get("metadata"):
+                        for key, value in doc["metadata"].items():
+                            if value is not None:
+                                meta[key] = value
+                    metadatas.append(meta)
 
                 collection.add(
                     ids=ids,
@@ -974,7 +983,7 @@ class RAGIndexer:
             chunk_overlap: Overlap between chunks
 
         Returns:
-            List of chunk dicts with 'content' and 'chunk_index'
+            List of chunk dicts with 'content', 'chunk_index', and optional metadata
         """
         from mcp.sources import DocumentContent
 
@@ -994,7 +1003,14 @@ class RAGIndexer:
 
                     text = re.sub(r"<[^>]+>", "", text)
 
-            return self._chunk_text(text, chunk_size, chunk_overlap)
+            chunks = self._chunk_text(text, chunk_size, chunk_overlap)
+
+            # Add metadata from DocumentContent to each chunk
+            if content.metadata:
+                for chunk in chunks:
+                    chunk["metadata"] = content.metadata
+
+            return chunks
 
         # If we have binary content, try to extract text
         if content.binary:

@@ -281,13 +281,48 @@ class RAGRetriever:
                 logger.warning(f"Failed to embed query for store '{store_name}': {e}")
                 continue
 
-            # Query ChromaDB
+            # Query ChromaDB with optional date filtering
             try:
-                results = collection.query(
-                    query_embeddings=[query_embedding],
-                    n_results=rerank_top_n,
-                    include=["documents", "metadatas", "distances"],
-                )
+                # Check for temporal references in query
+                from .date_parser import extract_date_range
+
+                date_range = extract_date_range(query)
+                where_filter = None
+
+                if date_range:
+                    start_date, end_date = date_range
+                    logger.debug(f"Date filter detected: {start_date} to {end_date}")
+                    # Filter by event_date (calendar) or email_date (email)
+                    # ChromaDB where clause with $or for multiple date fields
+                    where_filter = {
+                        "$or": [
+                            {"event_date": {"$gte": start_date, "$lte": end_date}},
+                            {"email_date": {"$gte": start_date, "$lte": end_date}},
+                        ]
+                    }
+
+                query_kwargs = {
+                    "query_embeddings": [query_embedding],
+                    "n_results": rerank_top_n,
+                    "include": ["documents", "metadatas", "distances"],
+                }
+                if where_filter:
+                    query_kwargs["where"] = where_filter
+
+                results = collection.query(**query_kwargs)
+
+                # If date filter returned no results, fall back to semantic-only
+                if where_filter and (
+                    not results["documents"] or not results["documents"][0]
+                ):
+                    logger.debug(
+                        f"No results with date filter, falling back to semantic search"
+                    )
+                    results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=rerank_top_n,
+                        include=["documents", "metadatas", "distances"],
+                    )
             except Exception as e:
                 logger.warning(f"ChromaDB query failed for store '{store_name}': {e}")
                 continue

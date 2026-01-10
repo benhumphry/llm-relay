@@ -59,6 +59,7 @@ class DocumentContent:
     mime_type: Optional[str] = None
     text: Optional[str] = None  # Text content
     binary: Optional[bytes] = None  # Binary content (for PDFs, images, etc.)
+    metadata: Optional[dict] = None  # Additional metadata (dates, etc.) for filtering
 
     @property
     def is_binary(self) -> bool:
@@ -1449,11 +1450,37 @@ Date: {date}
 {body_text}
 """
 
+        # Parse email date to YYYY-MM-DD format for filtering
+        email_date = None
+        if date:
+            try:
+                from email.utils import parsedate_to_datetime
+
+                parsed = parsedate_to_datetime(date)
+                email_date = parsed.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+        # Parse sender name from "Name <email@example.com>" format
+        from_name = from_addr
+        if "<" in from_addr:
+            from_name = from_addr.split("<")[0].strip().strip('"')
+        elif "@" in from_addr:
+            from_name = from_addr.split("@")[0]
+
         return DocumentContent(
             uri=uri,
             name=subject[:100] if subject else message_id,
             mime_type="text/plain",
             text=content,
+            metadata={
+                "email_date": email_date,
+                "from": from_addr,
+                "from_name": from_name,
+                "to": to_addr,
+                "subject": subject,
+                "source_type": "email",
+            },
         )
 
     def _extract_body(self, payload: dict) -> str:
@@ -1784,11 +1811,24 @@ Attendees: {attendee_list}
 {description}
 """
 
+        # Extract date for metadata (YYYY-MM-DD format)
+        event_date = None
+        if start_time:
+            # Handle both dateTime (2026-01-11T10:00:00Z) and date (2026-01-11) formats
+            event_date = start_time[:10] if len(start_time) >= 10 else start_time
+
         return DocumentContent(
             uri=uri,
             name=summary[:100],
             mime_type="text/plain",
             text=content.strip(),
+            metadata={
+                "event_date": event_date,
+                "start_time": start_time,
+                "end_time": end_time,
+                "location": location or None,
+                "source_type": "calendar",
+            },
         )
 
 
