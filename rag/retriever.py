@@ -293,13 +293,33 @@ class RAGRetriever:
                     start_date, end_date = date_range
                     logger.debug(f"Date filter detected: {start_date} to {end_date}")
                     # Filter by event_date (calendar) or email_date (email)
-                    # ChromaDB where clause with $or for multiple date fields
-                    where_filter = {
-                        "$or": [
-                            {"event_date": {"$gte": start_date, "$lte": end_date}},
-                            {"email_date": {"$gte": start_date, "$lte": end_date}},
-                        ]
-                    }
+                    # ChromaDB requires $and for range queries (can't combine $gte/$lte in one expr)
+                    if start_date == end_date:
+                        # Single day - use simple equality or $and with same date
+                        where_filter = {
+                            "$or": [
+                                {"event_date": start_date},
+                                {"email_date": start_date},
+                            ]
+                        }
+                    else:
+                        # Date range - need $and for each field, then $or between fields
+                        where_filter = {
+                            "$or": [
+                                {
+                                    "$and": [
+                                        {"event_date": {"$gte": start_date}},
+                                        {"event_date": {"$lte": end_date}},
+                                    ]
+                                },
+                                {
+                                    "$and": [
+                                        {"email_date": {"$gte": start_date}},
+                                        {"email_date": {"$lte": end_date}},
+                                    ]
+                                },
+                            ]
+                        }
 
                 query_kwargs = {
                     "query_embeddings": [query_embedding],
