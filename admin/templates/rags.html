@@ -531,26 +531,90 @@ content %}
 
                 <!-- MCP Server Configuration (for mcp source) -->
                 <div x-show="form.source_type === 'mcp'" class="mt-4 space-y-4">
-                    <div class="alert alert-info">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="h-5 w-5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
+                    <!-- MCP Preset Selector -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">MCP Server Preset</span>
+                        </label>
+                        <select
+                            x-model="form.mcp_preset"
+                            @change="applyMcpPreset()"
+                            class="select select-bordered"
                         >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                        </svg>
-                        <span class="text-sm"
-                            >Connect to an MCP server to index documents from
-                            Google Drive, Notion, S3, etc.</span
-                        >
+                            <option value="">Custom Configuration</option>
+                            <option value="gdrive">Google Drive</option>
+                            <option value="notion">Notion</option>
+                            <option value="github">GitHub</option>
+                            <option value="slack">Slack</option>
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="filesystem">
+                                Filesystem (via MCP)
+                            </option>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Select a preset to auto-fill configuration, or
+                                choose Custom</span
+                            >
+                        </label>
                     </div>
+
+                    <!-- Preset Info Alert -->
+                    <template
+                        x-if="form.mcp_preset && mcpPresets[form.mcp_preset]"
+                    >
+                        <div class="alert alert-info">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5 shrink-0"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <div class="text-sm">
+                                <p
+                                    x-text="mcpPresets[form.mcp_preset]?.description"
+                                ></p>
+                                <p
+                                    class="mt-1 opacity-75"
+                                    x-show="mcpPresets[form.mcp_preset]?.setup_note"
+                                    x-text="mcpPresets[form.mcp_preset]?.setup_note"
+                                ></p>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Custom config info -->
+                    <template x-if="!form.mcp_preset">
+                        <div class="alert alert-warning">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
+                            </svg>
+                            <span class="text-sm"
+                                >Advanced: Configure a custom MCP server
+                                manually. Requires knowledge of MCP
+                                protocol.</span
+                            >
+                        </div>
+                    </template>
 
                     <!-- MCP Server Name -->
                     <div class="form-control">
@@ -561,6 +625,8 @@ content %}
                             type="text"
                             x-model="form.mcp_name"
                             class="input input-bordered"
+                            :class="{ 'input-disabled': form.mcp_preset }"
+                            :readonly="form.mcp_preset"
                             placeholder="e.g., gdrive, notion"
                             :required="form.source_type === 'mcp'"
                         />
@@ -574,6 +640,8 @@ content %}
                         <select
                             x-model="form.mcp_transport"
                             class="select select-bordered"
+                            :class="{ 'select-disabled': form.mcp_preset }"
+                            :disabled="form.mcp_preset"
                         >
                             <option value="stdio">Stdio (subprocess)</option>
                             <option value="http">HTTP</option>
@@ -591,6 +659,8 @@ content %}
                                     type="text"
                                     x-model="form.mcp_command"
                                     class="input input-bordered font-mono"
+                                    :class="{ 'input-disabled': form.mcp_preset }"
+                                    :readonly="form.mcp_preset"
                                     placeholder="e.g., npx, uvx, python"
                                 />
                             </div>
@@ -602,6 +672,8 @@ content %}
                                     type="text"
                                     x-model="form.mcp_args"
                                     class="input input-bordered font-mono"
+                                    :class="{ 'input-disabled': form.mcp_preset }"
+                                    :readonly="form.mcp_preset"
                                     placeholder="e.g., -y @anthropic/mcp-server-gdrive"
                                 />
                                 <label class="label">
@@ -623,6 +695,8 @@ content %}
                                 type="text"
                                 x-model="form.mcp_url"
                                 class="input input-bordered font-mono"
+                                :class="{ 'input-disabled': form.mcp_preset }"
+                                :readonly="form.mcp_preset"
                                 placeholder="e.g., http://localhost:8000/mcp"
                             />
                         </div>
@@ -1120,11 +1194,75 @@ content %}
             deletingRag: null,
             saving: false,
             deleting: false,
+
+            // MCP Server Presets
+            mcpPresets: {
+                gdrive: {
+                    name: "gdrive",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-server-gdrive",
+                    description:
+                        "Index documents from Google Drive. Supports Docs, Sheets, PDFs, and more.",
+                    setup_note:
+                        "Requires Google OAuth setup. Run the command manually first to authenticate.",
+                },
+                notion: {
+                    name: "notion",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-server-notion",
+                    description:
+                        "Index pages and databases from Notion workspace.",
+                    setup_note:
+                        "Requires NOTION_API_KEY environment variable with an integration token.",
+                },
+                github: {
+                    name: "github",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-server-github",
+                    description:
+                        "Index repositories, issues, and documentation from GitHub.",
+                    setup_note:
+                        "Requires GITHUB_TOKEN environment variable with repo access.",
+                },
+                slack: {
+                    name: "slack",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-server-slack",
+                    description:
+                        "Index messages and files from Slack channels.",
+                    setup_note:
+                        "Requires SLACK_BOT_TOKEN and SLACK_TEAM_ID environment variables.",
+                },
+                postgres: {
+                    name: "postgres",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-server-postgres postgresql://user:pass@localhost/db",
+                    description: "Index data from PostgreSQL database tables.",
+                    setup_note:
+                        "Edit the connection string in Arguments to match your database.",
+                },
+                filesystem: {
+                    name: "filesystem",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-server-filesystem /path/to/folder",
+                    description:
+                        "Index files from a filesystem path via MCP protocol.",
+                    setup_note:
+                        "Edit the path in Arguments. For local folders, use 'Local Filesystem' source type instead.",
+                },
+            },
             form: {
                 name: "",
                 source_type: "local",
                 source_path: "",
                 // MCP fields
+                mcp_preset: "",
                 mcp_name: "",
                 mcp_transport: "stdio",
                 mcp_command: "",
@@ -1219,6 +1357,24 @@ content %}
                     this.form.mcp_uri_patterns = "";
                 } else {
                     this.form.source_path = "";
+                }
+            },
+
+            applyMcpPreset() {
+                const preset = this.mcpPresets[this.form.mcp_preset];
+                if (preset) {
+                    this.form.mcp_name = preset.name;
+                    this.form.mcp_transport = preset.transport;
+                    this.form.mcp_command = preset.command;
+                    this.form.mcp_args = preset.args;
+                    this.form.mcp_url = "";
+                } else {
+                    // Custom - clear fields for manual entry
+                    this.form.mcp_name = "";
+                    this.form.mcp_transport = "stdio";
+                    this.form.mcp_command = "";
+                    this.form.mcp_args = "";
+                    this.form.mcp_url = "";
                 }
             },
 
@@ -1357,6 +1513,7 @@ content %}
                     source_type: "local",
                     source_path: "/data/documents",
                     // MCP fields
+                    mcp_preset: "",
                     mcp_name: "",
                     mcp_transport: "stdio",
                     mcp_command: "",
@@ -1442,11 +1599,30 @@ content %}
                     ", ",
                 );
 
+                // Detect if MCP config matches a preset
+                let mcpPreset = "";
+                if (mcpConfig.name) {
+                    for (const [key, preset] of Object.entries(
+                        this.mcpPresets,
+                    )) {
+                        if (
+                            preset.name === mcpConfig.name &&
+                            preset.transport === mcpConfig.transport &&
+                            preset.command === mcpConfig.command &&
+                            preset.args === mcpArgs
+                        ) {
+                            mcpPreset = key;
+                            break;
+                        }
+                    }
+                }
+
                 this.form = {
                     name: rag.name,
                     source_type: rag.source_type || "local",
                     source_path: rag.source_path || "",
                     // MCP fields
+                    mcp_preset: mcpPreset,
                     mcp_name: mcpConfig.name || "",
                     mcp_transport: mcpConfig.transport || "stdio",
                     mcp_command: mcpConfig.command || "",
