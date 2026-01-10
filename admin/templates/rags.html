@@ -493,7 +493,7 @@ content %}
                 <!-- Source Type -->
                 <div class="form-control mt-4">
                     <label class="label">
-                        <span class="label-text">Source Type</span>
+                        <span class="label-text">Document Source</span>
                     </label>
                     <select
                         x-model="form.source_type"
@@ -501,7 +501,16 @@ content %}
                         class="select select-bordered"
                     >
                         <option value="local">Local Filesystem</option>
-                        <option value="mcp">MCP Server</option>
+                        <optgroup label="MCP Integrations">
+                            <option value="mcp:gdrive">Google Drive</option>
+                            <option value="mcp:notion">Notion</option>
+                            <option value="mcp:github">GitHub</option>
+                            <option value="mcp:slack">Slack</option>
+                            <option value="mcp:postgres">PostgreSQL</option>
+                            <option value="mcp:custom">
+                                Custom MCP Server
+                            </option>
+                        </optgroup>
                     </select>
                 </div>
 
@@ -529,39 +538,14 @@ content %}
                     </label>
                 </div>
 
-                <!-- MCP Server Configuration (for mcp source) -->
-                <div x-show="form.source_type === 'mcp'" class="mt-4 space-y-4">
-                    <!-- MCP Preset Selector -->
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">MCP Server Preset</span>
-                        </label>
-                        <select
-                            x-model="form.mcp_preset"
-                            @change="applyMcpPreset()"
-                            class="select select-bordered"
-                        >
-                            <option value="">Custom Configuration</option>
-                            <option value="gdrive">Google Drive</option>
-                            <option value="notion">Notion</option>
-                            <option value="github">GitHub</option>
-                            <option value="slack">Slack</option>
-                            <option value="postgres">PostgreSQL</option>
-                            <option value="filesystem">
-                                Filesystem (via MCP)
-                            </option>
-                        </select>
-                        <label class="label">
-                            <span class="label-text-alt"
-                                >Select a preset to auto-fill configuration, or
-                                choose Custom</span
-                            >
-                        </label>
-                    </div>
-
+                <!-- MCP Server Configuration (for mcp sources) -->
+                <div
+                    x-show="form.source_type.startsWith('mcp:')"
+                    class="mt-4 space-y-4"
+                >
                     <!-- Preset Info Alert -->
                     <template
-                        x-if="form.mcp_preset && mcpPresets[form.mcp_preset]"
+                        x-if="getMcpPresetKey() && mcpPresets[getMcpPresetKey()]"
                     >
                         <div class="alert alert-info">
                             <svg
@@ -580,19 +564,19 @@ content %}
                             </svg>
                             <div class="text-sm">
                                 <p
-                                    x-text="mcpPresets[form.mcp_preset]?.description"
+                                    x-text="mcpPresets[getMcpPresetKey()]?.description"
                                 ></p>
                                 <p
                                     class="mt-1 opacity-75"
-                                    x-show="mcpPresets[form.mcp_preset]?.setup_note"
-                                    x-text="mcpPresets[form.mcp_preset]?.setup_note"
+                                    x-show="mcpPresets[getMcpPresetKey()]?.setup_note"
+                                    x-text="mcpPresets[getMcpPresetKey()]?.setup_note"
                                 ></p>
                             </div>
                         </div>
                     </template>
 
                     <!-- Custom config info -->
-                    <template x-if="!form.mcp_preset">
+                    <template x-if="form.source_type === 'mcp:custom'">
                         <div class="alert alert-warning">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -625,10 +609,10 @@ content %}
                             type="text"
                             x-model="form.mcp_name"
                             class="input input-bordered"
-                            :class="{ 'input-disabled': form.mcp_preset }"
-                            :readonly="form.mcp_preset"
+                            :class="{ 'input-disabled': getMcpPresetKey() }"
+                            :readonly="getMcpPresetKey()"
                             placeholder="e.g., gdrive, notion"
-                            :required="form.source_type === 'mcp'"
+                            :required="form.source_type.startsWith('mcp:')"
                         />
                     </div>
 
@@ -640,8 +624,8 @@ content %}
                         <select
                             x-model="form.mcp_transport"
                             class="select select-bordered"
-                            :class="{ 'select-disabled': form.mcp_preset }"
-                            :disabled="form.mcp_preset"
+                            :class="{ 'select-disabled': getMcpPresetKey() }"
+                            :disabled="getMcpPresetKey()"
                         >
                             <option value="stdio">Stdio (subprocess)</option>
                             <option value="http">HTTP</option>
@@ -659,8 +643,8 @@ content %}
                                     type="text"
                                     x-model="form.mcp_command"
                                     class="input input-bordered font-mono"
-                                    :class="{ 'input-disabled': form.mcp_preset }"
-                                    :readonly="form.mcp_preset"
+                                    :class="{ 'input-disabled': getMcpPresetKey() }"
+                                    :readonly="getMcpPresetKey()"
                                     placeholder="e.g., npx, uvx, python"
                                 />
                             </div>
@@ -672,8 +656,8 @@ content %}
                                     type="text"
                                     x-model="form.mcp_args"
                                     class="input input-bordered font-mono"
-                                    :class="{ 'input-disabled': form.mcp_preset }"
-                                    :readonly="form.mcp_preset"
+                                    :class="{ 'input-disabled': getMcpPresetKey() }"
+                                    :readonly="getMcpPresetKey()"
                                     placeholder="e.g., -y @anthropic/mcp-server-gdrive"
                                 />
                                 <label class="label">
@@ -695,8 +679,8 @@ content %}
                                 type="text"
                                 x-model="form.mcp_url"
                                 class="input input-bordered font-mono"
-                                :class="{ 'input-disabled': form.mcp_preset }"
-                                :readonly="form.mcp_preset"
+                                :class="{ 'input-disabled': getMcpPresetKey() }"
+                                :readonly="getMcpPresetKey()"
                                 placeholder="e.g., http://localhost:8000/mcp"
                             />
                         </div>
@@ -863,122 +847,16 @@ content %}
                     </div>
                 </template>
 
-                <!-- Divider for Vision Settings -->
-                <div class="divider mt-6">Document Parsing (Vision Model)</div>
-
-                <!-- Vision Provider -->
-                <div class="form-control">
-                    <label class="label">
-                        <span class="label-text">Vision Provider</span>
-                    </label>
-                    <select
-                        x-model="form.vision_provider"
-                        @change="onVisionProviderChange()"
-                        class="select select-bordered"
-                    >
-                        <option value="local">Local (Docling default)</option>
-                        <template x-if="visionModels.ollama?.available">
-                            <option value="ollama">Ollama</option>
-                        </template>
-                        <template
-                            x-for="provider in visionModels.providers || []"
-                            :key="provider.name"
-                        >
-                            <option
-                                :value="provider.name"
-                                x-text="provider.name"
-                            ></option>
-                        </template>
-                    </select>
-                    <label class="label">
-                        <span class="label-text-alt"
-                            >For parsing complex PDFs, images, and scanned
-                            documents</span
-                        >
-                    </label>
-                </div>
-
-                <!-- Local Vision Info -->
-                <div x-show="form.vision_provider === 'local'" class="mt-2">
-                    <div
-                        class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
-                    >
-                        Uses bundled Docling models for document parsing. Runs
-                        on CPU/GPU.
-                    </div>
-                </div>
-
-                <!-- Ollama Vision Instance & Model -->
-                <template
-                    x-if="form.vision_provider === 'ollama' && visionModels.ollama?.available"
+                <!-- Vision Settings Note -->
+                <div
+                    class="mt-6 text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
                 >
-                    <div class="grid grid-cols-2 gap-4 mt-2">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Ollama Instance</span>
-                            </label>
-                            <select
-                                x-model="form.vision_ollama_instance"
-                                @change="onVisionOllamaInstanceChange()"
-                                class="select select-bordered"
-                            >
-                                <template
-                                    x-for="instance in visionModels.ollama.instances"
-                                    :key="instance.name"
-                                >
-                                    <option
-                                        :value="instance.name"
-                                        x-text="instance.name + ' (' + instance.url + ')'"
-                                    ></option>
-                                </template>
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Vision Model</span>
-                            </label>
-                            <select
-                                x-model="form.vision_model"
-                                class="select select-bordered font-mono"
-                            >
-                                <option value="">Select a model...</option>
-                                <template
-                                    x-for="model in getOllamaVisionModels()"
-                                    :key="model.id"
-                                >
-                                    <option
-                                        :value="model.id"
-                                        x-text="model.name"
-                                    ></option>
-                                </template>
-                            </select>
-                        </div>
-                    </div>
-                </template>
-
-                <!-- Provider Vision Model -->
-                <template x-if="isProviderVision()">
-                    <div class="form-control mt-2">
-                        <label class="label">
-                            <span class="label-text">Vision Model</span>
-                        </label>
-                        <select
-                            x-model="form.vision_model"
-                            class="select select-bordered font-mono"
-                        >
-                            <option value="">Select a model...</option>
-                            <template
-                                x-for="model in getProviderVisionModels()"
-                                :key="model.id"
-                            >
-                                <option
-                                    :value="model.id"
-                                    x-text="model.name"
-                                ></option>
-                            </template>
-                        </select>
-                    </div>
-                </template>
+                    <span class="font-medium">Document Parsing:</span>
+                    Vision model for PDF/image parsing is configured in
+                    <a href="/settings" class="link link-primary"
+                        >Global Settings</a
+                    >.
+                </div>
 
                 <!-- Index Schedule -->
                 <div class="form-control mt-4">
@@ -1184,7 +1062,7 @@ content %}
             rags: [],
             availableModels: [],
             embeddingModels: {},
-            visionModels: {},
+
             expandedRows: [],
             indexingRags: [],
             cancellingRags: [],
@@ -1262,7 +1140,6 @@ content %}
                 source_type: "local",
                 source_path: "",
                 // MCP fields
-                mcp_preset: "",
                 mcp_name: "",
                 mcp_transport: "stdio",
                 mcp_command: "",
@@ -1275,10 +1152,6 @@ content %}
                 embedding_model: "",
                 ollama_instance: "",
                 ollama_url: "",
-                vision_provider: "local",
-                vision_model: "",
-                vision_ollama_instance: "",
-                vision_ollama_url: "",
                 index_schedule: "",
                 custom_schedule: "",
                 max_results: 5,
@@ -1297,7 +1170,6 @@ content %}
                     this.loadRags(),
                     this.loadAvailableModels(),
                     this.loadEmbeddingModels(),
-                    this.loadVisionModels(),
                 ]);
                 this.loading = false;
             },
@@ -1335,15 +1207,15 @@ content %}
                 }
             },
 
-            async loadVisionModels() {
-                try {
-                    const response = await fetch("/api/rags/vision-models");
-                    if (response.ok) {
-                        this.visionModels = await response.json();
-                    }
-                } catch (error) {
-                    console.error("Failed to load vision models:", error);
+            getMcpPresetKey() {
+                // Returns the preset key if source_type is a preset, null otherwise
+                if (
+                    this.form.source_type.startsWith("mcp:") &&
+                    this.form.source_type !== "mcp:custom"
+                ) {
+                    return this.form.source_type.replace("mcp:", "");
                 }
+                return null;
             },
 
             onSourceTypeChange() {
@@ -1355,26 +1227,25 @@ content %}
                     this.form.mcp_args = "";
                     this.form.mcp_url = "";
                     this.form.mcp_uri_patterns = "";
-                } else {
+                } else if (this.form.source_type.startsWith("mcp:")) {
                     this.form.source_path = "";
-                }
-            },
-
-            applyMcpPreset() {
-                const preset = this.mcpPresets[this.form.mcp_preset];
-                if (preset) {
-                    this.form.mcp_name = preset.name;
-                    this.form.mcp_transport = preset.transport;
-                    this.form.mcp_command = preset.command;
-                    this.form.mcp_args = preset.args;
-                    this.form.mcp_url = "";
-                } else {
-                    // Custom - clear fields for manual entry
-                    this.form.mcp_name = "";
-                    this.form.mcp_transport = "stdio";
-                    this.form.mcp_command = "";
-                    this.form.mcp_args = "";
-                    this.form.mcp_url = "";
+                    // Apply preset if selected
+                    const presetKey = this.getMcpPresetKey();
+                    if (presetKey && this.mcpPresets[presetKey]) {
+                        const preset = this.mcpPresets[presetKey];
+                        this.form.mcp_name = preset.name;
+                        this.form.mcp_transport = preset.transport;
+                        this.form.mcp_command = preset.command;
+                        this.form.mcp_args = preset.args;
+                        this.form.mcp_url = "";
+                    } else {
+                        // Custom - clear fields for manual entry
+                        this.form.mcp_name = "";
+                        this.form.mcp_transport = "stdio";
+                        this.form.mcp_command = "";
+                        this.form.mcp_args = "";
+                        this.form.mcp_url = "";
+                    }
                 }
             },
 
@@ -1439,64 +1310,6 @@ content %}
                 return provider?.models || [];
             },
 
-            // Vision model helpers
-            onVisionProviderChange() {
-                this.form.vision_model = "";
-                this.form.vision_ollama_instance = "";
-                this.form.vision_ollama_url = "";
-
-                if (
-                    this.form.vision_provider === "ollama" &&
-                    this.visionModels.ollama?.instances?.length > 0
-                ) {
-                    this.form.vision_ollama_instance =
-                        this.visionModels.ollama.instances[0].name;
-                    this.form.vision_ollama_url =
-                        this.visionModels.ollama.instances[0].url;
-                } else if (this.isProviderVision()) {
-                    const providerModels = this.getProviderVisionModels();
-                    if (providerModels.length > 0) {
-                        this.form.vision_model = providerModels[0].id;
-                    }
-                }
-            },
-
-            onVisionOllamaInstanceChange() {
-                const instance = this.visionModels.ollama?.instances?.find(
-                    (i) => i.name === this.form.vision_ollama_instance,
-                );
-                if (instance) {
-                    this.form.vision_ollama_url = instance.url;
-                    this.form.vision_model = "";
-                }
-            },
-
-            getOllamaVisionModels() {
-                const instance = this.visionModels.ollama?.instances?.find(
-                    (i) => i.name === this.form.vision_ollama_instance,
-                );
-                return instance?.models || [];
-            },
-
-            isProviderVision() {
-                if (
-                    this.form.vision_provider === "local" ||
-                    this.form.vision_provider === "ollama"
-                ) {
-                    return false;
-                }
-                return (this.visionModels.providers || []).some(
-                    (p) => p.name === this.form.vision_provider,
-                );
-            },
-
-            getProviderVisionModels() {
-                const provider = (this.visionModels.providers || []).find(
-                    (p) => p.name === this.form.vision_provider,
-                );
-                return provider?.models || [];
-            },
-
             toggleExpand(id) {
                 const idx = this.expandedRows.indexOf(id);
                 if (idx >= 0) {
@@ -1513,7 +1326,6 @@ content %}
                     source_type: "local",
                     source_path: "/data/documents",
                     // MCP fields
-                    mcp_preset: "",
                     mcp_name: "",
                     mcp_transport: "stdio",
                     mcp_command: "",
@@ -1526,10 +1338,6 @@ content %}
                     embedding_model: "",
                     ollama_instance: "",
                     ollama_url: "",
-                    vision_provider: "local",
-                    vision_model: "",
-                    vision_ollama_instance: "",
-                    vision_ollama_url: "",
                     index_schedule: "",
                     custom_schedule: "",
                     max_results: 5,
@@ -1572,25 +1380,8 @@ content %}
                     ollamaInstance = instance?.name || "";
                 }
 
-                // Parse vision provider similarly
-                let visionProvider = rag.vision_provider || "local";
-                let visionOllamaInstance = "";
-                if (visionProvider.startsWith("ollama:")) {
-                    visionOllamaInstance = visionProvider.split(":")[1];
-                    visionProvider = "ollama";
-                } else if (
-                    visionProvider === "ollama" &&
-                    rag.vision_ollama_url
-                ) {
-                    const instance = (
-                        this.visionModels.ollama?.instances || []
-                    ).find((i) => i.url === rag.vision_ollama_url);
-                    visionOllamaInstance = instance?.name || "";
-                }
-
                 // Save model values to restore after DOM renders with options
                 const savedEmbeddingModel = rag.embedding_model || "";
-                const savedVisionModel = rag.vision_model || "";
 
                 // Parse MCP config if present
                 const mcpConfig = rag.mcp_server_config || {};
@@ -1599,9 +1390,11 @@ content %}
                     ", ",
                 );
 
-                // Detect if MCP config matches a preset
-                let mcpPreset = "";
-                if (mcpConfig.name) {
+                // Determine source_type - detect if MCP config matches a preset
+                let sourceType = rag.source_type || "local";
+                if (sourceType === "mcp" && mcpConfig.name) {
+                    // Try to match to a preset
+                    let matchedPreset = null;
                     for (const [key, preset] of Object.entries(
                         this.mcpPresets,
                     )) {
@@ -1611,18 +1404,20 @@ content %}
                             preset.command === mcpConfig.command &&
                             preset.args === mcpArgs
                         ) {
-                            mcpPreset = key;
+                            matchedPreset = key;
                             break;
                         }
                     }
+                    sourceType = matchedPreset
+                        ? `mcp:${matchedPreset}`
+                        : "mcp:custom";
                 }
 
                 this.form = {
                     name: rag.name,
-                    source_type: rag.source_type || "local",
+                    source_type: sourceType,
                     source_path: rag.source_path || "",
                     // MCP fields
-                    mcp_preset: mcpPreset,
                     mcp_name: mcpConfig.name || "",
                     mcp_transport: mcpConfig.transport || "stdio",
                     mcp_command: mcpConfig.command || "",
@@ -1635,10 +1430,6 @@ content %}
                     embedding_model: "", // Set after options render
                     ollama_instance: ollamaInstance,
                     ollama_url: rag.ollama_url || "",
-                    vision_provider: visionProvider,
-                    vision_model: "", // Set after options render
-                    vision_ollama_instance: visionOllamaInstance,
-                    vision_ollama_url: rag.vision_ollama_url || "",
                     index_schedule: isPreset
                         ? rag.index_schedule || ""
                         : "custom",
@@ -1659,7 +1450,6 @@ content %}
                 this.$nextTick(() => {
                     this.form.target_model = rag.target_model;
                     this.form.embedding_model = savedEmbeddingModel;
-                    this.form.vision_model = savedVisionModel;
                 });
             },
 
@@ -1694,20 +1484,13 @@ content %}
                     ollamaUrl = this.form.ollama_url;
                 }
 
-                // Format vision provider similarly
-                let visionProvider = this.form.vision_provider;
-                let visionOllamaUrl = null;
-                if (
-                    this.form.vision_provider === "ollama" &&
-                    this.form.vision_ollama_instance
-                ) {
-                    visionProvider = `ollama:${this.form.vision_ollama_instance}`;
-                    visionOllamaUrl = this.form.vision_ollama_url;
-                }
+                // Determine actual source type for API (local or mcp)
+                const isMcpSource = this.form.source_type.startsWith("mcp:");
+                const actualSourceType = isMcpSource ? "mcp" : "local";
 
                 // Build MCP server config if using MCP source
                 let mcpServerConfig = null;
-                if (this.form.source_type === "mcp") {
+                if (isMcpSource) {
                     const uriPatterns = this.form.mcp_uri_patterns
                         .split(",")
                         .map((p) => p.trim())
@@ -1727,19 +1510,15 @@ content %}
 
                 const payload = {
                     name: this.form.name.toLowerCase().trim(),
-                    source_type: this.form.source_type,
-                    source_path:
-                        this.form.source_type === "local"
-                            ? this.form.source_path.trim()
-                            : null,
+                    source_type: actualSourceType,
+                    source_path: !isMcpSource
+                        ? this.form.source_path.trim()
+                        : null,
                     mcp_server_config: mcpServerConfig,
                     target_model: this.form.target_model,
                     embedding_provider: embeddingProvider,
                     embedding_model: this.form.embedding_model || null,
                     ollama_url: ollamaUrl,
-                    vision_provider: visionProvider,
-                    vision_model: this.form.vision_model || null,
-                    vision_ollama_url: visionOllamaUrl,
                     index_schedule: schedule || null,
                     max_results: parseInt(this.form.max_results),
                     similarity_threshold: parseFloat(
