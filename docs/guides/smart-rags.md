@@ -96,6 +96,97 @@ services:
 
 Then set Source Path to `/data/documents`.
 
+### MCP Integrations
+
+Smart RAGs can index documents from external services via MCP (Model Context Protocol) servers. This allows you to index content from:
+
+- **Notion** - Workspace pages and databases
+- **Google Drive** - Documents, spreadsheets, PDFs
+- **GitHub** - Repository files, issues, documentation
+- **Slack** - Channel messages and files
+- **PostgreSQL** - Database tables
+
+#### Setting Up Notion
+
+1. **Create a Notion Integration**:
+   - Go to [notion.so/my-integrations](https://notion.so/my-integrations)
+   - Click "New integration"
+   - Give it a name (e.g., "LLM Relay")
+   - Select your workspace
+   - Copy the "Internal Integration Secret" (starts with `ntn_`)
+
+2. **Add the token to your environment**:
+   ```bash
+   # .env
+   NOTION_TOKEN=ntn_your_token_here
+   ```
+
+3. **Connect the integration to your pages**:
+   - Open a Notion page you want to index
+   - Click the **⋯** menu (top right)
+   - Select **"Add connections"**
+   - Find and select your integration
+   - Click **Confirm**
+   
+   The integration can now access that page and all its children.
+
+4. **Create a Smart RAG with Notion source**:
+   - In Admin UI, go to **Smart RAGs**
+   - Click **Add RAG**
+   - For **Document Source**, select **Notion** from the MCP Integrations group
+   - Configure target model and other settings
+   - Click **Save**, then **Index Now**
+
+#### Setting Up Google Drive
+
+1. **Run the MCP server once manually** to authenticate:
+   ```bash
+   npx -y @modelcontextprotocol/server-gdrive
+   ```
+   This will open a browser for OAuth authentication. Complete the flow.
+
+2. **Create a Smart RAG** with the Google Drive source preset.
+
+#### Setting Up GitHub
+
+1. **Create a GitHub Personal Access Token**:
+   - Go to GitHub Settings → Developer settings → Personal access tokens
+   - Generate a token with `repo` scope
+
+2. **Add to environment**:
+   ```bash
+   # .env
+   GITHUB_TOKEN=ghp_your_token_here
+   ```
+
+3. **Create a Smart RAG** with the GitHub source preset.
+
+#### Setting Up Slack
+
+1. **Create a Slack App**:
+   - Go to [api.slack.com/apps](https://api.slack.com/apps)
+   - Create a new app and add Bot Token Scopes for channel reading
+
+2. **Add to environment**:
+   ```bash
+   # .env
+   SLACK_BOT_TOKEN=xoxb-your-token
+   SLACK_TEAM_ID=T0123456789
+   ```
+
+3. **Create a Smart RAG** with the Slack source preset.
+
+#### Custom MCP Servers
+
+For other MCP-compatible servers:
+
+1. Select **Custom MCP Server** as the source
+2. Configure:
+   - **Server Name**: Identifier for the server
+   - **Transport**: `stdio` (subprocess) or `http`
+   - **Command/URL**: How to connect to the server
+   - **Arguments**: Command-line arguments (for stdio)
+
 ### Supported Formats
 
 LLM Relay uses Docling for document parsing:

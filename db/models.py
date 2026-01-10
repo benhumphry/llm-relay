@@ -221,6 +221,13 @@ class Setting(Base):
     KEY_WEB_RERANK_PROVIDER = "web_rerank_provider"  # "local" or "jina"
     # Note: Jina API key is configured via JINA_API_KEY env var
 
+    # Embedding settings for Smart RAGs (v1.6)
+    KEY_EMBEDDING_PROVIDER = (
+        "embedding_provider"  # "local", "ollama:<instance>", or provider name
+    )
+    KEY_EMBEDDING_MODEL = "embedding_model"  # Model name (e.g., "nomic-embed-text")
+    KEY_EMBEDDING_OLLAMA_URL = "embedding_ollama_url"  # Ollama URL when using ollama
+
     # Vision model settings for document parsing (v3.9)
     KEY_VISION_PROVIDER = (
         "vision_provider"  # "local", "ollama:<instance>", or provider name

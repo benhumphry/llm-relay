@@ -18,3 +18,4 @@ sentence-transformers>=2.2.0  # Local embeddings for Smart RAG
 docling>=2.0.0  # Document parsing for Smart RAG (PDF, DOCX, etc.)
 apscheduler>=3.10.0  # Background scheduling for RAG indexing
 trafilatura>=1.6.0  # Web content extraction for Smart Augmentors
+mcp>=1.0.0  # Model Context Protocol client for MCP integrations (v1.6)

@@ -1346,8 +1346,146 @@ content %}
                         </div>
                     </template>
 
-                    <!-- Rerank Provider -->
+                    <!-- Smart RAG Divider -->
+                    <div class="divider mt-4">Smart RAG Settings</div>
+
+                    <!-- Embedding Provider -->
                     <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Embedding Provider</span>
+                            <template
+                                x-if="webSettings.embedding_provider === 'local'"
+                            >
+                                <span
+                                    class="badge badge-sm"
+                                    :class="webSettings.gpu_available ? 'badge-success' : 'badge-warning'"
+                                    x-text="webSettings.gpu_available ? 'GPU: ' + webSettings.gpu_name : 'CPU'"
+                                ></span>
+                            </template>
+                        </label>
+                        <select
+                            x-model="webSettings.embedding_provider"
+                            @change="onEmbeddingProviderChange()"
+                            class="select select-bordered"
+                        >
+                            <option value="local">
+                                Local (sentence-transformers)
+                            </option>
+                            <option
+                                x-show="embeddingModels.ollama?.available"
+                                value="ollama"
+                            >
+                                Ollama
+                            </option>
+                            <template
+                                x-for="provider in embeddingModels.providers || []"
+                                :key="provider.name"
+                            >
+                                <option
+                                    :value="provider.name"
+                                    x-text="provider.name"
+                                ></option>
+                            </template>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Used by Smart RAGs for document embedding and
+                                semantic search</span
+                            >
+                        </label>
+                    </div>
+
+                    <!-- Local Embedding Info -->
+                    <template x-if="webSettings.embedding_provider === 'local'">
+                        <div
+                            class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
+                        >
+                            Uses bundled
+                            <span class="font-mono"
+                                >BAAI/bge-small-en-v1.5</span
+                            >
+                            model. No external dependencies required.
+                        </div>
+                    </template>
+
+                    <!-- Ollama Embedding Instance & Model -->
+                    <template
+                        x-if="webSettings.embedding_provider === 'ollama' && embeddingModels.ollama?.available"
+                    >
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Ollama Instance</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="webSettings.embedding_ollama_instance"
+                                    @change="onEmbeddingOllamaInstanceChange()"
+                                    class="select select-bordered"
+                                >
+                                    <template
+                                        x-for="instance in embeddingModels.ollama.instances"
+                                        :key="instance.name"
+                                    >
+                                        <option
+                                            :value="instance.name"
+                                            x-text="instance.name + ' (' + instance.url + ')'"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Embedding Model</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="webSettings.embedding_model"
+                                    class="select select-bordered font-mono"
+                                >
+                                    <option value="">Select a model...</option>
+                                    <template
+                                        x-for="model in getOllamaEmbeddingModels()"
+                                        :key="model.id"
+                                    >
+                                        <option
+                                            :value="model.id"
+                                            x-text="model.name"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- Provider Embedding Model -->
+                    <template x-if="isProviderEmbedding()">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Embedding Model</span>
+                            </label>
+                            <select
+                                x-model="webSettings.embedding_model"
+                                class="select select-bordered font-mono"
+                            >
+                                <option value="">Select a model...</option>
+                                <template
+                                    x-for="model in getProviderEmbeddingModels()"
+                                    :key="model.id"
+                                >
+                                    <option
+                                        :value="model.id"
+                                        x-text="model.name"
+                                    ></option>
+                                </template>
+                            </select>
+                        </div>
+                    </template>
+
+                    <!-- Rerank Provider -->
+                    <div class="form-control mt-4">
                         <label class="label">
                             <span class="label-text">Rerank Provider</span>
                             <template
@@ -1776,6 +1914,10 @@ content %}
                 search_provider: "",
                 search_url: "",
                 scraper_provider: "builtin",
+                embedding_provider: "local",
+                embedding_model: "",
+                embedding_ollama_instance: "",
+                embedding_ollama_url: "",
                 rerank_provider: "local",
                 jina_api_configured: false,
                 vision_provider: "local",
@@ -1788,6 +1930,7 @@ content %}
             availableSearchProviders: [],
             hasAnySearchProvider: false,
             savingWebSettings: false,
+            embeddingModels: {},
             visionModels: {},
 
             // Computed property for filtered logs
@@ -2098,13 +2241,24 @@ content %}
                             this.availableSearchProviders.length > 0;
                     }
 
-                    // Load vision models
+                    // Load vision and embedding models
                     await this.loadVisionModels();
+                    await this.loadEmbeddingModels();
 
                     // Load saved web settings
                     const webRes = await fetch("/api/settings/web");
                     if (webRes.ok) {
                         const webData = await webRes.json();
+
+                        // Parse embedding provider - if starts with "ollama:", extract instance name
+                        let embeddingProvider =
+                            webData.embedding_provider || "local";
+                        let embeddingOllamaInstance = "";
+                        if (embeddingProvider.startsWith("ollama:")) {
+                            embeddingOllamaInstance =
+                                embeddingProvider.substring(7);
+                            embeddingProvider = "ollama";
+                        }
 
                         // Parse vision provider - if starts with "ollama:", extract instance name
                         let visionProvider = webData.vision_provider || "local";
@@ -2114,7 +2268,9 @@ content %}
                             visionProvider = "ollama";
                         }
 
-                        // Save vision_model to restore after DOM renders with options
+                        // Save models to restore after DOM renders with options
+                        const savedEmbeddingModel =
+                            webData.embedding_model || "";
                         const savedVisionModel = webData.vision_model || "";
 
                         this.webSettings = {
@@ -2122,6 +2278,11 @@ content %}
                             search_url: webData.search_url || "",
                             scraper_provider:
                                 webData.scraper_provider || "builtin",
+                            embedding_provider: embeddingProvider,
+                            embedding_model: "", // Set after options render
+                            embedding_ollama_instance: embeddingOllamaInstance,
+                            embedding_ollama_url:
+                                webData.embedding_ollama_url || "",
                             rerank_provider: webData.rerank_provider || "local",
                             jina_api_configured:
                                 webData.jina_api_configured || false,
@@ -2133,13 +2294,17 @@ content %}
                             gpu_name: webData.gpu_name || null,
                         };
 
-                        // Restore vision_model after DOM renders with dropdown options
-                        if (savedVisionModel) {
-                            this.$nextTick(() => {
+                        // Restore models after DOM renders with dropdown options
+                        this.$nextTick(() => {
+                            if (savedEmbeddingModel) {
+                                this.webSettings.embedding_model =
+                                    savedEmbeddingModel;
+                            }
+                            if (savedVisionModel) {
                                 this.webSettings.vision_model =
                                     savedVisionModel;
-                            });
-                        }
+                            }
+                        });
                     }
                 } catch (err) {
                     console.error("Failed to load web settings:", err);
@@ -2155,6 +2320,82 @@ content %}
                 } catch (err) {
                     console.error("Failed to load vision models:", err);
                 }
+            },
+
+            async loadEmbeddingModels() {
+                try {
+                    const res = await fetch("/api/rags/embedding-models");
+                    if (res.ok) {
+                        this.embeddingModels = await res.json();
+                    }
+                } catch (err) {
+                    console.error("Failed to load embedding models:", err);
+                }
+            },
+
+            onEmbeddingProviderChange() {
+                // Reset model when provider changes
+                this.webSettings.embedding_model = "";
+                this.webSettings.embedding_ollama_instance = "";
+                this.webSettings.embedding_ollama_url = "";
+
+                // Auto-select first Ollama instance if switching to Ollama
+                if (
+                    this.webSettings.embedding_provider === "ollama" &&
+                    this.embeddingModels.ollama?.instances?.length > 0
+                ) {
+                    this.webSettings.embedding_ollama_instance =
+                        this.embeddingModels.ollama.instances[0].name;
+                    this.webSettings.embedding_ollama_url =
+                        this.embeddingModels.ollama.instances[0].url;
+                }
+            },
+
+            onEmbeddingOllamaInstanceChange() {
+                // Reset model when Ollama instance changes
+                this.webSettings.embedding_model = "";
+                // Update URL from selected instance
+                const instance = this.embeddingModels.ollama?.instances?.find(
+                    (i) =>
+                        i.name === this.webSettings.embedding_ollama_instance,
+                );
+                if (instance) {
+                    this.webSettings.embedding_ollama_url = instance.url;
+                }
+            },
+
+            getOllamaEmbeddingModels() {
+                if (
+                    !this.embeddingModels.ollama?.instances ||
+                    !this.webSettings.embedding_ollama_instance
+                ) {
+                    return [];
+                }
+                const instance = this.embeddingModels.ollama.instances.find(
+                    (i) =>
+                        i.name === this.webSettings.embedding_ollama_instance,
+                );
+                return instance?.models || [];
+            },
+
+            isProviderEmbedding() {
+                const provider = this.webSettings.embedding_provider;
+                return (
+                    provider && provider !== "local" && provider !== "ollama"
+                );
+            },
+
+            getProviderEmbeddingModels() {
+                if (
+                    !this.isProviderEmbedding() ||
+                    !this.embeddingModels.providers
+                ) {
+                    return [];
+                }
+                const provider = this.embeddingModels.providers.find(
+                    (p) => p.name === this.webSettings.embedding_provider,
+                );
+                return provider?.models || [];
             },
 
             onVisionProviderChange() {
@@ -2220,6 +2461,18 @@ content %}
             async saveWebSettings() {
                 this.savingWebSettings = true;
                 try {
+                    // Build embedding provider string - combine instance name for Ollama
+                    let embeddingProvider = this.webSettings.embedding_provider;
+                    let embeddingOllamaUrl = null;
+                    if (
+                        this.webSettings.embedding_provider === "ollama" &&
+                        this.webSettings.embedding_ollama_instance
+                    ) {
+                        embeddingProvider = `ollama:${this.webSettings.embedding_ollama_instance}`;
+                        embeddingOllamaUrl =
+                            this.webSettings.embedding_ollama_url;
+                    }
+
                     // Build vision provider string - combine instance name for Ollama
                     let visionProvider = this.webSettings.vision_provider;
                     let visionOllamaUrl = null;
@@ -2235,6 +2488,9 @@ content %}
                         search_provider: this.webSettings.search_provider,
                         search_url: this.webSettings.search_url,
                         scraper_provider: this.webSettings.scraper_provider,
+                        embedding_provider: embeddingProvider,
+                        embedding_model: this.webSettings.embedding_model,
+                        embedding_ollama_url: embeddingOllamaUrl || "",
                         rerank_provider: this.webSettings.rerank_provider,
                         vision_provider: visionProvider,
                         vision_model: this.webSettings.vision_model,

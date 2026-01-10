@@ -729,6 +729,32 @@ def _run_migrations(engine) -> None:
                     conn.execute(text(sql))
                 conn.commit()
 
+    # Migration: Make source_path nullable for MCP sources (v1.6.1)
+    if "smart_rags" in inspector.get_table_names():
+        # Check if source_path is currently NOT NULL (PostgreSQL only - SQLite doesn't enforce this well)
+        db_url = get_database_url()
+        if "postgresql" in db_url:
+            with engine.connect() as conn:
+                # Check if column is nullable
+                result = conn.execute(
+                    text("""
+                        SELECT is_nullable
+                        FROM information_schema.columns
+                        WHERE table_name = 'smart_rags' AND column_name = 'source_path'
+                    """)
+                )
+                row = result.fetchone()
+                if row and row[0] == "NO":
+                    logger.info(
+                        "Making source_path nullable for MCP sources (v1.6.1)"
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE smart_rags ALTER COLUMN source_path DROP NOT NULL"
+                        )
+                    )
+                    conn.commit()
+
     # Migration: Add scraper and reranking columns to smart_augmentors table (v1.5)
     if "smart_augmentors" in inspector.get_table_names():
         existing_columns = {

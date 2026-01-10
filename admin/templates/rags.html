@@ -658,7 +658,7 @@ content %}
                                     class="input input-bordered font-mono"
                                     :class="{ 'input-disabled': getMcpPresetKey() }"
                                     :readonly="getMcpPresetKey()"
-                                    placeholder="e.g., -y @anthropic/mcp-server-gdrive"
+                                    placeholder="e.g., -y @modelcontextprotocol/server-gdrive"
                                 />
                                 <label class="label">
                                     <span class="label-text-alt"
@@ -736,123 +736,13 @@ content %}
                     </label>
                 </div>
 
-                <!-- Embedding Provider -->
-                <div class="form-control mt-4">
-                    <label class="label">
-                        <span class="label-text">Embedding Provider</span>
-                    </label>
-                    <select
-                        x-model="form.embedding_provider"
-                        @change="onEmbeddingProviderChange()"
-                        class="select select-bordered"
-                    >
-                        <option value="local">
-                            Local (sentence-transformers)
-                        </option>
-                        <template x-if="embeddingModels.ollama?.available">
-                            <option value="ollama">Ollama</option>
-                        </template>
-                        <template
-                            x-for="provider in embeddingModels.providers || []"
-                            :key="provider.name"
-                        >
-                            <option
-                                :value="provider.name"
-                                x-text="provider.name"
-                            ></option>
-                        </template>
-                    </select>
-                </div>
-
-                <!-- Local Embedding Info -->
-                <div x-show="form.embedding_provider === 'local'" class="mt-2">
-                    <div
-                        class="text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
-                    >
-                        Uses bundled
-                        <span class="font-mono">BAAI/bge-small-en-v1.5</span>
-                        model. No external dependencies required.
-                    </div>
-                </div>
-
-                <!-- Ollama Instance & Model (shown when ollama selected) -->
-                <template
-                    x-if="form.embedding_provider === 'ollama' && embeddingModels.ollama?.available"
-                >
-                    <div class="grid grid-cols-2 gap-4 mt-2">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Ollama Instance</span>
-                            </label>
-                            <select
-                                x-model="form.ollama_instance"
-                                @change="onOllamaInstanceChange()"
-                                class="select select-bordered"
-                            >
-                                <template
-                                    x-for="instance in embeddingModels.ollama.instances"
-                                    :key="instance.name"
-                                >
-                                    <option
-                                        :value="instance.name"
-                                        x-text="instance.name + ' (' + instance.url + ')'"
-                                    ></option>
-                                </template>
-                            </select>
-                        </div>
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Embedding Model</span>
-                            </label>
-                            <select
-                                x-model="form.embedding_model"
-                                class="select select-bordered font-mono"
-                            >
-                                <option value="">Select a model...</option>
-                                <template
-                                    x-for="model in getOllamaModels()"
-                                    :key="model.id"
-                                >
-                                    <option
-                                        :value="model.id"
-                                        x-text="model.name"
-                                    ></option>
-                                </template>
-                            </select>
-                        </div>
-                    </div>
-                </template>
-
-                <!-- Provider Embedding Model (shown when a provider is selected) -->
-                <template x-if="isProviderEmbedding()">
-                    <div class="form-control mt-2">
-                        <label class="label">
-                            <span class="label-text">Embedding Model</span>
-                        </label>
-                        <select
-                            x-model="form.embedding_model"
-                            class="select select-bordered font-mono"
-                        >
-                            <option value="">Select a model...</option>
-                            <template
-                                x-for="model in getProviderModels()"
-                                :key="model.id"
-                            >
-                                <option
-                                    :value="model.id"
-                                    x-text="model.name"
-                                ></option>
-                            </template>
-                        </select>
-                    </div>
-                </template>
-
-                <!-- Vision Settings Note -->
+                <!-- Embedding & Vision Settings Note -->
                 <div
-                    class="mt-6 text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
+                    class="mt-4 text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
                 >
-                    <span class="font-medium">Document Parsing:</span>
-                    Vision model for PDF/image parsing is configured in
+                    <span class="font-medium">Embedding & Vision Models:</span>
+                    Embedding provider and vision model for document parsing are
+                    configured in
                     <a href="/settings" class="link link-primary"
                         >Global Settings</a
                     >.
@@ -1061,7 +951,6 @@ content %}
             loading: true,
             rags: [],
             availableModels: [],
-            embeddingModels: {},
 
             expandedRows: [],
             indexingRags: [],
@@ -1079,7 +968,7 @@ content %}
                     name: "gdrive",
                     transport: "stdio",
                     command: "npx",
-                    args: "-y @anthropic/mcp-server-gdrive",
+                    args: "-y @modelcontextprotocol/server-gdrive",
                     description:
                         "Index documents from Google Drive. Supports Docs, Sheets, PDFs, and more.",
                     setup_note:
@@ -1089,17 +978,24 @@ content %}
                     name: "notion",
                     transport: "stdio",
                     command: "npx",
-                    args: "-y @anthropic/mcp-server-notion",
+                    args: "-y @notionhq/notion-mcp-server",
                     description:
                         "Index pages and databases from Notion workspace.",
                     setup_note:
-                        "Requires NOTION_API_KEY environment variable with an integration token.",
+                        "Requires NOTION_TOKEN environment variable. Create an integration at notion.so/my-integrations, then add it to pages via Share > Add connections.",
+                    // Tool-based discovery config
+                    discovery_tool: "API-post-search",
+                    discovery_args: {
+                        filter: { property: "object", value: "page" },
+                    },
+                    content_tool: "API-get-block-children",
+                    content_id_field: "block_id",
                 },
                 github: {
                     name: "github",
                     transport: "stdio",
                     command: "npx",
-                    args: "-y @anthropic/mcp-server-github",
+                    args: "-y @modelcontextprotocol/server-github",
                     description:
                         "Index repositories, issues, and documentation from GitHub.",
                     setup_note:
@@ -1109,7 +1005,7 @@ content %}
                     name: "slack",
                     transport: "stdio",
                     command: "npx",
-                    args: "-y @anthropic/mcp-server-slack",
+                    args: "-y @modelcontextprotocol/server-slack",
                     description:
                         "Index messages and files from Slack channels.",
                     setup_note:
@@ -1119,7 +1015,7 @@ content %}
                     name: "postgres",
                     transport: "stdio",
                     command: "npx",
-                    args: "-y @anthropic/mcp-server-postgres postgresql://user:pass@localhost/db",
+                    args: "-y @modelcontextprotocol/server-postgres postgresql://user:pass@localhost/db",
                     description: "Index data from PostgreSQL database tables.",
                     setup_note:
                         "Edit the connection string in Arguments to match your database.",
@@ -1128,7 +1024,7 @@ content %}
                     name: "filesystem",
                     transport: "stdio",
                     command: "npx",
-                    args: "-y @anthropic/mcp-server-filesystem /path/to/folder",
+                    args: "-y @modelcontextprotocol/server-filesystem /path/to/folder",
                     description:
                         "Index files from a filesystem path via MCP protocol.",
                     setup_note:
@@ -1146,12 +1042,13 @@ content %}
                 mcp_args: "",
                 mcp_url: "",
                 mcp_uri_patterns: "",
+                // Tool-based discovery fields
+                mcp_discovery_tool: "",
+                mcp_discovery_args: {},
+                mcp_content_tool: "",
+                mcp_content_id_field: "",
                 // Other fields
                 target_model: "",
-                embedding_provider: "local",
-                embedding_model: "",
-                ollama_instance: "",
-                ollama_url: "",
                 index_schedule: "",
                 custom_schedule: "",
                 max_results: 5,
@@ -1169,7 +1066,6 @@ content %}
                 await Promise.all([
                     this.loadRags(),
                     this.loadAvailableModels(),
-                    this.loadEmbeddingModels(),
                 ]);
                 this.loading = false;
             },
@@ -1193,17 +1089,6 @@ content %}
                     }
                 } catch (error) {
                     console.error("Failed to load available models:", error);
-                }
-            },
-
-            async loadEmbeddingModels() {
-                try {
-                    const response = await fetch("/api/rags/embedding-models");
-                    if (response.ok) {
-                        this.embeddingModels = await response.json();
-                    }
-                } catch (error) {
-                    console.error("Failed to load embedding models:", error);
                 }
             },
 
@@ -1238,6 +1123,14 @@ content %}
                         this.form.mcp_command = preset.command;
                         this.form.mcp_args = preset.args;
                         this.form.mcp_url = "";
+                        // Tool-based discovery config
+                        this.form.mcp_discovery_tool =
+                            preset.discovery_tool || "";
+                        this.form.mcp_discovery_args =
+                            preset.discovery_args || {};
+                        this.form.mcp_content_tool = preset.content_tool || "";
+                        this.form.mcp_content_id_field =
+                            preset.content_id_field || "";
                     } else {
                         // Custom - clear fields for manual entry
                         this.form.mcp_name = "";
@@ -1245,69 +1138,12 @@ content %}
                         this.form.mcp_command = "";
                         this.form.mcp_args = "";
                         this.form.mcp_url = "";
+                        this.form.mcp_discovery_tool = "";
+                        this.form.mcp_discovery_args = {};
+                        this.form.mcp_content_tool = "";
+                        this.form.mcp_content_id_field = "";
                     }
                 }
-            },
-
-            onEmbeddingProviderChange() {
-                // Reset model selection when provider changes
-                this.form.embedding_model = "";
-                this.form.ollama_instance = "";
-                this.form.ollama_url = "";
-
-                // Set defaults based on provider
-                if (
-                    this.form.embedding_provider === "ollama" &&
-                    this.embeddingModels.ollama?.instances?.length > 0
-                ) {
-                    this.form.ollama_instance =
-                        this.embeddingModels.ollama.instances[0].name;
-                    this.form.ollama_url =
-                        this.embeddingModels.ollama.instances[0].url;
-                } else if (this.isProviderEmbedding()) {
-                    const providerModels = this.getProviderModels();
-                    if (providerModels.length > 0) {
-                        this.form.embedding_model = providerModels[0].id;
-                    }
-                }
-            },
-
-            onOllamaInstanceChange() {
-                // Update URL when instance changes
-                const instance = this.embeddingModels.ollama?.instances?.find(
-                    (i) => i.name === this.form.ollama_instance,
-                );
-                if (instance) {
-                    this.form.ollama_url = instance.url;
-                    this.form.embedding_model = ""; // Reset model selection
-                }
-            },
-
-            getOllamaModels() {
-                const instance = this.embeddingModels.ollama?.instances?.find(
-                    (i) => i.name === this.form.ollama_instance,
-                );
-                return instance?.models || [];
-            },
-
-            isProviderEmbedding() {
-                // Check if current selection is a provider (not local or ollama)
-                if (
-                    this.form.embedding_provider === "local" ||
-                    this.form.embedding_provider === "ollama"
-                ) {
-                    return false;
-                }
-                return (this.embeddingModels.providers || []).some(
-                    (p) => p.name === this.form.embedding_provider,
-                );
-            },
-
-            getProviderModels() {
-                const provider = (this.embeddingModels.providers || []).find(
-                    (p) => p.name === this.form.embedding_provider,
-                );
-                return provider?.models || [];
             },
 
             toggleExpand(id) {
@@ -1332,12 +1168,13 @@ content %}
                     mcp_args: "",
                     mcp_url: "",
                     mcp_uri_patterns: "",
+                    // Tool-based discovery fields
+                    mcp_discovery_tool: "",
+                    mcp_discovery_args: {},
+                    mcp_content_tool: "",
+                    mcp_content_id_field: "",
                     // Other fields
                     target_model: "",
-                    embedding_provider: "local",
-                    embedding_model: "",
-                    ollama_instance: "",
-                    ollama_url: "",
                     index_schedule: "",
                     custom_schedule: "",
                     max_results: 5,
@@ -1365,23 +1202,6 @@ content %}
                 const isPreset = schedulePresets.includes(
                     rag.index_schedule || "",
                 );
-
-                // Parse embedding provider - could be "ollama:instance_name" or just "provider_name"
-                let embeddingProvider = rag.embedding_provider || "local";
-                let ollamaInstance = "";
-                if (embeddingProvider.startsWith("ollama:")) {
-                    ollamaInstance = embeddingProvider.split(":")[1];
-                    embeddingProvider = "ollama";
-                } else if (embeddingProvider === "ollama" && rag.ollama_url) {
-                    // Find instance by URL
-                    const instance = (
-                        this.embeddingModels.ollama?.instances || []
-                    ).find((i) => i.url === rag.ollama_url);
-                    ollamaInstance = instance?.name || "";
-                }
-
-                // Save model values to restore after DOM renders with options
-                const savedEmbeddingModel = rag.embedding_model || "";
 
                 // Parse MCP config if present
                 const mcpConfig = rag.mcp_server_config || {};
@@ -1424,12 +1244,13 @@ content %}
                     mcp_args: mcpArgs,
                     mcp_url: mcpConfig.url || "",
                     mcp_uri_patterns: mcpUriPatterns,
+                    // Tool-based discovery fields
+                    mcp_discovery_tool: mcpConfig.discovery_tool || "",
+                    mcp_discovery_args: mcpConfig.discovery_args || {},
+                    mcp_content_tool: mcpConfig.content_tool || "",
+                    mcp_content_id_field: mcpConfig.content_id_field || "",
                     // Other fields
                     target_model: "",
-                    embedding_provider: embeddingProvider,
-                    embedding_model: "", // Set after options render
-                    ollama_instance: ollamaInstance,
-                    ollama_url: rag.ollama_url || "",
                     index_schedule: isPreset
                         ? rag.index_schedule || ""
                         : "custom",
@@ -1449,7 +1270,6 @@ content %}
                 // Restore model selections after DOM renders with dropdown options
                 this.$nextTick(() => {
                     this.form.target_model = rag.target_model;
-                    this.form.embedding_model = savedEmbeddingModel;
                 });
             },
 
@@ -1473,17 +1293,6 @@ content %}
                         ? this.form.custom_schedule
                         : this.form.index_schedule;
 
-                // Format embedding provider - for Ollama, include instance name
-                let embeddingProvider = this.form.embedding_provider;
-                let ollamaUrl = null;
-                if (
-                    this.form.embedding_provider === "ollama" &&
-                    this.form.ollama_instance
-                ) {
-                    embeddingProvider = `ollama:${this.form.ollama_instance}`;
-                    ollamaUrl = this.form.ollama_url;
-                }
-
                 // Determine actual source type for API (local or mcp)
                 const isMcpSource = this.form.source_type.startsWith("mcp:");
                 const actualSourceType = isMcpSource ? "mcp" : "local";
@@ -1505,6 +1314,12 @@ content %}
                             .filter((a) => a.length > 0),
                         url: this.form.mcp_url.trim() || null,
                         uri_patterns: uriPatterns,
+                        // Tool-based discovery config
+                        discovery_tool: this.form.mcp_discovery_tool || null,
+                        discovery_args: this.form.mcp_discovery_args || null,
+                        content_tool: this.form.mcp_content_tool || null,
+                        content_id_field:
+                            this.form.mcp_content_id_field || null,
                     };
                 }
 
@@ -1516,9 +1331,6 @@ content %}
                         : null,
                     mcp_server_config: mcpServerConfig,
                     target_model: this.form.target_model,
-                    embedding_provider: embeddingProvider,
-                    embedding_model: this.form.embedding_model || null,
-                    ollama_url: ollamaUrl,
                     index_schedule: schedule || null,
                     max_results: parseInt(this.form.max_results),
                     similarity_threshold: parseFloat(

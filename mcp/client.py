@@ -38,6 +38,12 @@ class MCPServerConfig:
     # Resource filtering
     uri_patterns: list[str] = field(default_factory=list)  # e.g., ["file://**/*.pdf"]
 
+    # Tool-based discovery (for servers that use tools instead of resources)
+    discovery_tool: Optional[str] = None  # e.g., "search"
+    discovery_args: dict = field(default_factory=dict)  # e.g., {"filter": {"value": "page"}}
+    content_tool: Optional[str] = None  # e.g., "retrieve-page-content"
+    content_id_field: Optional[str] = None  # e.g., "id" - field in discovery results
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -49,6 +55,10 @@ class MCPServerConfig:
             "url": self.url,
             "headers": self.headers,
             "uri_patterns": self.uri_patterns,
+            "discovery_tool": self.discovery_tool,
+            "discovery_args": self.discovery_args,
+            "content_tool": self.content_tool,
+            "content_id_field": self.content_id_field,
         }
 
     @classmethod
@@ -63,6 +73,10 @@ class MCPServerConfig:
             url=data.get("url"),
             headers=data.get("headers", {}),
             uri_patterns=data.get("uri_patterns", []),
+            discovery_tool=data.get("discovery_tool"),
+            discovery_args=data.get("discovery_args", {}),
+            content_tool=data.get("content_tool"),
+            content_id_field=data.get("content_id_field"),
         )
 
 
@@ -84,6 +98,15 @@ class MCPResourceContent:
     mime_type: Optional[str] = None
     text: Optional[str] = None
     blob: Optional[bytes] = None  # Base64 decoded
+
+
+@dataclass
+class MCPTool:
+    """Represents a tool from an MCP server."""
+
+    name: str
+    description: Optional[str] = None
+    input_schema: Optional[dict] = None
 
 
 class MCPClient:
@@ -141,11 +164,15 @@ class MCPClient:
         if not self.config.command:
             raise ValueError("Command required for stdio transport")
 
+        import os
+
         # Build command
         cmd = [self.config.command] + self.config.args
 
-        # Merge environment
-        env = dict(**self.config.env) if self.config.env else None
+        # Merge environment - always inherit parent env, then overlay config env
+        env = os.environ.copy()
+        if self.config.env:
+            env.update(self.config.env)
 
         logger.info(f"Starting MCP server: {' '.join(cmd)}")
 
@@ -361,6 +388,94 @@ class MCPClient:
             text=content.get("text"),
             blob=blob,
         )
+
+    def list_tools(self) -> list[MCPTool]:
+        """
+        List available tools from the server.
+
+        Returns:
+            List of MCPTool objects
+        """
+        if not self._initialized:
+            raise RuntimeError("MCP client not initialized")
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": self._next_id(),
+            "method": "tools/list",
+            "params": {},
+        }
+
+        response = self._send_request(request)
+        if not response or "result" not in response:
+            return []
+
+        result = response["result"]
+        tools = []
+
+        for t in result.get("tools", []):
+            tools.append(
+                MCPTool(
+                    name=t["name"],
+                    description=t.get("description"),
+                    input_schema=t.get("inputSchema"),
+                )
+            )
+
+        return tools
+
+    def call_tool(self, name: str, arguments: Optional[dict] = None) -> Any:
+        """
+        Call a tool on the server.
+
+        Args:
+            name: Tool name
+            arguments: Tool arguments (optional)
+
+        Returns:
+            Tool result (structure depends on the tool)
+        """
+        if not self._initialized:
+            raise RuntimeError("MCP client not initialized")
+
+        request = {
+            "jsonrpc": "2.0",
+            "id": self._next_id(),
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments or {},
+            },
+        }
+
+        response = self._send_request(request)
+        if not response:
+            return None
+
+        # Check for error
+        if "error" in response:
+            error = response["error"]
+            logger.error(f"Tool call '{name}' failed: {error.get('message', error)}")
+            return None
+
+        result = response.get("result", {})
+
+        # MCP tool results have a 'content' array with text/image blocks
+        content = result.get("content", [])
+        if not content:
+            return result
+
+        # Extract text content (most common case)
+        text_parts = []
+        for block in content:
+            if block.get("type") == "text":
+                text_parts.append(block.get("text", ""))
+
+        if text_parts:
+            return "\n".join(text_parts)
+
+        # Return raw result if no text content
+        return result
 
     def __enter__(self):
         """Context manager entry."""

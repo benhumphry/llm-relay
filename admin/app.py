@@ -921,6 +921,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER,
             Setting.KEY_WEB_SEARCH_URL,
             Setting.KEY_WEB_SCRAPER_PROVIDER,
+            Setting.KEY_EMBEDDING_PROVIDER,
+            Setting.KEY_EMBEDDING_MODEL,
+            Setting.KEY_EMBEDDING_OLLAMA_URL,
             Setting.KEY_WEB_RERANK_PROVIDER,
             Setting.KEY_VISION_PROVIDER,
             Setting.KEY_VISION_MODEL,
@@ -941,6 +944,13 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "search_url": settings_dict.get(Setting.KEY_WEB_SEARCH_URL) or "",
                 "scraper_provider": settings_dict.get(Setting.KEY_WEB_SCRAPER_PROVIDER)
                 or "builtin",
+                "embedding_provider": settings_dict.get(Setting.KEY_EMBEDDING_PROVIDER)
+                or "local",
+                "embedding_model": settings_dict.get(Setting.KEY_EMBEDDING_MODEL) or "",
+                "embedding_ollama_url": settings_dict.get(
+                    Setting.KEY_EMBEDDING_OLLAMA_URL
+                )
+                or "",
                 "rerank_provider": settings_dict.get(Setting.KEY_WEB_RERANK_PROVIDER)
                 or "local",
                 "jina_api_configured": jina_api_configured,
@@ -970,6 +980,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if scraper_provider not in ("builtin", "jina"):
             return jsonify({"error": "Invalid scraper provider"}), 400
 
+        # Embedding provider can be "local", "ollama:<instance>", or any provider name
+        embedding_provider = data.get("embedding_provider", "local")
+        embedding_model = data.get("embedding_model", "")
+        embedding_ollama_url = data.get("embedding_ollama_url", "")
+
         # Validate rerank provider
         rerank_provider = data.get("rerank_provider", "local")
         if rerank_provider not in ("local", "jina"):
@@ -985,6 +1000,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER: search_provider,
             Setting.KEY_WEB_SEARCH_URL: data.get("search_url", ""),
             Setting.KEY_WEB_SCRAPER_PROVIDER: scraper_provider,
+            Setting.KEY_EMBEDDING_PROVIDER: embedding_provider,
+            Setting.KEY_EMBEDDING_MODEL: embedding_model,
+            Setting.KEY_EMBEDDING_OLLAMA_URL: embedding_ollama_url,
             Setting.KEY_WEB_RERANK_PROVIDER: rerank_provider,
             Setting.KEY_VISION_PROVIDER: vision_provider,
             Setting.KEY_VISION_MODEL: vision_model,
