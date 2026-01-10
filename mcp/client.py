@@ -40,7 +40,9 @@ class MCPServerConfig:
 
     # Tool-based discovery (for servers that use tools instead of resources)
     discovery_tool: Optional[str] = None  # e.g., "search"
-    discovery_args: dict = field(default_factory=dict)  # e.g., {"filter": {"value": "page"}}
+    discovery_args: dict = field(
+        default_factory=dict
+    )  # e.g., {"filter": {"value": "page"}}
     content_tool: Optional[str] = None  # e.g., "retrieve-page-content"
     content_id_field: Optional[str] = None  # e.g., "id" - field in discovery results
 
@@ -221,7 +223,9 @@ class MCPClient:
             )
 
             # Send initialized notification
-            self._send_notification({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            self._send_notification(
+                {"jsonrpc": "2.0", "method": "notifications/initialized"}
+            )
             return True
 
         return False
@@ -255,16 +259,34 @@ class MCPClient:
         if not expect_response:
             return None
 
-        # Read response
-        response_line = self._process.stdout.readline()
-        if not response_line:
-            raise RuntimeError("No response from MCP server")
+        # Read response, skipping non-JSON lines (some servers output debug info to stdout)
+        max_attempts = 20  # Safety limit
+        for _ in range(max_attempts):
+            response_line = self._process.stdout.readline()
+            if not response_line:
+                raise RuntimeError("No response from MCP server")
 
-        return json.loads(response_line)
+            response_line = response_line.strip()
+            if not response_line:
+                continue  # Skip empty lines
 
-    def _send_http(
-        self, message: dict, expect_response: bool = True
-    ) -> Optional[dict]:
+            # Try to parse as JSON
+            if response_line.startswith("{"):
+                try:
+                    return json.loads(response_line)
+                except json.JSONDecodeError:
+                    logger.debug(f"Skipping invalid JSON line: {response_line[:100]}")
+                    continue
+            else:
+                # Log non-JSON output as debug info
+                logger.debug(f"MCP server debug output: {response_line[:200]}")
+                continue
+
+        raise RuntimeError(
+            "No valid JSON response from MCP server after reading multiple lines"
+        )
+
+    def _send_http(self, message: dict, expect_response: bool = True) -> Optional[dict]:
         """Send message via HTTP."""
         headers = {
             "Content-Type": "application/json",

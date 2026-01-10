@@ -8,6 +8,7 @@ Provides a unified interface for retrieving documents from:
 
 import fnmatch
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -293,6 +294,7 @@ class MCPDocumentSource(DocumentSource):
     def _list_documents_via_tools(self, client: MCPClient) -> Iterator[DocumentInfo]:
         """List documents using tool-based discovery with pagination support."""
         import json
+        import re
 
         try:
             next_cursor = None
@@ -309,7 +311,11 @@ class MCPDocumentSource(DocumentSource):
                     else {}
                 )
                 if next_cursor:
-                    args["start_cursor"] = next_cursor
+                    # Support different pagination param names
+                    if self.config.name == "gdrive":
+                        args["pageToken"] = next_cursor
+                    else:
+                        args["start_cursor"] = next_cursor
 
                 # Call the discovery tool
                 result = client.call_tool(self.config.discovery_tool, args)
@@ -322,11 +328,16 @@ class MCPDocumentSource(DocumentSource):
 
                 # Parse response to check for pagination
                 parsed = None
+                page_token = None
                 if isinstance(result, str):
                     try:
                         parsed = json.loads(result)
                     except json.JSONDecodeError:
-                        pass
+                        # Check for Google Drive style pagination in text
+                        # "More results available. Use pageToken: <token>"
+                        match = re.search(r"Use pageToken:\s*(\S+)", result)
+                        if match:
+                            page_token = match.group(1)
 
                 # Extract items from the result
                 items = self._parse_discovery_result(result)
@@ -341,19 +352,33 @@ class MCPDocumentSource(DocumentSource):
                     uri = f"tool://{self.config.name}/{item_id}"
                     name = self._extract_name(item) or item_id
 
+                    # Get mime type if available
+                    mime_type = (
+                        item.get("mimeType", "text/markdown")
+                        if isinstance(item, dict)
+                        else "text/markdown"
+                    )
+
                     yield DocumentInfo(
                         uri=uri,
                         name=name,
-                        mime_type="text/markdown",  # Tool-based servers typically return markdown
+                        mime_type=mime_type,
                     )
 
-                # Check for more pages (Notion-style pagination)
+                # Check for more pages
                 if parsed and isinstance(parsed, dict):
+                    # Notion-style pagination
                     has_more = parsed.get("has_more", False)
                     next_cursor = parsed.get("next_cursor")
                     if not has_more or not next_cursor:
                         break
                     logger.debug(f"Fetching next page (cursor: {next_cursor[:20]}...)")
+                elif page_token:
+                    # Google Drive style pagination
+                    next_cursor = page_token
+                    logger.debug(
+                        f"Fetching next page (pageToken: {next_cursor[:20]}...)"
+                    )
                 else:
                     break  # No pagination info, assume single page
 
@@ -363,8 +388,9 @@ class MCPDocumentSource(DocumentSource):
     def _parse_discovery_result(self, result: Any) -> list:
         """Parse the discovery tool result into a list of items."""
         import json
+        import re
 
-        # If result is a string, try to parse as JSON
+        # If result is a string, try to parse as JSON first
         if isinstance(result, str):
             try:
                 parsed = json.loads(result)
@@ -378,8 +404,36 @@ class MCPDocumentSource(DocumentSource):
                     # Return as single-item list
                     return [parsed]
             except json.JSONDecodeError:
-                # Not JSON, might be plain text - can't extract items
-                logger.warning("Discovery result is not valid JSON")
+                # Not JSON - try Google Drive text format parsing
+                # Format: "fileId fileName (mimeType)"
+                items = []
+                for line in result.split("\n"):
+                    line = line.strip()
+                    if (
+                        not line
+                        or line.startswith("Found ")
+                        or line.startswith("More results")
+                    ):
+                        continue
+
+                    # Parse: "fileId name (mimeType)"
+                    match = re.match(r"^(\S+)\s+(.+?)\s+\(([^)]+)\)$", line)
+                    if match:
+                        file_id, name, mime_type = match.groups()
+                        items.append(
+                            {
+                                "id": file_id,
+                                "name": name,
+                                "mimeType": mime_type,
+                            }
+                        )
+
+                if items:
+                    return items
+
+                logger.warning(
+                    "Discovery result is not valid JSON or known text format"
+                )
                 return []
 
         # If already a list, return as-is
@@ -624,6 +678,1120 @@ class MCPDocumentSource(DocumentSource):
         return False
 
 
+def _setup_google_oauth_files(account_id: int) -> Optional[str]:
+    """
+    Set up credential files for mcp-gsuite based on stored OAuth token.
+
+    Creates .gauth.json, .accounts.json, and .oauth.{email}.json files
+    in a temporary directory for mcp-gsuite to use.
+
+    Args:
+        account_id: ID of the stored OAuth token
+
+    Returns:
+        Path to the credentials directory, or None if setup failed
+    """
+    import json
+
+    from db.oauth_tokens import get_oauth_token_by_id, list_oauth_tokens
+
+    # Get the token by ID
+    tokens = list_oauth_tokens(provider="google")
+    token_meta = next((t for t in tokens if t["id"] == account_id), None)
+    if not token_meta:
+        logger.error(f"OAuth token {account_id} not found")
+        return None
+
+    token_data = get_oauth_token_by_id(account_id)
+    if not token_data:
+        logger.error(f"Failed to decrypt OAuth token {account_id}")
+        return None
+
+    account_email = token_meta["account_email"]
+
+    # Create a persistent temp directory for credentials
+    # Use a fixed path based on account ID so files persist across calls
+    creds_dir = f"/tmp/llm-relay-oauth-{account_id}"
+    os.makedirs(creds_dir, exist_ok=True)
+
+    # Create .gauth.json with client credentials
+    gauth_path = os.path.join(creds_dir, ".gauth.json")
+    gauth_data = {
+        "web": {
+            "client_id": token_data.get("client_id"),
+            "client_secret": token_data.get("client_secret"),
+            "redirect_uris": ["http://localhost:4100/code"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+    with open(gauth_path, "w") as f:
+        json.dump(gauth_data, f)
+
+    # Create .accounts.json with account info
+    accounts_path = os.path.join(creds_dir, ".accounts.json")
+    accounts_data = {
+        "accounts": [
+            {
+                "email": account_email,
+                "account_type": "personal",
+            }
+        ]
+    }
+    with open(accounts_path, "w") as f:
+        json.dump(accounts_data, f)
+
+    # Create .oauth.{email}.json with the actual OAuth tokens
+    oauth_path = os.path.join(creds_dir, f".oauth.{account_email}.json")
+    oauth_data = {
+        "token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": token_data.get("client_id"),
+        "client_secret": token_data.get("client_secret"),
+        "scopes": token_meta.get("scopes", []),
+        "expiry": token_data.get("expiry"),
+    }
+    with open(oauth_path, "w") as f:
+        json.dump(oauth_data, f)
+
+    logger.info(f"Set up OAuth credentials for {account_email} in {creds_dir}")
+    return creds_dir
+
+
+def _setup_gdrive_oauth_files(account_id: int) -> Optional[dict]:
+    """
+    Set up credential files for @isaacphi/mcp-gdrive based on stored OAuth token.
+
+    Creates gcp-oauth.keys.json and credentials.json files in the format
+    expected by the mcp-gdrive package.
+
+    Args:
+        account_id: ID of the stored OAuth token
+
+    Returns:
+        Dict with creds_dir, client_id, client_secret, or None if setup failed
+    """
+    import json
+
+    from db.oauth_tokens import get_oauth_token_by_id, list_oauth_tokens
+
+    # Get the token by ID
+    tokens = list_oauth_tokens(provider="google")
+    token_meta = next((t for t in tokens if t["id"] == account_id), None)
+    if not token_meta:
+        logger.error(f"OAuth token {account_id} not found")
+        return None
+
+    token_data = get_oauth_token_by_id(account_id)
+    if not token_data:
+        logger.error(f"Failed to decrypt OAuth token {account_id}")
+        return None
+
+    client_id = token_data.get("client_id")
+    client_secret = token_data.get("client_secret")
+
+    # Create a persistent temp directory for credentials
+    # Use a fixed path based on account ID so files persist across calls
+    creds_dir = f"/tmp/llm-relay-gdrive-{account_id}"
+    os.makedirs(creds_dir, exist_ok=True)
+
+    # Create gcp-oauth.keys.json with client credentials
+    # @isaacphi/mcp-gdrive expects this specific filename
+    keys_path = os.path.join(creds_dir, "gcp-oauth.keys.json")
+    keys_data = {
+        "installed": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uris": ["http://localhost"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
+    with open(keys_path, "w") as f:
+        json.dump(keys_data, f)
+
+    # Create .gdrive-server-credentials.json with the OAuth tokens
+    # This is the token file that mcp-gdrive expects after authentication
+    creds_path = os.path.join(creds_dir, ".gdrive-server-credentials.json")
+    creds_data = {
+        "access_token": token_data.get("access_token"),
+        "refresh_token": token_data.get("refresh_token"),
+        "scope": " ".join(token_meta.get("scopes", [])),
+        "token_type": "Bearer",
+        "expiry_date": token_data.get("expiry"),
+    }
+    with open(creds_path, "w") as f:
+        json.dump(creds_data, f)
+
+    account_email = token_meta["account_email"]
+    logger.info(f"Set up Google Drive credentials for {account_email} in {creds_dir}")
+    return {
+        "creds_dir": creds_dir,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+
+
+class GoogleDriveDocumentSource(DocumentSource):
+    """
+    Document source for Google Drive using direct API calls.
+
+    Uses Google Drive API v3 directly with stored OAuth tokens,
+    bypassing MCP for better performance and proper folder filtering.
+
+    Supports Docling processing with optional vision models for PDFs
+    and other binary document formats.
+    """
+
+    # Google Workspace MIME types that need export
+    GOOGLE_EXPORT_TYPES = {
+        "application/vnd.google-apps.document": ("text/plain", ".txt"),
+        "application/vnd.google-apps.spreadsheet": ("text/csv", ".csv"),
+        "application/vnd.google-apps.presentation": ("text/plain", ".txt"),
+        "application/vnd.google-apps.drawing": ("image/png", ".png"),
+    }
+
+    # Binary file types that should be processed through Docling
+    # Maps MIME type to file extension for temp file creation
+    DOCLING_MIME_TYPES = {
+        "application/pdf": ".pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/tiff": ".tiff",
+        "image/bmp": ".bmp",
+    }
+
+    def __init__(
+        self,
+        account_id: int,
+        folder_id: Optional[str] = None,
+        vision_provider: str = "local",
+        vision_model: Optional[str] = None,
+        vision_ollama_url: Optional[str] = None,
+    ):
+        """
+        Initialize with OAuth account ID and optional folder filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            folder_id: Optional folder ID to restrict indexing scope
+            vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
+            vision_model: Vision model name (e.g., "granite3.2-vision:latest")
+            vision_ollama_url: Ollama URL when using ollama provider
+        """
+        self.account_id = account_id
+        self.folder_id = folder_id
+        self.vision_provider = vision_provider
+        self.vision_model = vision_model
+        self.vision_ollama_url = vision_ollama_url
+        self._access_token: Optional[str] = None
+        self._token_data: Optional[dict] = None
+        self._document_converter = None
+
+    def _get_token_data(self) -> Optional[dict]:
+        """Get and cache the decrypted token data."""
+        if self._token_data is None:
+            from db.oauth_tokens import get_oauth_token_by_id
+
+            self._token_data = get_oauth_token_by_id(self.account_id)
+        return self._token_data
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if necessary."""
+        import requests as http_requests
+
+        token_data = self._get_token_data()
+        if not token_data:
+            logger.error(f"OAuth token {self.account_id} not found")
+            return None
+
+        # Check if token needs refresh (simplified - always try to refresh if we have refresh_token)
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            logger.error("No access token in stored credentials")
+            return None
+
+        # Try the access token first
+        test_response = http_requests.get(
+            "https://www.googleapis.com/drive/v3/about",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"fields": "user"},
+            timeout=10,
+        )
+
+        if test_response.status_code == 200:
+            return access_token
+
+        # Token expired, try to refresh
+        if not refresh_token or not client_id or not client_secret:
+            logger.error(
+                "Cannot refresh token - missing refresh_token or client credentials"
+            )
+            return None
+
+        logger.info("Access token expired, refreshing...")
+        refresh_response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+
+        if refresh_response.status_code != 200:
+            logger.error(f"Token refresh failed: {refresh_response.text}")
+            return None
+
+        new_token_data = refresh_response.json()
+        new_access_token = new_token_data.get("access_token")
+
+        # Update stored token
+        from db.oauth_tokens import update_oauth_token_data
+
+        updated_data = {**token_data, "access_token": new_access_token}
+        update_oauth_token_data(self.account_id, updated_data)
+
+        # Update cache
+        self._token_data = updated_data
+        logger.info("Token refreshed successfully")
+        return new_access_token
+
+    def is_available(self) -> bool:
+        """Check if we can access Google Drive."""
+        return self._get_access_token() is not None
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all documents in Drive or specified folder."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list documents - no valid access token")
+            return
+
+        # Build query - filter by folder if specified
+        if self.folder_id:
+            query = f"'{self.folder_id}' in parents and trashed = false"
+            logger.info(f"Listing documents in folder: {self.folder_id}")
+        else:
+            query = "trashed = false"
+            logger.info("Listing all documents in Drive")
+
+        # Fields to retrieve
+        fields = "nextPageToken, files(id, name, mimeType, size, modifiedTime)"
+
+        page_token = None
+        total_files = 0
+
+        while True:
+            params = {
+                "q": query,
+                "fields": fields,
+                "pageSize": 100,
+                "orderBy": "modifiedTime desc",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+
+            response = http_requests.get(
+                "https://www.googleapis.com/drive/v3/files",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Drive API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            files = data.get("files", [])
+
+            for file_info in files:
+                mime_type = file_info.get("mimeType", "")
+                file_id = file_info["id"]
+                name = file_info["name"]
+
+                # Skip folders
+                if mime_type == "application/vnd.google-apps.folder":
+                    continue
+
+                # Check if it's a supported type
+                if not self._is_supported_file(mime_type, name):
+                    continue
+
+                total_files += 1
+                yield DocumentInfo(
+                    uri=f"gdrive://{file_id}",
+                    name=name,
+                    mime_type=mime_type,
+                    size=int(file_info.get("size", 0))
+                    if file_info.get("size")
+                    else None,
+                )
+
+            # Check for more pages
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        logger.info(f"Found {total_files} documents to index")
+
+    def _is_supported_file(self, mime_type: str, name: str) -> bool:
+        """Check if a file type is supported for indexing."""
+        # Google Workspace types we can export
+        if mime_type in self.GOOGLE_EXPORT_TYPES:
+            return True
+
+        # Binary types we can process through Docling
+        if mime_type in self.DOCLING_MIME_TYPES:
+            return True
+
+        # Check file extension for text types
+        name_lower = name.lower()
+        text_extensions = {".txt", ".md", ".html", ".htm", ".asciidoc", ".adoc"}
+        for ext in text_extensions:
+            if name_lower.endswith(ext):
+                return True
+
+        return False
+
+    def _get_document_converter(self):
+        """Get or create a Docling DocumentConverter with vision support."""
+        if self._document_converter is None:
+            from rag.vision import get_document_converter
+
+            self._document_converter = get_document_converter(
+                vision_provider=self.vision_provider,
+                vision_model=self.vision_model,
+                vision_ollama_url=self.vision_ollama_url,
+            )
+        return self._document_converter
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a document from Google Drive."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read document - no valid access token")
+            return None
+
+        # Extract file ID from URI (gdrive://file_id)
+        if not uri.startswith("gdrive://"):
+            logger.error(f"Invalid Drive URI: {uri}")
+            return None
+
+        file_id = uri.replace("gdrive://", "")
+
+        # First get file metadata to determine how to download
+        meta_response = http_requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"fields": "id, name, mimeType, size"},
+            timeout=30,
+        )
+
+        if meta_response.status_code != 200:
+            logger.error(f"Failed to get file metadata: {meta_response.text}")
+            return None
+
+        file_meta = meta_response.json()
+        mime_type = file_meta.get("mimeType", "")
+        name = file_meta.get("name", file_id)
+
+        # Handle Google Workspace files (need export)
+        if mime_type in self.GOOGLE_EXPORT_TYPES:
+            export_mime, _ = self.GOOGLE_EXPORT_TYPES[mime_type]
+            return self._export_google_doc(access_token, file_id, name, export_mime)
+
+        # Handle binary files through Docling (PDF, DOCX, images, etc.)
+        if mime_type in self.DOCLING_MIME_TYPES:
+            return self._download_and_process_with_docling(
+                access_token, file_id, name, mime_type
+            )
+
+        # Handle text files
+        return self._download_text(access_token, file_id, name, mime_type)
+
+    def _export_google_doc(
+        self, access_token: str, file_id: str, name: str, export_mime: str
+    ) -> Optional[DocumentContent]:
+        """Export a Google Workspace document to text/csv format."""
+        import requests as http_requests
+
+        response = http_requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}/export",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"mimeType": export_mime},
+            timeout=60,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to export Google Doc {name}: {response.status_code}")
+            return None
+
+        return DocumentContent(
+            uri=f"gdrive://{file_id}",
+            name=name,
+            mime_type=export_mime,
+            text=response.text,
+        )
+
+    def _download_and_process_with_docling(
+        self, access_token: str, file_id: str, name: str, mime_type: str
+    ) -> Optional[DocumentContent]:
+        """Download a binary file and process it through Docling with vision support."""
+        import tempfile
+
+        import requests as http_requests
+
+        # Download the file
+        response = http_requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"alt": "media"},
+            timeout=120,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to download {name}: {response.status_code}")
+            return None
+
+        # Get file extension for temp file
+        extension = self.DOCLING_MIME_TYPES.get(mime_type, ".bin")
+
+        # Save to temp file and process with Docling
+        try:
+            with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp:
+                tmp.write(response.content)
+                tmp_path = tmp.name
+
+            try:
+                converter = self._get_document_converter()
+                result = converter.convert(tmp_path)
+                text = result.document.export_to_markdown()
+
+                logger.debug(f"Processed {name} with Docling: {len(text)} chars")
+
+                return DocumentContent(
+                    uri=f"gdrive://{file_id}",
+                    name=name,
+                    mime_type="text/markdown",
+                    text=text,
+                )
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"Docling processing failed for {name}: {e}")
+            # Return None on failure - let the indexer skip this document
+            return None
+
+    def _download_text(
+        self, access_token: str, file_id: str, name: str, mime_type: str
+    ) -> Optional[DocumentContent]:
+        """Download a text file from Drive."""
+        import requests as http_requests
+
+        response = http_requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"alt": "media"},
+            timeout=60,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to download {name}: {response.status_code}")
+            return None
+
+        # Try to decode as text
+        try:
+            text = response.content.decode("utf-8", errors="ignore")
+        except Exception:
+            text = response.text
+
+        return DocumentContent(
+            uri=f"gdrive://{file_id}",
+            name=name,
+            mime_type=mime_type or "text/plain",
+            text=text,
+        )
+
+
+class GmailDocumentSource(DocumentSource):
+    """
+    Document source for Gmail using direct API calls.
+
+    Uses Gmail API directly with stored OAuth tokens,
+    bypassing MCP for better performance and reliability.
+    """
+
+    def __init__(self, account_id: int, label_id: Optional[str] = None):
+        """
+        Initialize with OAuth account ID and optional label filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            label_id: Optional label ID to filter emails (e.g., "INBOX", "SENT")
+        """
+        self.account_id = account_id
+        self.label_id = label_id
+        self._access_token: Optional[str] = None
+        self._token_data: Optional[dict] = None
+
+    def _get_token_data(self) -> Optional[dict]:
+        """Get and cache the decrypted token data."""
+        if self._token_data is None:
+            from db.oauth_tokens import get_oauth_token_by_id
+
+            self._token_data = get_oauth_token_by_id(self.account_id)
+        return self._token_data
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if necessary."""
+        import requests as http_requests
+
+        token_data = self._get_token_data()
+        if not token_data:
+            logger.error(f"OAuth token {self.account_id} not found")
+            return None
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            logger.error("No access token in stored credentials")
+            return None
+
+        # Try the access token first
+        test_response = http_requests.get(
+            "https://www.googleapis.com/gmail/v1/users/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+
+        if test_response.status_code == 200:
+            return access_token
+
+        # Token expired, try to refresh
+        if not refresh_token or not client_id or not client_secret:
+            logger.error(
+                "Cannot refresh token - missing refresh_token or client credentials"
+            )
+            return None
+
+        logger.info("Access token expired, refreshing...")
+        refresh_response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+
+        if refresh_response.status_code != 200:
+            logger.error(f"Token refresh failed: {refresh_response.text}")
+            return None
+
+        new_token_data = refresh_response.json()
+        new_access_token = new_token_data.get("access_token")
+
+        # Update stored token
+        from db.oauth_tokens import update_oauth_token_data
+
+        updated_data = {**token_data, "access_token": new_access_token}
+        update_oauth_token_data(self.account_id, updated_data)
+
+        self._token_data = updated_data
+        logger.info("Token refreshed successfully")
+        return new_access_token
+
+    def is_available(self) -> bool:
+        """Check if we can access Gmail."""
+        return self._get_access_token() is not None
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List emails from Gmail."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list emails - no valid access token")
+            return
+
+        # Build query parameters
+        params = {
+            "maxResults": 100,
+        }
+
+        # Filter by label if specified
+        if self.label_id:
+            params["labelIds"] = self.label_id
+            logger.info(f"Listing emails with label: {self.label_id}")
+        else:
+            logger.info("Listing all emails")
+
+        page_token = None
+        total_emails = 0
+
+        while True:
+            if page_token:
+                params["pageToken"] = page_token
+
+            response = http_requests.get(
+                "https://www.googleapis.com/gmail/v1/users/me/messages",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Gmail API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            messages = data.get("messages", [])
+
+            for msg in messages:
+                total_emails += 1
+                yield DocumentInfo(
+                    uri=f"gmail://{msg['id']}",
+                    name=msg["id"],  # Will be replaced with subject when reading
+                    mime_type="message/rfc822",
+                )
+
+            # Check for more pages
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+            # Safety limit
+            if total_emails >= 1000:
+                logger.warning("Reached 1000 email limit")
+                break
+
+        logger.info(f"Found {total_emails} emails to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read an email from Gmail."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read email - no valid access token")
+            return None
+
+        # Extract message ID from URI (gmail://message_id)
+        if not uri.startswith("gmail://"):
+            logger.error(f"Invalid Gmail URI: {uri}")
+            return None
+
+        message_id = uri.replace("gmail://", "")
+
+        # Get full message
+        response = http_requests.get(
+            f"https://www.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"format": "full"},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get email {message_id}: {response.status_code}")
+            return None
+
+        msg_data = response.json()
+
+        # Extract headers
+        headers = {
+            h["name"].lower(): h["value"]
+            for h in msg_data.get("payload", {}).get("headers", [])
+        }
+        subject = headers.get("subject", "(No Subject)")
+        from_addr = headers.get("from", "")
+        to_addr = headers.get("to", "")
+        date = headers.get("date", "")
+
+        # Extract body text
+        body_text = self._extract_body(msg_data.get("payload", {}))
+
+        # Format as readable text
+        content = f"""Subject: {subject}
+From: {from_addr}
+To: {to_addr}
+Date: {date}
+
+{body_text}
+"""
+
+        return DocumentContent(
+            uri=uri,
+            name=subject[:100] if subject else message_id,
+            mime_type="text/plain",
+            text=content,
+        )
+
+    def _extract_body(self, payload: dict) -> str:
+        """Extract plain text body from email payload."""
+        import base64
+
+        mime_type = payload.get("mimeType", "")
+        body = payload.get("body", {})
+        parts = payload.get("parts", [])
+
+        # Direct body data
+        if body.get("data"):
+            try:
+                return base64.urlsafe_b64decode(body["data"]).decode(
+                    "utf-8", errors="ignore"
+                )
+            except Exception:
+                pass
+
+        # Multipart - look for text/plain first, then text/html
+        if parts:
+            # First pass: look for text/plain
+            for part in parts:
+                if part.get("mimeType") == "text/plain":
+                    part_body = part.get("body", {})
+                    if part_body.get("data"):
+                        try:
+                            return base64.urlsafe_b64decode(part_body["data"]).decode(
+                                "utf-8", errors="ignore"
+                            )
+                        except Exception:
+                            pass
+
+            # Second pass: look for text/html and strip tags
+            for part in parts:
+                if part.get("mimeType") == "text/html":
+                    part_body = part.get("body", {})
+                    if part_body.get("data"):
+                        try:
+                            html = base64.urlsafe_b64decode(part_body["data"]).decode(
+                                "utf-8", errors="ignore"
+                            )
+                            return self._strip_html(html)
+                        except Exception:
+                            pass
+
+            # Recurse into nested parts
+            for part in parts:
+                nested_parts = part.get("parts", [])
+                if nested_parts:
+                    result = self._extract_body(part)
+                    if result:
+                        return result
+
+        return ""
+
+    def _strip_html(self, html: str) -> str:
+        """Strip HTML tags and decode entities."""
+        import html as html_module
+        import re
+
+        # Remove script and style elements
+        html = re.sub(
+            r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE
+        )
+        html = re.sub(
+            r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE
+        )
+
+        # Replace common block elements with newlines
+        html = re.sub(r"<(br|p|div|tr|li)[^>]*>", "\n", html, flags=re.IGNORECASE)
+
+        # Remove all remaining tags
+        html = re.sub(r"<[^>]+>", "", html)
+
+        # Decode HTML entities
+        html = html_module.unescape(html)
+
+        # Clean up whitespace
+        html = re.sub(r"\n\s*\n", "\n\n", html)
+        html = html.strip()
+
+        return html
+
+
+class GoogleCalendarDocumentSource(DocumentSource):
+    """
+    Document source for Google Calendar using direct API calls.
+
+    Uses Google Calendar API directly with stored OAuth tokens,
+    bypassing MCP for better performance and reliability.
+    """
+
+    def __init__(
+        self,
+        account_id: int,
+        calendar_id: Optional[str] = None,
+        days_back: int = 30,
+        days_forward: int = 30,
+    ):
+        """
+        Initialize with OAuth account ID and optional calendar filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            calendar_id: Optional calendar ID to filter (default: primary)
+            days_back: How many days in the past to index
+            days_forward: How many days in the future to index
+        """
+        self.account_id = account_id
+        self.calendar_id = calendar_id or "primary"
+        self.days_back = days_back
+        self.days_forward = days_forward
+        self._access_token: Optional[str] = None
+        self._token_data: Optional[dict] = None
+
+    def _get_token_data(self) -> Optional[dict]:
+        """Get and cache the decrypted token data."""
+        if self._token_data is None:
+            from db.oauth_tokens import get_oauth_token_by_id
+
+            self._token_data = get_oauth_token_by_id(self.account_id)
+        return self._token_data
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if necessary."""
+        import requests as http_requests
+
+        token_data = self._get_token_data()
+        if not token_data:
+            logger.error(f"OAuth token {self.account_id} not found")
+            return None
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            logger.error("No access token in stored credentials")
+            return None
+
+        # Try the access token first
+        test_response = http_requests.get(
+            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"maxResults": 1},
+            timeout=10,
+        )
+
+        if test_response.status_code == 200:
+            return access_token
+
+        # Token expired, try to refresh
+        if not refresh_token or not client_id or not client_secret:
+            logger.error(
+                "Cannot refresh token - missing refresh_token or client credentials"
+            )
+            return None
+
+        logger.info("Access token expired, refreshing...")
+        refresh_response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+
+        if refresh_response.status_code != 200:
+            logger.error(f"Token refresh failed: {refresh_response.text}")
+            return None
+
+        new_token_data = refresh_response.json()
+        new_access_token = new_token_data.get("access_token")
+
+        # Update stored token
+        from db.oauth_tokens import update_oauth_token_data
+
+        updated_data = {**token_data, "access_token": new_access_token}
+        update_oauth_token_data(self.account_id, updated_data)
+
+        self._token_data = updated_data
+        logger.info("Token refreshed successfully")
+        return new_access_token
+
+    def is_available(self) -> bool:
+        """Check if we can access Google Calendar."""
+        return self._get_access_token() is not None
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List calendar events."""
+        from datetime import datetime, timedelta
+
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list events - no valid access token")
+            return
+
+        # Calculate time range
+        now = datetime.utcnow()
+        time_min = (now - timedelta(days=self.days_back)).isoformat() + "Z"
+        time_max = (now + timedelta(days=self.days_forward)).isoformat() + "Z"
+
+        logger.info(
+            f"Listing calendar events from {self.calendar_id} ({self.days_back} days back, {self.days_forward} days forward)"
+        )
+
+        params = {
+            "timeMin": time_min,
+            "timeMax": time_max,
+            "maxResults": 250,
+            "singleEvents": "true",
+            "orderBy": "startTime",
+        }
+
+        page_token = None
+        total_events = 0
+
+        while True:
+            if page_token:
+                params["pageToken"] = page_token
+
+            response = http_requests.get(
+                f"https://www.googleapis.com/calendar/v3/calendars/{self.calendar_id}/events",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Calendar API error: {response.status_code} - {response.text}"
+                )
+                logger.error(
+                    f"Calendar API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            events = data.get("items", [])
+
+            for event in events:
+                event_id = event.get("id")
+                summary = event.get("summary", "(No title)")
+
+                total_events += 1
+                yield DocumentInfo(
+                    uri=f"gcal://{self.calendar_id}/{event_id}",
+                    name=summary[:100],
+                    mime_type="text/calendar",
+                )
+
+            # Check for more pages
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        logger.info(f"Found {total_events} calendar events to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a calendar event."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read event - no valid access token")
+            return None
+
+        # Extract calendar ID and event ID from URI (gcal://calendar_id/event_id)
+        if not uri.startswith("gcal://"):
+            logger.error(f"Invalid Calendar URI: {uri}")
+            return None
+
+        parts = uri.replace("gcal://", "").split("/", 1)
+        if len(parts) != 2:
+            logger.error(f"Invalid Calendar URI format: {uri}")
+            return None
+
+        calendar_id, event_id = parts
+
+        response = http_requests.get(
+            f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get event {event_id}: {response.status_code}")
+            return None
+
+        event = response.json()
+
+        # Extract event details
+        summary = event.get("summary", "(No title)")
+        description = event.get("description", "")
+        location = event.get("location", "")
+
+        # Parse start/end times
+        start = event.get("start", {})
+        end = event.get("end", {})
+        start_time = start.get("dateTime") or start.get("date", "")
+        end_time = end.get("dateTime") or end.get("date", "")
+
+        # Get attendees
+        attendees = event.get("attendees", [])
+        attendee_list = ", ".join(
+            a.get("email", "") for a in attendees if a.get("email")
+        )
+
+        # Get organizer
+        organizer = event.get("organizer", {})
+        organizer_email = organizer.get("email", "")
+
+        # Format as readable text
+        content = f"""Event: {summary}
+Start: {start_time}
+End: {end_time}
+Location: {location}
+Organizer: {organizer_email}
+Attendees: {attendee_list}
+
+{description}
+"""
+
+        return DocumentContent(
+            uri=uri,
+            name=summary[:100],
+            mime_type="text/plain",
+            text=content.strip(),
+        )
+
+
 def _inject_mcp_env_vars(mcp_config: dict) -> dict:
     """
     Inject required environment variables into MCP config based on server name.
@@ -632,6 +1800,7 @@ def _inject_mcp_env_vars(mcp_config: dict) -> dict:
     - Notion: NOTION_TOKEN
     - GitHub: GITHUB_TOKEN
     - Slack: SLACK_BOT_TOKEN, SLACK_TEAM_ID
+    - GWorkspace (mcp-gsuite): OAuth credential files via GAUTH_FILE, ACCOUNTS_FILE, CREDENTIALS_DIR
     """
     import os
 
@@ -666,6 +1835,21 @@ def _inject_mcp_env_vars(mcp_config: dict) -> dict:
             if team_id:
                 env["SLACK_TEAM_ID"] = team_id
 
+    # Google (mcp-gsuite) - set up OAuth credential files for Drive/Gmail/Calendar
+    elif server_name == "google":
+        google_account_id = config.get("google_account_id")
+        google_service = config.get("google_service", "drive")
+        if google_account_id:
+            creds_dir = _setup_google_oauth_files(google_account_id)
+            if creds_dir:
+                env["GAUTH_FILE"] = os.path.join(creds_dir, ".gauth.json")
+                env["ACCOUNTS_FILE"] = os.path.join(creds_dir, ".accounts.json")
+                env["CREDENTIALS_DIR"] = creds_dir
+                # Set the service type for mcp-gsuite to know which API to use
+                env["GOOGLE_SERVICE"] = google_service
+        else:
+            logger.warning("Google MCP server configured without google_account_id")
+
     config["env"] = env
     return config
 
@@ -674,14 +1858,28 @@ def get_document_source(
     source_type: str,
     source_path: Optional[str] = None,
     mcp_config: Optional[dict] = None,
+    google_account_id: Optional[int] = None,
+    gdrive_folder_id: Optional[str] = None,
+    gmail_label_id: Optional[str] = None,
+    gcalendar_calendar_id: Optional[str] = None,
+    vision_provider: str = "local",
+    vision_model: Optional[str] = None,
+    vision_ollama_url: Optional[str] = None,
 ) -> DocumentSource:
     """
     Factory function to create the appropriate document source.
 
     Args:
-        source_type: "local" or "mcp"
+        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", or "mcp:gcalendar"
         source_path: Path for local sources
         mcp_config: Configuration dict for MCP sources
+        google_account_id: OAuth account ID for Google sources
+        gdrive_folder_id: Optional folder ID to filter Google Drive indexing
+        gmail_label_id: Optional label ID to filter Gmail indexing (e.g., "INBOX", "SENT")
+        gcalendar_calendar_id: Optional calendar ID to filter Calendar indexing
+        vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
+        vision_model: Vision model name (e.g., "granite3.2-vision:latest")
+        vision_ollama_url: Ollama URL when using ollama provider
 
     Returns:
         Appropriate DocumentSource instance
@@ -691,7 +1889,53 @@ def get_document_source(
             raise ValueError("source_path required for local document source")
         return LocalDocumentSource(source_path)
 
-    elif source_type == "mcp":
+    elif source_type == "mcp:gdrive":
+        # Google Drive - use direct API for better performance and proper folder filtering
+        if not google_account_id:
+            raise ValueError(f"google_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating Google Drive source (account={google_account_id}, "
+            f"folder={gdrive_folder_id or 'all'}, vision={vision_provider})"
+        )
+        return GoogleDriveDocumentSource(
+            account_id=google_account_id,
+            folder_id=gdrive_folder_id,
+            vision_provider=vision_provider,
+            vision_model=vision_model,
+            vision_ollama_url=vision_ollama_url,
+        )
+
+    elif source_type == "mcp:gmail":
+        # Gmail - use direct API for better performance and reliability
+        if not google_account_id:
+            raise ValueError(f"google_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating Gmail source (account={google_account_id}, "
+            f"label={gmail_label_id or 'all'})"
+        )
+        return GmailDocumentSource(
+            account_id=google_account_id,
+            label_id=gmail_label_id,
+        )
+
+    elif source_type == "mcp:gcalendar":
+        # Calendar - use direct API for better performance and reliability
+        if not google_account_id:
+            raise ValueError(f"google_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating Calendar source (account={google_account_id}, "
+            f"calendar={gcalendar_calendar_id or 'primary'})"
+        )
+        return GoogleCalendarDocumentSource(
+            account_id=google_account_id,
+            calendar_id=gcalendar_calendar_id,
+            # Default: 30 days back, 30 days forward
+        )
+
+    elif source_type == "mcp" or source_type.startswith("mcp:"):
         if not mcp_config:
             raise ValueError("mcp_config required for MCP document source")
 

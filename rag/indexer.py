@@ -11,7 +11,7 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class RAGIndexer:
     Background service for indexing documents into ChromaDB.
 
     Uses Docling for document parsing and supports scheduled re-indexing.
+    Indexes both legacy SmartRAGs and new DocumentStores.
     """
 
     def __init__(self):
@@ -49,7 +50,10 @@ class RAGIndexer:
         self._chroma_client = None
         self._running = False
         self._lock = threading.Lock()
-        self._indexing_jobs: dict[int, threading.Thread] = {}
+        # Track indexing jobs by type and ID: "rag_{id}" or "store_{id}"
+        self._indexing_jobs: dict[str, threading.Thread] = {}
+        # Track cancelled jobs - checked by indexing loop to stop early
+        self._cancelled_jobs: set[str] = set()
 
     def start(self):
         """Start the indexer service and scheduler."""
@@ -79,6 +83,10 @@ class RAGIndexer:
         else:
             logger.warning("CHROMA_URL not set - RAG indexing disabled")
 
+        # Reset any stuck "indexing" statuses from previous runs
+        # (e.g., if container was restarted mid-indexing)
+        self._reset_stuck_indexing_jobs()
+
         # Initialize scheduler
         try:
             from apscheduler.schedulers.background import BackgroundScheduler
@@ -87,8 +95,9 @@ class RAGIndexer:
             self._scheduler.start()
             logger.info("RAG Indexer scheduler started")
 
-            # Schedule existing RAGs
+            # Schedule existing RAGs and document stores
             self._schedule_all_rags()
+            self._schedule_all_stores()
         except ImportError:
             logger.warning("APScheduler not installed - scheduled indexing disabled")
             self._scheduler = None
@@ -107,17 +116,57 @@ class RAGIndexer:
 
         logger.info("RAG Indexer stopped")
 
+    def _reset_stuck_indexing_jobs(self):
+        """
+        Reset any document stores or RAGs stuck in 'indexing' status.
+
+        This handles cases where the indexing thread was killed mid-operation
+        (e.g., container restart, crash) and the status was never updated.
+        On startup, we reset these to 'pending' so they can be re-indexed.
+        """
+        from db import (
+            get_all_document_stores,
+            update_document_store_index_status,
+        )
+
+        try:
+            stores = get_all_document_stores()
+            reset_count = 0
+
+            for store in stores:
+                if store.index_status == "indexing":
+                    logger.warning(
+                        f"Document store '{store.name}' (ID: {store.id}) was stuck in "
+                        f"'indexing' status - resetting to 'pending'"
+                    )
+                    update_document_store_index_status(store.id, "pending")
+                    reset_count += 1
+
+            if reset_count > 0:
+                logger.info(f"Reset {reset_count} stuck indexing job(s) to 'pending'")
+
+        except Exception as e:
+            logger.error(f"Failed to reset stuck indexing jobs: {e}")
+
     def _schedule_all_rags(self):
-        """Schedule indexing for all RAGs with schedules."""
+        """Schedule indexing for all legacy RAGs with schedules."""
         from db import get_rags_with_schedule
 
         rags = get_rags_with_schedule()
         for rag in rags:
             self.schedule_rag(rag.id, rag.index_schedule)
 
+    def _schedule_all_stores(self):
+        """Schedule indexing for all document stores with schedules."""
+        from db import get_stores_with_schedule
+
+        stores = get_stores_with_schedule()
+        for store in stores:
+            self.schedule_store(store.id, store.index_schedule)
+
     def schedule_rag(self, rag_id: int, cron_expression: str):
         """
-        Schedule periodic indexing for a RAG.
+        Schedule periodic indexing for a legacy RAG.
 
         Args:
             rag_id: ID of the SmartRAG
@@ -156,7 +205,7 @@ class RAGIndexer:
             )
 
             self._scheduler.add_job(
-                self._run_index_job,
+                self._run_rag_index_job,
                 trigger,
                 args=[rag_id],
                 id=job_id,
@@ -166,8 +215,58 @@ class RAGIndexer:
         except Exception as e:
             logger.error(f"Failed to schedule RAG {rag_id}: {e}")
 
+    def schedule_store(self, store_id: int, cron_expression: str):
+        """
+        Schedule periodic indexing for a document store.
+
+        Args:
+            store_id: ID of the DocumentStore
+            cron_expression: Cron expression (e.g., "0 2 * * *" for 2 AM daily)
+        """
+        if not self._scheduler:
+            logger.warning("Scheduler not available - cannot schedule store indexing")
+            return
+
+        job_id = f"store_index_{store_id}"
+
+        # Remove existing job if any
+        try:
+            self._scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
+        if not cron_expression:
+            return
+
+        try:
+            parts = cron_expression.split()
+            if len(parts) != 5:
+                logger.error(f"Invalid cron expression: {cron_expression}")
+                return
+
+            from apscheduler.triggers.cron import CronTrigger
+
+            trigger = CronTrigger(
+                minute=parts[0],
+                hour=parts[1],
+                day=parts[2],
+                month=parts[3],
+                day_of_week=parts[4],
+            )
+
+            self._scheduler.add_job(
+                self._run_store_index_job,
+                trigger,
+                args=[store_id],
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info(f"Scheduled indexing for store {store_id}: {cron_expression}")
+        except Exception as e:
+            logger.error(f"Failed to schedule store {store_id}: {e}")
+
     def unschedule_rag(self, rag_id: int):
-        """Remove scheduled indexing for a RAG."""
+        """Remove scheduled indexing for a legacy RAG."""
         if not self._scheduler:
             return
 
@@ -178,38 +277,82 @@ class RAGIndexer:
         except Exception:
             pass
 
-    def _run_index_job(self, rag_id: int):
-        """Run indexing job (called by scheduler)."""
+    def unschedule_store(self, store_id: int):
+        """Remove scheduled indexing for a document store."""
+        if not self._scheduler:
+            return
+
+        job_id = f"store_index_{store_id}"
+        try:
+            self._scheduler.remove_job(job_id)
+            logger.info(f"Unscheduled indexing for store {store_id}")
+        except Exception:
+            pass
+
+    def _run_rag_index_job(self, rag_id: int):
+        """Run legacy RAG indexing job (called by scheduler)."""
         self.index_rag(rag_id, background=True)
+
+    def _run_store_index_job(self, store_id: int):
+        """Run document store indexing job (called by scheduler)."""
+        self.index_store(store_id, background=True)
 
     def cancel_indexing(self, rag_id: int) -> bool:
         """
-        Cancel and reset a stuck indexing job.
+        Cancel and reset a stuck legacy RAG indexing job.
 
         This doesn't actually kill the thread (Python threads can't be killed),
         but it resets the status so a new indexing job can be started.
         """
         from db import update_smart_rag_index_status
 
+        job_key = f"rag_{rag_id}"
         with self._lock:
-            if rag_id in self._indexing_jobs:
-                del self._indexing_jobs[rag_id]
+            if job_key in self._indexing_jobs:
+                del self._indexing_jobs[job_key]
 
         # Reset status to pending
         update_smart_rag_index_status(rag_id, "pending")
         logger.info(f"Cancelled/reset indexing for RAG {rag_id}")
         return True
 
-    def is_indexing(self, rag_id: int) -> bool:
-        """Check if a RAG is currently being indexed."""
+    def cancel_store_indexing(self, store_id: int) -> bool:
+        """
+        Cancel and reset a stuck document store indexing job.
+        """
+        from db import update_document_store_index_status
+
+        job_key = f"store_{store_id}"
         with self._lock:
-            if rag_id in self._indexing_jobs:
-                return self._indexing_jobs[rag_id].is_alive()
+            # Mark as cancelled so the indexing loop will stop
+            self._cancelled_jobs.add(job_key)
+            if job_key in self._indexing_jobs:
+                del self._indexing_jobs[job_key]
+
+        # Reset status to pending
+        update_document_store_index_status(store_id, "pending")
+        logger.info(f"Cancelled/reset indexing for store {store_id}")
+        return True
+
+    def is_indexing(self, rag_id: int) -> bool:
+        """Check if a legacy RAG is currently being indexed."""
+        job_key = f"rag_{rag_id}"
+        with self._lock:
+            if job_key in self._indexing_jobs:
+                return self._indexing_jobs[job_key].is_alive()
+        return False
+
+    def is_store_indexing(self, store_id: int) -> bool:
+        """Check if a document store is currently being indexed."""
+        job_key = f"store_{store_id}"
+        with self._lock:
+            if job_key in self._indexing_jobs:
+                return self._indexing_jobs[job_key].is_alive()
         return False
 
     def index_rag(self, rag_id: int, background: bool = False) -> bool:
         """
-        Index all documents for a SmartRAG.
+        Index all documents for a legacy SmartRAG.
 
         Args:
             rag_id: ID of the SmartRAG to index
@@ -222,11 +365,13 @@ class RAGIndexer:
             logger.error("ChromaDB not available - cannot index")
             return False
 
+        job_key = f"rag_{rag_id}"
+
         if background:
             # Check if already indexing
             with self._lock:
-                if rag_id in self._indexing_jobs:
-                    thread = self._indexing_jobs[rag_id]
+                if job_key in self._indexing_jobs:
+                    thread = self._indexing_jobs[job_key]
                     if thread.is_alive():
                         logger.warning(f"RAG {rag_id} is already being indexed")
                         return False
@@ -236,14 +381,265 @@ class RAGIndexer:
                     args=[rag_id],
                     daemon=True,
                 )
-                self._indexing_jobs[rag_id] = thread
+                self._indexing_jobs[job_key] = thread
                 thread.start()
             return True
         else:
             return self._index_rag_impl(rag_id)
 
+    def index_store(self, store_id: int, background: bool = False) -> bool:
+        """
+        Index all documents for a DocumentStore.
+
+        Args:
+            store_id: ID of the DocumentStore to index
+            background: If True, run in background thread
+
+        Returns:
+            True if indexing started/completed successfully
+        """
+        if not self._chroma_client:
+            logger.error("ChromaDB not available - cannot index")
+            return False
+
+        job_key = f"store_{store_id}"
+
+        if background:
+            with self._lock:
+                # Clear any previous cancellation flag
+                self._cancelled_jobs.discard(job_key)
+
+                if job_key in self._indexing_jobs:
+                    thread = self._indexing_jobs[job_key]
+                    if thread.is_alive():
+                        logger.warning(f"Store {store_id} is already being indexed")
+                        return False
+
+                thread = threading.Thread(
+                    target=self._index_store_impl,
+                    args=[store_id],
+                    daemon=True,
+                )
+                self._indexing_jobs[job_key] = thread
+                thread.start()
+            return True
+        else:
+            # Clear any previous cancellation flag for sync indexing too
+            with self._lock:
+                self._cancelled_jobs.discard(job_key)
+            return self._index_store_impl(store_id)
+
+    def _index_store_impl(self, store_id: int) -> bool:
+        """Implementation of DocumentStore indexing."""
+        from db import get_document_store_by_id, update_document_store_index_status
+
+        from .retriever import _get_embedding_provider
+
+        # Get store config
+        store = get_document_store_by_id(store_id)
+        if not store:
+            logger.error(f"Store {store_id} not found")
+            return False
+
+        source_desc = (
+            store.source_path
+            if store.source_type == "local"
+            else f"MCP:{store.mcp_server_config.get('name', 'unknown') if store.mcp_server_config else 'unknown'}"
+        )
+        logger.info(f"Starting indexing for store '{store.name}' from {source_desc}")
+
+        # Update status to indexing
+        update_document_store_index_status(store_id, "indexing")
+
+        try:
+            # Get document source based on source_type
+            from mcp.sources import get_document_source
+
+            source = get_document_source(
+                source_type=store.source_type,
+                source_path=store.source_path,
+                mcp_config=store.mcp_server_config,
+                google_account_id=store.google_account_id,
+                gdrive_folder_id=store.gdrive_folder_id,
+                gmail_label_id=store.gmail_label_id,
+                gcalendar_calendar_id=store.gcalendar_calendar_id,
+                vision_provider=store.vision_provider,
+                vision_model=store.vision_model,
+                vision_ollama_url=store.vision_ollama_url,
+            )
+
+            if not source.is_available():
+                raise ValueError(f"Document source not available: {source_desc}")
+
+            # Get embedding provider
+            embedding_provider = _get_embedding_provider(
+                store.embedding_provider,
+                store.embedding_model,
+                store.ollama_url,
+            )
+
+            if not embedding_provider.is_available():
+                raise ValueError(
+                    f"Embedding provider '{store.embedding_provider}' is not available"
+                )
+
+            # Get or create ChromaDB collection
+            collection_name = store.collection_name or f"docstore_{store_id}"
+            collection = self._chroma_client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+
+            # Clear existing documents
+            try:
+                collection.delete(where={})
+            except Exception:
+                pass
+
+            # Find and process documents
+            documents = []
+            doc_count = 0
+
+            all_docs = list(source.list_documents())
+            total_files = len(all_docs)
+            logger.info(f"Found {total_files} documents to index")
+
+            job_key = f"store_{store_id}"
+            for file_idx, doc_info in enumerate(all_docs):
+                # Check if cancelled
+                if job_key in self._cancelled_jobs:
+                    logger.info(f"Indexing cancelled for store {store_id}")
+                    with self._lock:
+                        self._cancelled_jobs.discard(job_key)
+                    return False
+
+                logger.info(
+                    f"Processing document {file_idx + 1}/{total_files}: {doc_info.name}"
+                )
+                try:
+                    if store.source_type == "local":
+                        chunks = self._process_document(
+                            Path(doc_info.uri),
+                            store.chunk_size,
+                            store.chunk_overlap,
+                            vision_provider=store.vision_provider,
+                            vision_model=store.vision_model,
+                            vision_ollama_url=store.vision_ollama_url,
+                        )
+                    else:
+                        content = source.read_document(doc_info.uri)
+                        if content:
+                            chunks = self._process_content(
+                                content,
+                                store.chunk_size,
+                                store.chunk_overlap,
+                            )
+                        else:
+                            chunks = []
+
+                    for chunk in chunks:
+                        chunk["source_file"] = doc_info.name
+                    documents.extend(chunks)
+                    doc_count += 1
+                    logger.info(
+                        f"Completed {doc_info.name}: {len(chunks)} chunks "
+                        f"(total: {len(documents)} chunks from {doc_count} docs)"
+                    )
+
+                    update_document_store_index_status(
+                        store_id,
+                        "indexing",
+                        document_count=doc_count,
+                        chunk_count=len(documents),
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to process {doc_info.uri}: {e}")
+
+            if not documents:
+                logger.warning(f"No documents found in {source_desc}")
+                update_document_store_index_status(
+                    store_id,
+                    "ready",
+                    document_count=0,
+                    chunk_count=0,
+                    collection_name=collection_name,
+                )
+                return True
+
+            # Generate embeddings and store in ChromaDB
+            logger.info(f"Generating embeddings for {len(documents)} chunks...")
+
+            batch_size = 100
+            total_chunks = 0
+
+            for i in range(0, len(documents), batch_size):
+                # Check if cancelled during embedding
+                if job_key in self._cancelled_jobs:
+                    logger.info(
+                        f"Indexing cancelled during embedding for store {store_id}"
+                    )
+                    with self._lock:
+                        self._cancelled_jobs.discard(job_key)
+                    return False
+
+                batch = documents[i : i + batch_size]
+                texts = [doc["content"] for doc in batch]
+
+                embed_result = embedding_provider.embed(texts)
+
+                ids = [
+                    hashlib.md5(
+                        f"{doc['source_file']}:{doc['chunk_index']}".encode()
+                    ).hexdigest()
+                    for doc in batch
+                ]
+                metadatas = [
+                    {
+                        "source_file": doc["source_file"],
+                        "chunk_index": doc["chunk_index"],
+                        "indexed_at": datetime.utcnow().isoformat(),
+                        "store_id": store_id,
+                        "store_name": store.name,
+                    }
+                    for doc in batch
+                ]
+
+                collection.add(
+                    ids=ids,
+                    embeddings=embed_result.embeddings,
+                    documents=texts,
+                    metadatas=metadatas,
+                )
+
+                total_chunks += len(batch)
+                logger.debug(f"Indexed {total_chunks}/{len(documents)} chunks")
+
+            update_document_store_index_status(
+                store_id,
+                "ready",
+                document_count=doc_count,
+                chunk_count=total_chunks,
+                collection_name=collection_name,
+            )
+
+            logger.info(
+                f"Indexing complete for store '{store.name}': "
+                f"{doc_count} documents, {total_chunks} chunks"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Indexing failed for store {store_id}: {e}")
+            update_document_store_index_status(store_id, "error", error=str(e))
+            return False
+
+        finally:
+            job_key = f"store_{store_id}"
+            with self._lock:
+                self._indexing_jobs.pop(job_key, None)
+
     def _index_rag_impl(self, rag_id: int) -> bool:
-        """Implementation of RAG indexing."""
+        """Implementation of legacy RAG indexing."""
         from db import get_smart_rag_by_id, update_smart_rag_index_status
 
         from .retriever import _get_embedding_provider_for_rag
@@ -254,7 +650,11 @@ class RAGIndexer:
             logger.error(f"RAG {rag_id} not found")
             return False
 
-        source_desc = rag.source_path if rag.source_type == "local" else f"MCP:{rag.mcp_server_config.get('name', 'unknown') if rag.mcp_server_config else 'unknown'}"
+        source_desc = (
+            rag.source_path
+            if rag.source_type == "local"
+            else f"MCP:{rag.mcp_server_config.get('name', 'unknown') if rag.mcp_server_config else 'unknown'}"
+        )
         logger.info(f"Starting indexing for RAG '{rag.name}' from {source_desc}")
 
         # Update status to indexing
@@ -429,8 +829,9 @@ class RAGIndexer:
 
         finally:
             # Clean up job reference
+            job_key = f"rag_{rag_id}"
             with self._lock:
-                self._indexing_jobs.pop(rag_id, None)
+                self._indexing_jobs.pop(job_key, None)
 
     def _find_documents(self, source_path: Path):
         """Find all supported documents in a directory."""
@@ -585,10 +986,12 @@ class RAGIndexer:
             if content.mime_type and "html" in content.mime_type.lower():
                 try:
                     from bs4 import BeautifulSoup
+
                     soup = BeautifulSoup(text, "html.parser")
                     text = soup.get_text(separator="\n")
                 except ImportError:
                     import re
+
                     text = re.sub(r"<[^>]+>", "", text)
 
             return self._chunk_text(text, chunk_size, chunk_overlap)
@@ -601,7 +1004,9 @@ class RAGIndexer:
             if "pdf" in mime.lower():
                 try:
                     import io
+
                     import pypdf
+
                     reader = pypdf.PdfReader(io.BytesIO(content.binary))
                     text = "\n".join(page.extract_text() or "" for page in reader.pages)
                     return self._chunk_text(text, chunk_size, chunk_overlap)
@@ -613,8 +1018,9 @@ class RAGIndexer:
             if "wordprocessingml" in mime.lower() or content.name.endswith(".docx"):
                 try:
                     import io
+
                     from docx import Document
-                    doc = Document(io.BytesIO(content.binary))
+
                     text = "\n".join(para.text for para in doc.paragraphs)
                     return self._chunk_text(text, chunk_size, chunk_overlap)
                 except Exception as e:
@@ -675,7 +1081,7 @@ class RAGIndexer:
         return chunks
 
     def delete_collection(self, rag_id: int) -> bool:
-        """Delete the ChromaDB collection for a RAG."""
+        """Delete the ChromaDB collection for a legacy RAG."""
         if not self._chroma_client:
             return False
 
@@ -693,8 +1099,27 @@ class RAGIndexer:
             logger.error(f"Failed to delete collection: {e}")
             return False
 
+    def delete_store_collection(self, store_id: int) -> bool:
+        """Delete the ChromaDB collection for a document store."""
+        if not self._chroma_client:
+            return False
+
+        from db import get_document_store_by_id
+
+        store = get_document_store_by_id(store_id)
+        if not store or not store.collection_name:
+            return False
+
+        try:
+            self._chroma_client.delete_collection(store.collection_name)
+            logger.info(f"Deleted collection {store.collection_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete collection: {e}")
+            return False
+
     def get_collection_stats(self, rag_id: int) -> Optional[dict]:
-        """Get statistics for a RAG's ChromaDB collection."""
+        """Get statistics for a legacy RAG's ChromaDB collection."""
         if not self._chroma_client:
             return None
 
@@ -709,6 +1134,27 @@ class RAGIndexer:
             count = collection.count()
             return {
                 "collection_name": rag.collection_name,
+                "chunk_count": count,
+            }
+        except Exception:
+            return None
+
+    def get_store_collection_stats(self, store_id: int) -> Optional[dict]:
+        """Get statistics for a document store's ChromaDB collection."""
+        if not self._chroma_client:
+            return None
+
+        from db import get_document_store_by_id
+
+        store = get_document_store_by_id(store_id)
+        if not store or not store.collection_name:
+            return None
+
+        try:
+            collection = self._chroma_client.get_collection(store.collection_name)
+            count = collection.count()
+            return {
+                "collection_name": store.collection_name,
                 "chunk_count": count,
             }
         except Exception:

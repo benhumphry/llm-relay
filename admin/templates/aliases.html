@@ -1,5 +1,5 @@
-{% extends "base.html" %} {% block title %}Aliases{% endblock %} {% block content
-%}
+{% extends "base.html" %} {% block title %}Aliases{% endblock %} {% block
+content %}
 <div x-data="aliasesPage()" x-init="init()">
     <!-- Header -->
     <div
@@ -109,14 +109,26 @@
                                     </svg>
                                 </td>
                                 <td>
-                                    <div class="font-mono font-medium" x-text="alias.name"></div>
+                                    <div
+                                        class="font-mono font-medium"
+                                        x-text="alias.name"
+                                    ></div>
                                 </td>
                                 <td>
-                                    <div class="font-mono text-sm text-base-content/70" x-text="alias.target_model"></div>
+                                    <div
+                                        class="font-mono text-sm text-base-content/70"
+                                        x-text="alias.target_model"
+                                    ></div>
                                 </td>
                                 <td>
-                                    <template x-for="tag in (alias.tags || []).slice(0, 2)" :key="tag">
-                                        <span class="badge badge-outline badge-xs mr-1" x-text="tag"></span>
+                                    <template
+                                        x-for="tag in (alias.tags || []).slice(0, 2)"
+                                        :key="tag"
+                                    >
+                                        <span
+                                            class="badge badge-outline badge-xs mr-1"
+                                            x-text="tag"
+                                        ></span>
                                     </template>
                                     <span
                                         x-show="(alias.tags || []).length > 2"
@@ -126,10 +138,14 @@
                                     <span
                                         x-show="!alias.tags || alias.tags.length === 0"
                                         class="text-base-content/40 text-sm"
-                                    >-</span>
+                                        >-</span
+                                    >
                                 </td>
                                 <td class="text-right">
-                                    <span class="font-mono text-sm" x-text="stats[alias.name] || 0"></span>
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="stats[alias.name] || 0"
+                                    ></span>
                                 </td>
                                 <td>
                                     <span
@@ -184,32 +200,70 @@
                                 </td>
                             </tr>
                             <!-- Expanded Details Row -->
-                            <tr x-show="expandedRows.includes(alias.id)" x-transition>
+                            <tr
+                                x-show="expandedRows.includes(alias.id)"
+                                x-transition
+                            >
                                 <td colspan="7" class="bg-base-200 p-0">
-                                    <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                    <div
+                                        class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
+                                    >
                                         <!-- Description -->
                                         <div x-show="alias.description">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Description</div>
-                                            <div class="text-sm" x-text="alias.description"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Description
+                                            </div>
+                                            <div
+                                                class="text-sm"
+                                                x-text="alias.description"
+                                            ></div>
                                         </div>
                                         <!-- Full Target Path -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Target Model</div>
-                                            <div class="font-mono text-xs" x-text="alias.target_model"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Target Model
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="alias.target_model"
+                                            ></div>
                                         </div>
                                         <!-- All Tags -->
-                                        <div x-show="alias.tags && alias.tags.length > 0">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">All Tags</div>
+                                        <div
+                                            x-show="alias.tags && alias.tags.length > 0"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                All Tags
+                                            </div>
                                             <div class="flex flex-wrap gap-1">
-                                                <template x-for="tag in alias.tags" :key="tag">
-                                                    <span class="badge badge-primary badge-sm" x-text="tag"></span>
+                                                <template
+                                                    x-for="tag in alias.tags"
+                                                    :key="tag"
+                                                >
+                                                    <span
+                                                        class="badge badge-primary badge-sm"
+                                                        x-text="tag"
+                                                    ></span>
                                                 </template>
                                             </div>
                                         </div>
                                         <!-- Created -->
                                         <div x-show="alias.created_at">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Created</div>
-                                            <div class="text-xs" x-text="formatDate(alias.created_at)"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Created
+                                            </div>
+                                            <div
+                                                class="text-xs"
+                                                x-text="formatDate(alias.created_at)"
+                                            ></div>
                                         </div>
                                     </div>
                                 </td>
@@ -224,7 +278,10 @@
     <!-- Add/Edit Modal -->
     <div class="modal" :class="{ 'modal-open': showModal }">
         <div class="modal-box max-w-lg">
-            <h3 class="font-bold text-lg" x-text="editingAlias ? 'Edit Alias' : 'Add Alias'"></h3>
+            <h3
+                class="font-bold text-lg"
+                x-text="editingAlias ? 'Edit Alias' : 'Add Alias'"
+            ></h3>
             <form @submit.prevent="saveAlias()">
                 <div class="form-control mt-4">
                     <label class="label">
@@ -240,10 +297,16 @@
                         :disabled="editingAlias"
                     />
                     <label class="label" x-show="formErrors.name">
-                        <span class="label-text-alt text-error" x-text="formErrors.name"></span>
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.name"
+                        ></span>
                     </label>
                     <label class="label" x-show="!formErrors.name">
-                        <span class="label-text-alt">Clients can request this name instead of the full model ID</span>
+                        <span class="label-text-alt"
+                            >Clients can request this name instead of the full
+                            model ID</span
+                        >
                     </label>
                 </div>
 
@@ -257,12 +320,20 @@
                         required
                     >
                         <option value="">Select a model...</option>
-                        <template x-for="model in availableModels" :key="model.id">
-                            <option :value="model.id" x-text="`${model.id} (${model.family})`"></option>
+                        <template
+                            x-for="model in availableModels"
+                            :key="model.id"
+                        >
+                            <option
+                                :value="model.id"
+                                x-text="`${model.id} (${model.family})`"
+                            ></option>
                         </template>
                     </select>
                     <label class="label">
-                        <span class="label-text-alt">The actual model that will be used</span>
+                        <span class="label-text-alt"
+                            >The actual model that will be used</span
+                        >
                     </label>
                 </div>
 
@@ -277,7 +348,10 @@
                         placeholder="e.g., project-a, team-1"
                     />
                     <label class="label">
-                        <span class="label-text-alt">Comma-separated tags to assign to requests using this alias</span>
+                        <span class="label-text-alt"
+                            >Comma-separated tags to assign to requests using
+                            this alias</span
+                        >
                     </label>
                 </div>
 
@@ -304,8 +378,137 @@
                     </label>
                 </div>
 
+                <!-- Advanced Settings (collapsed) -->
+                <div class="collapse collapse-arrow bg-base-200 mt-4">
+                    <input type="checkbox" />
+                    <div class="collapse-title text-sm font-medium">
+                        Advanced Settings
+                    </div>
+                    <div class="collapse-content space-y-4">
+                        <!-- Response Caching -->
+                        <div class="form-control">
+                            <label
+                                class="label cursor-pointer justify-start gap-3"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_cache"
+                                    class="checkbox checkbox-secondary"
+                                />
+                                <span class="label-text"
+                                    >Enable Response Caching</span
+                                >
+                            </label>
+                        </div>
+                        <!-- Cache Settings (shown when caching enabled) -->
+                        <div
+                            x-show="form.use_cache"
+                            x-transition
+                            class="space-y-3 pl-4 border-l-2 border-secondary"
+                        >
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Similarity Threshold</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_similarity_threshold"
+                                        class="input input-bordered input-sm"
+                                        min="0.5"
+                                        max="1"
+                                        step="0.01"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Cache TTL (hours)</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_ttl_hours"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="8760"
+                                    />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Min Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_min_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_max_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_system_prompt"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match System Prompt</span
+                                    >
+                                </label>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_last_message_only"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match Last Message Only</span
+                                    >
+                                </label>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs"
+                                        >Useful for OpenWebUI (ignores
+                                        conversation history)</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="modal-action">
-                    <button type="button" @click="closeModal()" class="btn btn-ghost">
+                    <button
+                        type="button"
+                        @click="closeModal()"
+                        class="btn btn-ghost"
+                    >
                         Cancel
                     </button>
                     <button
@@ -314,7 +517,9 @@
                         :class="{ 'loading': saving }"
                         :disabled="saving"
                     >
-                        <span x-text="editingAlias ? 'Save Changes' : 'Create Alias'"></span>
+                        <span
+                            x-text="editingAlias ? 'Save Changes' : 'Create Alias'"
+                        ></span>
                     </button>
                 </div>
             </form>
@@ -328,8 +533,11 @@
             <h3 class="font-bold text-lg">Delete Alias</h3>
             <p class="py-4">
                 Are you sure you want to delete the alias
-                <span class="font-mono font-bold" x-text="deletingAlias?.name"></span>?
-                This action cannot be undone.
+                <span
+                    class="font-mono font-bold"
+                    x-text="deletingAlias?.name"
+                ></span
+                >? This action cannot be undone.
             </p>
             <div class="modal-action">
                 <button @click="showDeleteModal = false" class="btn btn-ghost">
@@ -363,13 +571,21 @@
             deletingAlias: null,
             saving: false,
             deleting: false,
-            redirectWarnings: {},  // { aliasId: { modelName: { redirected: true, target: 'x' } } }
+            redirectWarnings: {}, // { aliasId: { modelName: { redirected: true, target: 'x' } } }
             form: {
-                name: '',
-                target_model: '',
-                tagsInput: '',
-                description: '',
+                name: "",
+                target_model: "",
+                tagsInput: "",
+                description: "",
                 enabled: true,
+                // Cache settings
+                use_cache: false,
+                cache_similarity_threshold: 0.95,
+                cache_match_system_prompt: false,
+                cache_match_last_message_only: true,
+                cache_ttl_hours: 168,
+                cache_min_tokens: 50,
+                cache_max_tokens: 10000,
             },
             formErrors: {},
 
@@ -384,34 +600,34 @@
 
             async loadAliases() {
                 try {
-                    const response = await fetch('/api/aliases');
+                    const response = await fetch("/api/aliases");
                     if (response.ok) {
                         this.aliases = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load aliases:', error);
+                    console.error("Failed to load aliases:", error);
                 }
             },
 
             async loadStats() {
                 try {
-                    const response = await fetch('/api/aliases/stats');
+                    const response = await fetch("/api/aliases/stats");
                     if (response.ok) {
                         this.stats = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load alias stats:', error);
+                    console.error("Failed to load alias stats:", error);
                 }
             },
 
             async loadAvailableModels() {
                 try {
-                    const response = await fetch('/api/aliases/models');
+                    const response = await fetch("/api/aliases/models");
                     if (response.ok) {
                         this.availableModels = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load available models:', error);
+                    console.error("Failed to load available models:", error);
                 }
             },
 
@@ -425,19 +641,34 @@
             },
 
             formatDate(isoString) {
-                if (!isoString) return '-';
+                if (!isoString) return "-";
                 const date = new Date(isoString);
-                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                return (
+                    date.toLocaleDateString() +
+                    " " +
+                    date.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                    })
+                );
             },
 
             openAddModal() {
                 this.editingAlias = null;
                 this.form = {
-                    name: '',
-                    target_model: '',
-                    tagsInput: '',
-                    description: '',
+                    name: "",
+                    target_model: "",
+                    tagsInput: "",
+                    description: "",
                     enabled: true,
+                    // Cache settings
+                    use_cache: false,
+                    cache_similarity_threshold: 0.95,
+                    cache_match_system_prompt: false,
+                    cache_match_last_message_only: true,
+                    cache_ttl_hours: 168,
+                    cache_min_tokens: 50,
+                    cache_max_tokens: 10000,
                 };
                 this.formErrors = {};
                 this.showModal = true;
@@ -448,9 +679,20 @@
                 this.form = {
                     name: alias.name,
                     target_model: alias.target_model,
-                    tagsInput: (alias.tags || []).join(', '),
-                    description: alias.description || '',
+                    tagsInput: (alias.tags || []).join(", "),
+                    description: alias.description || "",
                     enabled: alias.enabled,
+                    // Cache settings
+                    use_cache: alias.use_cache || false,
+                    cache_similarity_threshold:
+                        alias.cache_similarity_threshold || 0.95,
+                    cache_match_system_prompt:
+                        alias.cache_match_system_prompt || false,
+                    cache_match_last_message_only:
+                        alias.cache_match_last_message_only !== false,
+                    cache_ttl_hours: alias.cache_ttl_hours || 168,
+                    cache_min_tokens: alias.cache_min_tokens || 50,
+                    cache_max_tokens: alias.cache_max_tokens || 10000,
                 };
                 this.formErrors = {};
                 this.showModal = true;
@@ -468,9 +710,9 @@
 
                 // Parse tags from comma-separated input
                 const tags = this.form.tagsInput
-                    .split(',')
-                    .map(t => t.trim().toLowerCase())
-                    .filter(t => t.length > 0);
+                    .split(",")
+                    .map((t) => t.trim().toLowerCase())
+                    .filter((t) => t.length > 0);
 
                 const payload = {
                     name: this.form.name.toLowerCase().trim(),
@@ -478,27 +720,38 @@
                     tags: tags,
                     description: this.form.description || null,
                     enabled: this.form.enabled,
+                    // Cache settings
+                    use_cache: this.form.use_cache,
+                    cache_similarity_threshold:
+                        this.form.cache_similarity_threshold,
+                    cache_match_system_prompt:
+                        this.form.cache_match_system_prompt,
+                    cache_match_last_message_only:
+                        this.form.cache_match_last_message_only,
+                    cache_ttl_hours: this.form.cache_ttl_hours,
+                    cache_min_tokens: this.form.cache_min_tokens,
+                    cache_max_tokens: this.form.cache_max_tokens,
                 };
 
                 try {
                     const url = this.editingAlias
                         ? `/api/aliases/${this.editingAlias.id}`
-                        : '/api/aliases';
-                    const method = this.editingAlias ? 'PUT' : 'POST';
+                        : "/api/aliases";
+                    const method = this.editingAlias ? "PUT" : "POST";
 
                     const response = await fetch(url, {
                         method: method,
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(payload),
                     });
 
                     const data = await response.json();
 
                     if (!response.ok) {
-                        if (data.error && data.error.includes('name')) {
+                        if (data.error && data.error.includes("name")) {
                             this.formErrors.name = data.error;
                         } else {
-                            alert(data.error || 'Failed to save alias');
+                            alert(data.error || "Failed to save alias");
                         }
                         return;
                     }
@@ -506,8 +759,8 @@
                     await this.loadAliases();
                     this.closeModal();
                 } catch (error) {
-                    console.error('Failed to save alias:', error);
-                    alert('Failed to save alias');
+                    console.error("Failed to save alias:", error);
+                    alert("Failed to save alias");
                 } finally {
                     this.saving = false;
                 }
@@ -523,9 +776,12 @@
 
                 this.deleting = true;
                 try {
-                    const response = await fetch(`/api/aliases/${this.deletingAlias.id}`, {
-                        method: 'DELETE',
-                    });
+                    const response = await fetch(
+                        `/api/aliases/${this.deletingAlias.id}`,
+                        {
+                            method: "DELETE",
+                        },
+                    );
 
                     if (response.ok) {
                         await this.loadAliases();
@@ -533,11 +789,11 @@
                         this.deletingAlias = null;
                     } else {
                         const data = await response.json();
-                        alert(data.error || 'Failed to delete alias');
+                        alert(data.error || "Failed to delete alias");
                     }
                 } catch (error) {
-                    console.error('Failed to delete alias:', error);
-                    alert('Failed to delete alias');
+                    console.error("Failed to delete alias:", error);
+                    alert("Failed to delete alias");
                 } finally {
                     this.deleting = false;
                 }

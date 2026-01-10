@@ -30,6 +30,8 @@ class ResolvedModel:
     _routing_result: "object | None" = None
     # Track if this resolution used the default fallback
     is_default_fallback: bool = False
+    # Cache configuration (set when resolving from cache-enabled entity)
+    _cache_config: "object | None" = None
 
     @property
     def has_alias(self) -> bool:
@@ -40,11 +42,6 @@ class ResolvedModel:
     def has_router(self) -> bool:
         """Check if this resolution came from a smart router."""
         return self._routing_result is not None
-
-    @property
-    def has_cache(self) -> bool:
-        """Check if this resolution came from a smart cache."""
-        return False  # Regular ResolvedModel is never from cache
 
     @property
     def router_name(self) -> str | None:
@@ -60,117 +57,62 @@ class ResolvedModel:
             return self._routing_result.designator_usage
         return None
 
-
-@dataclass
-class CacheResolvedModel(ResolvedModel):
-    """
-    Extended ResolvedModel that includes smart cache information.
-
-    When resolve_model() returns a CacheResolvedModel, the proxy should:
-    1. Check cache_result.is_cache_hit
-    2. If hit: return cached_response directly
-    3. If miss: forward to provider, then call cache_engine.store_response()
-    """
-
-    cache_result: "object" = None  # CacheResult from SmartCacheEngine.lookup()
-    cache_engine: "object" = None  # SmartCacheEngine instance for storing responses
-
     @property
     def has_cache(self) -> bool:
-        """Check if this resolution came from a smart cache."""
-        return True
+        """Check if caching is enabled for this resolution."""
+        return self._cache_config is not None and self._cache_config.use_cache
 
     @property
-    def is_cache_hit(self) -> bool:
-        """Check if this is a cache hit."""
-        return self.cache_result and self.cache_result.is_cache_hit
-
-    @property
-    def cached_response(self) -> dict | None:
-        """Get the cached response if this is a cache hit."""
-        if self.cache_result and self.cache_result.is_cache_hit:
-            return self.cache_result.cached_response
-        return None
+    def cache_config(self) -> "object | None":
+        """Get the cache configuration (Alias, Router, Redirect, or Enricher)."""
+        return self._cache_config
 
 
 @dataclass
-class AugmentorResolvedModel(ResolvedModel):
+class EnricherResolvedModel(ResolvedModel):
     """
-    Extended ResolvedModel that includes smart augmentor information.
+    Extended ResolvedModel that includes smart enricher information.
 
-    When resolve_model() returns an AugmentorResolvedModel, the proxy should:
-    1. Use augmentation_result.augmented_system instead of original system
-    2. Use augmentation_result.augmented_messages instead of original messages
-    3. Forward to the target provider with augmented context
+    When resolve_model() returns an EnricherResolvedModel, the proxy should:
+    1. Use enrichment_result.augmented_system instead of original system
+    2. Use enrichment_result.augmented_messages instead of original messages
+    3. Forward to the target provider with enriched context
     """
 
-    augmentation_result: "object" = None  # AugmentationResult from SmartAugmentorEngine
+    enrichment_result: "object" = None  # EnrichmentResult from SmartEnricherEngine
 
     @property
-    def has_augmentation(self) -> bool:
-        """Check if this resolution came from a smart augmentor."""
+    def has_enrichment(self) -> bool:
+        """Check if this resolution came from a smart enricher."""
         return True
 
     @property
     def augmented_system(self) -> str | None:
-        """Get the augmented system prompt."""
-        if self.augmentation_result:
-            return self.augmentation_result.augmented_system
-        return None
-
-    @property
-    def augmented_messages(self) -> list[dict]:
-        """Get the augmented messages."""
-        if self.augmentation_result:
-            return self.augmentation_result.augmented_messages
-        return []
-
-    @property
-    def augmentation_type(self) -> str:
-        """Get the type of augmentation applied."""
-        if self.augmentation_result:
-            return self.augmentation_result.augmentation_type
-        return "direct"
-
-
-@dataclass
-class RAGResolvedModel(ResolvedModel):
-    """
-    Extended ResolvedModel that includes smart RAG information.
-
-    When resolve_model() returns a RAGResolvedModel, the proxy should:
-    1. Use rag_result.augmented_system instead of original system
-    2. Use rag_result.augmented_messages instead of original messages
-    3. Forward to the target provider with document context
-    """
-
-    rag_result: "object" = None  # RAGResult from SmartRAGEngine
-
-    @property
-    def has_rag(self) -> bool:
-        """Check if this resolution came from a smart RAG."""
-        return True
-
-    @property
-    def augmented_system(self) -> str | None:
-        """Get the augmented system prompt with document context."""
-        if self.rag_result:
-            return self.rag_result.augmented_system
+        """Get the augmented system prompt with enriched context."""
+        if self.enrichment_result:
+            return self.enrichment_result.augmented_system
         return None
 
     @property
     def augmented_messages(self) -> list[dict]:
         """Get the messages (usually unchanged)."""
-        if self.rag_result:
-            return self.rag_result.augmented_messages
+        if self.enrichment_result:
+            return self.enrichment_result.augmented_messages
         return []
 
     @property
     def context_injected(self) -> bool:
-        """Check if document context was injected."""
-        if self.rag_result:
-            return self.rag_result.context_injected
+        """Check if context was injected."""
+        if self.enrichment_result:
+            return self.enrichment_result.context_injected
         return False
+
+    @property
+    def enrichment_type(self) -> str:
+        """Get the type of enrichment applied (rag, web, hybrid, none)."""
+        if self.enrichment_result:
+            return self.enrichment_result.enrichment_type
+        return "none"
 
 
 class ProviderRegistry:
@@ -220,32 +162,28 @@ class ProviderRegistry:
         messages: list[dict] | None = None,
         system: str | None = None,
         session_key: str | None = None,
-    ) -> "ResolvedModel | CacheResolvedModel":
+    ) -> "ResolvedModel | EnricherResolvedModel":
         """
         Resolve a model name to a provider and model ID.
 
         Resolution order:
         1. Check for redirects (v3.7) - transparent model name mapping
         2. Check if it's a smart router (v3.2) - requires messages
-        3. Check if it's a smart cache (v3.3) - requires ChromaDB, returns CacheResolvedModel
-        4. Check if it's a smart augmentor (v3.4) - returns AugmentorResolvedModel
-        5. Check if it's a smart RAG (v3.8) - returns RAGResolvedModel
-        6. Check if it's an alias (v3.1)
-        7. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        8. Check each configured provider's models
-        9. Fall back to default provider/model
+        3. Check if it's a smart enricher (unified RAG+Web) - returns EnricherResolvedModel
+        4. Check if it's an alias (v3.1)
+        5. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        6. Check each configured provider's models
+        7. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
-            messages: Optional message list (required for smart router/cache/rag)
-            system: Optional system prompt (for smart router/cache/rag context)
+            messages: Optional message list (required for smart router/enricher)
+            system: Optional system prompt (for smart router/enricher context)
             session_key: Optional session key (for per_session routing)
 
         Returns:
             ResolvedModel with provider, model_id, and optional alias info
-            OR CacheResolvedModel for smart cache lookups
-            OR AugmentorResolvedModel for smart augmentor lookups
-            OR RAGResolvedModel for smart RAG lookups
+            OR EnricherResolvedModel for smart enricher lookups
 
         Raises:
             ValueError: If model not found and no default configured
@@ -254,16 +192,12 @@ class ProviderRegistry:
         from db import (
             find_matching_redirect,
             get_alias_by_name,
-            get_smart_augmentor_by_name,
-            get_smart_cache_by_name,
-            get_smart_rag_by_name,
+            get_smart_enricher_by_name,
             get_smart_router_by_name,
             increment_redirect_count,
         )
         from routing import (
-            SmartAugmentorEngine,
-            SmartCacheEngine,
-            SmartRAGEngine,
+            SmartEnricherEngine,
             SmartRouterEngine,
         )
 
@@ -305,6 +239,9 @@ class ProviderRegistry:
                 ]
                 result.alias_name = redirect.source
                 result.alias_tags = merged_tags
+            # Set cache config if caching is enabled on redirect
+            if redirect.use_cache:
+                result._cache_config = redirect
             return result
 
         # Step 2: Check if it's a smart router (v3.2)
@@ -314,10 +251,13 @@ class ProviderRegistry:
                 # Use smart routing
                 logger.debug(f"Using smart router '{name}'")
                 engine = SmartRouterEngine(router, self)
-                result = engine.route(messages, system, session_key)
+                routing_result = engine.route(messages, system, session_key)
                 # Store routing metadata for later use
-                result.resolved._routing_result = result
-                return result.resolved
+                routing_result.resolved._routing_result = routing_result
+                # Set cache config if caching is enabled
+                if router.use_cache:
+                    routing_result.resolved._cache_config = router
+                return routing_result.resolved
             else:
                 # No messages provided - fall back to router's fallback model
                 logger.debug(
@@ -325,156 +265,91 @@ class ProviderRegistry:
                 )
                 try:
                     target_result = self._resolve_actual_model(router.fallback_model)
-                    return ResolvedModel(
+                    result = ResolvedModel(
                         provider=target_result.provider,
                         model_id=target_result.model_id,
                         alias_name=router.name,
                         alias_tags=router.tags or [],
                     )
+                    if router.use_cache:
+                        result._cache_config = router
+                    return result
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 3: Check if it's a smart cache (v3.3)
-        cache = get_smart_cache_by_name(name)
-        if cache and cache.enabled:
-            # Smart caches require ChromaDB
-            if is_chroma_available():
+        # Step 3: Check if it's a smart enricher (unified RAG+Web)
+        enricher = get_smart_enricher_by_name(name)
+        if enricher and enricher.enabled:
+            # Check if enricher needs ChromaDB (for RAG functionality)
+            needs_chroma = enricher.use_rag
+            if not needs_chroma or is_chroma_available():
                 if messages is not None:
-                    logger.debug(f"Using smart cache '{name}'")
-                    engine = SmartCacheEngine(cache, self)
-                    cache_result = engine.lookup(messages, system)
-                    # Return a special CacheResolvedModel that the proxy can handle
-                    return CacheResolvedModel(
-                        provider=cache_result.resolved.provider,
-                        model_id=cache_result.resolved.model_id,
-                        alias_name=cache.name,
-                        alias_tags=cache.tags or [],
-                        cache_result=cache_result,
-                        cache_engine=engine,
+                    logger.debug(f"Using smart enricher '{name}'")
+                    engine = SmartEnricherEngine(enricher, self)
+                    enrichment_result = engine.enrich(messages, system)
+                    # Return an EnricherResolvedModel that the proxy can handle
+                    result = EnricherResolvedModel(
+                        provider=enrichment_result.resolved.provider,
+                        model_id=enrichment_result.resolved.model_id,
+                        alias_name=enricher.name,
+                        alias_tags=enricher.tags or [],
+                        enrichment_result=enrichment_result,
                     )
+                    # Set cache config if caching is enabled AND use_web is False
+                    # (realtime web data shouldn't be cached)
+                    if enricher.cache_enabled:
+                        result._cache_config = enricher
+                    return result
                 else:
                     # No messages - just resolve to target model
                     logger.debug(
-                        f"Smart cache '{name}' called without messages, resolving target"
+                        f"Smart enricher '{name}' called without messages, resolving target"
                     )
                     try:
-                        target_result = self._resolve_actual_model(cache.target_model)
+                        target_result = self._resolve_actual_model(
+                            enricher.target_model
+                        )
                         return ResolvedModel(
                             provider=target_result.provider,
                             model_id=target_result.model_id,
-                            alias_name=cache.name,
-                            alias_tags=cache.tags or [],
+                            alias_name=enricher.name,
+                            alias_tags=enricher.tags or [],
                         )
                     except ValueError:
                         pass  # Fall through to normal resolution
             else:
                 logger.warning(
-                    f"Smart cache '{name}' requested but ChromaDB not available, "
+                    f"Smart enricher '{name}' requires ChromaDB for RAG but it's not available, "
                     "falling back to target model"
                 )
                 try:
-                    target_result = self._resolve_actual_model(cache.target_model)
+                    target_result = self._resolve_actual_model(enricher.target_model)
                     return ResolvedModel(
                         provider=target_result.provider,
                         model_id=target_result.model_id,
-                        alias_name=cache.name,
-                        alias_tags=cache.tags or [],
+                        alias_name=enricher.name,
+                        alias_tags=enricher.tags or [],
                     )
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 4: Check if it's a smart augmentor (v3.4)
-        augmentor = get_smart_augmentor_by_name(name)
-        if augmentor and augmentor.enabled:
-            if messages is not None:
-                logger.debug(f"Using smart augmentor '{name}'")
-                engine = SmartAugmentorEngine(augmentor, self)
-                augmentation_result = engine.augment(messages, system)
-                # Return an AugmentorResolvedModel that the proxy can handle
-                return AugmentorResolvedModel(
-                    provider=augmentation_result.resolved.provider,
-                    model_id=augmentation_result.resolved.model_id,
-                    alias_name=augmentor.name,
-                    alias_tags=augmentor.tags or [],
-                    augmentation_result=augmentation_result,
-                )
-            else:
-                # No messages - just resolve to target model
-                logger.debug(
-                    f"Smart augmentor '{name}' called without messages, resolving target"
-                )
-                try:
-                    target_result = self._resolve_actual_model(augmentor.target_model)
-                    return ResolvedModel(
-                        provider=target_result.provider,
-                        model_id=target_result.model_id,
-                        alias_name=augmentor.name,
-                        alias_tags=augmentor.tags or [],
-                    )
-                except ValueError:
-                    pass  # Fall through to normal resolution
-
-        # Step 5: Check if it's a smart RAG (v3.8)
-        rag = get_smart_rag_by_name(name)
-        if rag and rag.enabled:
-            # Smart RAGs require ChromaDB
-            if is_chroma_available():
-                if messages is not None:
-                    logger.debug(f"Using smart RAG '{name}'")
-                    engine = SmartRAGEngine(rag, self)
-                    rag_result = engine.augment(messages, system)
-                    # Return a RAGResolvedModel that the proxy can handle
-                    return RAGResolvedModel(
-                        provider=rag_result.resolved.provider,
-                        model_id=rag_result.resolved.model_id,
-                        alias_name=rag.name,
-                        alias_tags=rag.tags or [],
-                        rag_result=rag_result,
-                    )
-                else:
-                    # No messages - just resolve to target model
-                    logger.debug(
-                        f"Smart RAG '{name}' called without messages, resolving target"
-                    )
-                    try:
-                        target_result = self._resolve_actual_model(rag.target_model)
-                        return ResolvedModel(
-                            provider=target_result.provider,
-                            model_id=target_result.model_id,
-                            alias_name=rag.name,
-                            alias_tags=rag.tags or [],
-                        )
-                    except ValueError:
-                        pass  # Fall through to normal resolution
-            else:
-                logger.warning(
-                    f"Smart RAG '{name}' requested but ChromaDB not available, "
-                    "falling back to target model"
-                )
-                try:
-                    target_result = self._resolve_actual_model(rag.target_model)
-                    return ResolvedModel(
-                        provider=target_result.provider,
-                        model_id=target_result.model_id,
-                        alias_name=rag.name,
-                        alias_tags=rag.tags or [],
-                    )
-                except ValueError:
-                    pass  # Fall through to normal resolution
-
-        # Step 6: Check if it's an alias (v3.1)
+        # Step 4: Check if it's an alias (v3.1)
         alias = get_alias_by_name(name)
         if alias and alias.enabled:
             logger.debug(f"Resolving alias '{name}' -> '{alias.target_model}'")
             # Resolve the target model
             try:
                 target_result = self._resolve_actual_model(alias.target_model)
-                return ResolvedModel(
+                result = ResolvedModel(
                     provider=target_result.provider,
                     model_id=target_result.model_id,
                     alias_name=alias.name,
                     alias_tags=alias.tags or [],
                 )
+                # Set cache config if caching is enabled
+                if alias.use_cache:
+                    result._cache_config = alias
+                return result
             except ValueError:
                 # Target model not available, fall back to default
                 logger.warning(
@@ -484,14 +359,17 @@ class ProviderRegistry:
                 if self._default_provider and self._default_model:
                     default = self._providers.get(self._default_provider)
                     if default and default.is_available():
-                        return ResolvedModel(
+                        result = ResolvedModel(
                             provider=default,
                             model_id=self._default_model,
                             alias_name=alias.name,
                             alias_tags=alias.tags or [],
                         )
+                        if alias.use_cache:
+                            result._cache_config = alias
+                        return result
 
-        # Step 7-9: Normal model resolution
+        # Step 5-7: Normal model resolution
         return self._resolve_actual_model(name)
 
     def _resolve_actual_model(self, model_name: str) -> ResolvedModel:
@@ -574,7 +452,7 @@ class ProviderRegistry:
 
     def list_all_models(self) -> list[dict]:
         """
-        Get combined model list from all available providers, aliases, smart routers, and smart caches.
+        Get combined model list from all available providers, aliases, smart routers, and smart enrichers.
 
         Returns list of model info dicts suitable for /api/tags response.
         Models are already filtered for enabled status in load_models_for_provider().
@@ -582,9 +460,7 @@ class ProviderRegistry:
         from context.chroma import is_chroma_available
         from db import (
             get_enabled_aliases,
-            get_enabled_smart_augmentors,
-            get_enabled_smart_caches,
-            get_enabled_smart_rags,
+            get_enabled_smart_enrichers,
             get_enabled_smart_routers,
         )
 
@@ -632,71 +508,35 @@ class ProviderRegistry:
                 }
             )
 
-        # Add smart caches (only if ChromaDB is available)
-        if is_chroma_available():
-            caches = get_enabled_smart_caches()
-            for cache_name, cache in caches.items():
-                seen.add(cache_name)
-                models.append(
-                    {
-                        "name": cache_name,
-                        "model": cache_name,
-                        "provider": "smart-cache",
-                        "details": {
-                            "family": "smart-cache",
-                            "parameter_size": "",
-                            "quantization_level": "",
-                        },
-                        "description": cache.description
-                        or f"Cached responses for {cache.target_model}",
-                        "context_length": 0,
-                        "capabilities": ["caching"],
-                    }
-                )
-
-        # Add smart augmentors
-        augmentors = get_enabled_smart_augmentors()
-        for augmentor_name, augmentor in augmentors.items():
-            seen.add(augmentor_name)
+        # Add smart enrichers (unified RAG + Web)
+        enrichers = get_enabled_smart_enrichers()
+        for enricher_name, enricher in enrichers.items():
+            # Skip if RAG-only enricher and ChromaDB not available
+            if enricher.use_rag and not enricher.use_web and not is_chroma_available():
+                continue
+            seen.add(enricher_name)
+            # Build capabilities list based on what's enabled
+            capabilities = []
+            if enricher.use_rag:
+                capabilities.extend(["rag", "documents"])
+            if enricher.use_web:
+                capabilities.extend(["search", "scrape"])
             models.append(
                 {
-                    "name": augmentor_name,
-                    "model": augmentor_name,
-                    "provider": "smart-augmentor",
+                    "name": enricher_name,
+                    "model": enricher_name,
+                    "provider": "smart-enricher",
                     "details": {
-                        "family": "smart-augmentor",
+                        "family": "smart-enricher",
                         "parameter_size": "",
                         "quantization_level": "",
                     },
-                    "description": augmentor.description
-                    or augmentor.purpose
-                    or f"Augments requests for {augmentor.target_model}",
+                    "description": enricher.description
+                    or f"Enriched context for {enricher.target_model}",
                     "context_length": 0,
-                    "capabilities": ["search", "scrape"],
+                    "capabilities": capabilities,
                 }
             )
-
-        # Add smart RAGs (only if ChromaDB is available)
-        if is_chroma_available():
-            rags = get_enabled_smart_rags()
-            for rag_name, rag in rags.items():
-                seen.add(rag_name)
-                models.append(
-                    {
-                        "name": rag_name,
-                        "model": rag_name,
-                        "provider": "smart-rag",
-                        "details": {
-                            "family": "smart-rag",
-                            "parameter_size": "",
-                            "quantization_level": "",
-                        },
-                        "description": rag.description
-                        or f"Document RAG for {rag.target_model}",
-                        "context_length": 0,
-                        "capabilities": ["rag", "documents"],
-                    }
-                )
 
         # Add provider models
         for provider in self.get_available_providers():
@@ -731,13 +571,12 @@ class ProviderRegistry:
         Get combined model list in OpenAI format.
 
         Returns list of model info dicts suitable for /v1/models response.
-        Includes aliases, smart routers, smart caches, and provider models.
+        Includes aliases, smart routers, smart enrichers, and provider models.
         """
         from context.chroma import is_chroma_available
         from db import (
             get_enabled_aliases,
-            get_enabled_smart_caches,
-            get_enabled_smart_rags,
+            get_enabled_smart_enrichers,
             get_enabled_smart_routers,
         )
 
@@ -768,30 +607,20 @@ class ProviderRegistry:
                 }
             )
 
-        # Add smart caches (only if ChromaDB is available)
-        if is_chroma_available():
-            caches = get_enabled_smart_caches()
-            for cache_name in caches.keys():
-                seen.add(cache_name)
-                models.append(
-                    {
-                        "id": cache_name,
-                        "object": "model",
-                        "owned_by": "smart-cache",
-                    }
-                )
-
-            # Add smart RAGs
-            rags = get_enabled_smart_rags()
-            for rag_name in rags.keys():
-                seen.add(rag_name)
-                models.append(
-                    {
-                        "id": rag_name,
-                        "object": "model",
-                        "owned_by": "smart-rag",
-                    }
-                )
+        # Add smart enrichers (unified RAG + Web)
+        enrichers = get_enabled_smart_enrichers()
+        for enricher_name, enricher in enrichers.items():
+            # Skip if RAG-only enricher and ChromaDB not available
+            if enricher.use_rag and not enricher.use_web and not is_chroma_available():
+                continue
+            seen.add(enricher_name)
+            models.append(
+                {
+                    "id": enricher_name,
+                    "object": "model",
+                    "owned_by": "smart-enricher",
+                }
+            )
 
         # Add provider models
         for provider in self.get_available_providers():

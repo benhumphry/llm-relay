@@ -1,0 +1,1223 @@
+{% extends "base.html" %} {% block title %}Smart Enrichers{% endblock %} {%
+block content %}
+<div x-data="enrichersPage()" x-init="init()">
+    <!-- Header -->
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
+        <div>
+            <h1 class="text-2xl font-bold">Smart Enrichers</h1>
+            <p class="text-base-content/60">
+                Unified context enrichment using documents and web search
+            </p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                />
+            </svg>
+            Add Enricher
+        </button>
+    </div>
+
+    <!-- Loading State -->
+    <template x-if="loading">
+        <div class="flex justify-center py-12">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    </template>
+
+    <!-- No Enrichers Configured -->
+    <template x-if="!loading && enrichers.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-base-content/30"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium">
+                    No Smart Enrichers Configured
+                </h3>
+                <p class="mt-2 text-base-content/60 max-w-md mx-auto">
+                    Smart Enrichers combine document retrieval (RAG) and
+                    realtime web search to inject relevant context into LLM
+                    requests.
+                </p>
+                <button @click="openAddModal()" class="btn btn-primary mt-4">
+                    Create Your First Enricher
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Enrichers Table -->
+    <template x-if="!loading && enrichers.length > 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="overflow-x-auto">
+                <table class="table table-fixed">
+                    <thead>
+                        <tr>
+                            <th class="w-8"></th>
+                            <th class="w-32">Name</th>
+                            <th class="w-24">Type</th>
+                            <th class="w-1/4">Target</th>
+                            <th class="w-24 text-right">Requests</th>
+                            <th class="w-24 text-right">Enriched</th>
+                            <th class="w-20">Status</th>
+                            <th class="w-24 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <template x-for="enricher in enrichers" :key="enricher.id">
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
+                                @click="toggleExpand(enricher.id)"
+                                class="cursor-pointer hover:bg-base-200"
+                            >
+                                <td class="w-8">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 transition-transform"
+                                        :class="{'rotate-90': expandedRows.includes(enricher.id)}"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
+                                </td>
+                                <td>
+                                    <div
+                                        class="font-mono font-medium"
+                                        x-text="enricher.name"
+                                    ></div>
+                                </td>
+                                <td>
+                                    <div class="flex gap-1">
+                                        <span
+                                            x-show="enricher.use_rag"
+                                            class="badge badge-sm badge-info"
+                                            title="RAG enabled"
+                                            >RAG</span
+                                        >
+                                        <span
+                                            x-show="enricher.use_web"
+                                            class="badge badge-sm badge-warning"
+                                            title="Web search enabled"
+                                            >Web</span
+                                        >
+                                    </div>
+                                </td>
+                                <td>
+                                    <div
+                                        class="font-mono text-sm text-base-content/70 truncate"
+                                        x-text="enricher.target_model"
+                                    ></div>
+                                </td>
+                                <td class="text-right">
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="enricher.total_requests || 0"
+                                    ></span>
+                                </td>
+                                <td class="text-right">
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="enricher.context_injections || 0"
+                                    ></span>
+                                    <span
+                                        class="text-xs text-base-content/50"
+                                        x-text="'(' + (enricher.injection_rate || 0).toFixed(0) + '%)'"
+                                    ></span>
+                                </td>
+                                <td>
+                                    <span
+                                        class="badge badge-sm"
+                                        :class="enricher.enabled ? 'badge-success' : 'badge-ghost'"
+                                        x-text="enricher.enabled ? 'Enabled' : 'Disabled'"
+                                    ></span>
+                                </td>
+                                <td class="text-right" @click.stop>
+                                    <div class="flex justify-end gap-1">
+                                        <button
+                                            @click="openEditModal(enricher)"
+                                            class="btn btn-ghost btn-sm"
+                                            title="Edit enricher"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="confirmDelete(enricher)"
+                                            class="btn btn-ghost btn-sm text-error"
+                                            title="Delete enricher"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <!-- Expanded Details Row -->
+                            <tr
+                                x-show="expandedRows.includes(enricher.id)"
+                                x-transition
+                            >
+                                <td colspan="8" class="bg-base-200 p-0">
+                                    <div
+                                        class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
+                                    >
+                                        <!-- Description -->
+                                        <div
+                                            x-show="enricher.description"
+                                            class="md:col-span-2"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Description
+                                            </div>
+                                            <div
+                                                class="text-sm"
+                                                x-text="enricher.description"
+                                            ></div>
+                                        </div>
+                                        <!-- Document Stores (if RAG enabled) -->
+                                        <div x-show="enricher.use_rag">
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Document Stores
+                                            </div>
+                                            <div class="text-xs">
+                                                <template
+                                                    x-if="enricher.document_stores && enricher.document_stores.length > 0"
+                                                >
+                                                    <span
+                                                        x-text="enricher.document_stores.map(s => s.name).join(', ')"
+                                                    ></span>
+                                                </template>
+                                                <template
+                                                    x-if="!enricher.document_stores || enricher.document_stores.length === 0"
+                                                >
+                                                    <span
+                                                        class="text-base-content/50"
+                                                        >None configured</span
+                                                    >
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <!-- Designator Model (if Web enabled) -->
+                                        <div x-show="enricher.use_web">
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Designator Model
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="enricher.designator_model || 'None (uses query as-is)'"
+                                            ></div>
+                                        </div>
+                                        <!-- RAG Settings -->
+                                        <div x-show="enricher.use_rag">
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                RAG Settings
+                                            </div>
+                                            <div class="text-xs">
+                                                Max chunks:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="enricher.max_results"
+                                                ></span
+                                                >, Threshold:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="enricher.similarity_threshold"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                        <!-- Web Settings -->
+                                        <div x-show="enricher.use_web">
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Web Settings
+                                            </div>
+                                            <div class="text-xs">
+                                                Search:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="enricher.max_search_results"
+                                                ></span
+                                                >, Scrape:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="enricher.max_scrape_urls"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                        <!-- Common Settings -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Context Tokens
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="enricher.max_context_tokens"
+                                            ></div>
+                                        </div>
+                                        <!-- Tags -->
+                                        <div
+                                            x-show="enricher.tags && enricher.tags.length > 0"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Tags
+                                            </div>
+                                            <div class="flex flex-wrap gap-1">
+                                                <template
+                                                    x-for="tag in enricher.tags"
+                                                    :key="tag"
+                                                >
+                                                    <span
+                                                        class="badge badge-primary badge-sm"
+                                                        x-text="tag"
+                                                    ></span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <!-- Stats -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Statistics
+                                            </div>
+                                            <div class="text-xs space-y-1">
+                                                <div>
+                                                    Total:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="enricher.total_requests || 0"
+                                                    ></span>
+                                                </div>
+                                                <div x-show="enricher.use_web">
+                                                    Searches:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="enricher.search_requests || 0"
+                                                    ></span
+                                                    >, Scrapes:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="enricher.scrape_requests || 0"
+                                                    ></span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+                </table>
+            </div>
+        </div>
+    </template>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal" :class="{ 'modal-open': showModal }">
+        <div class="modal-box max-w-2xl">
+            <h3
+                class="font-bold text-lg"
+                x-text="editingEnricher ? 'Edit Enricher' : 'Add Enricher'"
+            ></h3>
+            <form @submit.prevent="saveEnricher()">
+                <!-- Name -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Enricher Name</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.name"
+                        class="input input-bordered font-mono"
+                        :class="{ 'input-error': formErrors.name }"
+                        placeholder="e.g., research-assistant, doc-search"
+                        required
+                        :disabled="editingEnricher"
+                    />
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Use this name as the model name in your API
+                            requests</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Target Model -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Target Model</span>
+                    </label>
+                    <select
+                        x-model="form.target_model"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="">Select a model...</option>
+                        <template
+                            x-for="model in availableModels"
+                            :key="model.id"
+                        >
+                            <option
+                                :value="model.id"
+                                x-text="`${model.id} (${model.family})`"
+                            ></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Model that receives the enriched context</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Enrichment Options -->
+                <div class="form-control mt-6">
+                    <label class="label">
+                        <span class="label-text font-medium"
+                            >Enrichment Options</span
+                        >
+                    </label>
+                    <div class="bg-base-200 rounded-lg p-4 space-y-4">
+                        <!-- RAG Option -->
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                x-model="form.use_rag"
+                                class="checkbox checkbox-primary mt-1"
+                            />
+                            <div>
+                                <div class="font-medium">
+                                    RAG (Document Retrieval)
+                                </div>
+                                <div class="text-sm text-base-content/60">
+                                    Retrieve relevant chunks from indexed
+                                    document stores
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- RAG Settings (shown when RAG is enabled) -->
+                        <div
+                            x-show="form.use_rag"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-info space-y-3"
+                        >
+                            <!-- Document Stores Selection -->
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Document Stores</span
+                                    >
+                                    <a
+                                        href="/document-stores"
+                                        class="label-text-alt link link-primary text-xs"
+                                        >Manage Stores</a
+                                    >
+                                </label>
+                                <template x-if="documentStores.length === 0">
+                                    <div
+                                        class="text-sm text-base-content/60 bg-base-300 rounded-lg p-3"
+                                    >
+                                        No document stores configured.
+                                        <a
+                                            href="/document-stores"
+                                            class="link link-primary"
+                                            >Create a document store</a
+                                        >
+                                        first.
+                                    </div>
+                                </template>
+                                <template x-if="documentStores.length > 0">
+                                    <div
+                                        class="bg-base-300 rounded-lg p-2 max-h-36 overflow-y-auto"
+                                    >
+                                        <template
+                                            x-for="store in documentStores"
+                                            :key="store.id"
+                                        >
+                                            <label
+                                                class="flex items-center gap-2 py-1 hover:bg-base-200 px-2 rounded cursor-pointer"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    :value="store.id"
+                                                    x-model="form.store_ids"
+                                                    class="checkbox checkbox-sm checkbox-primary"
+                                                />
+                                                <div class="flex-1 min-w-0">
+                                                    <span
+                                                        class="font-mono text-sm"
+                                                        x-text="store.name"
+                                                    ></span>
+                                                    <span
+                                                        class="badge badge-xs ml-2"
+                                                        :class="store.index_status === 'ready' ? 'badge-success' : 'badge-ghost'"
+                                                        x-text="store.index_status"
+                                                    ></span>
+                                                </div>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                            <!-- RAG Parameters -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Chunks</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.max_results"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="50"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Similarity Threshold</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.similarity_threshold"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                        max="1"
+                                        step="0.05"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Web Option -->
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                x-model="form.use_web"
+                                class="checkbox checkbox-warning mt-1"
+                            />
+                            <div>
+                                <div class="font-medium">
+                                    Realtime Web Access
+                                </div>
+                                <div class="text-sm text-base-content/60">
+                                    Search the web and scrape relevant pages for
+                                    current information
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- Web Settings (shown when Web is enabled) -->
+                        <div
+                            x-show="form.use_web"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-warning space-y-3"
+                        >
+                            <!-- Designator Model -->
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Designator Model (optional)</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="form.designator_model"
+                                    class="select select-bordered select-sm"
+                                >
+                                    <option value="">Use query as-is</option>
+                                    <template
+                                        x-for="model in availableModels"
+                                        :key="model.id"
+                                    >
+                                        <option
+                                            :value="model.id"
+                                            x-text="model.id"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs"
+                                        >Fast model to optimize search
+                                        queries</span
+                                    >
+                                </label>
+                            </div>
+                            <!-- Web Parameters -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Search Results</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.max_search_results"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="20"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max URLs to Scrape</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.max_scrape_urls"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                        max="10"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <label
+                        class="label"
+                        x-show="!form.use_rag && !form.use_web"
+                    >
+                        <span class="label-text-alt text-warning"
+                            >At least one enrichment option must be
+                            enabled</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Common Settings (collapsed) -->
+                <div class="collapse collapse-arrow bg-base-200 mt-4">
+                    <input type="checkbox" />
+                    <div class="collapse-title text-sm font-medium">
+                        Advanced Settings
+                    </div>
+                    <div class="collapse-content space-y-4">
+                        <!-- Max Context Tokens -->
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Max Context Tokens</span
+                                >
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.max_context_tokens"
+                                class="input input-bordered"
+                                min="100"
+                                max="32000"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Maximum tokens for injected context</span
+                                >
+                            </label>
+                        </div>
+
+                        <!-- Reranking -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Rerank Provider</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="form.rerank_provider"
+                                    class="select select-bordered"
+                                >
+                                    <option value="local">
+                                        Local (cross-encoder)
+                                    </option>
+                                    <option value="jina">Jina AI</option>
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Rerank Top N</span>
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.rerank_top_n"
+                                    class="input input-bordered"
+                                    min="5"
+                                    max="100"
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Response Caching -->
+                        <div class="divider text-xs text-base-content/50">
+                            Response Caching
+                        </div>
+                        <div class="form-control">
+                            <label
+                                class="label cursor-pointer justify-start gap-3"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_cache"
+                                    class="checkbox checkbox-secondary"
+                                    :disabled="form.use_web"
+                                />
+                                <div>
+                                    <span class="label-text"
+                                        >Enable Response Caching</span
+                                    >
+                                    <div
+                                        x-show="form.use_web"
+                                        class="text-xs text-warning"
+                                    >
+                                        Caching disabled when Web Access is
+                                        enabled
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                        <!-- Cache Settings (shown when caching enabled and web not enabled) -->
+                        <div
+                            x-show="form.use_cache && !form.use_web"
+                            x-transition
+                            class="space-y-3 pl-4 border-l-2 border-secondary"
+                        >
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Similarity Threshold</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_similarity_threshold"
+                                        class="input input-bordered input-sm"
+                                        min="0.5"
+                                        max="1"
+                                        step="0.01"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Cache TTL (hours)</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_ttl_hours"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="8760"
+                                    />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Min Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_min_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_max_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_system_prompt"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match System Prompt</span
+                                    >
+                                </label>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_last_message_only"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match Last Message Only</span
+                                    >
+                                </label>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs"
+                                        >Useful for OpenWebUI (ignores
+                                        conversation history)</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="divider text-xs text-base-content/50">
+                            Other
+                        </div>
+
+                        <!-- Tags -->
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Tags (optional)</span>
+                            </label>
+                            <input
+                                type="text"
+                                x-model="form.tags_input"
+                                class="input input-bordered"
+                                placeholder="tag1, tag2, tag3"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Comma-separated tags for usage
+                                    tracking</span
+                                >
+                            </label>
+                        </div>
+
+                        <!-- Description -->
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Description (optional)</span
+                                >
+                            </label>
+                            <textarea
+                                x-model="form.description"
+                                class="textarea textarea-bordered"
+                                rows="2"
+                                placeholder="Brief description of what this enricher is for"
+                            ></textarea>
+                        </div>
+
+                        <!-- Enabled -->
+                        <div class="form-control">
+                            <label
+                                class="label cursor-pointer justify-start gap-3"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.enabled"
+                                    class="checkbox checkbox-primary"
+                                />
+                                <span class="label-text">Enabled</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modal Actions -->
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="closeModal()"
+                        class="btn btn-ghost"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                        :disabled="saving || (!form.use_rag && !form.use_web)"
+                    >
+                        <span
+                            x-text="editingEnricher ? 'Save Changes' : 'Create Enricher'"
+                        ></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop" @click="closeModal()"></div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal" :class="{ 'modal-open': showDeleteModal }">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg">Delete Enricher</h3>
+            <p class="py-4">
+                Are you sure you want to delete
+                <span
+                    class="font-mono font-bold"
+                    x-text="deletingEnricher?.name"
+                ></span
+                >? This action cannot be undone.
+            </p>
+            <div class="modal-action">
+                <button @click="showDeleteModal = false" class="btn btn-ghost">
+                    Cancel
+                </button>
+                <button
+                    @click="deleteEnricher()"
+                    class="btn btn-error"
+                    :class="{ 'loading': deleting }"
+                    :disabled="deleting"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop" @click="showDeleteModal = false"></div>
+    </div>
+</div>
+
+<script>
+    function enrichersPage() {
+        return {
+            loading: true,
+            enrichers: [],
+            availableModels: [],
+            documentStores: [],
+            expandedRows: [],
+            showModal: false,
+            showDeleteModal: false,
+            editingEnricher: null,
+            deletingEnricher: null,
+            saving: false,
+            deleting: false,
+            formErrors: {},
+            form: {
+                name: "",
+                target_model: "",
+                use_rag: false,
+                use_web: false,
+                store_ids: [],
+                designator_model: "",
+                max_results: 5,
+                similarity_threshold: 0.7,
+                max_search_results: 5,
+                max_scrape_urls: 3,
+                max_context_tokens: 4000,
+                rerank_provider: "local",
+                rerank_top_n: 20,
+                // Cache settings
+                use_cache: false,
+                cache_similarity_threshold: 0.95,
+                cache_match_system_prompt: false,
+                cache_match_last_message_only: true,
+                cache_ttl_hours: 168,
+                cache_min_tokens: 50,
+                cache_max_tokens: 10000,
+                // Other
+                tags_input: "",
+                description: "",
+                enabled: true,
+            },
+
+            async init() {
+                await Promise.all([
+                    this.loadEnrichers(),
+                    this.loadModels(),
+                    this.loadDocumentStores(),
+                ]);
+                this.loading = false;
+            },
+
+            async loadEnrichers() {
+                try {
+                    const response = await fetch("/api/enrichers");
+                    this.enrichers = await response.json();
+                } catch (error) {
+                    console.error("Failed to load enrichers:", error);
+                }
+            },
+
+            async loadModels() {
+                try {
+                    const response = await fetch("/api/enrichers/models");
+                    this.availableModels = await response.json();
+                } catch (error) {
+                    console.error("Failed to load models:", error);
+                }
+            },
+
+            async loadDocumentStores() {
+                try {
+                    const response = await fetch("/api/document-stores");
+                    this.documentStores = await response.json();
+                } catch (error) {
+                    console.error("Failed to load document stores:", error);
+                }
+            },
+
+            toggleExpand(id) {
+                const index = this.expandedRows.indexOf(id);
+                if (index === -1) {
+                    this.expandedRows.push(id);
+                } else {
+                    this.expandedRows.splice(index, 1);
+                }
+            },
+
+            openAddModal() {
+                this.editingEnricher = null;
+                this.formErrors = {};
+                this.form = {
+                    name: "",
+                    target_model: "",
+                    use_rag: false,
+                    use_web: true, // Default to web enabled
+                    store_ids: [],
+                    designator_model: "",
+                    max_results: 5,
+                    similarity_threshold: 0.7,
+                    max_search_results: 5,
+                    max_scrape_urls: 3,
+                    max_context_tokens: 4000,
+                    rerank_provider: "local",
+                    rerank_top_n: 20,
+                    // Cache settings
+                    use_cache: false,
+                    cache_similarity_threshold: 0.95,
+                    cache_match_system_prompt: false,
+                    cache_match_last_message_only: true,
+                    cache_ttl_hours: 168,
+                    cache_min_tokens: 50,
+                    cache_max_tokens: 10000,
+                    // Other
+                    tags_input: "",
+                    description: "",
+                    enabled: true,
+                };
+                this.showModal = true;
+            },
+
+            openEditModal(enricher) {
+                this.editingEnricher = enricher;
+                this.formErrors = {};
+                this.form = {
+                    name: enricher.name,
+                    target_model: enricher.target_model,
+                    use_rag: enricher.use_rag,
+                    use_web: enricher.use_web,
+                    store_ids: enricher.document_store_ids || [],
+                    designator_model: enricher.designator_model || "",
+                    max_results: enricher.max_results,
+                    similarity_threshold: enricher.similarity_threshold,
+                    max_search_results: enricher.max_search_results,
+                    max_scrape_urls: enricher.max_scrape_urls,
+                    max_context_tokens: enricher.max_context_tokens,
+                    rerank_provider: enricher.rerank_provider,
+                    rerank_top_n: enricher.rerank_top_n,
+                    // Cache settings
+                    use_cache: enricher.use_cache || false,
+                    cache_similarity_threshold:
+                        enricher.cache_similarity_threshold || 0.95,
+                    cache_match_system_prompt:
+                        enricher.cache_match_system_prompt || false,
+                    cache_match_last_message_only:
+                        enricher.cache_match_last_message_only !== false,
+                    cache_ttl_hours: enricher.cache_ttl_hours || 168,
+                    cache_min_tokens: enricher.cache_min_tokens || 50,
+                    cache_max_tokens: enricher.cache_max_tokens || 10000,
+                    // Other
+                    tags_input: (enricher.tags || []).join(", "),
+                    description: enricher.description || "",
+                    enabled: enricher.enabled,
+                };
+                this.showModal = true;
+            },
+
+            closeModal() {
+                this.showModal = false;
+                this.editingEnricher = null;
+            },
+
+            async saveEnricher() {
+                this.saving = true;
+                this.formErrors = {};
+
+                // Parse tags
+                const tags = this.form.tags_input
+                    ? this.form.tags_input
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter((t) => t)
+                    : [];
+
+                const data = {
+                    name: this.form.name,
+                    target_model: this.form.target_model,
+                    use_rag: this.form.use_rag,
+                    use_web: this.form.use_web,
+                    document_store_ids: this.form.store_ids,
+                    designator_model: this.form.designator_model || null,
+                    max_results: this.form.max_results,
+                    similarity_threshold: this.form.similarity_threshold,
+                    max_search_results: this.form.max_search_results,
+                    max_scrape_urls: this.form.max_scrape_urls,
+                    max_context_tokens: this.form.max_context_tokens,
+                    rerank_provider: this.form.rerank_provider,
+                    rerank_top_n: this.form.rerank_top_n,
+                    // Cache settings (only if web not enabled)
+                    use_cache: this.form.use_web ? false : this.form.use_cache,
+                    cache_similarity_threshold:
+                        this.form.cache_similarity_threshold,
+                    cache_match_system_prompt:
+                        this.form.cache_match_system_prompt,
+                    cache_match_last_message_only:
+                        this.form.cache_match_last_message_only,
+                    cache_ttl_hours: this.form.cache_ttl_hours,
+                    cache_min_tokens: this.form.cache_min_tokens,
+                    cache_max_tokens: this.form.cache_max_tokens,
+                    // Other
+                    tags: tags,
+                    description: this.form.description || null,
+                    enabled: this.form.enabled,
+                };
+
+                try {
+                    const url = this.editingEnricher
+                        ? `/api/enrichers/${this.editingEnricher.id}`
+                        : "/api/enrichers";
+                    const method = this.editingEnricher ? "PUT" : "POST";
+
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(data),
+                    });
+
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        this.formErrors.name = result.error;
+                        return;
+                    }
+
+                    await this.loadEnrichers();
+                    this.closeModal();
+                } catch (error) {
+                    console.error("Failed to save enricher:", error);
+                    this.formErrors.name = "Failed to save enricher";
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            confirmDelete(enricher) {
+                this.deletingEnricher = enricher;
+                this.showDeleteModal = true;
+            },
+
+            async deleteEnricher() {
+                if (!this.deletingEnricher) return;
+
+                this.deleting = true;
+                try {
+                    const response = await fetch(
+                        `/api/enrichers/${this.deletingEnricher.id}`,
+                        { method: "DELETE" },
+                    );
+
+                    if (response.ok) {
+                        await this.loadEnrichers();
+                        this.showDeleteModal = false;
+                        this.deletingEnricher = null;
+                    }
+                } catch (error) {
+                    console.error("Failed to delete enricher:", error);
+                } finally {
+                    this.deleting = false;
+                }
+            },
+        };
+    }
+</script>
+{% endblock %}

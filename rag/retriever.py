@@ -2,12 +2,13 @@
 RAG Retriever for Smart RAG.
 
 Handles semantic search and context formatting for query augmentation.
+Supports both legacy single-collection retrieval and multi-store retrieval.
 """
 
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 from .embeddings import (
     EmbeddingProvider,
@@ -19,13 +20,13 @@ from .embeddings import (
 logger = logging.getLogger(__name__)
 
 
-def _get_embedding_provider_for_rag(
+def _get_embedding_provider(
     embedding_provider: str,
     embedding_model: Optional[str],
     ollama_url: Optional[str],
 ) -> EmbeddingProvider:
     """
-    Get an embedding provider based on RAG configuration.
+    Get an embedding provider based on configuration.
 
     Args:
         embedding_provider: "local", "ollama:<instance>", or provider name
@@ -86,6 +87,10 @@ def _get_embedding_provider_for_rag(
     )
 
 
+# Alias for backward compatibility
+_get_embedding_provider_for_rag = _get_embedding_provider
+
+
 @dataclass
 class RetrievedChunk:
     """A retrieved document chunk with metadata."""
@@ -94,6 +99,8 @@ class RetrievedChunk:
     source_file: str
     chunk_index: int
     score: float  # Similarity score (0-1, higher is more similar)
+    store_name: Optional[str] = None  # Document store name (for multi-store)
+    store_id: Optional[int] = None  # Document store ID (for multi-store)
 
 
 @dataclass
@@ -106,6 +113,7 @@ class RetrievalResult:
     embedding_usage: dict | None = None  # Usage from embedding call
     embedding_model: str | None = None  # Model used for embedding
     embedding_provider: str | None = None  # Provider used for embedding
+    stores_queried: list[str] | None = None  # Names of stores that were queried
 
 
 class RAGRetriever:
@@ -140,6 +148,248 @@ class RAGRetriever:
 
         return self._chroma_client
 
+    def retrieve_from_stores(
+        self,
+        stores: list,
+        query: str,
+        max_results: int = 5,
+        similarity_threshold: float = 0.7,
+        rerank_provider: Optional[str] = None,
+        rerank_model: Optional[str] = None,
+        rerank_top_n: Optional[int] = None,
+    ) -> RetrievalResult:
+        """
+        Retrieve relevant chunks from multiple document stores.
+
+        Queries each store's collection in parallel, then merges and reranks
+        all results together.
+
+        Args:
+            stores: List of DocumentStore objects (or detached store dicts)
+            query: User query text
+            max_results: Maximum chunks to return after reranking
+            similarity_threshold: Minimum similarity score (0-1)
+            rerank_provider: Reranking provider ("local" or "jina")
+            rerank_model: Model for reranking
+            rerank_top_n: Fetch this many per store before merging
+
+        Returns:
+            RetrievalResult with relevant chunks from all stores
+        """
+        if not stores:
+            return RetrievalResult(
+                chunks=[], query=query, total_tokens=0, stores_queried=[]
+            )
+
+        # Apply defaults for reranking
+        if rerank_provider is None:
+            from rag.reranker import get_global_rerank_provider
+
+            rerank_provider = get_global_rerank_provider()
+        if rerank_model is None:
+            rerank_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+        if rerank_top_n is None:
+            rerank_top_n = 20
+
+        all_chunks = []
+        stores_queried = []
+        embedding_usage = None
+        embed_model = None
+        embed_provider = None
+
+        try:
+            client = self._get_client()
+        except Exception as e:
+            logger.error(f"Failed to get ChromaDB client: {e}")
+            return RetrievalResult(chunks=[], query=query, total_tokens=0)
+
+        # Query each store's collection
+        for store in stores:
+            # Handle both DocumentStore objects and detached store dicts
+            store_id = getattr(
+                store, "id", store.get("id") if isinstance(store, dict) else None
+            )
+            store_name = getattr(
+                store,
+                "name",
+                store.get("name") if isinstance(store, dict) else "unknown",
+            )
+            collection_name = getattr(
+                store,
+                "collection_name",
+                store.get("collection_name") if isinstance(store, dict) else None,
+            )
+            index_status = getattr(
+                store,
+                "index_status",
+                store.get("index_status") if isinstance(store, dict) else None,
+            )
+            enabled = getattr(
+                store,
+                "enabled",
+                store.get("enabled", True) if isinstance(store, dict) else True,
+            )
+
+            # Skip stores that aren't ready
+            if not collection_name or index_status != "ready" or not enabled:
+                logger.debug(
+                    f"Skipping store '{store_name}': not ready (status={index_status}, collection={collection_name})"
+                )
+                continue
+
+            try:
+                collection = client.get_collection(collection_name)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to get collection {collection_name} for store '{store_name}': {e}"
+                )
+                continue
+
+            # Get embedding provider from store config
+            embedding_provider_name = getattr(
+                store,
+                "embedding_provider",
+                store.get("embedding_provider") if isinstance(store, dict) else "local",
+            )
+            embedding_model_name = getattr(
+                store,
+                "embedding_model",
+                store.get("embedding_model") if isinstance(store, dict) else None,
+            )
+            ollama_url = getattr(
+                store,
+                "ollama_url",
+                store.get("ollama_url") if isinstance(store, dict) else None,
+            )
+
+            # Embed query (reuse if same provider/model)
+            try:
+                provider = _get_embedding_provider(
+                    embedding_provider_name,
+                    embedding_model_name,
+                    ollama_url,
+                )
+                embed_result = provider.embed_query(query)
+                query_embedding = embed_result.embeddings[0]
+
+                # Track usage from first embedding
+                if embedding_usage is None:
+                    embedding_usage = embed_result.usage
+                    embed_model = embed_result.model
+                    embed_provider = embed_result.provider
+            except Exception as e:
+                logger.warning(f"Failed to embed query for store '{store_name}': {e}")
+                continue
+
+            # Query ChromaDB
+            try:
+                results = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=rerank_top_n,
+                    include=["documents", "metadatas", "distances"],
+                )
+            except Exception as e:
+                logger.warning(f"ChromaDB query failed for store '{store_name}': {e}")
+                continue
+
+            stores_queried.append(store_name)
+
+            # Process results
+            if results and results["documents"] and results["documents"][0]:
+                documents = results["documents"][0]
+                metadatas = (
+                    results["metadatas"][0]
+                    if results["metadatas"]
+                    else [{}] * len(documents)
+                )
+                distances = (
+                    results["distances"][0]
+                    if results["distances"]
+                    else [0.0] * len(documents)
+                )
+
+                for doc, meta, dist in zip(documents, metadatas, distances):
+                    # Convert distance to similarity
+                    similarity = 1 - (dist / 2) if dist <= 2 else 0
+
+                    if similarity >= similarity_threshold:
+                        chunk = RetrievedChunk(
+                            content=doc,
+                            source_file=meta.get("source_file", "unknown"),
+                            chunk_index=meta.get("chunk_index", 0),
+                            score=similarity,
+                            store_name=store_name,
+                            store_id=store_id,
+                        )
+                        all_chunks.append(chunk)
+
+        if not all_chunks:
+            return RetrievalResult(
+                chunks=[],
+                query=query,
+                total_tokens=0,
+                stores_queried=stores_queried,
+            )
+
+        # Rerank all combined results
+        try:
+            from .reranker import rerank_documents
+
+            chunk_dicts = [
+                {
+                    "content": c.content,
+                    "source_file": c.source_file,
+                    "chunk_index": c.chunk_index,
+                    "original_score": c.score,
+                    "store_name": c.store_name,
+                    "store_id": c.store_id,
+                }
+                for c in all_chunks
+            ]
+
+            reranked = rerank_documents(
+                query=query,
+                documents=chunk_dicts,
+                model_name=rerank_model,
+                top_k=max_results,
+                provider_type=rerank_provider,
+            )
+
+            all_chunks = [
+                RetrievedChunk(
+                    content=d["content"],
+                    source_file=d["source_file"],
+                    chunk_index=d["chunk_index"],
+                    score=d.get("rerank_score", d.get("original_score", 0)),
+                    store_name=d.get("store_name"),
+                    store_id=d.get("store_id"),
+                )
+                for d in reranked
+            ]
+
+            logger.debug(
+                f"Reranked {len(chunk_dicts)} chunks from {len(stores_queried)} stores to {len(all_chunks)}"
+            )
+        except Exception as e:
+            logger.warning(f"Reranking failed, using original order: {e}")
+            # Sort by score and limit
+            all_chunks = sorted(all_chunks, key=lambda c: c.score, reverse=True)[
+                :max_results
+            ]
+
+        # Calculate total tokens
+        total_tokens = sum(len(c.content) // 4 for c in all_chunks)
+
+        return RetrievalResult(
+            chunks=all_chunks,
+            query=query,
+            total_tokens=total_tokens,
+            embedding_usage=embedding_usage,
+            embedding_model=embed_model,
+            embedding_provider=embed_provider,
+            stores_queried=stores_queried,
+        )
+
     def retrieve(
         self,
         collection_name: str,
@@ -154,7 +404,7 @@ class RAGRetriever:
         rerank_top_n: Optional[int] = None,
     ) -> RetrievalResult:
         """
-        Retrieve relevant chunks for a query.
+        Retrieve relevant chunks for a query from a single collection.
 
         Always reranks results using a cross-encoder for better relevance.
 
@@ -198,7 +448,7 @@ class RAGRetriever:
         embed_model = None
         embed_provider = None
         try:
-            provider = _get_embedding_provider_for_rag(
+            provider = _get_embedding_provider(
                 embedding_provider,
                 embedding_model,
                 ollama_url,
@@ -322,6 +572,7 @@ class RAGRetriever:
         result: RetrievalResult,
         max_tokens: int = 4000,
         include_sources: bool = True,
+        include_store_names: bool = False,
     ) -> str:
         """
         Format retrieved chunks into context for injection.
@@ -330,6 +581,7 @@ class RAGRetriever:
             result: RetrievalResult from retrieve()
             max_tokens: Maximum tokens for context
             include_sources: Whether to include source file info
+            include_store_names: Whether to include document store names
 
         Returns:
             Formatted context string
@@ -351,11 +603,16 @@ class RAGRetriever:
             # Estimate tokens for this chunk
             chunk_tokens = len(chunk.content) // 4
 
-            if include_sources:
-                source_line = f"[Source: {chunk.source_file}]\n"
-                chunk_tokens += len(source_line) // 4
-            else:
-                source_line = ""
+            source_line = ""
+            if include_sources or include_store_names:
+                parts = []
+                if include_store_names and chunk.store_name:
+                    parts.append(f"Store: {chunk.store_name}")
+                if include_sources:
+                    parts.append(f"Source: {chunk.source_file}")
+                if parts:
+                    source_line = f"[{', '.join(parts)}]\n"
+                    chunk_tokens += len(source_line) // 4
 
             # Check if we'd exceed limit
             if current_tokens + chunk_tokens > max_tokens:
@@ -364,17 +621,10 @@ class RAGRetriever:
                 if remaining_tokens > 100:  # Worth including partial
                     remaining_chars = remaining_tokens * 4
                     truncated = chunk.content[:remaining_chars] + "..."
-                    if include_sources:
-                        context_parts.append(f"{source_line}{truncated}\n")
-                    else:
-                        context_parts.append(f"{truncated}\n")
+                    context_parts.append(f"{source_line}{truncated}\n")
                 break
 
-            if include_sources:
-                context_parts.append(f"{source_line}{chunk.content}\n")
-            else:
-                context_parts.append(f"{chunk.content}\n")
-
+            context_parts.append(f"{source_line}{chunk.content}\n")
             current_tokens += chunk_tokens
 
         if not context_parts:

@@ -51,6 +51,15 @@ def create_alias(
     tags: list[str] | None = None,
     description: str | None = None,
     enabled: bool = True,
+    # Caching
+    use_cache: bool = False,
+    cache_similarity_threshold: float = 0.95,
+    cache_match_system_prompt: bool = True,
+    cache_match_last_message_only: bool = False,
+    cache_ttl_hours: int = 168,
+    cache_min_tokens: int = 50,
+    cache_max_tokens: int = 4000,
+    cache_collection: str | None = None,
     db: Optional[Session] = None,
 ) -> Alias:
     """
@@ -82,6 +91,14 @@ def create_alias(
             target_model=target_model,
             description=description,
             enabled=enabled,
+            use_cache=use_cache,
+            cache_similarity_threshold=cache_similarity_threshold,
+            cache_match_system_prompt=cache_match_system_prompt,
+            cache_match_last_message_only=cache_match_last_message_only,
+            cache_ttl_hours=cache_ttl_hours,
+            cache_min_tokens=cache_min_tokens,
+            cache_max_tokens=cache_max_tokens,
+            cache_collection=cache_collection,
         )
         if tags:
             alias.tags = tags
@@ -109,6 +126,15 @@ def update_alias(
     tags: list[str] | None = None,
     description: str | None = None,
     enabled: bool | None = None,
+    # Caching
+    use_cache: bool | None = None,
+    cache_similarity_threshold: float | None = None,
+    cache_match_system_prompt: bool | None = None,
+    cache_match_last_message_only: bool | None = None,
+    cache_ttl_hours: int | None = None,
+    cache_min_tokens: int | None = None,
+    cache_max_tokens: int | None = None,
+    cache_collection: str | None = None,
     db: Optional[Session] = None,
 ) -> Optional[Alias]:
     """
@@ -153,6 +179,24 @@ def update_alias(
 
         if enabled is not None:
             alias.enabled = enabled
+
+        # Cache settings
+        if use_cache is not None:
+            alias.use_cache = use_cache
+        if cache_similarity_threshold is not None:
+            alias.cache_similarity_threshold = cache_similarity_threshold
+        if cache_match_system_prompt is not None:
+            alias.cache_match_system_prompt = cache_match_system_prompt
+        if cache_match_last_message_only is not None:
+            alias.cache_match_last_message_only = cache_match_last_message_only
+        if cache_ttl_hours is not None:
+            alias.cache_ttl_hours = cache_ttl_hours
+        if cache_min_tokens is not None:
+            alias.cache_min_tokens = cache_min_tokens
+        if cache_max_tokens is not None:
+            alias.cache_max_tokens = cache_max_tokens
+        if cache_collection is not None:
+            alias.cache_collection = cache_collection
 
         session.flush()
         logger.info(f"Updated alias: {alias.name}")
@@ -256,6 +300,18 @@ def _alias_to_detached(alias: Alias) -> Alias:
         tags_json=alias.tags_json,
         description=alias.description,
         enabled=alias.enabled,
+        # Cache fields
+        use_cache=alias.use_cache,
+        cache_similarity_threshold=alias.cache_similarity_threshold,
+        cache_match_system_prompt=alias.cache_match_system_prompt,
+        cache_match_last_message_only=alias.cache_match_last_message_only,
+        cache_ttl_hours=alias.cache_ttl_hours,
+        cache_min_tokens=alias.cache_min_tokens,
+        cache_max_tokens=alias.cache_max_tokens,
+        cache_collection=alias.cache_collection,
+        cache_hits=alias.cache_hits,
+        cache_tokens_saved=alias.cache_tokens_saved,
+        cache_cost_saved=alias.cache_cost_saved,
     )
     detached.id = alias.id
     detached.created_at = alias.created_at

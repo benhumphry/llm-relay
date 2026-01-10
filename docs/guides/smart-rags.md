@@ -137,15 +137,55 @@ Smart RAGs can index documents from external services via MCP (Model Context Pro
    - Configure target model and other settings
    - Click **Save**, then **Index Now**
 
-#### Setting Up Google Drive
+#### Setting Up Google (Drive/Gmail/Calendar)
 
-1. **Run the MCP server once manually** to authenticate:
+Index content from Google Drive, Gmail, or Calendar using OAuth authentication.
+
+1. **Create OAuth Credentials**:
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create or select a project
+   - Enable the APIs you need: **Drive API**, **Gmail API**, and/or **Calendar API**
+   - Go to **APIs & Services** → **Credentials**
+   - Click **Create Credentials** → **OAuth client ID**
+   - Application type: **Web application**
+   - Add authorized redirect URI: `http://your-server:8080/oauth/google/callback`
+   - Note the **Client ID** and **Client Secret**
+
+2. **Configure OAuth consent screen**:
+   - Go to **APIs & Services** → **OAuth consent screen**
+   - Configure the consent screen with your app name
+   - Add scopes for services you want to use:
+     - `drive.readonly` - for Google Drive
+     - `gmail.readonly` - for Gmail
+     - `calendar.readonly` - for Calendar
+   - Add test users (your email addresses) if in testing mode
+
+3. **Add environment variables**:
    ```bash
-   npx -y @modelcontextprotocol/server-gdrive
+   # .env
+   GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=your-client-secret
+   OAUTH_ENCRYPTION_KEY=your-32-byte-fernet-key
    ```
-   This will open a browser for OAuth authentication. Complete the flow.
+   
+   Generate an encryption key for secure token storage:
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
 
-2. **Create a Smart RAG** with the Google Drive source preset.
+4. **Create a Smart RAG with Google source**:
+   - In Admin UI, go to **Smart RAGs** → **Add RAG**
+   - Select **Google (Drive/Gmail/Calendar)** as the source
+   - Click **Connect** to link your Google account
+   - Complete the OAuth flow in the popup
+   - Select the connected account from the dropdown
+   - Choose which service to index: **Drive**, **Gmail**, or **Calendar**
+   - Configure target model and save
+
+5. **Index multiple services** (optional):
+   - Create separate RAGs for each service you want to index
+   - Each RAG can use the same Google account but index a different service
+   - Or connect multiple accounts to index from different users
 
 #### Setting Up GitHub
 

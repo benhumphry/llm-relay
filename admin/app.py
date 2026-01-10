@@ -21,6 +21,7 @@ from flask import (
     render_template,
     request,
     send_from_directory,
+    session,
     url_for,
 )
 
@@ -1148,7 +1149,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         # Build feature status
         features = {
-            "smart_caches": {
+            "smart_enrichers": {
                 "available": chroma_available,
                 "enabled": chroma_configured,
                 "reason": None
@@ -1156,19 +1157,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 else (
                     "CHROMA_URL not set"
                     if not chroma_configured
-                    else "ChromaDB not reachable"
-                ),
-            },
-            "smart_augmentors": {
-                "available": chroma_available and has_search_provider,
-                "enabled": chroma_configured and has_search_provider,
-                "reason": None
-                if (chroma_available and has_search_provider)
-                else (
-                    "Requires ChromaDB and a search provider"
-                    if not chroma_configured
-                    else "No search provider configured"
-                    if not has_search_provider
                     else "ChromaDB not reachable"
                 ),
             },
@@ -1182,17 +1170,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     if not chroma_configured
                     else "No search provider configured"
                     if not has_search_provider
-                    else "ChromaDB not reachable"
-                ),
-            },
-            "smart_rags": {
-                "available": chroma_available,
-                "enabled": chroma_configured,
-                "reason": None
-                if chroma_available
-                else (
-                    "CHROMA_URL not set"
-                    if not chroma_configured
                     else "ChromaDB not reachable"
                 ),
             },
@@ -2396,6 +2373,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     func.count(RequestLog.id).filter(RequestLog.status_code < 400),
                     func.count(RequestLog.id).filter(RequestLog.status_code >= 400),
                     func.sum(RequestLog.cost),
+                    # Cache stats
+                    func.count(RequestLog.id).filter(RequestLog.is_cache_hit == True),
+                    func.sum(RequestLog.cache_tokens_saved),
+                    func.sum(RequestLog.cache_cost_saved),
                 ).filter(RequestLog.timestamp >= filters["start_date"])
 
                 if filters["end_date"]:
@@ -2446,6 +2427,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "estimated_cost": round(stats[5] or 0, 4),
                         "success_count": stats[3] or 0,
                         "error_count": stats[4] or 0,
+                        # Cache stats
+                        "cache_hits": stats[6] or 0,
+                        "cache_tokens_saved": stats[7] or 0,
+                        "cache_cost_saved": round(stats[8] or 0, 4),
                     }
                 )
             else:
@@ -2469,6 +2454,20 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 stats = query.first()
 
+                # Get cache stats from RequestLog (not in DailyStats)
+                cache_query = db.query(
+                    func.count(RequestLog.id).filter(RequestLog.is_cache_hit == True),
+                    func.sum(RequestLog.cache_tokens_saved),
+                    func.sum(RequestLog.cache_cost_saved),
+                ).filter(RequestLog.timestamp >= filters["start_date"])
+
+                if filters["end_date"]:
+                    cache_query = cache_query.filter(
+                        RequestLog.timestamp <= filters["end_date"]
+                    )
+
+                cache_stats = cache_query.first()
+
                 return jsonify(
                     {
                         "period_days": request.args.get("days", 30),
@@ -2479,6 +2478,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "estimated_cost": round(stats[3] or 0, 4),
                         "success_count": stats[4] or 0,
                         "error_count": stats[5] or 0,
+                        # Cache stats
+                        "cache_hits": cache_stats[0] or 0,
+                        "cache_tokens_saved": cache_stats[1] or 0,
+                        "cache_cost_saved": round(cache_stats[2] or 0, 4),
                     }
                 )
 
@@ -3922,6 +3925,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 tags=data.get("tags", []),
                 description=data.get("description"),
                 enabled=data.get("enabled", True),
+                # Caching
+                use_cache=data.get("use_cache", False),
+                cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
+                cache_match_system_prompt=data.get("cache_match_system_prompt", True),
+                cache_match_last_message_only=data.get(
+                    "cache_match_last_message_only", False
+                ),
+                cache_ttl_hours=data.get("cache_ttl_hours", 168),
+                cache_min_tokens=data.get("cache_min_tokens", 50),
+                cache_max_tokens=data.get("cache_max_tokens", 4000),
             )
             return jsonify(alias.to_dict()), 201
         except ValueError as e:
@@ -3969,6 +3982,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 tags=data.get("tags"),
                 description=data.get("description"),
                 enabled=data.get("enabled"),
+                # Caching
+                use_cache=data.get("use_cache"),
+                cache_similarity_threshold=data.get("cache_similarity_threshold"),
+                cache_match_system_prompt=data.get("cache_match_system_prompt"),
+                cache_match_last_message_only=data.get("cache_match_last_message_only"),
+                cache_ttl_hours=data.get("cache_ttl_hours"),
+                cache_min_tokens=data.get("cache_min_tokens"),
+                cache_max_tokens=data.get("cache_max_tokens"),
             )
             if not alias:
                 return jsonify({"error": "Alias not found"}), 404
@@ -4119,6 +4140,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 description=data.get("description"),
                 enabled=data.get("enabled", True),
                 tags=tags if tags else None,
+                # Caching
+                use_cache=data.get("use_cache", False),
+                cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
+                cache_match_system_prompt=data.get("cache_match_system_prompt", True),
+                cache_match_last_message_only=data.get(
+                    "cache_match_last_message_only", False
+                ),
+                cache_ttl_hours=data.get("cache_ttl_hours", 168),
+                cache_min_tokens=data.get("cache_min_tokens", 50),
+                cache_max_tokens=data.get("cache_max_tokens", 4000),
             )
             return jsonify(redirect.to_dict()), 201
         except ValueError as e:
@@ -4162,6 +4193,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 description=data.get("description"),
                 enabled=data.get("enabled"),
                 tags=tags,
+                # Caching
+                use_cache=data.get("use_cache"),
+                cache_similarity_threshold=data.get("cache_similarity_threshold"),
+                cache_match_system_prompt=data.get("cache_match_system_prompt"),
+                cache_match_last_message_only=data.get("cache_match_last_message_only"),
+                cache_ttl_hours=data.get("cache_ttl_hours"),
+                cache_min_tokens=data.get("cache_min_tokens"),
+                cache_max_tokens=data.get("cache_max_tokens"),
             )
             if not redirect:
                 return jsonify({"error": "Redirect not found"}), 404
@@ -4293,6 +4332,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_model_intelligence=data.get("use_model_intelligence", False),
                 search_provider=data.get("search_provider"),
                 intelligence_model=data.get("intelligence_model"),
+                # Caching
+                use_cache=data.get("use_cache", False),
+                cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
+                cache_match_system_prompt=data.get("cache_match_system_prompt", True),
+                cache_match_last_message_only=data.get(
+                    "cache_match_last_message_only", False
+                ),
+                cache_ttl_hours=data.get("cache_ttl_hours", 168),
+                cache_min_tokens=data.get("cache_min_tokens", 50),
+                cache_max_tokens=data.get("cache_max_tokens", 4000),
             )
             return jsonify(router.to_dict()), 201
         except ValueError as e:
@@ -4354,6 +4403,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_model_intelligence=data.get("use_model_intelligence"),
                 search_provider=data.get("search_provider"),
                 intelligence_model=data.get("intelligence_model"),
+                # Caching
+                use_cache=data.get("use_cache"),
+                cache_similarity_threshold=data.get("cache_similarity_threshold"),
+                cache_match_system_prompt=data.get("cache_match_system_prompt"),
+                cache_match_last_message_only=data.get("cache_match_last_message_only"),
+                cache_ttl_hours=data.get("cache_ttl_hours"),
+                cache_min_tokens=data.get("cache_min_tokens"),
+                cache_max_tokens=data.get("cache_max_tokens"),
             )
             if not router:
                 return jsonify({"error": "Router not found"}), 404
@@ -4992,826 +5049,101 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             logger.error(f"Error clearing model intelligence: {e}")
             return jsonify({"error": str(e)}), 500
 
-    # -------------------------------------------------------------------------
-    # Smart Cache API (v3.3)
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # Document Stores (v3.9)
+    # =========================================================================
 
-    @admin.route("/caches")
+    @admin.route("/document-stores")
     @require_auth
-    def caches_page():
-        """Smart Caches management page."""
-        return render_template("caches.html")
+    def document_stores_page():
+        """Document Stores management page."""
+        return render_template("document_stores.html")
 
-    @admin.route("/api/caches", methods=["GET"])
+    @admin.route("/web-sources")
+    @require_auth
+    def web_sources_page():
+        """Web Sources configuration page (search and scraping settings)."""
+        return render_template("web_sources.html")
+
+    @admin.route("/api/mcp-integrations/status", methods=["GET"])
     @require_auth_api
-    def list_caches():
-        """List all smart caches."""
-        from db import get_all_smart_caches
+    def get_mcp_integrations_status():
+        """Check which MCP integrations are available based on environment variables."""
+        import os
 
-        caches = get_all_smart_caches()
-        return jsonify([c.to_dict() for c in caches])
-
-    @admin.route("/api/caches/<int:cache_id>", methods=["GET"])
-    @require_auth_api
-    def get_cache(cache_id: int):
-        """Get a single smart cache by ID."""
-        from db import get_smart_cache_by_id
-
-        cache = get_smart_cache_by_id(cache_id)
-        if not cache:
-            return jsonify({"error": "Cache not found"}), 404
-        return jsonify(cache.to_dict())
-
-    @admin.route("/api/caches", methods=["POST"])
-    @require_auth_api
-    def create_cache_endpoint():
-        """Create a new smart cache."""
-        from context.chroma import is_chroma_available
-        from db import cache_name_available, create_smart_cache
-
-        # Check if ChromaDB is available
-        if not is_chroma_available():
-            return jsonify(
-                {
-                    "error": "ChromaDB is not configured. Set CHROMA_URL environment variable to enable Smart Cache."
-                }
-            ), 503
-
-        data = request.get_json() or {}
-
-        # Validate required fields
-        if not data.get("name"):
-            return jsonify({"error": "Name is required"}), 400
-        if not data.get("target_model"):
-            return jsonify({"error": "Target model is required"}), 400
-
-        name = data["name"].lower().strip()
-
-        # Check if name is available
-        if not cache_name_available(name):
-            return jsonify({"error": f"Cache name '{name}' is already in use"}), 409
-
-        # Check if name conflicts with an existing model, alias, or router
-        try:
-            from providers import registry
-
-            resolved = registry.resolve_model(name)
-            # If we get here without using default fallback, the name matches something
-            if not resolved.is_default_fallback:
-                return jsonify(
-                    {
-                        "error": f"Name '{name}' conflicts with an existing model, alias, or router"
-                    }
-                ), 409
-        except ValueError:
-            # Model not found - that's fine, the name is available
-            pass
-
-        # Validate similarity threshold
-        similarity_threshold = data.get("similarity_threshold", 0.95)
-        if not (0.0 <= similarity_threshold <= 1.0):
-            return jsonify(
-                {"error": "Similarity threshold must be between 0.0 and 1.0"}
-            ), 400
-
-        try:
-            cache = create_smart_cache(
-                name=name,
-                target_model=data["target_model"],
-                similarity_threshold=similarity_threshold,
-                match_system_prompt=data.get("match_system_prompt", True),
-                match_last_message_only=data.get("match_last_message_only", False),
-                cache_ttl_hours=data.get("cache_ttl_hours", 168),
-                min_cached_tokens=data.get("min_cached_tokens", 50),
-                max_cached_tokens=data.get("max_cached_tokens", 4000),
-                tags=data.get("tags", []),
-                description=data.get("description"),
-                enabled=data.get("enabled", True),
-            )
-            return jsonify(cache.to_dict()), 201
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/caches/<int:cache_id>", methods=["PUT"])
-    @require_auth_api
-    def update_cache_endpoint(cache_id: int):
-        """Update an existing smart cache."""
-        from db import (
-            cache_name_available,
-            get_smart_cache_by_id,
-            update_smart_cache,
+        # Check for required tokens/credentials
+        has_notion = bool(
+            os.environ.get("NOTION_TOKEN") or os.environ.get("NOTION_API_KEY")
         )
-
-        data = request.get_json() or {}
-
-        # Check cache exists
-        existing = get_smart_cache_by_id(cache_id)
-        if not existing:
-            return jsonify({"error": "Cache not found"}), 404
-
-        # If name is being changed, validate it
-        new_name = data.get("name")
-        if new_name and new_name.lower().strip() != existing.name:
-            new_name = new_name.lower().strip()
-            if not cache_name_available(new_name, exclude_id=cache_id):
-                return jsonify(
-                    {"error": f"Cache name '{new_name}' is already in use"}
-                ), 409
-
-            # Check if new name conflicts with an existing model, alias, or router
-            try:
-                from providers import registry
-
-                resolved = registry.resolve_model(new_name)
-                if not resolved.is_default_fallback:
-                    return jsonify(
-                        {
-                            "error": f"Name '{new_name}' conflicts with an existing model, alias, or router"
-                        }
-                    ), 409
-            except ValueError:
-                pass
-
-        # Validate similarity threshold if provided
-        if "similarity_threshold" in data:
-            if not (0.0 <= data["similarity_threshold"] <= 1.0):
-                return jsonify(
-                    {"error": "Similarity threshold must be between 0.0 and 1.0"}
-                ), 400
-
-        try:
-            cache = update_smart_cache(
-                cache_id=cache_id,
-                name=data.get("name"),
-                target_model=data.get("target_model"),
-                similarity_threshold=data.get("similarity_threshold"),
-                match_system_prompt=data.get("match_system_prompt"),
-                match_last_message_only=data.get("match_last_message_only"),
-                cache_ttl_hours=data.get("cache_ttl_hours"),
-                min_cached_tokens=data.get("min_cached_tokens"),
-                max_cached_tokens=data.get("max_cached_tokens"),
-                tags=data.get("tags"),
-                description=data.get("description"),
-                enabled=data.get("enabled"),
-            )
-            if not cache:
-                return jsonify({"error": "Cache not found"}), 404
-            return jsonify(cache.to_dict())
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/caches/<int:cache_id>", methods=["DELETE"])
-    @require_auth_api
-    def delete_cache_endpoint(cache_id: int):
-        """Delete a smart cache."""
-        from context.chroma import delete_collection
-        from db import delete_smart_cache, get_smart_cache_by_id
-
-        # Get the cache to find its collection name
-        cache = get_smart_cache_by_id(cache_id)
-        if not cache:
-            return jsonify({"error": "Cache not found"}), 404
-
-        # Delete the ChromaDB collection if it exists
-        if cache.chroma_collection:
-            delete_collection(cache.chroma_collection)
-
-        # Delete the cache from database
-        if delete_smart_cache(cache_id):
-            return jsonify({"success": True})
-        return jsonify({"error": "Failed to delete cache"}), 500
-
-    @admin.route("/api/caches/<int:cache_id>/clear", methods=["POST"])
-    @require_auth_api
-    def clear_cache_endpoint(cache_id: int):
-        """Clear all cached entries for a smart cache."""
-        from context.chroma import is_chroma_available
-        from db import get_smart_cache_by_id, reset_smart_cache_stats
-        from routing import SmartCacheEngine
-
-        if not is_chroma_available():
-            return jsonify({"error": "ChromaDB is not available"}), 503
-
-        cache = get_smart_cache_by_id(cache_id)
-        if not cache:
-            return jsonify({"error": "Cache not found"}), 404
-
-        try:
-            # Create engine and clear the collection
-            engine = SmartCacheEngine(cache, registry)
-
-            # Get count before clearing
-            count_before = engine.collection.count()
-            logger.info(
-                f"Clearing cache '{cache.name}' - entries before: {count_before}"
-            )
-
-            engine.clear_cache()
-
-            # Verify it's empty
-            count_after = engine.collection.count()
-            logger.info(f"Cache '{cache.name}' cleared - entries after: {count_after}")
-
-            # Note: We don't reset statistics - they have historical value
-            # and represent total usage over time, not just current cache contents
-
-            return jsonify({"success": True, "entries_cleared": count_before})
-        except Exception as e:
-            logger.error(f"Failed to clear cache: {e}")
-            return jsonify({"error": f"Failed to clear cache: {str(e)}"}), 500
-
-    @admin.route("/api/caches/<int:cache_id>/stats", methods=["GET"])
-    @require_auth_api
-    def get_cache_stats_endpoint(cache_id: int):
-        """Get detailed statistics for a smart cache."""
-        from context.chroma import is_chroma_available
-        from db import get_smart_cache_by_id
-        from routing import SmartCacheEngine
-
-        cache = get_smart_cache_by_id(cache_id)
-        if not cache:
-            return jsonify({"error": "Cache not found"}), 404
-
-        result = cache.to_dict()
-
-        # Add ChromaDB stats if available
-        if is_chroma_available():
-            try:
-                engine = SmartCacheEngine(cache, registry)
-                chroma_stats = engine.get_cache_stats()
-                result["chroma_entries"] = chroma_stats.get("entries", 0)
-            except Exception as e:
-                result["chroma_error"] = str(e)
-        else:
-            result["chroma_available"] = False
-
-        return jsonify(result)
-
-    @admin.route("/api/caches/validate/<name>", methods=["GET"])
-    @require_auth_api
-    def validate_cache_name(name: str):
-        """Check if a cache name is available."""
-        from db import cache_name_available
-
-        name = name.lower().strip()
-        exclude_id = request.args.get("exclude_id", type=int)
-
-        # Check if name is taken by another cache
-        if not cache_name_available(name, exclude_id=exclude_id):
-            return jsonify(
-                {"available": False, "reason": "Name is already used by another cache"}
-            )
-
-        # Check if name conflicts with an existing model, alias, or router
-        try:
-            from providers import registry
-
-            resolved = registry.resolve_model(name)
-            if not resolved.is_default_fallback:
-                return jsonify(
-                    {
-                        "available": False,
-                        "reason": "Name conflicts with an existing model, alias, or router",
-                    }
-                )
-        except ValueError:
-            pass
-
-        return jsonify({"available": True})
-
-    @admin.route("/api/caches/chroma-status", methods=["GET"])
-    @require_auth_api
-    def get_cache_chroma_status():
-        """Check if ChromaDB is available for smart caches."""
-        from context.chroma import (
-            get_chroma_url,
-            is_chroma_available,
-            is_chroma_configured,
+        has_github = bool(
+            os.environ.get("GITHUB_TOKEN")
+            or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+        )
+        has_slack = bool(
+            os.environ.get("SLACK_BOT_TOKEN") and os.environ.get("SLACK_TEAM_ID")
+        )
+        has_google = bool(
+            os.environ.get("GOOGLE_CLIENT_ID")
+            and os.environ.get("GOOGLE_CLIENT_SECRET")
         )
 
         return jsonify(
             {
-                "configured": is_chroma_configured(),
-                "available": is_chroma_available(),
-                "url": get_chroma_url(),
+                "google": {
+                    "available": has_google,
+                    "reason": None
+                    if has_google
+                    else "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET required",
+                },
+                "notion": {
+                    "available": has_notion,
+                    "reason": None
+                    if has_notion
+                    else "NOTION_TOKEN or NOTION_API_KEY required",
+                },
+                "github": {
+                    "available": has_github,
+                    "reason": None if has_github else "GITHUB_TOKEN required",
+                },
+                "slack": {
+                    "available": has_slack,
+                    "reason": None
+                    if has_slack
+                    else "SLACK_BOT_TOKEN and SLACK_TEAM_ID required",
+                },
+                "postgres": {
+                    "available": True,
+                    "reason": None,
+                },  # Always available (connection string in args)
+                "custom": {"available": True, "reason": None},  # Always available
             }
         )
 
-    @admin.route("/api/caches/models", methods=["GET"])
+    @admin.route("/api/document-stores", methods=["GET"])
     @require_auth_api
-    def list_available_models_for_cache():
-        """List all available models that can be used as cache targets."""
-        models = []
+    def list_document_stores():
+        """List all document stores."""
+        from db import get_all_document_stores
 
-        # Only provider models - no aliases/routers/caches to avoid circular routing
-        for provider in registry.get_available_providers():
-            for model_id, info in provider.get_models().items():
-                models.append(
-                    {
-                        "id": f"{provider.name}/{model_id}",
-                        "provider": provider.name,
-                        "model_id": model_id,
-                        "family": info.family,
-                        "description": info.description,
-                        "context_length": info.context_length,
-                        "capabilities": info.capabilities,
-                        "input_cost": info.input_cost,
-                        "output_cost": info.output_cost,
-                    }
-                )
+        stores = get_all_document_stores()
+        return jsonify([s.to_dict() for s in stores])
 
-        # Sort by provider, then model_id
-        models.sort(key=lambda m: (m["provider"], m["model_id"]))
-        return jsonify(models)
-
-    # =========================================================================
-    # Smart Augmentors (v3.4)
-    # =========================================================================
-
-    @admin.route("/augmentors")
-    @require_auth
-    def augmentors_page():
-        """Smart augmentors management page."""
-        return render_template("augmentors.html")
-
-    @admin.route("/api/augmentors/models", methods=["GET"])
+    @admin.route("/api/document-stores/<int:store_id>", methods=["GET"])
     @require_auth_api
-    def list_available_models_for_augmentor():
-        """List all available models that can be used as augmentor designators/targets."""
-        models = []
+    def get_document_store(store_id: int):
+        """Get a specific document store."""
+        from db import get_document_store_by_id
 
-        # Only provider models - no aliases/routers/augmentors to avoid circular routing
-        for provider in registry.get_available_providers():
-            for model_id, info in provider.get_models().items():
-                models.append(
-                    {
-                        "id": f"{provider.name}/{model_id}",
-                        "provider": provider.name,
-                        "model_id": model_id,
-                        "family": info.family,
-                        "description": info.description,
-                        "context_length": info.context_length,
-                        "capabilities": info.capabilities,
-                        "input_cost": info.input_cost,
-                        "output_cost": info.output_cost,
-                    }
-                )
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+        return jsonify(store.to_dict())
 
-        # Sort by provider, then model_id
-        models.sort(key=lambda m: (m["provider"], m["model_id"]))
-        return jsonify(models)
-
-    @admin.route("/api/augmentors", methods=["GET"])
+    @admin.route("/api/document-stores", methods=["POST"])
     @require_auth_api
-    def list_augmentors():
-        """List all smart augmentors."""
-        from db import get_all_smart_augmentors
-
-        augmentors = get_all_smart_augmentors()
-        return jsonify([a.to_dict() for a in augmentors])
-
-    @admin.route("/api/augmentors/<int:augmentor_id>", methods=["GET"])
-    @require_auth_api
-    def get_augmentor(augmentor_id: int):
-        """Get a specific smart augmentor."""
-        from db import get_smart_augmentor_by_id
-
-        augmentor = get_smart_augmentor_by_id(augmentor_id)
-        if not augmentor:
-            return jsonify({"error": "Augmentor not found"}), 404
-        return jsonify(augmentor.to_dict())
-
-    @admin.route("/api/augmentors", methods=["POST"])
-    @require_auth_api
-    def create_augmentor():
-        """Create a new smart augmentor."""
-        from db import create_smart_augmentor
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        name = data.get("name", "").strip()
-        if not name:
-            return jsonify({"error": "Name is required"}), 400
-
-        target_model = data.get("target_model", "").strip()
-        if not target_model:
-            return jsonify({"error": "Target model is required"}), 400
-
-        designator_model = data.get("designator_model", "").strip()
-        if not designator_model:
-            return jsonify({"error": "Designator model is required"}), 400
-
-        try:
-            augmentor = create_smart_augmentor(
-                name=name,
-                designator_model=designator_model,
-                target_model=target_model,
-                purpose=data.get("purpose"),
-                search_provider=data.get("search_provider", "searxng"),
-                search_provider_url=data.get("search_provider_url"),
-                max_search_results=data.get("max_search_results", 5),
-                max_scrape_urls=data.get("max_scrape_urls", 3),
-                max_context_tokens=data.get("max_context_tokens", 4000),
-                tags=data.get("tags", []),
-                description=data.get("description"),
-                enabled=data.get("enabled", True),
-            )
-            return jsonify(augmentor.to_dict()), 201
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/augmentors/<int:augmentor_id>", methods=["PUT"])
-    @require_auth_api
-    def update_augmentor(augmentor_id: int):
-        """Update a smart augmentor."""
-        from db import update_smart_augmentor
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        try:
-            augmentor = update_smart_augmentor(
-                augmentor_id=augmentor_id,
-                name=data.get("name"),
-                designator_model=data.get("designator_model"),
-                target_model=data.get("target_model"),
-                purpose=data.get("purpose"),
-                search_provider=data.get("search_provider"),
-                search_provider_url=data.get("search_provider_url"),
-                max_search_results=data.get("max_search_results"),
-                max_scrape_urls=data.get("max_scrape_urls"),
-                max_context_tokens=data.get("max_context_tokens"),
-                tags=data.get("tags"),
-                description=data.get("description"),
-                enabled=data.get("enabled"),
-            )
-            if not augmentor:
-                return jsonify({"error": "Augmentor not found"}), 404
-            return jsonify(augmentor.to_dict())
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/augmentors/<int:augmentor_id>", methods=["DELETE"])
-    @require_auth_api
-    def delete_augmentor_endpoint(augmentor_id: int):
-        """Delete a smart augmentor."""
-        from db import delete_smart_augmentor
-
-        if delete_smart_augmentor(augmentor_id):
-            return jsonify({"success": True})
-        return jsonify({"error": "Failed to delete augmentor"}), 500
-
-    @admin.route("/api/search-providers", methods=["GET"])
-    @require_auth_api
-    def list_search_providers():
-        """List available search providers."""
-        from augmentation import list_search_providers
-
-        providers = list_search_providers()
-        return jsonify(providers)
-
-    # =========================================================================
-    # Smart RAGs (v3.8)
-    # =========================================================================
-
-    @admin.route("/rags")
-    @require_auth
-    def rags_page():
-        """Smart RAGs management page."""
-        return render_template("rags.html")
-
-    @admin.route("/api/rags/models", methods=["GET"])
-    @require_auth_api
-    def list_available_models_for_rag():
-        """List all available models that can be used as RAG targets."""
-        models = []
-
-        # Only provider models - no aliases/routers/rags to avoid circular routing
-        for provider in registry.get_available_providers():
-            for model_id, info in provider.get_models().items():
-                models.append(
-                    {
-                        "id": f"{provider.name}/{model_id}",
-                        "provider": provider.name,
-                        "model_id": model_id,
-                        "family": info.family,
-                        "description": info.description,
-                        "context_length": info.context_length,
-                        "capabilities": info.capabilities,
-                        "input_cost": info.input_cost,
-                        "output_cost": info.output_cost,
-                    }
-                )
-
-        # Sort by provider, then model_id
-        models.sort(key=lambda m: (m["provider"], m["model_id"]))
-        return jsonify(models)
-
-    @admin.route("/api/rags/embedding-models", methods=["GET"])
-    @require_auth_api
-    def list_embedding_models_for_rag():
-        """List all available embedding models for RAG.
-
-        Returns ALL configured providers, with suggested models where known.
-        Providers without known embedding models will have an empty list
-        but users can still enter a custom model name.
-        """
-        # Known embedding models for various providers (suggestions only)
-        PROVIDER_EMBEDDING_MODELS = {
-            "openai": [
-                {"id": "text-embedding-3-small", "name": "Text Embedding 3 Small"},
-                {"id": "text-embedding-3-large", "name": "Text Embedding 3 Large"},
-                {"id": "text-embedding-ada-002", "name": "Text Embedding Ada 002"},
-            ],
-            "openrouter": [
-                {
-                    "id": "openai/text-embedding-3-small",
-                    "name": "OpenAI Text Embedding 3 Small",
-                },
-                {
-                    "id": "openai/text-embedding-3-large",
-                    "name": "OpenAI Text Embedding 3 Large",
-                },
-            ],
-            "together": [
-                {
-                    "id": "togethercomputer/m2-bert-80M-8k-retrieval",
-                    "name": "M2-BERT 80M 8K",
-                },
-                {
-                    "id": "togethercomputer/m2-bert-80M-32k-retrieval",
-                    "name": "M2-BERT 80M 32K",
-                },
-                {"id": "BAAI/bge-large-en-v1.5", "name": "BGE Large English"},
-                {"id": "BAAI/bge-base-en-v1.5", "name": "BGE Base English"},
-            ],
-            "fireworks": [
-                {
-                    "id": "nomic-ai/nomic-embed-text-v1.5",
-                    "name": "Nomic Embed Text v1.5",
-                },
-                {"id": "thenlper/gte-large", "name": "GTE Large"},
-            ],
-            "deepinfra": [
-                {"id": "BAAI/bge-large-en-v1.5", "name": "BGE Large English"},
-                {
-                    "id": "sentence-transformers/all-MiniLM-L6-v2",
-                    "name": "All MiniLM L6 v2",
-                },
-            ],
-            "cohere": [
-                {"id": "embed-english-v3.0", "name": "Embed English v3.0"},
-                {"id": "embed-multilingual-v3.0", "name": "Embed Multilingual v3.0"},
-                {"id": "embed-english-light-v3.0", "name": "Embed English Light v3.0"},
-            ],
-            "voyage": [
-                {"id": "voyage-3", "name": "Voyage 3"},
-                {"id": "voyage-3-lite", "name": "Voyage 3 Lite"},
-                {"id": "voyage-code-3", "name": "Voyage Code 3"},
-            ],
-            "mistral": [
-                {"id": "mistral-embed", "name": "Mistral Embed"},
-            ],
-        }
-
-        result = {
-            "local": {
-                "available": True,
-                "description": "Bundled model (no external dependencies)",
-                "models": [
-                    {
-                        "id": "BAAI/bge-small-en-v1.5",
-                        "name": "BGE Small English (384 dim)",
-                    }
-                ],
-            },
-            "ollama": {
-                "available": False,
-                "instances": [],
-            },
-            "providers": [],
-        }
-
-        # Check Ollama instances for embedding models
-        ollama_instances = []
-        # Common embedding model names/patterns
-        embedding_patterns = [
-            "embed",
-            "nomic-embed",
-            "bge",
-            "mxbai-embed",
-            "all-minilm",
-            "snowflake-arctic-embed",
-            "paraphrase",
-            "e5-",
-            "gte-",
-        ]
-
-        for provider in _get_ollama_providers():
-            if provider.is_configured():
-                raw_models = provider.get_raw_models()
-                models = []
-                for model in raw_models:
-                    name = model.get("name", "").lower()
-                    # Check if this looks like an embedding model
-                    is_embedding = any(
-                        pattern in name for pattern in embedding_patterns
-                    )
-                    if is_embedding:
-                        models.append(
-                            {
-                                "id": model.get("name", ""),
-                                "name": model.get("name", ""),
-                                "size": model.get("size"),
-                            }
-                        )
-                if models:
-                    ollama_instances.append(
-                        {
-                            "name": provider.name,
-                            "url": provider.base_url,
-                            "models": models,
-                        }
-                    )
-
-        if ollama_instances:
-            result["ollama"]["available"] = True
-            result["ollama"]["instances"] = ollama_instances
-
-        # Include ALL configured providers (not just those with known embedding models)
-        for provider in registry.get_available_providers():
-            # Skip Ollama providers (handled above)
-            if provider.name.startswith("ollama"):
-                continue
-
-            provider_name = provider.name.lower()
-            # Get suggested models if available, otherwise empty list
-            # (user can enter custom model name)
-            suggested_models = PROVIDER_EMBEDDING_MODELS.get(provider_name, [])
-
-            result["providers"].append(
-                {
-                    "name": provider.name,
-                    "models": suggested_models,
-                    "supports_custom": True,  # All providers support custom model names
-                }
-            )
-
-        return jsonify(result)
-
-    @admin.route("/api/rags/vision-models", methods=["GET"])
-    @require_auth_api
-    def list_vision_models_for_rag():
-        """List all available vision models for document parsing.
-
-        Vision models are used by Docling for parsing complex documents
-        (PDFs with tables, images requiring OCR, etc.).
-        """
-        # Known vision models for various providers (suggestions only)
-        PROVIDER_VISION_MODELS = {
-            "openai": [
-                {"id": "gpt-4o", "name": "GPT-4o"},
-                {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
-                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
-            ],
-            "anthropic": [
-                {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
-                {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
-                {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku"},
-            ],
-            "openrouter": [
-                {"id": "openai/gpt-4o", "name": "OpenAI GPT-4o"},
-                {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet"},
-                {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5"},
-            ],
-            "google": [
-                {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
-                {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
-            ],
-            "together": [
-                {
-                    "id": "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
-                    "name": "Llama 3.2 11B Vision",
-                },
-                {
-                    "id": "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo",
-                    "name": "Llama 3.2 90B Vision",
-                },
-            ],
-            "fireworks": [
-                {
-                    "id": "accounts/fireworks/models/llama-v3p2-11b-vision-instruct",
-                    "name": "Llama 3.2 11B Vision",
-                },
-            ],
-        }
-
-        result = {
-            "local": {
-                "available": True,
-                "description": "Bundled Docling models (CPU/GPU)",
-                "models": [
-                    {
-                        "id": "default",
-                        "name": "Docling Default (local processing)",
-                    }
-                ],
-            },
-            "ollama": {
-                "available": False,
-                "instances": [],
-            },
-            "providers": [],
-        }
-
-        # Check Ollama instances for vision models
-        ollama_instances = []
-        # Common vision model names/patterns
-        vision_patterns = [
-            "vision",
-            "llava",
-            "granite-docling",
-            "granite3.2-vision",
-            "moondream",
-            "bakllava",
-            "llama3.2-vision",
-        ]
-
-        for provider in _get_ollama_providers():
-            if provider.is_configured():
-                raw_models = provider.get_raw_models()
-                models = []
-                for model in raw_models:
-                    name = model.get("name", "").lower()
-                    # Check if this looks like a vision model
-                    is_vision = any(pattern in name for pattern in vision_patterns)
-                    if is_vision:
-                        models.append(
-                            {
-                                "id": model.get("name", ""),
-                                "name": model.get("name", ""),
-                                "size": model.get("size"),
-                            }
-                        )
-                if models:
-                    ollama_instances.append(
-                        {
-                            "name": provider.name,
-                            "url": provider.base_url,
-                            "models": models,
-                        }
-                    )
-
-        if ollama_instances:
-            result["ollama"]["available"] = True
-            result["ollama"]["instances"] = ollama_instances
-
-        # Include ALL configured providers
-        for provider in registry.get_available_providers():
-            if provider.name.startswith("ollama"):
-                continue
-
-            provider_name = provider.name.lower()
-            suggested_models = PROVIDER_VISION_MODELS.get(provider_name, [])
-
-            result["providers"].append(
-                {
-                    "name": provider.name,
-                    "models": suggested_models,
-                    "supports_custom": True,
-                }
-            )
-
-        return jsonify(result)
-
-    @admin.route("/api/rags", methods=["GET"])
-    @require_auth_api
-    def list_rags():
-        """List all smart RAGs."""
-        from db import get_all_smart_rags
-
-        rags = get_all_smart_rags()
-        return jsonify([r.to_dict() for r in rags])
-
-    @admin.route("/api/rags/<int:rag_id>", methods=["GET"])
-    @require_auth_api
-    def get_rag(rag_id: int):
-        """Get a specific smart RAG."""
-        from db import get_smart_rag_by_id
-
-        rag = get_smart_rag_by_id(rag_id)
-        if not rag:
-            return jsonify({"error": "RAG not found"}), 404
-        return jsonify(rag.to_dict())
-
-    @admin.route("/api/rags", methods=["POST"])
-    @require_auth_api
-    def create_rag():
-        """Create a new smart RAG."""
-        from db import create_smart_rag
+    def create_document_store():
+        """Create a new document store."""
+        from db import create_document_store as db_create_store
 
         data = request.get_json()
         if not data:
@@ -5822,30 +5154,43 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"error": "Name is required"}), 400
 
         source_type = data.get("source_type", "local")
-        source_path = data.get("source_path", "").strip() if data.get("source_path") else None
+        source_path = (
+            data.get("source_path", "").strip() if data.get("source_path") else None
+        )
         mcp_server_config = data.get("mcp_server_config")
 
         # Validate source configuration
+        google_account_id = data.get("google_account_id")
         if source_type == "local":
             if not source_path:
-                return jsonify({"error": "Source path is required for local sources"}), 400
+                return jsonify(
+                    {"error": "Source path is required for local sources"}
+                ), 400
+        elif source_type in ("mcp:gdrive", "mcp:gmail", "mcp:gcalendar"):
+            # Google sources require OAuth account
+            if not google_account_id:
+                return jsonify(
+                    {"error": "Google account is required for Google sources"}
+                ), 400
         elif source_type == "mcp":
             if not mcp_server_config or not mcp_server_config.get("name"):
                 return jsonify({"error": "MCP server configuration is required"}), 400
         else:
             return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
-        target_model = data.get("target_model", "").strip()
-        if not target_model:
-            return jsonify({"error": "Target model is required"}), 400
-
         try:
-            rag = create_smart_rag(
+            store = db_create_store(
                 name=name,
                 source_type=source_type,
                 source_path=source_path,
                 mcp_server_config=mcp_server_config,
-                target_model=target_model,
+                google_account_id=google_account_id,
+                gdrive_folder_id=data.get("gdrive_folder_id"),
+                gdrive_folder_name=data.get("gdrive_folder_name"),
+                gmail_label_id=data.get("gmail_label_id"),
+                gmail_label_name=data.get("gmail_label_name"),
+                gcalendar_calendar_id=data.get("gcalendar_calendar_id"),
+                gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
                 embedding_provider=data.get("embedding_provider", "local"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5855,35 +5200,37 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 index_schedule=data.get("index_schedule"),
                 chunk_size=data.get("chunk_size", 512),
                 chunk_overlap=data.get("chunk_overlap", 50),
-                max_results=data.get("max_results", 5),
-                similarity_threshold=data.get("similarity_threshold", 0.7),
-                max_context_tokens=data.get("max_context_tokens", 4000),
-                tags=data.get("tags", []),
                 description=data.get("description"),
                 enabled=data.get("enabled", True),
             )
-            return jsonify(rag.to_dict()), 201
+            return jsonify(store.to_dict()), 201
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
-    @admin.route("/api/rags/<int:rag_id>", methods=["PUT"])
+    @admin.route("/api/document-stores/<int:store_id>", methods=["PUT"])
     @require_auth_api
-    def update_rag_endpoint(rag_id: int):
-        """Update a smart RAG."""
-        from db import update_smart_rag
+    def update_document_store_endpoint(store_id: int):
+        """Update a document store."""
+        from db import update_document_store
 
         data = request.get_json()
         if not data:
             return jsonify({"error": "No data provided"}), 400
 
         try:
-            rag = update_smart_rag(
-                rag_id=rag_id,
+            store = update_document_store(
+                store_id=store_id,
                 name=data.get("name"),
                 source_type=data.get("source_type"),
                 source_path=data.get("source_path"),
                 mcp_server_config=data.get("mcp_server_config"),
-                target_model=data.get("target_model"),
+                google_account_id=data.get("google_account_id"),
+                gdrive_folder_id=data.get("gdrive_folder_id"),
+                gdrive_folder_name=data.get("gdrive_folder_name"),
+                gmail_label_id=data.get("gmail_label_id"),
+                gmail_label_name=data.get("gmail_label_name"),
+                gcalendar_calendar_id=data.get("gcalendar_calendar_id"),
+                gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
                 embedding_provider=data.get("embedding_provider"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5893,54 +5240,62 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 index_schedule=data.get("index_schedule"),
                 chunk_size=data.get("chunk_size"),
                 chunk_overlap=data.get("chunk_overlap"),
-                max_results=data.get("max_results"),
-                similarity_threshold=data.get("similarity_threshold"),
-                max_context_tokens=data.get("max_context_tokens"),
-                tags=data.get("tags"),
                 description=data.get("description"),
                 enabled=data.get("enabled"),
             )
-            if not rag:
-                return jsonify({"error": "RAG not found"}), 404
-            return jsonify(rag.to_dict())
+            if not store:
+                return jsonify({"error": "Document store not found"}), 404
+            return jsonify(store.to_dict())
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
 
-    @admin.route("/api/rags/<int:rag_id>", methods=["DELETE"])
+    @admin.route("/api/document-stores/<int:store_id>", methods=["DELETE"])
     @require_auth_api
-    def delete_rag_endpoint(rag_id: int):
-        """Delete a smart RAG and its ChromaDB collection."""
-        from db import delete_smart_rag, get_smart_rag_by_id
+    def delete_document_store_endpoint(store_id: int):
+        """Delete a document store and its ChromaDB collection."""
+        from db import delete_document_store, get_document_store_by_id
+
+        # Check if any RAGs are using this store
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        if store.smart_enrichers:
+            enricher_names = [e.name for e in store.smart_enrichers]
+            return jsonify(
+                {
+                    "error": f"Cannot delete store - used by enrichers: {', '.join(enricher_names)}"
+                }
+            ), 409
 
         # Try to delete the ChromaDB collection first
-        rag = get_smart_rag_by_id(rag_id)
-        if rag and rag.collection_name:
+        if store.collection_name:
             try:
                 from rag import get_indexer
 
                 indexer = get_indexer()
-                indexer.delete_collection(rag_id)
+                indexer.delete_store_collection(store_id)
             except Exception as e:
                 logger.warning(f"Failed to delete ChromaDB collection: {e}")
 
-        if delete_smart_rag(rag_id):
+        if delete_document_store(store_id):
             return jsonify({"success": True})
-        return jsonify({"error": "Failed to delete RAG"}), 500
+        return jsonify({"error": "Failed to delete document store"}), 500
 
-    @admin.route("/api/rags/<int:rag_id>/index", methods=["POST"])
+    @admin.route("/api/document-stores/<int:store_id>/index", methods=["POST"])
     @require_auth_api
-    def index_rag_now(rag_id: int):
-        """Trigger immediate indexing for a RAG."""
-        from db import get_smart_rag_by_id
+    def index_store_now(store_id: int):
+        """Trigger immediate indexing for a document store."""
+        from db import get_document_store_by_id
         from rag import get_indexer
 
-        rag = get_smart_rag_by_id(rag_id)
-        if not rag:
-            return jsonify({"error": "RAG not found"}), 404
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
 
         try:
             indexer = get_indexer()
-            if indexer.index_rag(rag_id, background=True):
+            if indexer.index_store(store_id, background=True):
                 return jsonify({"success": True, "message": "Indexing started"})
             else:
                 return jsonify({"error": "Indexing already in progress"}), 409
@@ -5948,32 +5303,792 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             logger.error(f"Failed to start indexing: {e}")
             return jsonify({"error": str(e)}), 500
 
-    @admin.route("/api/rags/<int:rag_id>/cancel-index", methods=["POST"])
+    @admin.route("/api/document-stores/<int:store_id>/cancel-index", methods=["POST"])
     @require_auth_api
-    def cancel_rag_indexing(rag_id: int):
-        """Cancel/reset a stuck indexing job."""
-        from db import get_smart_rag_by_id
+    def cancel_store_indexing(store_id: int):
+        """Cancel/reset a stuck indexing job for a document store."""
+        from db import get_document_store_by_id
         from rag import get_indexer
 
-        rag = get_smart_rag_by_id(rag_id)
-        if not rag:
-            return jsonify({"error": "RAG not found"}), 404
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
 
         try:
             indexer = get_indexer()
-            indexer.cancel_indexing(rag_id)
+            indexer.cancel_store_indexing(store_id)
             return jsonify({"success": True, "message": "Indexing cancelled"})
         except Exception as e:
             logger.error(f"Failed to cancel indexing: {e}")
             return jsonify({"error": str(e)}), 500
 
-    @admin.route("/api/rags/embedding-providers", methods=["GET"])
+    @admin.route("/api/document-stores/<int:store_id>/clear", methods=["POST"])
     @require_auth_api
-    def list_embedding_providers():
-        """List available embedding providers."""
-        from rag import list_embedding_providers
+    def clear_store_contents(store_id: int):
+        """Clear all indexed content from a document store without deleting it."""
+        from db import get_document_store_by_id, update_document_store_index_status
+        from rag import get_indexer
 
-        providers = list_embedding_providers()
-        return jsonify(providers)
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        try:
+            indexer = get_indexer()
+            # Cancel any running indexing first
+            indexer.cancel_store_indexing(store_id)
+            # Delete the ChromaDB collection
+            indexer.delete_store_collection(store_id)
+            # Reset the store stats
+            update_document_store_index_status(
+                store_id, "pending", document_count=0, chunk_count=0
+            )
+            return jsonify({"success": True, "message": "Store contents cleared"})
+        except Exception as e:
+            logger.error(f"Failed to clear store contents: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # -------------------------------------------------------------------------
+    # OAuth Routes (Google, etc.)
+    # -------------------------------------------------------------------------
+
+    # Google OAuth scopes for different services
+    # All include userinfo.email to identify the account
+    GOOGLE_SCOPES = {
+        "drive": [
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ],
+        "gmail": [
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/gmail.readonly",
+        ],
+        "calendar": [
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/calendar.readonly",
+        ],
+        "workspace": [
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/calendar.readonly",
+        ],
+    }
+
+    @admin.route("/api/oauth/tokens", methods=["GET"])
+    @require_auth_api
+    def list_oauth_tokens():
+        """List all stored OAuth tokens (metadata only)."""
+        from db.oauth_tokens import list_oauth_tokens
+
+        provider = request.args.get("provider")
+        tokens = list_oauth_tokens(provider=provider)
+        return jsonify(tokens)
+
+    @admin.route("/api/oauth/tokens/<int:token_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_oauth_token(token_id: int):
+        """Delete an OAuth token."""
+        from db.oauth_tokens import delete_oauth_token
+
+        if delete_oauth_token(token_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Token not found"}), 404
+
+    @admin.route("/api/oauth/google/start", methods=["GET"])
+    @require_auth_api
+    def google_oauth_start():
+        """
+        Start Google OAuth flow.
+
+        Query params:
+            - scope: "drive", "gmail", "calendar", or "workspace" (default: workspace)
+            - redirect_uri: Where to redirect after auth (default: /rags)
+
+        Returns redirect URL to Google consent screen.
+        """
+        import secrets
+        import urllib.parse
+
+        client_id = os.environ.get("GOOGLE_CLIENT_ID")
+        if not client_id:
+            return jsonify(
+                {
+                    "error": "GOOGLE_CLIENT_ID not configured",
+                    "setup_required": True,
+                }
+            ), 400
+
+        # Always request all scopes (workspace) so one account works for Drive, Gmail, Calendar
+        # This avoids confusing UX where users need separate accounts per service
+        scopes = GOOGLE_SCOPES["workspace"]
+
+        # Generate state token for CSRF protection
+        # Store in database instead of session to avoid cookie issues with OAuth redirects
+        import json
+
+        from db import set_setting
+
+        state = secrets.token_urlsafe(32)
+        oauth_data = {
+            "redirect": request.args.get("redirect_uri", "/document-stores"),
+            "scopes": scopes,
+        }
+        set_setting(f"oauth_state_{state}", json.dumps(oauth_data))
+
+        # Build the OAuth URL
+        # Determine our callback URL - use EXTERNAL_URL if set (for reverse proxy setups)
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.google_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.google_oauth_callback"
+            )
+
+        params = {
+            "client_id": client_id,
+            "redirect_uri": callback_url,
+            "scope": " ".join(scopes),
+            "response_type": "code",
+            "state": state,
+            "access_type": "offline",  # Get refresh token
+            "prompt": "consent",  # Always show consent to get refresh token
+        }
+
+        auth_url = (
+            "https://accounts.google.com/o/oauth2/v2/auth?"
+            + urllib.parse.urlencode(params)
+        )
+
+        return jsonify({"auth_url": auth_url})
+
+    @admin.route("/api/document-stores/oauth/callback", methods=["GET"])
+    def google_oauth_callback():
+        """
+        Handle Google OAuth callback.
+
+        Google redirects here after user consents. We exchange the code for tokens.
+        """
+        import requests as http_requests
+
+        error = request.args.get("error")
+        if error:
+            logger.error(f"Google OAuth error: {error}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Google authentication failed: {error}",
+            )
+
+        # Verify state - retrieve from database
+        import json
+
+        from db import delete_setting, get_setting
+
+        state = request.args.get("state")
+        oauth_data_json = get_setting(f"oauth_state_{state}") if state else None
+
+        if not state or not oauth_data_json:
+            logger.error("OAuth state mismatch or not found")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="Invalid OAuth state. Please try again.",
+            )
+
+        # Parse stored OAuth data and clean up
+        oauth_data = json.loads(oauth_data_json)
+        delete_setting(f"oauth_state_{state}")  # One-time use
+
+        code = request.args.get("code")
+        if not code:
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="No authorization code received.",
+            )
+
+        # Exchange code for tokens
+        client_id = os.environ.get("GOOGLE_CLIENT_ID")
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+
+        # Use EXTERNAL_URL if set (for reverse proxy setups)
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.google_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.google_oauth_callback"
+            )
+
+        try:
+            token_response = http_requests.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": callback_url,
+                    "grant_type": "authorization_code",
+                },
+                timeout=30,
+            )
+            token_response.raise_for_status()
+            token_data = token_response.json()
+        except Exception as e:
+            logger.error(f"Failed to exchange OAuth code: {e}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Failed to get tokens: {e}",
+            )
+
+        if "refresh_token" not in token_data:
+            logger.warning(
+                "No refresh_token in response - user may have already authorized"
+            )
+
+        # Get user info to identify the account
+        try:
+            userinfo_response = http_requests.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {token_data['access_token']}"},
+                timeout=30,
+            )
+            userinfo_response.raise_for_status()
+            userinfo = userinfo_response.json()
+            account_email = userinfo.get("email", "unknown")
+            account_name = userinfo.get("name")
+        except Exception as e:
+            logger.warning(f"Failed to get user info: {e}")
+            account_email = "unknown"
+            account_name = None
+
+        # Store the tokens
+        from db.oauth_tokens import store_oauth_token
+
+        scopes = oauth_data.get("scopes", [])
+
+        # Add client credentials to token data for later refresh
+        token_data["client_id"] = client_id
+        token_data["client_secret"] = client_secret
+        token_data["token_uri"] = "https://oauth2.googleapis.com/token"
+
+        token_id = store_oauth_token(
+            provider="google",
+            account_email=account_email,
+            token_data=token_data,
+            scopes=scopes,
+            account_name=account_name,
+        )
+
+        redirect_url = oauth_data.get("redirect", "/document-stores")
+
+        return render_template(
+            "oauth_result.html",
+            success=True,
+            account_id=token_id,
+            account_email=account_email,
+            account_name=account_name,
+            redirect_url=redirect_url,
+        )
+
+    @admin.route("/api/oauth/google/status", methods=["GET"])
+    @require_auth_api
+    def google_oauth_status():
+        """
+        Check Google OAuth configuration status.
+
+        Returns whether client credentials are configured and list of connected accounts.
+        """
+        from db.oauth_tokens import list_oauth_tokens
+
+        client_id = os.environ.get("GOOGLE_CLIENT_ID")
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+
+        configured = bool(client_id and client_secret)
+        accounts = list_oauth_tokens(provider="google") if configured else []
+
+        return jsonify(
+            {
+                "configured": configured,
+                "accounts": accounts,
+            }
+        )
+
+    @admin.route("/api/oauth/accounts/<int:account_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_oauth_account(account_id):
+        """Delete an OAuth account by ID."""
+        from db.oauth_tokens import delete_oauth_token
+
+        if delete_oauth_token(account_id):
+            return jsonify({"success": True})
+        else:
+            return jsonify({"error": "Account not found"}), 404
+
+    @admin.route("/api/oauth/google/<int:account_id>/folders", methods=["GET"])
+    @require_auth_api
+    def list_google_drive_folders(account_id):
+        """
+        List folders from a Google Drive account using the Drive API directly.
+
+        Query params:
+            parent: Optional parent folder ID to list subfolders of.
+                    If not provided or 'root', lists root-level folders.
+
+        Returns a list of folders the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id, list_oauth_tokens
+
+        parent_id = request.args.get("parent", "root") or "root"
+
+        # Get the OAuth token
+        tokens = list_oauth_tokens(provider="google")
+        token_meta = next((t for t in tokens if t["id"] == account_id), None)
+        if not token_meta:
+            return jsonify({"error": "OAuth account not found"}), 404
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "Failed to get OAuth token"}), 400
+
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return jsonify({"error": "No access token available"}), 400
+
+        folders = []
+        try:
+            # Use Google Drive API directly
+            # Query: folders that have the specified parent
+            query = f"'{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+
+            page_token = None
+            max_pages = 10
+
+            for _ in range(max_pages):
+                params = {
+                    "q": query,
+                    "fields": "nextPageToken, files(id, name)",
+                    "pageSize": 100,
+                    "orderBy": "name",
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+
+                response = http_requests.get(
+                    "https://www.googleapis.com/drive/v3/files",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=30,
+                )
+
+                if response.status_code == 401:
+                    # Token expired - try to refresh
+                    refresh_token = token_data.get("refresh_token")
+                    client_id = token_data.get("client_id")
+                    client_secret = token_data.get("client_secret")
+
+                    if refresh_token and client_id and client_secret:
+                        refresh_response = http_requests.post(
+                            "https://oauth2.googleapis.com/token",
+                            data={
+                                "client_id": client_id,
+                                "client_secret": client_secret,
+                                "refresh_token": refresh_token,
+                                "grant_type": "refresh_token",
+                            },
+                            timeout=30,
+                        )
+                        if refresh_response.status_code == 200:
+                            new_token_data = refresh_response.json()
+                            access_token = new_token_data.get("access_token")
+                            # Update stored token
+                            from db.oauth_tokens import update_oauth_token_data
+
+                            token_data["access_token"] = access_token
+                            update_oauth_token_data(account_id, token_data)
+                            # Retry the request
+                            response = http_requests.get(
+                                "https://www.googleapis.com/drive/v3/files",
+                                headers={"Authorization": f"Bearer {access_token}"},
+                                params=params,
+                                timeout=30,
+                            )
+                        else:
+                            return jsonify(
+                                {"error": "Token expired and refresh failed"}
+                            ), 401
+                    else:
+                        return jsonify(
+                            {"error": "Token expired and no refresh token available"}
+                        ), 401
+
+                if response.status_code != 200:
+                    logger.error(
+                        f"Drive API error: {response.status_code} - {response.text}"
+                    )
+                    return jsonify(
+                        {"error": f"Drive API error: {response.status_code}"}
+                    ), 500
+
+                data = response.json()
+                for file in data.get("files", []):
+                    folders.append({"id": file["id"], "name": file["name"]})
+
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+
+        except Exception as e:
+            logger.error(f"Failed to list Google Drive folders: {e}")
+            return jsonify({"error": str(e)}), 500
+
+        return jsonify(
+            {
+                "folders": folders,
+                "parent_id": parent_id if parent_id != "root" else "",
+            }
+        )
+
+    @admin.route("/api/oauth/google/<int:account_id>/labels", methods=["GET"])
+    @require_auth_api
+    def list_gmail_labels(account_id):
+        """
+        List labels from a Gmail account.
+
+        Returns a list of labels the user can select to limit indexing scope.
+        Gmail labels include system labels (INBOX, SENT, etc.) and user labels.
+        """
+        from mcp.client import MCPClient, MCPServerConfig
+        from mcp.sources import _setup_google_oauth_files
+
+        # Set up credentials for this account
+        creds_dir = _setup_google_oauth_files(account_id)
+        if not creds_dir:
+            return jsonify({"error": "Failed to set up Google credentials"}), 400
+
+        config = MCPServerConfig(
+            name="gmail",
+            transport="stdio",
+            command="uvx",
+            args=[
+                "mcp-gsuite",
+                "--gauth-file",
+                f"{creds_dir}/.gauth.json",
+                "--accounts-file",
+                f"{creds_dir}/.accounts.json",
+                "--credentials-dir",
+                creds_dir,
+            ],
+        )
+
+        labels = []
+        try:
+            client = MCPClient(config)
+            if not client.connect():
+                return jsonify({"error": "Failed to connect to Gmail"}), 500
+
+            # Query emails to get available labels
+            # mcp-gsuite doesn't have a list_labels tool, so we'll provide common labels
+            # and let the user type custom ones
+            client.disconnect()
+
+            # Provide standard Gmail labels
+            standard_labels = [
+                {"id": "", "name": "All emails (no filter)"},
+                {"id": "INBOX", "name": "Inbox"},
+                {"id": "SENT", "name": "Sent"},
+                {"id": "DRAFT", "name": "Drafts"},
+                {"id": "STARRED", "name": "Starred"},
+                {"id": "IMPORTANT", "name": "Important"},
+                {"id": "UNREAD", "name": "Unread"},
+                {"id": "SPAM", "name": "Spam"},
+                {"id": "TRASH", "name": "Trash"},
+                {"id": "CATEGORY_PERSONAL", "name": "Category: Personal"},
+                {"id": "CATEGORY_SOCIAL", "name": "Category: Social"},
+                {"id": "CATEGORY_PROMOTIONS", "name": "Category: Promotions"},
+                {"id": "CATEGORY_UPDATES", "name": "Category: Updates"},
+                {"id": "CATEGORY_FORUMS", "name": "Category: Forums"},
+            ]
+
+            return jsonify({"labels": standard_labels})
+
+        except Exception as e:
+            logger.error(f"Failed to list Gmail labels: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/oauth/google/<int:account_id>/calendars", methods=["GET"])
+    @require_auth_api
+    def list_google_calendars(account_id):
+        """
+        List calendars from a Google Calendar account using direct API.
+
+        Returns a list of calendars the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        # Try the access token first
+        response = http_requests.get(
+            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                # Update stored token
+                from db.oauth_tokens import update_oauth_token
+
+                update_oauth_token(account_id, {"access_token": access_token})
+
+                # Retry the request
+                response = http_requests.get(
+                    "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list calendars: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list calendars: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+        calendars = [{"id": "", "name": "Primary calendar only"}]
+
+        for cal in data.get("items", []):
+            cal_id = cal.get("id", "")
+            summary = cal.get("summary", cal_id)
+            primary = cal.get("primary", False)
+
+            if primary:
+                # Put primary first (after the "all" option)
+                calendars.insert(1, {"id": cal_id, "name": f"{summary} (Primary)"})
+            else:
+                calendars.append({"id": cal_id, "name": summary})
+
+        return jsonify({"calendars": calendars})
+
+    # =========================================================================
+    # Smart Enrichers (unified RAG + Web)
+    # =========================================================================
+
+    @admin.route("/enrichers")
+    @require_auth
+    def enrichers_page():
+        """Smart Enrichers management page."""
+        return render_template("enrichers.html")
+
+    @admin.route("/api/enrichers/models", methods=["GET"])
+    @require_auth_api
+    def list_available_models_for_enricher():
+        """List all available models that can be used as enricher targets."""
+        models = []
+
+        # Only provider models - no aliases/routers to avoid circular routing
+        for provider in registry.get_available_providers():
+            for model_id, info in provider.get_models().items():
+                models.append(
+                    {
+                        "id": f"{provider.name}/{model_id}",
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "family": info.family,
+                        "description": info.description,
+                        "context_length": info.context_length,
+                        "capabilities": info.capabilities,
+                        "input_cost": info.input_cost,
+                        "output_cost": info.output_cost,
+                    }
+                )
+
+        # Sort by provider, then model_id
+        models.sort(key=lambda m: (m["provider"], m["model_id"]))
+        return jsonify(models)
+
+    @admin.route("/api/enrichers", methods=["GET"])
+    @require_auth_api
+    def list_enrichers():
+        """List all smart enrichers."""
+        from db import get_all_smart_enrichers
+
+        enrichers = get_all_smart_enrichers()
+        return jsonify([e.to_dict() for e in enrichers])
+
+    @admin.route("/api/enrichers/<int:enricher_id>", methods=["GET"])
+    @require_auth_api
+    def get_enricher(enricher_id: int):
+        """Get a specific smart enricher."""
+        from db import get_smart_enricher_by_id
+
+        enricher = get_smart_enricher_by_id(enricher_id)
+        if not enricher:
+            return jsonify({"error": "Enricher not found"}), 404
+        return jsonify(enricher.to_dict())
+
+    @admin.route("/api/enrichers", methods=["POST"])
+    @require_auth_api
+    def create_enricher():
+        """Create a new smart enricher."""
+        from db import create_smart_enricher
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+
+        target_model = data.get("target_model", "").strip()
+        if not target_model:
+            return jsonify({"error": "Target model is required"}), 400
+
+        use_rag = data.get("use_rag", False)
+        use_web = data.get("use_web", False)
+
+        if not use_rag and not use_web:
+            return jsonify(
+                {"error": "At least one enrichment option (RAG or Web) must be enabled"}
+            ), 400
+
+        # Document store IDs (for RAG)
+        store_ids = data.get("document_store_ids") or data.get("store_ids")
+
+        # If RAG is enabled, we need document stores
+        if use_rag and not store_ids:
+            return jsonify(
+                {"error": "Document stores are required when RAG is enabled"}
+            ), 400
+
+        try:
+            enricher = create_smart_enricher(
+                name=name,
+                target_model=target_model,
+                use_rag=use_rag,
+                use_web=use_web,
+                store_ids=store_ids,
+                designator_model=data.get("designator_model"),
+                max_results=data.get("max_results", 5),
+                similarity_threshold=data.get("similarity_threshold", 0.7),
+                max_search_results=data.get("max_search_results", 5),
+                max_scrape_urls=data.get("max_scrape_urls", 3),
+                max_context_tokens=data.get("max_context_tokens", 4000),
+                rerank_provider=data.get("rerank_provider", "local"),
+                rerank_model=data.get("rerank_model"),
+                rerank_top_n=data.get("rerank_top_n", 20),
+                tags=data.get("tags", []),
+                description=data.get("description"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(enricher.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/enrichers/<int:enricher_id>", methods=["PUT"])
+    @require_auth_api
+    def update_enricher_endpoint(enricher_id: int):
+        """Update a smart enricher."""
+        from db import update_smart_enricher
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Document store IDs
+        store_ids = data.get("document_store_ids") or data.get("store_ids")
+
+        try:
+            enricher = update_smart_enricher(
+                enricher_id=enricher_id,
+                name=data.get("name"),
+                target_model=data.get("target_model"),
+                use_rag=data.get("use_rag"),
+                use_web=data.get("use_web"),
+                store_ids=store_ids,
+                designator_model=data.get("designator_model"),
+                max_results=data.get("max_results"),
+                similarity_threshold=data.get("similarity_threshold"),
+                max_search_results=data.get("max_search_results"),
+                max_scrape_urls=data.get("max_scrape_urls"),
+                max_context_tokens=data.get("max_context_tokens"),
+                rerank_provider=data.get("rerank_provider"),
+                rerank_model=data.get("rerank_model"),
+                rerank_top_n=data.get("rerank_top_n"),
+                tags=data.get("tags"),
+                description=data.get("description"),
+                enabled=data.get("enabled"),
+            )
+            if not enricher:
+                return jsonify({"error": "Enricher not found"}), 404
+            return jsonify(enricher.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/enrichers/<int:enricher_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_enricher_endpoint(enricher_id: int):
+        """Delete a smart enricher."""
+        from db import delete_smart_enricher
+
+        if delete_smart_enricher(enricher_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Failed to delete enricher"}), 500
+
+    @admin.route("/api/enrichers/<int:enricher_id>/reset-stats", methods=["POST"])
+    @require_auth_api
+    def reset_enricher_stats(enricher_id: int):
+        """Reset statistics for an enricher."""
+        from db import reset_smart_enricher_stats
+
+        if reset_smart_enricher_stats(enricher_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Enricher not found"}), 404
 
     return admin

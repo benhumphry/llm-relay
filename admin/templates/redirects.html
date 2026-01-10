@@ -1,5 +1,5 @@
-{% extends "base.html" %} {% block title %}Redirects{% endblock %} {% block content
-%}
+{% extends "base.html" %} {% block title %}Redirects{% endblock %} {% block
+content %}
 <div x-data="redirectsPage()" x-init="init()">
     <!-- Header -->
     <div
@@ -55,11 +55,14 @@
                         d="M13 7l5 5m0 0l-5 5m5-5H6"
                     />
                 </svg>
-                <h3 class="mt-4 text-lg font-medium">No Redirects Configured</h3>
+                <h3 class="mt-4 text-lg font-medium">
+                    No Redirects Configured
+                </h3>
                 <p class="mt-2 text-base-content/60 max-w-md mx-auto">
-                    Redirects let you transparently map model requests to different targets.
-                    Useful for model upgrades (gpt-4 to gpt-5) or provider switches
-                    (openrouter/anthropic/* to anthropic/*).
+                    Redirects let you transparently map model requests to
+                    different targets. Useful for model upgrades (gpt-4 to
+                    gpt-5) or provider switches (openrouter/anthropic/* to
+                    anthropic/*).
                 </p>
                 <button @click="openAddModal()" class="btn btn-primary mt-4">
                     Create Your First Redirect
@@ -110,8 +113,15 @@
                                     </svg>
                                 </td>
                                 <td>
-                                    <div class="font-mono font-medium text-sm" x-text="redirect.source"></div>
-                                    <span x-show="redirect.source.includes('*')" class="badge badge-outline badge-xs ml-1">wildcard</span>
+                                    <div
+                                        class="font-mono font-medium text-sm"
+                                        x-text="redirect.source"
+                                    ></div>
+                                    <span
+                                        x-show="redirect.source.includes('*')"
+                                        class="badge badge-outline badge-xs ml-1"
+                                        >wildcard</span
+                                    >
                                 </td>
                                 <td class="text-center">
                                     <svg
@@ -130,11 +140,20 @@
                                     </svg>
                                 </td>
                                 <td>
-                                    <div class="font-mono text-sm text-base-content/70" x-text="redirect.target"></div>
+                                    <div
+                                        class="font-mono text-sm text-base-content/70"
+                                        x-text="redirect.target"
+                                    ></div>
                                 </td>
                                 <td>
-                                    <template x-for="tag in (redirect.tags || []).slice(0, 2)" :key="tag">
-                                        <span class="badge badge-outline badge-xs mr-1" x-text="tag"></span>
+                                    <template
+                                        x-for="tag in (redirect.tags || []).slice(0, 2)"
+                                        :key="tag"
+                                    >
+                                        <span
+                                            class="badge badge-outline badge-xs mr-1"
+                                            x-text="tag"
+                                        ></span>
                                     </template>
                                     <span
                                         x-show="(redirect.tags || []).length > 2"
@@ -144,10 +163,14 @@
                                     <span
                                         x-show="!redirect.tags || redirect.tags.length === 0"
                                         class="text-base-content/40 text-sm"
-                                    >-</span>
+                                        >-</span
+                                    >
                                 </td>
                                 <td class="text-right">
-                                    <span class="font-mono text-sm" x-text="redirect.redirect_count || 0"></span>
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="redirect.redirect_count || 0"
+                                    ></span>
                                 </td>
                                 <td>
                                     <span
@@ -202,42 +225,97 @@
                                 </td>
                             </tr>
                             <!-- Expanded Details Row -->
-                            <tr x-show="expandedRows.includes(redirect.id)" x-transition>
+                            <tr
+                                x-show="expandedRows.includes(redirect.id)"
+                                x-transition
+                            >
                                 <td colspan="8" class="bg-base-200 p-0">
-                                    <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                    <div
+                                        class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
+                                    >
                                         <!-- Description -->
-                                        <div x-show="redirect.description" class="col-span-2">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Description</div>
-                                            <div class="text-sm" x-text="redirect.description"></div>
+                                        <div
+                                            x-show="redirect.description"
+                                            class="col-span-2"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Description
+                                            </div>
+                                            <div
+                                                class="text-sm"
+                                                x-text="redirect.description"
+                                            ></div>
                                         </div>
                                         <!-- Source Pattern -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Source Pattern</div>
-                                            <div class="font-mono text-xs" x-text="redirect.source"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Source Pattern
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="redirect.source"
+                                            ></div>
                                         </div>
                                         <!-- Target -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Target</div>
-                                            <div class="font-mono text-xs" x-text="redirect.target"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Target
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="redirect.target"
+                                            ></div>
                                         </div>
                                         <!-- All Tags -->
-                                        <div x-show="redirect.tags && redirect.tags.length > 0">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">All Tags</div>
+                                        <div
+                                            x-show="redirect.tags && redirect.tags.length > 0"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                All Tags
+                                            </div>
                                             <div class="flex flex-wrap gap-1">
-                                                <template x-for="tag in redirect.tags" :key="tag">
-                                                    <span class="badge badge-primary badge-sm" x-text="tag"></span>
+                                                <template
+                                                    x-for="tag in redirect.tags"
+                                                    :key="tag"
+                                                >
+                                                    <span
+                                                        class="badge badge-primary badge-sm"
+                                                        x-text="tag"
+                                                    ></span>
                                                 </template>
                                             </div>
                                         </div>
                                         <!-- Redirect Count -->
                                         <div>
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Total Redirects</div>
-                                            <div class="text-sm font-mono" x-text="redirect.redirect_count || 0"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Total Redirects
+                                            </div>
+                                            <div
+                                                class="text-sm font-mono"
+                                                x-text="redirect.redirect_count || 0"
+                                            ></div>
                                         </div>
                                         <!-- Created -->
                                         <div x-show="redirect.created_at">
-                                            <div class="text-xs text-base-content/50 uppercase mb-1">Created</div>
-                                            <div class="text-xs" x-text="formatDate(redirect.created_at)"></div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Created
+                                            </div>
+                                            <div
+                                                class="text-xs"
+                                                x-text="formatDate(redirect.created_at)"
+                                            ></div>
                                         </div>
                                     </div>
                                 </td>
@@ -252,7 +330,10 @@
     <!-- Add/Edit Modal -->
     <div class="modal" :class="{ 'modal-open': showModal }">
         <div class="modal-box max-w-lg">
-            <h3 class="font-bold text-lg" x-text="editingRedirect ? 'Edit Redirect' : 'Add Redirect'"></h3>
+            <h3
+                class="font-bold text-lg"
+                x-text="editingRedirect ? 'Edit Redirect' : 'Add Redirect'"
+            ></h3>
             <form @submit.prevent="saveRedirect()">
                 <div class="form-control mt-4">
                     <label class="label">
@@ -267,10 +348,16 @@
                         required
                     />
                     <label class="label" x-show="formErrors.source">
-                        <span class="label-text-alt text-error" x-text="formErrors.source"></span>
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.source"
+                        ></span>
                     </label>
                     <label class="label" x-show="!formErrors.source">
-                        <span class="label-text-alt">Model name to redirect from. Supports * wildcards (e.g., openrouter/anthropic/*)</span>
+                        <span class="label-text-alt"
+                            >Model name to redirect from. Supports * wildcards
+                            (e.g., openrouter/anthropic/*)</span
+                        >
                     </label>
                 </div>
 
@@ -287,10 +374,16 @@
                         required
                     />
                     <label class="label" x-show="formErrors.target">
-                        <span class="label-text-alt text-error" x-text="formErrors.target"></span>
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.target"
+                        ></span>
                     </label>
                     <label class="label" x-show="!formErrors.target">
-                        <span class="label-text-alt">Model name to redirect to. Use * in target to preserve matched portion from source</span>
+                        <span class="label-text-alt"
+                            >Model name to redirect to. Use * in target to
+                            preserve matched portion from source</span
+                        >
                     </label>
                 </div>
 
@@ -305,7 +398,10 @@
                         placeholder="e.g., deprecated, migration"
                     />
                     <label class="label">
-                        <span class="label-text-alt">Comma-separated tags for usage tracking in logs</span>
+                        <span class="label-text-alt"
+                            >Comma-separated tags for usage tracking in
+                            logs</span
+                        >
                     </label>
                 </div>
 
@@ -332,18 +428,162 @@
                     </label>
                 </div>
 
+                <!-- Advanced Settings (collapsed) -->
+                <div class="collapse collapse-arrow bg-base-200 mt-4">
+                    <input type="checkbox" />
+                    <div class="collapse-title text-sm font-medium">
+                        Advanced Settings
+                    </div>
+                    <div class="collapse-content space-y-4">
+                        <!-- Response Caching -->
+                        <div class="form-control">
+                            <label
+                                class="label cursor-pointer justify-start gap-3"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_cache"
+                                    class="checkbox checkbox-secondary"
+                                />
+                                <span class="label-text"
+                                    >Enable Response Caching</span
+                                >
+                            </label>
+                        </div>
+                        <!-- Cache Settings (shown when caching enabled) -->
+                        <div
+                            x-show="form.use_cache"
+                            x-transition
+                            class="space-y-3 pl-4 border-l-2 border-secondary"
+                        >
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Similarity Threshold</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_similarity_threshold"
+                                        class="input input-bordered input-sm"
+                                        min="0.5"
+                                        max="1"
+                                        step="0.01"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Cache TTL (hours)</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_ttl_hours"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="8760"
+                                    />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Min Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_min_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_max_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_system_prompt"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match System Prompt</span
+                                    >
+                                </label>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_last_message_only"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match Last Message Only</span
+                                    >
+                                </label>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs"
+                                        >Useful for OpenWebUI (ignores
+                                        conversation history)</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Examples -->
                 <div class="mt-4 p-3 bg-base-200 rounded-lg text-xs">
                     <div class="font-medium mb-2">Examples:</div>
                     <div class="space-y-1 font-mono text-base-content/70">
-                        <div>gpt-4 -> openai/gpt-4o <span class="text-base-content/50">(model upgrade)</span></div>
-                        <div>claude-3-opus -> anthropic/claude-3-opus <span class="text-base-content/50">(add provider prefix)</span></div>
-                        <div>old-ollama/* -> new-ollama/* <span class="text-base-content/50">(server migration)</span></div>
+                        <div>
+                            gpt-4 -> openai/gpt-4o
+                            <span class="text-base-content/50"
+                                >(model upgrade)</span
+                            >
+                        </div>
+                        <div>
+                            claude-3-opus -> anthropic/claude-3-opus
+                            <span class="text-base-content/50"
+                                >(add provider prefix)</span
+                            >
+                        </div>
+                        <div>
+                            old-ollama/* -> new-ollama/*
+                            <span class="text-base-content/50"
+                                >(server migration)</span
+                            >
+                        </div>
                     </div>
                 </div>
 
                 <div class="modal-action">
-                    <button type="button" @click="closeModal()" class="btn btn-ghost">
+                    <button
+                        type="button"
+                        @click="closeModal()"
+                        class="btn btn-ghost"
+                    >
                         Cancel
                     </button>
                     <button
@@ -352,7 +592,9 @@
                         :class="{ 'loading': saving }"
                         :disabled="saving"
                     >
-                        <span x-text="editingRedirect ? 'Save Changes' : 'Create Redirect'"></span>
+                        <span
+                            x-text="editingRedirect ? 'Save Changes' : 'Create Redirect'"
+                        ></span>
                     </button>
                 </div>
             </form>
@@ -366,8 +608,11 @@
             <h3 class="font-bold text-lg">Delete Redirect</h3>
             <p class="py-4">
                 Are you sure you want to delete the redirect
-                <span class="font-mono font-bold" x-text="deletingRedirect?.source"></span>?
-                This action cannot be undone.
+                <span
+                    class="font-mono font-bold"
+                    x-text="deletingRedirect?.source"
+                ></span
+                >? This action cannot be undone.
             </p>
             <div class="modal-action">
                 <button @click="showDeleteModal = false" class="btn btn-ghost">
@@ -400,11 +645,19 @@
             saving: false,
             deleting: false,
             form: {
-                source: '',
-                target: '',
-                tagsInput: '',
-                description: '',
+                source: "",
+                target: "",
+                tagsInput: "",
+                description: "",
                 enabled: true,
+                // Cache settings
+                use_cache: false,
+                cache_similarity_threshold: 0.95,
+                cache_match_system_prompt: false,
+                cache_match_last_message_only: true,
+                cache_ttl_hours: 168,
+                cache_min_tokens: 50,
+                cache_max_tokens: 10000,
             },
             formErrors: {},
 
@@ -415,12 +668,12 @@
 
             async loadRedirects() {
                 try {
-                    const response = await fetch('/api/redirects');
+                    const response = await fetch("/api/redirects");
                     if (response.ok) {
                         this.redirects = await response.json();
                     }
                 } catch (error) {
-                    console.error('Failed to load redirects:', error);
+                    console.error("Failed to load redirects:", error);
                 }
             },
 
@@ -434,19 +687,34 @@
             },
 
             formatDate(isoString) {
-                if (!isoString) return '-';
+                if (!isoString) return "-";
                 const date = new Date(isoString);
-                return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                return (
+                    date.toLocaleDateString() +
+                    " " +
+                    date.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                    })
+                );
             },
 
             openAddModal() {
                 this.editingRedirect = null;
                 this.form = {
-                    source: '',
-                    target: '',
-                    tagsInput: '',
-                    description: '',
+                    source: "",
+                    target: "",
+                    tagsInput: "",
+                    description: "",
                     enabled: true,
+                    // Cache settings
+                    use_cache: false,
+                    cache_similarity_threshold: 0.95,
+                    cache_match_system_prompt: false,
+                    cache_match_last_message_only: true,
+                    cache_ttl_hours: 168,
+                    cache_min_tokens: 50,
+                    cache_max_tokens: 10000,
                 };
                 this.formErrors = {};
                 this.showModal = true;
@@ -457,9 +725,20 @@
                 this.form = {
                     source: redirect.source,
                     target: redirect.target,
-                    tagsInput: (redirect.tags || []).join(', '),
-                    description: redirect.description || '',
+                    tagsInput: (redirect.tags || []).join(", "),
+                    description: redirect.description || "",
                     enabled: redirect.enabled,
+                    // Cache settings
+                    use_cache: redirect.use_cache || false,
+                    cache_similarity_threshold:
+                        redirect.cache_similarity_threshold || 0.95,
+                    cache_match_system_prompt:
+                        redirect.cache_match_system_prompt || false,
+                    cache_match_last_message_only:
+                        redirect.cache_match_last_message_only !== false,
+                    cache_ttl_hours: redirect.cache_ttl_hours || 168,
+                    cache_min_tokens: redirect.cache_min_tokens || 50,
+                    cache_max_tokens: redirect.cache_max_tokens || 10000,
                 };
                 this.formErrors = {};
                 this.showModal = true;
@@ -476,9 +755,9 @@
                 this.saving = true;
 
                 const tags = this.form.tagsInput
-                    .split(',')
-                    .map(t => t.trim().toLowerCase())
-                    .filter(t => t.length > 0);
+                    .split(",")
+                    .map((t) => t.trim().toLowerCase())
+                    .filter((t) => t.length > 0);
 
                 const payload = {
                     source: this.form.source.toLowerCase().trim(),
@@ -486,27 +765,38 @@
                     tags: tags,
                     description: this.form.description || null,
                     enabled: this.form.enabled,
+                    // Cache settings
+                    use_cache: this.form.use_cache,
+                    cache_similarity_threshold:
+                        this.form.cache_similarity_threshold,
+                    cache_match_system_prompt:
+                        this.form.cache_match_system_prompt,
+                    cache_match_last_message_only:
+                        this.form.cache_match_last_message_only,
+                    cache_ttl_hours: this.form.cache_ttl_hours,
+                    cache_min_tokens: this.form.cache_min_tokens,
+                    cache_max_tokens: this.form.cache_max_tokens,
                 };
 
                 try {
                     const url = this.editingRedirect
                         ? `/api/redirects/${this.editingRedirect.id}`
-                        : '/api/redirects';
-                    const method = this.editingRedirect ? 'PUT' : 'POST';
+                        : "/api/redirects";
+                    const method = this.editingRedirect ? "PUT" : "POST";
 
                     const response = await fetch(url, {
                         method: method,
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(payload),
                     });
 
                     const data = await response.json();
 
                     if (!response.ok) {
-                        if (data.error && data.error.includes('source')) {
+                        if (data.error && data.error.includes("source")) {
                             this.formErrors.source = data.error;
                         } else {
-                            alert(data.error || 'Failed to save redirect');
+                            alert(data.error || "Failed to save redirect");
                         }
                         return;
                     }
@@ -514,8 +804,8 @@
                     await this.loadRedirects();
                     this.closeModal();
                 } catch (error) {
-                    console.error('Failed to save redirect:', error);
-                    alert('Failed to save redirect');
+                    console.error("Failed to save redirect:", error);
+                    alert("Failed to save redirect");
                 } finally {
                     this.saving = false;
                 }
@@ -531,9 +821,12 @@
 
                 this.deleting = true;
                 try {
-                    const response = await fetch(`/api/redirects/${this.deletingRedirect.id}`, {
-                        method: 'DELETE',
-                    });
+                    const response = await fetch(
+                        `/api/redirects/${this.deletingRedirect.id}`,
+                        {
+                            method: "DELETE",
+                        },
+                    );
 
                     if (response.ok) {
                         await this.loadRedirects();
@@ -541,11 +834,11 @@
                         this.deletingRedirect = null;
                     } else {
                         const data = await response.json();
-                        alert(data.error || 'Failed to delete redirect');
+                        alert(data.error || "Failed to delete redirect");
                     }
                 } catch (error) {
-                    console.error('Failed to delete redirect:', error);
-                    alert('Failed to delete redirect');
+                    console.error("Failed to delete redirect:", error);
+                    alert("Failed to delete redirect");
                 } finally {
                     this.deleting = false;
                 }

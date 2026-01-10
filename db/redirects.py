@@ -144,6 +144,15 @@ def create_redirect(
     description: str | None = None,
     enabled: bool = True,
     tags: list[str] | None = None,
+    # Caching
+    use_cache: bool = False,
+    cache_similarity_threshold: float = 0.95,
+    cache_match_system_prompt: bool = True,
+    cache_match_last_message_only: bool = False,
+    cache_ttl_hours: int = 168,
+    cache_min_tokens: int = 50,
+    cache_max_tokens: int = 4000,
+    cache_collection: str | None = None,
     db: Optional[Session] = None,
 ) -> Redirect:
     """
@@ -177,6 +186,14 @@ def create_redirect(
             target=target,
             description=description,
             enabled=enabled,
+            use_cache=use_cache,
+            cache_similarity_threshold=cache_similarity_threshold,
+            cache_match_system_prompt=cache_match_system_prompt,
+            cache_match_last_message_only=cache_match_last_message_only,
+            cache_ttl_hours=cache_ttl_hours,
+            cache_min_tokens=cache_min_tokens,
+            cache_max_tokens=cache_max_tokens,
+            cache_collection=cache_collection,
         )
         if tags:
             redirect.tags = tags
@@ -202,6 +219,15 @@ def update_redirect(
     description: str | None = None,
     enabled: bool | None = None,
     tags: list[str] | None = None,
+    # Caching
+    use_cache: bool | None = None,
+    cache_similarity_threshold: float | None = None,
+    cache_match_system_prompt: bool | None = None,
+    cache_match_last_message_only: bool | None = None,
+    cache_ttl_hours: int | None = None,
+    cache_min_tokens: int | None = None,
+    cache_max_tokens: int | None = None,
+    cache_collection: str | None = None,
     db: Optional[Session] = None,
 ) -> Optional[Redirect]:
     """
@@ -249,6 +275,24 @@ def update_redirect(
 
         if tags is not None:
             redirect.tags = tags
+
+        # Cache settings
+        if use_cache is not None:
+            redirect.use_cache = use_cache
+        if cache_similarity_threshold is not None:
+            redirect.cache_similarity_threshold = cache_similarity_threshold
+        if cache_match_system_prompt is not None:
+            redirect.cache_match_system_prompt = cache_match_system_prompt
+        if cache_match_last_message_only is not None:
+            redirect.cache_match_last_message_only = cache_match_last_message_only
+        if cache_ttl_hours is not None:
+            redirect.cache_ttl_hours = cache_ttl_hours
+        if cache_min_tokens is not None:
+            redirect.cache_min_tokens = cache_min_tokens
+        if cache_max_tokens is not None:
+            redirect.cache_max_tokens = cache_max_tokens
+        if cache_collection is not None:
+            redirect.cache_collection = cache_collection
 
         session.flush()
         logger.info(f"Updated redirect: {redirect.source} -> {redirect.target}")
@@ -337,6 +381,18 @@ def _redirect_to_detached(redirect: Redirect) -> Redirect:
         description=redirect.description,
         enabled=redirect.enabled,
         tags_json=redirect.tags_json,
+        # Cache fields
+        use_cache=redirect.use_cache,
+        cache_similarity_threshold=redirect.cache_similarity_threshold,
+        cache_match_system_prompt=redirect.cache_match_system_prompt,
+        cache_match_last_message_only=redirect.cache_match_last_message_only,
+        cache_ttl_hours=redirect.cache_ttl_hours,
+        cache_min_tokens=redirect.cache_min_tokens,
+        cache_max_tokens=redirect.cache_max_tokens,
+        cache_collection=redirect.cache_collection,
+        cache_hits=redirect.cache_hits,
+        cache_tokens_saved=redirect.cache_tokens_saved,
+        cache_cost_saved=redirect.cache_cost_saved,
     )
     detached.id = redirect.id
     detached.redirect_count = redirect.redirect_count

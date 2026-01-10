@@ -11,11 +11,13 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean,
+    Column,
     DateTime,
     Float,
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
     create_engine,
 )
@@ -542,6 +544,18 @@ class RequestLog(Base):
         String(100), nullable=True, index=True
     )
 
+    # Cache tracking (v1.6)
+    is_cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_name: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # Name of entity that provided cache (alias/router/enricher/redirect)
+    cache_tokens_saved: Mapped[int] = mapped_column(
+        Integer, default=0
+    )  # Output tokens that would have been generated
+    cache_cost_saved: Mapped[float] = mapped_column(
+        Float, default=0.0
+    )  # Estimated cost saved
+
     # Request details
     provider_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     model_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -577,18 +591,6 @@ class RequestLog(Base):
 
     __table_args__ = ({"sqlite_autoincrement": True},)
 
-    @property
-    def scraped_urls(self) -> list[str]:
-        """Get scraped URLs as a list."""
-        if not self.augmentation_urls:
-            return []
-        return json.loads(self.augmentation_urls)
-
-    @scraped_urls.setter
-    def scraped_urls(self, value: list[str]):
-        """Set scraped URLs from a list."""
-        self.augmentation_urls = json.dumps(value) if value else None
-
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -600,10 +602,6 @@ class RequestLog(Base):
             "alias": self.alias,
             "is_designator": self.is_designator,
             "router_name": self.router_name,
-            "augmentor_name": self.augmentor_name,
-            "augmentation_type": self.augmentation_type,
-            "augmentation_query": self.augmentation_query,
-            "augmentation_urls": self.scraped_urls,
             "provider_id": self.provider_id,
             "model_id": self.model_id,
             "endpoint": self.endpoint,
@@ -618,6 +616,11 @@ class RequestLog(Base):
             "status_code": self.status_code,
             "error_message": self.error_message,
             "is_streaming": self.is_streaming,
+            # Cache tracking
+            "is_cache_hit": self.is_cache_hit,
+            "cache_name": self.cache_name,
+            "cache_tokens_saved": self.cache_tokens_saved,
+            "cache_cost_saved": self.cache_cost_saved,
         }
 
 
@@ -737,6 +740,27 @@ class Alias(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Response caching (semantic cache using ChromaDB)
+    use_cache: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_similarity_threshold: Mapped[float] = mapped_column(
+        Float, default=0.95
+    )  # 0.0-1.0, higher = stricter matching
+    cache_match_system_prompt: Mapped[bool] = mapped_column(
+        Boolean, default=True
+    )  # Include system prompt in cache key
+    cache_match_last_message_only: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Only match last user message
+    cache_ttl_hours: Mapped[int] = mapped_column(Integer, default=168)  # 7 days default
+    cache_min_tokens: Mapped[int] = mapped_column(Integer, default=50)
+    cache_max_tokens: Mapped[int] = mapped_column(Integer, default=4000)
+    cache_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Cache statistics
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+    cache_tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
+    cache_cost_saved: Mapped[float] = mapped_column(Float, default=0.0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -763,6 +787,17 @@ class Alias(Base):
             "tags": self.tags,
             "description": self.description,
             "enabled": self.enabled,
+            "use_cache": self.use_cache,
+            "cache_similarity_threshold": self.cache_similarity_threshold,
+            "cache_match_system_prompt": self.cache_match_system_prompt,
+            "cache_match_last_message_only": self.cache_match_last_message_only,
+            "cache_ttl_hours": self.cache_ttl_hours,
+            "cache_min_tokens": self.cache_min_tokens,
+            "cache_max_tokens": self.cache_max_tokens,
+            "cache_collection": self.cache_collection,
+            "cache_hits": self.cache_hits,
+            "cache_tokens_saved": self.cache_tokens_saved,
+            "cache_cost_saved": self.cache_cost_saved,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -824,6 +859,22 @@ class SmartRouter(Base):
         String(150), nullable=True
     )
 
+    # Response caching (semantic cache using ChromaDB)
+    # Note: For routers, caching caches the final routed response
+    use_cache: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_similarity_threshold: Mapped[float] = mapped_column(Float, default=0.95)
+    cache_match_system_prompt: Mapped[bool] = mapped_column(Boolean, default=True)
+    cache_match_last_message_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_ttl_hours: Mapped[int] = mapped_column(Integer, default=168)
+    cache_min_tokens: Mapped[int] = mapped_column(Integer, default=50)
+    cache_max_tokens: Mapped[int] = mapped_column(Integer, default=4000)
+    cache_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Cache statistics
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+    cache_tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
+    cache_cost_saved: Mapped[float] = mapped_column(Float, default=0.0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -851,6 +902,11 @@ class SmartRouter(Base):
         """Set candidates from a list of dicts."""
         self.candidates_json = json.dumps(value) if value else "[]"
 
+    @property
+    def target_model(self) -> str:
+        """Alias for fallback_model to satisfy CacheConfig protocol."""
+        return self.fallback_model
+
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -868,241 +924,17 @@ class SmartRouter(Base):
             "use_model_intelligence": self.use_model_intelligence,
             "search_provider": self.search_provider,
             "intelligence_model": self.intelligence_model,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
-# ============================================================================
-# Smart Cache Model (v3.3)
-# ============================================================================
-
-
-class SmartCache(Base):
-    """
-    Smart caches that return cached responses for semantically similar queries.
-
-    A smart cache uses ChromaDB to find semantically similar past queries and
-    returns cached responses when similarity exceeds the threshold, reducing
-    token usage and costs.
-
-    Requires ChromaDB to be configured (CHROMA_URL environment variable).
-    """
-
-    __tablename__ = "smart_caches"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(
-        String(100), unique=True, nullable=False, index=True
-    )
-
-    # Target model to use on cache miss
-    target_model: Mapped[str] = mapped_column(
-        String(150), nullable=False
-    )  # "provider_id/model_id"
-
-    # Cache behavior
-    similarity_threshold: Mapped[float] = mapped_column(
-        Float, default=0.95
-    )  # 0.0-1.0, higher = stricter matching
-    match_system_prompt: Mapped[bool] = mapped_column(
-        Boolean, default=True
-    )  # Include system prompt in cache key
-    match_last_message_only: Mapped[bool] = mapped_column(
-        Boolean, default=False
-    )  # Only match last user message (ignores conversation history)
-    cache_ttl_hours: Mapped[int] = mapped_column(Integer, default=168)  # 7 days default
-    min_cached_tokens: Mapped[int] = mapped_column(
-        Integer, default=50
-    )  # Don't cache very short responses (filters out titles, etc.)
-    max_cached_tokens: Mapped[int] = mapped_column(
-        Integer, default=4000
-    )  # Don't cache very long responses
-
-    # ChromaDB collection name (auto-generated if null)
-    chroma_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-
-    # Statistics (updated periodically)
-    total_requests: Mapped[int] = mapped_column(Integer, default=0)
-    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
-    tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
-    cost_saved: Mapped[float] = mapped_column(Float, default=0.0)
-
-    # Optional tags for usage tracking
-    tags_json: Mapped[str] = mapped_column(Text, default="[]")
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
-
-    __table_args__ = ({"sqlite_autoincrement": True},)
-
-    @property
-    def tags(self) -> list[str]:
-        """Get tags as a list."""
-        return json.loads(self.tags_json) if self.tags_json else []
-
-    @tags.setter
-    def tags(self, value: list[str]):
-        """Set tags from a list."""
-        self.tags_json = json.dumps(value) if value else "[]"
-
-    @property
-    def hit_rate(self) -> float:
-        """Calculate cache hit rate as a percentage."""
-        if self.total_requests == 0:
-            return 0.0
-        return (self.cache_hits / self.total_requests) * 100
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for API responses."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "target_model": self.target_model,
-            "similarity_threshold": self.similarity_threshold,
-            "match_system_prompt": self.match_system_prompt,
-            "match_last_message_only": self.match_last_message_only,
+            "use_cache": self.use_cache,
+            "cache_similarity_threshold": self.cache_similarity_threshold,
+            "cache_match_system_prompt": self.cache_match_system_prompt,
+            "cache_match_last_message_only": self.cache_match_last_message_only,
             "cache_ttl_hours": self.cache_ttl_hours,
-            "min_cached_tokens": self.min_cached_tokens,
-            "max_cached_tokens": self.max_cached_tokens,
-            "chroma_collection": self.chroma_collection,
-            "total_requests": self.total_requests,
+            "cache_min_tokens": self.cache_min_tokens,
+            "cache_max_tokens": self.cache_max_tokens,
+            "cache_collection": self.cache_collection,
             "cache_hits": self.cache_hits,
-            "tokens_saved": self.tokens_saved,
-            "cost_saved": self.cost_saved,
-            "hit_rate": self.hit_rate,
-            "tags": self.tags,
-            "description": self.description,
-            "enabled": self.enabled,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
-# ============================================================================
-# Smart Augmentor Model (v3.4)
-# ============================================================================
-
-
-class SmartAugmentor(Base):
-    """
-    Smart augmentors that enhance LLM requests with web search and URL scraping.
-
-    A smart augmentor uses a designator LLM to decide what augmentation to apply:
-    - direct: pass through unchanged
-    - search:query: search via configured provider, inject results
-    - scrape:url1,url2: fetch specific URLs, inject content
-    - search+scrape:query: search then scrape top results
-
-    The augmented context is injected into the system prompt before forwarding
-    to the target model.
-    """
-
-    __tablename__ = "smart_augmentors"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(
-        String(100), unique=True, nullable=False, index=True
-    )
-
-    # Designator LLM config
-    designator_model: Mapped[str] = mapped_column(
-        String(150), nullable=False
-    )  # "provider_id/model_id" for deciding augmentation
-    purpose: Mapped[Optional[str]] = mapped_column(
-        Text
-    )  # Context for augmentation decisions (e.g., "research assistant for current events")
-
-    # Target model to forward augmented requests to
-    target_model: Mapped[str] = mapped_column(
-        String(150), nullable=False
-    )  # "provider_id/model_id"
-
-    # Search provider config
-    search_provider: Mapped[str] = mapped_column(
-        String(50), default="searxng"
-    )  # "searxng" | "perplexity" | future providers
-    search_provider_url: Mapped[Optional[str]] = mapped_column(
-        String(500)
-    )  # Override default URL for self-hosted providers
-    max_search_results: Mapped[int] = mapped_column(Integer, default=5)
-    max_scrape_urls: Mapped[int] = mapped_column(Integer, default=3)
-
-    # Context injection config
-    max_context_tokens: Mapped[int] = mapped_column(
-        Integer, default=4000
-    )  # Max tokens for injected context
-
-    # Re-ranking config (always enabled, uses local cross-encoder by default)
-    rerank_provider: Mapped[str] = mapped_column(
-        String(50), default="local"
-    )  # "local" | "jina"
-    rerank_model: Mapped[str] = mapped_column(
-        String(150), default="cross-encoder/ms-marco-MiniLM-L-6-v2"
-    )
-
-    # Statistics
-    total_requests: Mapped[int] = mapped_column(Integer, default=0)
-    augmented_requests: Mapped[int] = mapped_column(Integer, default=0)  # Non-direct
-    search_requests: Mapped[int] = mapped_column(Integer, default=0)
-    scrape_requests: Mapped[int] = mapped_column(Integer, default=0)
-
-    # Optional tags for usage tracking
-    tags_json: Mapped[str] = mapped_column(Text, default="[]")
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
-
-    __table_args__ = ({"sqlite_autoincrement": True},)
-
-    @property
-    def tags(self) -> list[str]:
-        """Get tags as a list."""
-        return json.loads(self.tags_json) if self.tags_json else []
-
-    @tags.setter
-    def tags(self, value: list[str]):
-        """Set tags from a list."""
-        self.tags_json = json.dumps(value) if value else "[]"
-
-    @property
-    def augmentation_rate(self) -> float:
-        """Calculate augmentation rate as a percentage."""
-        if self.total_requests == 0:
-            return 0.0
-        return (self.augmented_requests / self.total_requests) * 100
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for API responses."""
-        return {
-            "id": self.id,
-            "name": self.name,
-            "designator_model": self.designator_model,
-            "purpose": self.purpose,
-            "target_model": self.target_model,
-            "search_provider": self.search_provider,
-            "search_provider_url": self.search_provider_url,
-            "max_search_results": self.max_search_results,
-            "max_scrape_urls": self.max_scrape_urls,
-            "max_context_tokens": self.max_context_tokens,
-            "rerank_provider": self.rerank_provider,
-            "rerank_model": self.rerank_model,
-            "total_requests": self.total_requests,
-            "augmented_requests": self.augmented_requests,
-            "search_requests": self.search_requests,
-            "scrape_requests": self.scrape_requests,
-            "augmentation_rate": self.augmentation_rate,
-            "tags": self.tags,
-            "description": self.description,
-            "enabled": self.enabled,
+            "cache_tokens_saved": self.cache_tokens_saved,
+            "cache_cost_saved": self.cache_cost_saved,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -1146,6 +978,21 @@ class Redirect(Base):
     # Statistics
     redirect_count: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Response caching (semantic cache using ChromaDB)
+    use_cache: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_similarity_threshold: Mapped[float] = mapped_column(Float, default=0.95)
+    cache_match_system_prompt: Mapped[bool] = mapped_column(Boolean, default=True)
+    cache_match_last_message_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_ttl_hours: Mapped[int] = mapped_column(Integer, default=168)
+    cache_min_tokens: Mapped[int] = mapped_column(Integer, default=50)
+    cache_max_tokens: Mapped[int] = mapped_column(Integer, default=4000)
+    cache_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Cache statistics
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+    cache_tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
+    cache_cost_saved: Mapped[float] = mapped_column(Float, default=0.0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -1158,8 +1005,6 @@ class Redirect(Base):
         """Get tags as a list."""
         if not self.tags_json:
             return []
-        import json
-
         try:
             return json.loads(self.tags_json)
         except (json.JSONDecodeError, TypeError):
@@ -1168,9 +1013,17 @@ class Redirect(Base):
     @tags.setter
     def tags(self, value: list[str]) -> None:
         """Set tags from a list."""
-        import json
-
         self.tags_json = json.dumps(value) if value else None
+
+    @property
+    def target_model(self) -> str:
+        """Alias for target to satisfy CacheConfig protocol."""
+        return self.target
+
+    @property
+    def name(self) -> str:
+        """Alias for source to satisfy CacheConfig protocol."""
+        return self.source
 
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
@@ -1182,34 +1035,43 @@ class Redirect(Base):
             "enabled": self.enabled,
             "tags": self.tags,
             "redirect_count": self.redirect_count,
+            "use_cache": self.use_cache,
+            "cache_similarity_threshold": self.cache_similarity_threshold,
+            "cache_match_system_prompt": self.cache_match_system_prompt,
+            "cache_match_last_message_only": self.cache_match_last_message_only,
+            "cache_ttl_hours": self.cache_ttl_hours,
+            "cache_min_tokens": self.cache_min_tokens,
+            "cache_max_tokens": self.cache_max_tokens,
+            "cache_collection": self.cache_collection,
+            "cache_hits": self.cache_hits,
+            "cache_tokens_saved": self.cache_tokens_saved,
+            "cache_cost_saved": self.cache_cost_saved,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
 # ============================================================================
-# Smart RAG Model (v3.8)
+# Document Store Model (v3.9)
 # ============================================================================
 
 
-class SmartRAG(Base):
+class DocumentStore(Base):
     """
-    Smart RAGs that provide document-based context augmentation.
+    Independent document store configuration.
 
-    A Smart RAG indexes documents from a local folder (Docker-mapped) into
-    ChromaDB, then retrieves relevant chunks to inject as context for queries.
-
-    Uses Docling for document parsing and LlamaIndex for RAG orchestration.
+    A document store represents a single source of documents that can be
+    indexed into ChromaDB and shared across multiple Smart RAGs.
     """
 
-    __tablename__ = "smart_rags"
+    __tablename__ = "document_stores"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(
         String(100), unique=True, nullable=False, index=True
     )
 
-    # Document source configuration
+    # Source configuration
     source_type: Mapped[str] = mapped_column(
         String(20), default="local"
     )  # "local" | "mcp"
@@ -1217,81 +1079,64 @@ class SmartRAG(Base):
     # Local source (Docker-mapped folder)
     source_path: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
-    )  # e.g., "/data/documents" (for local source type)
+    )  # e.g., "/data/documents"
 
     # MCP source configuration (JSON object with server config)
-    mcp_server_config_json: Mapped[Optional[str]] = mapped_column(
-        Text, nullable=True
-    )  # MCP server connection config (for mcp source type)
+    mcp_server_config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Target model to forward augmented requests to
-    target_model: Mapped[str] = mapped_column(
-        String(150), nullable=False
-    )  # "provider_id/model_id"
+    # Google OAuth account (for MCP:gdrive sources)
+    google_account_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("oauth_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Google Drive folder filter (optional - if set, only index files from this folder)
+    gdrive_folder_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    gdrive_folder_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+
+    # Gmail label filter (optional - if set, only index emails with this label)
+    gmail_label_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    gmail_label_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes (e.g., "INBOX", "SENT")
+
+    # Google Calendar filter (optional - if set, only index events from this calendar)
+    gcalendar_calendar_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    gcalendar_calendar_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
 
     # Embedding configuration
-    # embedding_provider: "local", "ollama:<instance>", or provider name (e.g., "openai")
     embedding_provider: Mapped[str] = mapped_column(String(100), default="local")
-    embedding_model: Mapped[Optional[str]] = mapped_column(
-        String(150), nullable=True
-    )  # Model name for embeddings
-    ollama_url: Mapped[Optional[str]] = mapped_column(
-        String(500), nullable=True
-    )  # Ollama instance URL (when using ollama provider)
+    embedding_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    ollama_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Vision model configuration (for document parsing with Docling)
-    # vision_provider: "local" (default), "ollama:<instance>", or provider name
     vision_provider: Mapped[str] = mapped_column(String(100), default="local")
-    vision_model: Mapped[Optional[str]] = mapped_column(
-        String(150), nullable=True
-    )  # Vision model name (e.g., "granite3.2-vision:latest")
-    vision_ollama_url: Mapped[Optional[str]] = mapped_column(
-        String(500), nullable=True
-    )  # Ollama URL for vision model
-
-    # Indexing configuration
-    index_schedule: Mapped[Optional[str]] = mapped_column(
-        String(100), nullable=True
-    )  # Cron expression, e.g., "0 2 * * *"
-    last_indexed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    index_status: Mapped[str] = mapped_column(
-        String(20), default="pending"
-    )  # "pending" | "indexing" | "ready" | "error"
-    index_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    vision_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    vision_ollama_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Chunking configuration
     chunk_size: Mapped[int] = mapped_column(Integer, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=50)
 
-    # Retrieval configuration
-    max_results: Mapped[int] = mapped_column(Integer, default=5)
-    similarity_threshold: Mapped[float] = mapped_column(Float, default=0.7)
-    max_context_tokens: Mapped[int] = mapped_column(Integer, default=4000)
-
-    # Re-ranking configuration (always enabled, uses local cross-encoder by default)
-    rerank_provider: Mapped[str] = mapped_column(
-        String(50), default="local"
-    )  # "local" | "jina"
-    rerank_model: Mapped[str] = mapped_column(
-        String(150), default="cross-encoder/ms-marco-MiniLM-L-6-v2"
-    )
-    rerank_top_n: Mapped[int] = mapped_column(
-        Integer, default=20
-    )  # Fetch this many from ChromaDB, then rerank to max_results
-
-    # ChromaDB collection name (auto-generated as "smartrag_{id}")
-    collection_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Indexing configuration
+    index_schedule: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_indexed: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    index_status: Mapped[str] = mapped_column(String(20), default="pending")
+    index_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Statistics
     document_count: Mapped[int] = mapped_column(Integer, default=0)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
-    total_requests: Mapped[int] = mapped_column(Integer, default=0)
-    context_injections: Mapped[int] = mapped_column(
-        Integer, default=0
-    )  # Requests where context was added
 
-    # Optional tags for usage tracking
-    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    # ChromaDB collection name (auto-generated as "docstore_{id}")
+    collection_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Metadata
     description: Mapped[Optional[str]] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -1301,16 +1146,6 @@ class SmartRAG(Base):
     )
 
     __table_args__ = ({"sqlite_autoincrement": True},)
-
-    @property
-    def tags(self) -> list[str]:
-        """Get tags as a list."""
-        return json.loads(self.tags_json) if self.tags_json else []
-
-    @tags.setter
-    def tags(self, value: list[str]):
-        """Set tags from a list."""
-        self.tags_json = json.dumps(value) if value else "[]"
 
     @property
     def mcp_server_config(self) -> dict | None:
@@ -1324,13 +1159,6 @@ class SmartRAG(Base):
         """Set MCP server config from a dict."""
         self.mcp_server_config_json = json.dumps(value) if value else None
 
-    @property
-    def injection_rate(self) -> float:
-        """Calculate context injection rate as a percentage."""
-        if self.total_requests == 0:
-            return 0.0
-        return (self.context_injections / self.total_requests) * 100
-
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -1339,34 +1167,30 @@ class SmartRAG(Base):
             "source_type": self.source_type,
             "source_path": self.source_path,
             "mcp_server_config": self.mcp_server_config,
-            "target_model": self.target_model,
+            "google_account_id": self.google_account_id,
+            "gdrive_folder_id": self.gdrive_folder_id,
+            "gdrive_folder_name": self.gdrive_folder_name,
+            "gmail_label_id": self.gmail_label_id,
+            "gmail_label_name": self.gmail_label_name,
+            "gcalendar_calendar_id": self.gcalendar_calendar_id,
+            "gcalendar_calendar_name": self.gcalendar_calendar_name,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "ollama_url": self.ollama_url,
             "vision_provider": self.vision_provider,
             "vision_model": self.vision_model,
             "vision_ollama_url": self.vision_ollama_url,
+            "chunk_size": self.chunk_size,
+            "chunk_overlap": self.chunk_overlap,
             "index_schedule": self.index_schedule,
             "last_indexed": self.last_indexed.isoformat()
             if self.last_indexed
             else None,
             "index_status": self.index_status,
             "index_error": self.index_error,
-            "chunk_size": self.chunk_size,
-            "chunk_overlap": self.chunk_overlap,
-            "max_results": self.max_results,
-            "similarity_threshold": self.similarity_threshold,
-            "max_context_tokens": self.max_context_tokens,
-            "rerank_provider": self.rerank_provider,
-            "rerank_model": self.rerank_model,
-            "rerank_top_n": self.rerank_top_n,
-            "collection_name": self.collection_name,
             "document_count": self.document_count,
             "chunk_count": self.chunk_count,
-            "total_requests": self.total_requests,
-            "context_injections": self.context_injections,
-            "injection_rate": self.injection_rate,
-            "tags": self.tags,
+            "collection_name": self.collection_name,
             "description": self.description,
             "enabled": self.enabled,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -1374,14 +1198,308 @@ class SmartRAG(Base):
         }
 
 
-# Future tables for v2.2+ (defined here for reference, not created yet)
-#
-# class ApiKey(Base):
-#     """API keys for proxy access (v2.2)"""
-#     __tablename__ = "api_keys"
-#     ...
-#
-# class Quota(Base):
-#     """Usage quotas per tag (v2.2)"""
-#     __tablename__ = "quotas"
-#     ...
+# ============================================================================
+# Smart Enricher (unified RAG + Web enrichment)
+# ============================================================================
+
+# Association table for SmartEnricher <-> DocumentStore many-to-many relationship
+smart_enricher_stores = Table(
+    "smart_enricher_stores",
+    Base.metadata,
+    Column(
+        "smart_enricher_id",
+        Integer,
+        ForeignKey("smart_enrichers.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "document_store_id",
+        Integer,
+        ForeignKey("document_stores.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+class SmartEnricher(Base):
+    """
+    Unified smart enrichment configuration (replaces SmartRAG + SmartAugmentor).
+
+    Smart Enrichers can use RAG (document retrieval), realtime web search,
+    or both to augment LLM requests with relevant context.
+    """
+
+    __tablename__ = "smart_enrichers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+
+    # Enrichment mode toggles
+    use_rag: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Enable RAG retrieval
+    use_web: Mapped[bool] = mapped_column(Boolean, default=False)  # Enable web search
+
+    # Target model (receives augmented context)
+    target_model: Mapped[str] = mapped_column(String(150), nullable=False)
+
+    # Designator model for web search query optimization (optional)
+    designator_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+
+    # RAG settings (when use_rag=True)
+    max_results: Mapped[int] = mapped_column(
+        Integer, default=5
+    )  # Max chunks to retrieve
+    similarity_threshold: Mapped[float] = mapped_column(Float, default=0.7)
+
+    # Web settings (when use_web=True)
+    # Uses global search_provider and scraper from Settings
+    max_search_results: Mapped[int] = mapped_column(Integer, default=5)
+    max_scrape_urls: Mapped[int] = mapped_column(Integer, default=3)
+
+    # Common settings
+    max_context_tokens: Mapped[int] = mapped_column(Integer, default=4000)
+
+    # Reranking configuration
+    rerank_provider: Mapped[str] = mapped_column(String(50), default="local")
+    rerank_model: Mapped[str] = mapped_column(
+        String(150), default="cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+    rerank_top_n: Mapped[int] = mapped_column(Integer, default=20)
+
+    # Statistics
+    total_requests: Mapped[int] = mapped_column(Integer, default=0)
+    context_injections: Mapped[int] = mapped_column(Integer, default=0)
+    search_requests: Mapped[int] = mapped_column(Integer, default=0)
+    scrape_requests: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Response caching (semantic cache using ChromaDB)
+    # Note: Caching is only effective when use_web=False (realtime data shouldn't be cached)
+    use_cache: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_similarity_threshold: Mapped[float] = mapped_column(
+        Float, default=0.95
+    )  # 0.0-1.0, higher = stricter matching
+    cache_match_system_prompt: Mapped[bool] = mapped_column(
+        Boolean, default=True
+    )  # Include system prompt in cache key
+    cache_match_last_message_only: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Only match last user message (ignores conversation history)
+    cache_ttl_hours: Mapped[int] = mapped_column(Integer, default=168)  # 7 days default
+    cache_min_tokens: Mapped[int] = mapped_column(
+        Integer, default=50
+    )  # Don't cache very short responses
+    cache_max_tokens: Mapped[int] = mapped_column(
+        Integer, default=4000
+    )  # Don't cache very long responses
+    cache_collection: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # ChromaDB collection name (auto-generated if null)
+
+    # Cache statistics
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+    cache_tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
+    cache_cost_saved: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # Tags for usage tracking (stored as JSON array string)
+    tags_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Metadata
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    document_stores: Mapped[list["DocumentStore"]] = relationship(
+        "DocumentStore",
+        secondary=smart_enricher_stores,
+        backref="smart_enrichers",
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        if not self.tags_json:
+            return []
+        try:
+            return json.loads(self.tags_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @tags.setter
+    def tags(self, value: list[str]) -> None:
+        """Set tags from a list."""
+        self.tags_json = json.dumps(value) if value else None
+
+    @property
+    def injection_rate(self) -> float:
+        """Calculate context injection rate as a percentage."""
+        if self.total_requests == 0:
+            return 0.0
+        return (self.context_injections / self.total_requests) * 100
+
+    @property
+    def enrichment_type(self) -> str:
+        """Get enrichment type description."""
+        if self.use_rag and self.use_web:
+            return "hybrid"
+        elif self.use_rag:
+            return "rag"
+        elif self.use_web:
+            return "web"
+        return "none"
+
+    @property
+    def cache_enabled(self) -> bool:
+        """
+        Check if caching is actually enabled.
+
+        Caching is only permitted when use_web=False (realtime web data
+        shouldn't be cached). Returns True only if use_cache=True AND
+        caching is permitted.
+        """
+        return self.use_cache and not self.use_web
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        # Get stores from either relationship or detached stores
+        stores = getattr(self, "_detached_stores", None) or self.document_stores or []
+
+        return {
+            "id": self.id,
+            "name": self.name,
+            "use_rag": self.use_rag,
+            "use_web": self.use_web,
+            "enrichment_type": self.enrichment_type,
+            "target_model": self.target_model,
+            "designator_model": self.designator_model,
+            # RAG settings
+            "max_results": self.max_results,
+            "similarity_threshold": self.similarity_threshold,
+            # Web settings
+            "max_search_results": self.max_search_results,
+            "max_scrape_urls": self.max_scrape_urls,
+            # Common settings
+            "max_context_tokens": self.max_context_tokens,
+            # Reranking
+            "rerank_provider": self.rerank_provider,
+            "rerank_model": self.rerank_model,
+            "rerank_top_n": self.rerank_top_n,
+            # Stats
+            "total_requests": self.total_requests,
+            "context_injections": self.context_injections,
+            "search_requests": self.search_requests,
+            "scrape_requests": self.scrape_requests,
+            "injection_rate": self.injection_rate,
+            # Caching (disabled when use_web=True)
+            "use_cache": self.use_cache,
+            "cache_allowed": not self.use_web,  # Caching not permitted with realtime web
+            "cache_similarity_threshold": self.cache_similarity_threshold,
+            "cache_match_system_prompt": self.cache_match_system_prompt,
+            "cache_match_last_message_only": self.cache_match_last_message_only,
+            "cache_ttl_hours": self.cache_ttl_hours,
+            "cache_min_tokens": self.cache_min_tokens,
+            "cache_max_tokens": self.cache_max_tokens,
+            "cache_collection": self.cache_collection,
+            "cache_hits": self.cache_hits,
+            "cache_tokens_saved": self.cache_tokens_saved,
+            "cache_cost_saved": self.cache_cost_saved,
+            # Metadata
+            "tags": self.tags,
+            "description": self.description,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            # Document stores
+            "document_store_ids": [s.id for s in stores] if stores else [],
+            "document_stores": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "source_type": s.source_type,
+                    "index_status": s.index_status,
+                    "document_count": s.document_count,
+                    "chunk_count": s.chunk_count,
+                }
+                for s in stores
+            ]
+            if stores
+            else [],
+        }
+
+
+class OAuthToken(Base):
+    """
+    OAuth tokens for external service integrations (Google, etc.).
+
+    Stores refresh tokens and metadata for MCP server authentication.
+    Multiple tokens can be stored per provider (e.g., multiple Google accounts).
+    """
+
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Provider identification
+    provider: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # "google", "microsoft", etc.
+    account_email: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # User's email for this account
+    account_name: Mapped[Optional[str]] = mapped_column(
+        String(255)
+    )  # Display name (optional)
+
+    # Token data (encrypted JSON containing access_token, refresh_token, etc.)
+    token_data_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Scopes granted
+    scopes_json: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Status
+    is_valid: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_refreshed: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    @property
+    def scopes(self) -> list[str]:
+        """Get scopes as a list."""
+        if not self.scopes_json:
+            return []
+        return json.loads(self.scopes_json)
+
+    @scopes.setter
+    def scopes(self, value: list[str]):
+        """Set scopes from a list."""
+        self.scopes_json = json.dumps(value) if value else "[]"
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses (excludes sensitive token data)."""
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "account_email": self.account_email,
+            "account_name": self.account_name,
+            "scopes": self.scopes,
+            "is_valid": self.is_valid,
+            "last_used": self.last_used.isoformat() if self.last_used else None,
+            "last_refreshed": self.last_refreshed.isoformat()
+            if self.last_refreshed
+            else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

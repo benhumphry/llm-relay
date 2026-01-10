@@ -110,7 +110,8 @@ content %}
                     </div>
                 </div>
                 <div class="text-xs text-base-content/60 mt-1">
-                    <span x-text="stats.models?.available || 0"></span> available
+                    <span x-text="stats.models?.available || 0"></span>
+                    available
                 </div>
             </div>
         </div>
@@ -185,10 +186,11 @@ content %}
                     </div>
                 </div>
                 <div class="text-xs text-base-content/60 mt-1">
-                    <span
-                        x-text="'$' + (periodStats?.cache_savings || 0).toFixed(2)"
+                    <span x-text="periodStats?.cache_hits || 0"></span> cache
+                    hits (<span
+                        x-text="'$' + (periodStats?.cache_cost_saved || 0).toFixed(2)"
                     ></span>
-                    saved from cache
+                    saved)
                 </div>
             </div>
         </div>
@@ -382,22 +384,52 @@ content %}
         <!-- Model Management -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <h2 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">
+                <h2
+                    class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                >
                     Model Management
                 </h2>
                 <ul class="space-y-2">
                     <li>
-                        <a href="{{ url_for('admin.models_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                        <a
+                            href="{{ url_for('admin.models_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                                />
                             </svg>
                             <span class="text-sm">Providers & Models</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{{ url_for('admin.ollama_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                        <a
+                            href="{{ url_for('admin.ollama_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"
+                                />
                             </svg>
                             <span class="text-sm">Local Servers</span>
                         </a>
@@ -409,64 +441,100 @@ content %}
         <!-- Routing -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <h2 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">
+                <h2
+                    class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                >
                     Routing
                 </h2>
                 <ul class="space-y-2">
                     <li>
-                        <a href="{{ url_for('admin.aliases_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                        <a
+                            href="{{ url_for('admin.aliases_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                                />
                             </svg>
                             <span class="text-sm">Aliases</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{{ url_for('admin.redirects_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        <a
+                            href="{{ url_for('admin.redirects_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 7l5 5m0 0l-5 5m5-5H6"
+                                />
                             </svg>
                             <span class="text-sm">Redirects</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{{ url_for('admin.routers_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        <a
+                            href="{{ url_for('admin.routers_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                                />
                             </svg>
                             <span class="text-sm">Smart Routers</span>
                         </a>
                     </li>
-                    <template x-if="featureStatus.features?.smart_caches?.available">
-                        <li>
-                            <a href="{{ url_for('admin.caches_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                                </svg>
-                                <span class="text-sm">Smart Caches</span>
-                            </a>
-                        </li>
-                    </template>
-                    <template x-if="featureStatus.features?.smart_augmentors?.available">
-                        <li>
-                            <a href="{{ url_for('admin.augmentors_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                </svg>
-                                <span class="text-sm">Smart Augmentors</span>
-                            </a>
-                        </li>
-                    </template>
-                    <template x-if="featureStatus.features?.smart_rags?.available">
-                        <li>
-                            <a href="{{ url_for('admin.rags_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                <span class="text-sm">Smart RAGs</span>
-                            </a>
-                        </li>
-                    </template>
+                    <li>
+                        <a
+                            href="{{ url_for('admin.enrichers_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                                />
+                            </svg>
+                            <span class="text-sm">Smart Enrichers</span>
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -474,22 +542,52 @@ content %}
         <!-- Usage -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <h2 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">
+                <h2
+                    class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                >
                     Usage
                 </h2>
                 <ul class="space-y-2">
                     <li>
-                        <a href="{{ url_for('admin.usage') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        <a
+                            href="{{ url_for('admin.usage') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                                />
                             </svg>
                             <span class="text-sm">Statistics</span>
                         </a>
                     </li>
                     <li>
-                        <a href="{{ url_for('admin.requests_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                        <a
+                            href="{{ url_for('admin.requests_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+                                />
                             </svg>
                             <span class="text-sm">Request Log</span>
                         </a>
@@ -501,25 +599,70 @@ content %}
         <!-- System -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <h2 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2">
+                <h2
+                    class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                >
                     System
                 </h2>
                 <ul class="space-y-2">
                     <li>
-                        <a href="{{ url_for('admin.alerts_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors" x-data="alertsBadge()" x-init="init()">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        <a
+                            href="{{ url_for('admin.alerts_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                            x-data="alertsBadge()"
+                            x-init="init()"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
                             </svg>
                             <span class="text-sm">Alerts</span>
-                            <span x-show="critical > 0" x-text="critical" class="badge badge-error badge-xs"></span>
-                            <span x-show="critical === 0 && warning > 0" x-text="warning" class="badge badge-warning badge-xs"></span>
+                            <span
+                                x-show="critical > 0"
+                                x-text="critical"
+                                class="badge badge-error badge-xs"
+                            ></span>
+                            <span
+                                x-show="critical === 0 && warning > 0"
+                                x-text="warning"
+                                class="badge badge-warning badge-xs"
+                            ></span>
                         </a>
                     </li>
                     <li>
-                        <a href="{{ url_for('admin.settings_page') }}" class="flex items-center gap-2 hover:text-primary transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <a
+                            href="{{ url_for('admin.settings_page') }}"
+                            class="flex items-center gap-2 hover:text-primary transition-colors"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-base-content/50"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                                />
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                />
                             </svg>
                             <span class="text-sm">Settings</span>
                         </a>
@@ -537,132 +680,286 @@ content %}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <!-- Features Column -->
                 <div>
-                    <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3">Features</h3>
+                    <h3
+                        class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
+                    >
+                        Features
+                    </h3>
                     <ul class="space-y-2">
-                        <!-- Smart Caches -->
+                        <!-- Smart Enrichers (RAG + Web) -->
                         <li class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
-                                <template x-if="featureStatus.features?.smart_caches?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                <template
+                                    x-if="featureStatus.features?.smart_enrichers?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
                                     </svg>
                                 </template>
-                                <template x-if="!featureStatus.features?.smart_caches?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                <template
+                                    x-if="!featureStatus.features?.smart_enrichers?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
                                     </svg>
                                 </template>
-                                <span class="text-sm">Smart Caches</span>
+                                <span class="text-sm">Smart Enrichers</span>
                             </div>
-                            <span class="text-xs text-base-content/50" x-text="featureStatus.features?.smart_caches?.reason || 'Available'"></span>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.features?.smart_enrichers?.reason || 'Available'"
+                            ></span>
                         </li>
 
-                        <!-- Smart Augmentors -->
+                        <!-- Semantic Caching -->
                         <li class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
-                                <template x-if="featureStatus.features?.smart_augmentors?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                <template
+                                    x-if="featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
                                     </svg>
                                 </template>
-                                <template x-if="!featureStatus.features?.smart_augmentors?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                <template
+                                    x-if="!featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
                                     </svg>
                                 </template>
-                                <span class="text-sm">Smart Augmentors</span>
+                                <span class="text-sm">Semantic Caching</span>
                             </div>
-                            <span class="text-xs text-base-content/50" x-text="featureStatus.features?.smart_augmentors?.reason || 'Available'"></span>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
+                            ></span>
                         </li>
 
                         <!-- Model Intelligence -->
                         <li class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
-                                <template x-if="featureStatus.features?.model_intelligence?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                <template
+                                    x-if="featureStatus.features?.model_intelligence?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
                                     </svg>
                                 </template>
-                                <template x-if="!featureStatus.features?.model_intelligence?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                <template
+                                    x-if="!featureStatus.features?.model_intelligence?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
                                     </svg>
                                 </template>
                                 <span class="text-sm">Model Intelligence</span>
                             </div>
-                            <span class="text-xs text-base-content/50" x-text="featureStatus.features?.model_intelligence?.reason || 'Available'"></span>
-                        </li>
-
-                        <!-- Smart RAGs -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template x-if="featureStatus.features?.smart_rags?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                                    </svg>
-                                </template>
-                                <template x-if="!featureStatus.features?.smart_rags?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Smart RAGs</span>
-                            </div>
-                            <span class="text-xs text-base-content/50" x-text="featureStatus.features?.smart_rags?.reason || 'Available'"></span>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.features?.model_intelligence?.reason || 'Available'"
+                            ></span>
                         </li>
                     </ul>
                 </div>
 
                 <!-- Dependencies Column -->
                 <div>
-                    <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3">Dependencies</h3>
+                    <h3
+                        class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
+                    >
+                        Dependencies
+                    </h3>
                     <ul class="space-y-2">
                         <!-- Database -->
                         <li class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-4 w-4 text-success"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M5 13l4 4L19 7"
+                                    />
                                 </svg>
-                                <span class="text-sm" x-text="featureStatus.dependencies?.database?.type || 'Database'"></span>
+                                <span
+                                    class="text-sm"
+                                    x-text="featureStatus.dependencies?.database?.type || 'Database'"
+                                ></span>
                             </div>
-                            <span class="text-xs text-base-content/50" x-text="featureStatus.dependencies?.database?.display || ''"></span>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.dependencies?.database?.display || ''"
+                            ></span>
                         </li>
 
                         <!-- ChromaDB -->
                         <li class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
-                                <template x-if="featureStatus.dependencies?.chromadb?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                <template
+                                    x-if="featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
                                     </svg>
                                 </template>
-                                <template x-if="!featureStatus.dependencies?.chromadb?.available">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                <template
+                                    x-if="!featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
                                     </svg>
                                 </template>
                                 <span class="text-sm">ChromaDB</span>
                             </div>
-                            <span class="text-xs text-base-content/50" x-text="featureStatus.dependencies?.chromadb?.url || featureStatus.dependencies?.chromadb?.reason || 'Not configured'"></span>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.dependencies?.chromadb?.url || featureStatus.dependencies?.chromadb?.reason || 'Not configured'"
+                            ></span>
                         </li>
 
                         <!-- Search Providers -->
-                        <template x-for="provider in featureStatus.dependencies?.search_providers || []" :key="provider.name">
+                        <template
+                            x-for="provider in featureStatus.dependencies?.search_providers || []"
+                            :key="provider.name"
+                        >
                             <li class="flex items-center justify-between">
                                 <div class="flex items-center gap-2">
                                     <template x-if="provider.configured">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-success"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M5 13l4 4L19 7"
+                                            />
                                         </svg>
                                     </template>
                                     <template x-if="!provider.configured">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-base-content/30"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
                                         </svg>
                                     </template>
-                                    <span class="text-sm capitalize" x-text="provider.name"></span>
+                                    <span
+                                        class="text-sm capitalize"
+                                        x-text="provider.name"
+                                    ></span>
                                 </div>
-                                <span class="text-xs text-base-content/50" x-text="provider.configured ? provider.url : (provider.requires_api_key ? 'API key not set' : 'URL not set')"></span>
+                                <span
+                                    class="text-xs text-base-content/50"
+                                    x-text="provider.configured ? provider.url : (provider.requires_api_key ? 'API key not set' : 'URL not set')"
+                                ></span>
                             </li>
                         </template>
                     </ul>
@@ -698,10 +995,7 @@ content %}
             featureStatus: {},
 
             async init() {
-                await Promise.all([
-                    this.loadStats(),
-                    this.loadFeatureStatus(),
-                ]);
+                await Promise.all([this.loadStats(), this.loadFeatureStatus()]);
             },
 
             async loadFeatureStatus() {
@@ -768,7 +1062,9 @@ content %}
                             requests: summary.total_requests || 0,
                             tokens: summary.total_tokens || 0,
                             cost: summary.estimated_cost || 0,
-                            cache_savings: summary.cache_savings || 0,
+                            cache_hits: summary.cache_hits || 0,
+                            cache_tokens_saved: summary.cache_tokens_saved || 0,
+                            cache_cost_saved: summary.cache_cost_saved || 0,
                         };
                     }
                     if (providersRes.ok)

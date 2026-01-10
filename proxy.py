@@ -218,14 +218,11 @@ def track_completion(
     # Smart router tracking (v3.2)
     is_designator: bool = False,
     router_name: str | None = None,
-    # Smart augmentor tracking (v3.5)
-    augmentor_name: str | None = None,
-    # Augmentation details (v3.5.1)
-    augmentation_type: str | None = None,
-    augmentation_query: str | None = None,
-    augmentation_urls: list[str] | None = None,
-    # Smart RAG tracking (v3.8)
-    rag_name: str | None = None,
+    # Cache tracking (v1.6)
+    is_cache_hit: bool = False,
+    cache_name: str | None = None,
+    cache_tokens_saved: int = 0,
+    cache_cost_saved: float = 0.0,
 ):
     """
     Track a completed request.
@@ -249,11 +246,10 @@ def track_completion(
         alias: Alias name if request used an alias (v3.1)
         is_designator: Whether this was a designator call (v3.2)
         router_name: Smart router name if request used a router (v3.2)
-        augmentor_name: Smart augmentor name if request used an augmentor (v3.5)
-        augmentation_type: Type of augmentation applied (direct|search|scrape|search+scrape)
-        augmentation_query: Search query used for augmentation (if any)
-        augmentation_urls: List of URLs scraped for augmentation (if any)
-        rag_name: Smart RAG name if request used a RAG (v3.8)
+        is_cache_hit: Whether this was served from cache (v1.6)
+        cache_name: Name of cache entity if cache hit
+        cache_tokens_saved: Output tokens saved by cache hit
+        cache_cost_saved: Estimated cost saved by cache hit
     """
     from flask import g
 
@@ -298,11 +294,10 @@ def track_completion(
         cache_read_tokens=cache_read_tokens,
         is_designator=is_designator,
         router_name=router_name,
-        augmentor_name=augmentor_name,
-        augmentation_type=augmentation_type,
-        augmentation_query=augmentation_query,
-        augmentation_urls=augmentation_urls,
-        rag_name=rag_name,
+        is_cache_hit=is_cache_hit,
+        cache_name=cache_name,
+        cache_tokens_saved=cache_tokens_saved,
+        cache_cost_saved=cache_cost_saved,
     )
 
 
@@ -875,118 +870,56 @@ def chat():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    # Handle Smart Cache hits (v3.3)
-    if resolved.has_cache and resolved.is_cache_hit:
-        cached_response = resolved.cached_response
-        cache_engine = resolved.cache_engine
-        cache_id = cache_engine.cache.id
-        cache_name = cache_engine.cache.name
-        # Use alias_tags which includes merged redirect tags if applicable
-        cache_tags = resolved.alias_tags or resolved.cache_result.cache_tags or []
+    # Handle Smart Enricher context injection (unified RAG + Web)
+    enricher_name = None
+    enricher_tags = []
+    enricher_type = None
+    enricher_query = None
+    enricher_urls = None
+    if getattr(resolved, "has_enrichment", False):
+        enrichment_result = resolved.enrichment_result
+        enricher_name = enrichment_result.enricher_name
+        enricher_tags = enrichment_result.enricher_tags or []
 
-        # Extract content for response
-        cached_content = cached_response.get("content", "")
-
-        # Use actual output tokens from cache metadata
-        tokens_saved = resolved.cache_result.cached_tokens
-
-        logger.info(
-            f"Cache hit for '{cache_name}' - returning cached response (tokens_saved={tokens_saved})"
-        )
-
-        # Update cache statistics
-        from db import update_smart_cache_stats
-
-        update_smart_cache_stats(
-            cache_id=cache_id,
-            increment_requests=1,
-            increment_hits=1,
-            increment_tokens_saved=tokens_saved,
-        )
-
-        # Merge cache tags with request tags (v3.5 fix)
-        cache_hit_tag = tag
-        if cache_tags:
-            existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-            all_tags = list(set(existing_tags + cache_tags))
-            cache_hit_tag = ",".join(all_tags)
-
-        # Log the cache hit request
-        track_completion(
-            provider_id="cache",
-            model_id=cache_name,
-            model_name=clean_model_name,
-            endpoint="/api/chat",
-            input_tokens=0,
-            output_tokens=tokens_saved,
-            status_code=200,
-            cost=0.0,
-            tag=cache_hit_tag,
-            alias=cache_name,
-        )
-
-        # Convert to Ollama format and return
-        return jsonify(
-            {
-                "model": clean_model_name,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "message": {
-                    "role": "assistant",
-                    "content": cached_content,
-                },
-                "done": True,
-                "x_cache": {"hit": True, "cache_name": cache_name},
-            }
-        )
-
-    # Handle Smart Augmentor context injection (v3.4)
-    augmentor_name = None
-    augmentor_tags = []
-    augmentation_type = None
-    augmentation_query = None
-    augmentation_urls = None
-    if getattr(resolved, "has_augmentation", False):
-        augmentation_result = resolved.augmentation_result
-        augmentor_name = augmentation_result.augmentor_name
-        augmentor_tags = augmentation_result.augmentor_tags or []
-
-        # Capture augmentation details for logging (v3.5.1)
-        augmentation_type = augmentation_result.augmentation_type
-        augmentation_query = augmentation_result.search_query
-        augmentation_urls = augmentation_result.scraped_urls or None
+        # Capture enrichment details for logging
+        enricher_type = enrichment_result.enrichment_type
+        enricher_query = enrichment_result.search_query
+        enricher_urls = enrichment_result.scraped_urls or None
 
         # Swap in augmented content
-        if augmentation_result.augmented_system is not None:
-            system_prompt = augmentation_result.augmented_system
-        if augmentation_result.augmented_messages:
-            messages = augmentation_result.augmented_messages
+        if enrichment_result.augmented_system is not None:
+            system_prompt = enrichment_result.augmented_system
+        if enrichment_result.augmented_messages:
+            messages = enrichment_result.augmented_messages
 
-        # Log augmentation decision
-        aug_type = augmentation_result.augmentation_type
-        if aug_type != "direct":
-            logger.info(f"Augmentor '{augmentor_name}' applied {aug_type} augmentation")
+        # Log enrichment
+        if enrichment_result.context_injected:
+            logger.info(
+                f"Enricher '{enricher_name}' applied {enricher_type} enrichment "
+                f"(RAG: {enrichment_result.chunks_retrieved} chunks, Web: {len(enrichment_result.scraped_urls)} URLs)"
+            )
 
-        # Update augmentor statistics
-        from db import update_smart_augmentor_stats
+        # Update enricher statistics
+        from db import update_smart_enricher_stats
 
-        update_smart_augmentor_stats(
-            augmentor_id=augmentation_result.augmentor_id,
+        update_smart_enricher_stats(
+            enricher_id=enrichment_result.enricher_id,
             increment_requests=1,
-            increment_augmented=1 if aug_type != "direct" else 0,
-            increment_search=1 if "search" in aug_type else 0,
-            increment_scrape=1 if "scrape" in aug_type else 0,
+            increment_injections=1 if enrichment_result.context_injected else 0,
+            increment_search=1 if enrichment_result.search_query else 0,
+            increment_scrape=1 if enrichment_result.scraped_urls else 0,
         )
 
-        # Log designator usage for augmentor (v3.5 fix: include tags and augmentor_name)
-        if augmentation_result.designator_usage:
-            designator_model = augmentation_result.designator_model or "unknown"
-            designator_usage = augmentation_result.designator_usage
+        # Log designator usage for enricher (if web search was used)
+        if enrichment_result.designator_usage:
+            designator_model = enrichment_result.designator_model or "unknown"
+            designator_usage = enrichment_result.designator_usage
 
-            # Merge augmentor tags with request tags for designator logging
+            # Merge enricher tags with request tags for designator logging
             designator_tag = tag
-            if augmentor_tags:
+            if enricher_tags:
                 existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-                all_tags = list(set(existing_tags + augmentor_tags))
+                all_tags = list(set(existing_tags + enricher_tags))
                 designator_tag = ",".join(all_tags)
 
             track_completion(
@@ -1003,50 +936,21 @@ def chat():
                 status_code=200,
                 tag=designator_tag,
                 is_designator=True,
-                augmentor_name=augmentor_name,
             )
 
-    # Handle Smart RAG context injection (v3.8)
-    rag_name = None
-    rag_tags = []
-    rag_chunks_retrieved = 0
-    if getattr(resolved, "has_rag", False):
-        rag_result = resolved.rag_result
-        rag_name = rag_result.rag_name
-        rag_tags = rag_result.rag_tags or []
-        rag_chunks_retrieved = rag_result.chunks_retrieved
+        # Log embedding usage for paid providers (OpenAI)
+        if (
+            enrichment_result.embedding_usage
+            and enrichment_result.embedding_provider == "openai"
+        ):
+            embed_model = enrichment_result.embedding_model or "text-embedding-3-small"
+            embed_usage = enrichment_result.embedding_usage
 
-        # Swap in augmented content
-        if rag_result.augmented_system is not None:
-            system_prompt = rag_result.augmented_system
-        if rag_result.augmented_messages:
-            messages = rag_result.augmented_messages
-
-        # Log RAG retrieval
-        if rag_result.context_injected:
-            logger.info(
-                f"RAG '{rag_name}' injected {rag_chunks_retrieved} chunks into context"
-            )
-
-        # Update RAG statistics
-        from db import update_smart_rag_stats
-
-        update_smart_rag_stats(
-            rag_id=rag_result.rag_id,
-            increment_requests=1,
-            increment_injections=1 if rag_result.context_injected else 0,
-        )
-
-        # Log embedding usage for paid providers (OpenAI) (v3.8)
-        if rag_result.embedding_usage and rag_result.embedding_provider == "openai":
-            embed_model = rag_result.embedding_model or "text-embedding-3-small"
-            embed_usage = rag_result.embedding_usage
-
-            # Merge RAG tags with request tags for embedding logging
+            # Merge enricher tags with request tags for embedding logging
             embed_tag = tag
-            if rag_tags:
+            if enricher_tags:
                 existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-                all_tags = list(set(existing_tags + rag_tags))
+                all_tags = list(set(existing_tags + enricher_tags))
                 embed_tag = ",".join(all_tags)
 
             track_completion(
@@ -1058,14 +962,13 @@ def chat():
                 output_tokens=0,
                 status_code=200,
                 tag=embed_tag,
-                rag_name=rag_name,
             )
 
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/api/chat")
 
-    # Merge alias/augmentor/rag tags with request tags (v3.1, v3.5, v3.8)
-    all_entity_tags = alias_tags + augmentor_tags + rag_tags
+    # Merge alias/enricher tags with request tags
+    all_entity_tags = alias_tags + enricher_tags
     if all_entity_tags:
         existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
         all_tags = list(set(existing_tags + all_entity_tags))
@@ -1093,6 +996,81 @@ def chat():
         f"messages={len(messages)}, stream={stream}"
     )
 
+    # Check for cache hit (if caching is enabled on the resolved entity)
+    cache_engine = None
+    if resolved.has_cache:
+        from context.chroma import is_chroma_available
+        from routing.smart_cache import SmartCacheEngine
+
+        if is_chroma_available():
+            try:
+                cache_engine = SmartCacheEngine(resolved.cache_config, registry)
+                cache_result = cache_engine.lookup(messages, system_prompt)
+
+                if cache_result.is_cache_hit:
+                    # Cache hit! Return cached response
+                    cached_response = cache_result.cached_response
+                    cached_content = cached_response.get("content", "")
+                    cached_tokens = cache_result.cached_tokens
+                    cached_cost_saved = (
+                        cache_result.cached_cost
+                    )  # Exact cost from original request
+
+                    logger.info(
+                        f"Cache hit for '{cache_result.cache_name}' "
+                        f"(similarity={cache_result.similarity_score:.4f}, "
+                        f"tokens={cached_tokens}, cost_saved=${cached_cost_saved:.4f})"
+                    )
+
+                    # Update cache stats
+                    from db import update_smart_enricher_stats
+
+                    config = resolved.cache_config
+                    if hasattr(config, "id"):
+                        # Determine which stats update function to use based on entity type
+                        if hasattr(config, "use_rag"):  # SmartEnricher
+                            update_smart_enricher_stats(
+                                enricher_id=config.id,
+                                increment_cache_hits=1,
+                                increment_tokens_saved=cached_tokens,
+                            )
+
+                    # Build Ollama-format response
+                    response_obj = {
+                        "model": model_id,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "message": {"role": "assistant", "content": cached_content},
+                        "done": True,
+                        "total_duration": 0,
+                        "load_duration": 0,
+                        "prompt_eval_count": 0,
+                        "eval_count": cached_tokens,
+                        "eval_duration": 0,
+                    }
+
+                    # Track the cache hit
+                    track_completion(
+                        provider_id=provider.name,
+                        model_id=model_id,
+                        model_name=model_name,
+                        endpoint="/api/chat",
+                        input_tokens=0,
+                        output_tokens=0,
+                        status_code=200,
+                        tag=tag,
+                        alias=alias_name,
+                        router_name=router_name,
+                        is_cache_hit=True,
+                        cache_name=cache_result.cache_name,
+                        cache_tokens_saved=cached_tokens,
+                        cache_cost_saved=cached_cost_saved,
+                    )
+
+                    return jsonify(response_obj)
+            except Exception as cache_err:
+                logger.warning(f"Cache lookup failed: {cache_err}")
+                cache_engine = None  # Proceed without caching
+
     try:
         if stream:
             # Calculate input chars for token estimation
@@ -1106,16 +1084,13 @@ def chat():
             # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name  # Capture for closure
-            captured_alias = alias_name  # Capture alias for closure (v3.1)
-            captured_router = router_name  # Capture router for closure (v3.2)
-            captured_resolved = resolved  # Capture for cache storage (v3.3)
-            captured_messages = messages  # Capture for cache storage (v3.3)
-            captured_system = system_prompt  # Capture for cache storage (v3.3)
-            # Capture augmentation details for logging (v3.5.1)
-            captured_augmentor = augmentor_name
-            captured_aug_type = augmentation_type
-            captured_aug_query = augmentation_query
-            captured_aug_urls = augmentation_urls
+            captured_alias = alias_name  # Capture alias for closure
+            captured_router = router_name  # Capture router for closure
+
+            # Capture cache engine and messages for streaming cache storage
+            captured_cache_engine = cache_engine
+            captured_messages = messages
+            captured_system = system_prompt
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -1159,39 +1134,23 @@ def chat():
                     else None,
                     alias=captured_alias,
                     router_name=captured_router,
-                    augmentor_name=captured_augmentor,
-                    augmentation_type=captured_aug_type,
-                    augmentation_query=captured_aug_query,
-                    augmentation_urls=captured_aug_urls,
                 )
 
-                # Store response in smart cache on cache miss (v3.3)
-                if (
-                    full_content
-                    and not error
-                    and captured_resolved.has_cache
-                    and not captured_resolved.is_cache_hit
-                ):
+                # Store streaming response in cache
+                if captured_cache_engine and full_content and not error:
                     try:
-                        cache_engine = captured_resolved.cache_engine
-                        cache_engine.store_response(
+                        captured_cache_engine.store_response(
                             messages=captured_messages,
                             system=captured_system,
                             response={"content": full_content},
+                            input_tokens=input_tokens,
                             output_tokens=output_tokens,
-                        )
-                        # Update cache request count (miss)
-                        from db import update_smart_cache_stats
-
-                        update_smart_cache_stats(
-                            cache_id=cache_engine.cache.id,
-                            increment_requests=1,
-                        )
-                        logger.debug(
-                            f"Stored streaming response in cache '{cache_engine.cache.name}'"
+                            cost=cost or 0.0,
                         )
                     except Exception as cache_err:
-                        logger.warning(f"Failed to store in cache: {cache_err}")
+                        logger.warning(
+                            f"Failed to store streaming response in cache: {cache_err}"
+                        )
 
             return Response(
                 stream_ollama_response(
@@ -1243,35 +1202,21 @@ def chat():
                 tag=tag,
                 alias=alias_name,
                 router_name=router_name,
-                augmentor_name=augmentor_name,
-                augmentation_type=augmentation_type,
-                augmentation_query=augmentation_query,
-                augmentation_urls=augmentation_urls,
-                rag_name=rag_name,
             )
 
-            # Store response in smart cache on cache miss (v3.3)
-            if resolved.has_cache and not resolved.is_cache_hit:
+            # Store response in cache (if caching is enabled and we have a cache engine)
+            if cache_engine:
                 try:
-                    cache_engine = resolved.cache_engine
                     cache_engine.store_response(
                         messages=messages,
                         system=system_prompt,
                         response={"content": llm_content},
+                        input_tokens=result.get("input_tokens", 0),
                         output_tokens=result.get("output_tokens", 0),
-                    )
-                    # Update cache request count (miss)
-                    from db import update_smart_cache_stats
-
-                    update_smart_cache_stats(
-                        cache_id=cache_engine.cache.id,
-                        increment_requests=1,
-                    )
-                    logger.debug(
-                        f"Stored response in cache '{cache_engine.cache.name}'"
+                        cost=result.get("cost", 0.0) or 0.0,
                     )
                 except Exception as cache_err:
-                    logger.warning(f"Failed to store in cache: {cache_err}")
+                    logger.warning(f"Failed to store response in cache: {cache_err}")
 
             return jsonify(response_obj)
 
@@ -1290,11 +1235,6 @@ def chat():
             tag=tag,
             alias=alias_name,
             router_name=router_name,
-            augmentor_name=augmentor_name,
-            augmentation_type=augmentation_type,
-            augmentation_query=augmentation_query,
-            augmentation_urls=augmentation_urls,
-            rag_name=rag_name,
         )
         return jsonify({"error": str(e)}), 500
 
@@ -1628,130 +1568,56 @@ def openai_chat_completions():
             }
         ), 400
 
-    # Handle Smart Cache hits (v3.3)
-    if resolved.has_cache and resolved.is_cache_hit:
-        cached_response = resolved.cached_response
-        cache_engine = resolved.cache_engine
-        cache_id = cache_engine.cache.id
-        cache_name = cache_engine.cache.name
-        # Use alias_tags which includes merged redirect tags if applicable
-        cache_tags = resolved.alias_tags or resolved.cache_result.cache_tags or []
+    # Handle Smart Enricher context injection (unified RAG + Web)
+    enricher_name = None
+    enricher_tags = []
+    enricher_type = None
+    enricher_query = None
+    enricher_urls = None
+    if getattr(resolved, "has_enrichment", False):
+        enrichment_result = resolved.enrichment_result
+        enricher_name = enrichment_result.enricher_name
+        enricher_tags = enrichment_result.enricher_tags or []
 
-        # Extract content for response
-        cached_content = cached_response.get("content", "")
-
-        # Use actual output tokens from cache metadata
-        tokens_saved = resolved.cache_result.cached_tokens
-
-        logger.info(
-            f"Cache hit for '{cache_name}' - returning cached response (OpenAI format, tokens_saved={tokens_saved})"
-        )
-
-        # Update cache statistics
-        from db import update_smart_cache_stats
-
-        update_smart_cache_stats(
-            cache_id=cache_id,
-            increment_requests=1,
-            increment_hits=1,
-            increment_tokens_saved=tokens_saved,
-        )
-
-        # Merge cache tags with request tags (v3.5 fix)
-        cache_hit_tag = tag
-        if cache_tags:
-            existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-            all_tags = list(set(existing_tags + cache_tags))
-            cache_hit_tag = ",".join(all_tags)
-
-        # Log the cache hit request
-        track_completion(
-            provider_id="cache",
-            model_id=cache_name,
-            model_name=clean_model_name,
-            endpoint="/v1/chat/completions",
-            input_tokens=0,
-            output_tokens=tokens_saved,
-            status_code=200,
-            cost=0.0,
-            tag=cache_hit_tag,
-            alias=cache_name,
-        )
-
-        # Return OpenAI-compatible response
-        return jsonify(
-            {
-                "id": f"chatcmpl-cache-{cache_id}",
-                "object": "chat.completion",
-                "created": int(datetime.now(timezone.utc).timestamp()),
-                "model": clean_model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": cached_content,
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": tokens_saved,
-                    "total_tokens": tokens_saved,
-                },
-                "x_cache": {"hit": True, "cache_name": cache_name},
-            }
-        )
-
-    # Handle Smart Augmentor context injection (v3.4)
-    augmentor_name = None
-    augmentor_tags = []
-    augmentation_type = None
-    augmentation_query = None
-    augmentation_urls = None
-    if getattr(resolved, "has_augmentation", False):
-        augmentation_result = resolved.augmentation_result
-        augmentor_name = augmentation_result.augmentor_name
-        augmentor_tags = augmentation_result.augmentor_tags or []
-
-        # Capture augmentation details for logging (v3.5.1)
-        augmentation_type = augmentation_result.augmentation_type
-        augmentation_query = augmentation_result.search_query
-        augmentation_urls = augmentation_result.scraped_urls or None
+        # Capture enrichment details for logging
+        enricher_type = enrichment_result.enrichment_type
+        enricher_query = enrichment_result.search_query
+        enricher_urls = enrichment_result.scraped_urls or None
 
         # Swap in augmented content
-        if augmentation_result.augmented_system is not None:
-            system_prompt = augmentation_result.augmented_system
-        if augmentation_result.augmented_messages:
-            messages = augmentation_result.augmented_messages
+        if enrichment_result.augmented_system is not None:
+            system_prompt = enrichment_result.augmented_system
+        if enrichment_result.augmented_messages:
+            messages = enrichment_result.augmented_messages
 
-        # Log augmentation decision
-        aug_type = augmentation_result.augmentation_type
-        if aug_type != "direct":
-            logger.info(f"Augmentor '{augmentor_name}' applied {aug_type} augmentation")
+        # Log enrichment
+        if enrichment_result.context_injected:
+            logger.info(
+                f"Enricher '{enricher_name}' applied {enricher_type} enrichment "
+                f"(RAG: {enrichment_result.chunks_retrieved} chunks, Web: {len(enrichment_result.scraped_urls)} URLs)"
+            )
 
-        # Update augmentor statistics
-        from db import update_smart_augmentor_stats
+        # Update enricher statistics
+        from db import update_smart_enricher_stats
 
-        update_smart_augmentor_stats(
-            augmentor_id=augmentation_result.augmentor_id,
+        update_smart_enricher_stats(
+            enricher_id=enrichment_result.enricher_id,
             increment_requests=1,
-            increment_augmented=1 if aug_type != "direct" else 0,
-            increment_search=1 if "search" in aug_type else 0,
-            increment_scrape=1 if "scrape" in aug_type else 0,
+            increment_injections=1 if enrichment_result.context_injected else 0,
+            increment_search=1 if enrichment_result.search_query else 0,
+            increment_scrape=1 if enrichment_result.scraped_urls else 0,
         )
 
-        # Log designator usage for augmentor (v3.5 fix: include tags and augmentor_name)
-        if augmentation_result.designator_usage:
-            designator_model = augmentation_result.designator_model or "unknown"
-            designator_usage = augmentation_result.designator_usage
+        # Log designator usage for enricher (if web search was used)
+        if enrichment_result.designator_usage:
+            designator_model = enrichment_result.designator_model or "unknown"
+            designator_usage = enrichment_result.designator_usage
 
-            # Merge augmentor tags with request tags for designator logging
+            # Merge enricher tags with request tags for designator logging
             designator_tag = tag
-            if augmentor_tags:
+            if enricher_tags:
                 existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-                all_tags = list(set(existing_tags + augmentor_tags))
+                all_tags = list(set(existing_tags + enricher_tags))
                 designator_tag = ",".join(all_tags)
 
             track_completion(
@@ -1768,50 +1634,21 @@ def openai_chat_completions():
                 status_code=200,
                 tag=designator_tag,
                 is_designator=True,
-                augmentor_name=augmentor_name,
             )
 
-    # Handle Smart RAG context injection (v3.8)
-    rag_name = None
-    rag_tags = []
-    rag_chunks_retrieved = 0
-    if getattr(resolved, "has_rag", False):
-        rag_result = resolved.rag_result
-        rag_name = rag_result.rag_name
-        rag_tags = rag_result.rag_tags or []
-        rag_chunks_retrieved = rag_result.chunks_retrieved
+        # Log embedding usage for paid providers (OpenAI)
+        if (
+            enrichment_result.embedding_usage
+            and enrichment_result.embedding_provider == "openai"
+        ):
+            embed_model = enrichment_result.embedding_model or "text-embedding-3-small"
+            embed_usage = enrichment_result.embedding_usage
 
-        # Swap in augmented content
-        if rag_result.augmented_system is not None:
-            system_prompt = rag_result.augmented_system
-        if rag_result.augmented_messages:
-            messages = rag_result.augmented_messages
-
-        # Log RAG retrieval
-        if rag_result.context_injected:
-            logger.info(
-                f"RAG '{rag_name}' injected {rag_chunks_retrieved} chunks into context"
-            )
-
-        # Update RAG statistics
-        from db import update_smart_rag_stats
-
-        update_smart_rag_stats(
-            rag_id=rag_result.rag_id,
-            increment_requests=1,
-            increment_injections=1 if rag_result.context_injected else 0,
-        )
-
-        # Log embedding usage for paid providers (OpenAI) (v3.8)
-        if rag_result.embedding_usage and rag_result.embedding_provider == "openai":
-            embed_model = rag_result.embedding_model or "text-embedding-3-small"
-            embed_usage = rag_result.embedding_usage
-
-            # Merge RAG tags with request tags for embedding logging
+            # Merge enricher tags with request tags for embedding logging
             embed_tag = tag
-            if rag_tags:
+            if enricher_tags:
                 existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
-                all_tags = list(set(existing_tags + rag_tags))
+                all_tags = list(set(existing_tags + enricher_tags))
                 embed_tag = ",".join(all_tags)
 
             track_completion(
@@ -1823,14 +1660,13 @@ def openai_chat_completions():
                 output_tokens=0,
                 status_code=200,
                 tag=embed_tag,
-                rag_name=rag_name,
             )
 
     # Log designator usage for smart routers (v3.2)
     log_designator_usage(resolved, "/v1/chat/completions")
 
-    # Merge alias/augmentor/rag tags with request tags (v3.1, v3.5, v3.8)
-    all_entity_tags = alias_tags + augmentor_tags + rag_tags
+    # Merge alias/enricher tags with request tags
+    all_entity_tags = alias_tags + enricher_tags
     if all_entity_tags:
         existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
         all_tags = list(set(existing_tags + all_entity_tags))
@@ -1844,6 +1680,90 @@ def openai_chat_completions():
             logger.warning(
                 f"Model {model_id} doesn't support vision - images removed from request"
             )
+
+    # Check for cache hit (if caching is enabled on the resolved entity)
+    cache_engine = None
+    if resolved.has_cache:
+        from context.chroma import is_chroma_available
+        from routing.smart_cache import SmartCacheEngine
+
+        if is_chroma_available():
+            try:
+                cache_engine = SmartCacheEngine(resolved.cache_config, registry)
+                cache_result = cache_engine.lookup(messages, system_prompt)
+
+                if cache_result.is_cache_hit:
+                    # Cache hit! Return cached response
+                    cached_response = cache_result.cached_response
+                    cached_content = cached_response.get("content", "")
+                    cached_tokens = cache_result.cached_tokens
+                    cached_cost_saved = (
+                        cache_result.cached_cost
+                    )  # Exact cost from original request
+
+                    logger.info(
+                        f"Cache hit for '{cache_result.cache_name}' "
+                        f"(similarity={cache_result.similarity_score:.4f}, "
+                        f"tokens={cached_tokens}, cost_saved=${cached_cost_saved:.4f})"
+                    )
+
+                    # Update cache stats
+                    from db import update_smart_enricher_stats
+
+                    config = resolved.cache_config
+                    if hasattr(config, "id"):
+                        if hasattr(config, "use_rag"):  # SmartEnricher
+                            update_smart_enricher_stats(
+                                enricher_id=config.id,
+                                increment_cache_hits=1,
+                                increment_tokens_saved=cached_tokens,
+                            )
+
+                    # Build OpenAI-format response
+                    response_obj = {
+                        "id": generate_openai_id(),
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": cached_content,
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": 0,
+                            "completion_tokens": cached_tokens,
+                            "total_tokens": cached_tokens,
+                        },
+                    }
+
+                    # Track the cache hit
+                    track_completion(
+                        provider_id=provider.name,
+                        model_id=model_id,
+                        model_name=model_name,
+                        endpoint="/v1/chat/completions",
+                        input_tokens=0,
+                        output_tokens=0,
+                        status_code=200,
+                        tag=tag,
+                        alias=alias_name,
+                        router_name=router_name,
+                        is_cache_hit=True,
+                        cache_name=cache_result.cache_name,
+                        cache_tokens_saved=cached_tokens,
+                        cache_cost_saved=cached_cost_saved,
+                    )
+
+                    return jsonify(response_obj)
+            except Exception as cache_err:
+                logger.warning(f"Cache lookup failed: {cache_err}")
+                cache_engine = None  # Proceed without caching
 
     # Build options
     options = {}
@@ -1881,16 +1801,13 @@ def openai_chat_completions():
             # tag already extracted above
             hostname = resolve_hostname(client_ip)
             prov_name = provider.name
-            captured_alias = alias_name  # Capture alias for closure (v3.1)
-            captured_router = router_name  # Capture router for closure (v3.2)
-            captured_resolved = resolved  # Capture for cache storage (v3.3)
-            captured_messages = messages  # Capture for cache storage (v3.3)
-            captured_system = system_prompt  # Capture for cache storage (v3.3)
-            # Capture augmentation details for logging (v3.5.1)
-            captured_augmentor = augmentor_name
-            captured_aug_type = augmentation_type
-            captured_aug_query = augmentation_query
-            captured_aug_urls = augmentation_urls
+            captured_alias = alias_name  # Capture alias for closure
+            captured_router = router_name  # Capture router for closure
+
+            # Capture cache engine and messages for streaming cache storage
+            captured_cache_engine = cache_engine
+            captured_messages = messages
+            captured_system = system_prompt
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -1934,39 +1851,23 @@ def openai_chat_completions():
                     else None,
                     alias=captured_alias,
                     router_name=captured_router,
-                    augmentor_name=captured_augmentor,
-                    augmentation_type=captured_aug_type,
-                    augmentation_query=captured_aug_query,
-                    augmentation_urls=captured_aug_urls,
                 )
 
-                # Store response in smart cache on cache miss (v3.3)
-                if (
-                    full_content
-                    and not error
-                    and captured_resolved.has_cache
-                    and not captured_resolved.is_cache_hit
-                ):
+                # Store streaming response in cache
+                if captured_cache_engine and full_content and not error:
                     try:
-                        cache_engine = captured_resolved.cache_engine
-                        cache_engine.store_response(
+                        captured_cache_engine.store_response(
                             messages=captured_messages,
                             system=captured_system,
                             response={"content": full_content},
+                            input_tokens=input_tokens,
                             output_tokens=output_tokens,
-                        )
-                        # Update cache request count (miss)
-                        from db import update_smart_cache_stats
-
-                        update_smart_cache_stats(
-                            cache_id=cache_engine.cache.id,
-                            increment_requests=1,
-                        )
-                        logger.debug(
-                            f"Stored streaming response in cache '{cache_engine.cache.name}'"
+                            cost=cost or 0.0,
                         )
                     except Exception as cache_err:
-                        logger.warning(f"Failed to store in cache: {cache_err}")
+                        logger.warning(
+                            f"Failed to store streaming response in cache: {cache_err}"
+                        )
 
             return Response(
                 stream_openai_response(
@@ -2035,35 +1936,21 @@ def openai_chat_completions():
                 tag=tag,
                 alias=alias_name,
                 router_name=router_name,
-                augmentor_name=augmentor_name,
-                augmentation_type=augmentation_type,
-                augmentation_query=augmentation_query,
-                augmentation_urls=augmentation_urls,
-                rag_name=rag_name,
             )
 
-            # Store response in smart cache on cache miss (v3.3)
-            if resolved.has_cache and not resolved.is_cache_hit:
+            # Store response in cache (if caching is enabled and we have a cache engine)
+            if cache_engine:
                 try:
-                    cache_engine = resolved.cache_engine
                     cache_engine.store_response(
                         messages=messages,
                         system=system_prompt,
                         response={"content": llm_content},
+                        input_tokens=result.get("input_tokens", 0),
                         output_tokens=result.get("output_tokens", 0),
-                    )
-                    # Update cache request count (miss)
-                    from db import update_smart_cache_stats
-
-                    update_smart_cache_stats(
-                        cache_id=cache_engine.cache.id,
-                        increment_requests=1,
-                    )
-                    logger.debug(
-                        f"Stored response in cache '{cache_engine.cache.name}'"
+                        cost=result.get("cost", 0.0) or 0.0,
                     )
                 except Exception as cache_err:
-                    logger.warning(f"Failed to store in cache: {cache_err}")
+                    logger.warning(f"Failed to store response in cache: {cache_err}")
 
             return jsonify(response_obj)
 
@@ -2082,11 +1969,6 @@ def openai_chat_completions():
             tag=tag,
             alias=alias_name,
             router_name=router_name,
-            augmentor_name=augmentor_name,
-            augmentation_type=augmentation_type,
-            augmentation_query=augmentation_query,
-            augmentation_urls=augmentation_urls,
-            rag_name=rag_name,
         )
         return jsonify(
             {

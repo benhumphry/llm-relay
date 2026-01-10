@@ -510,6 +510,36 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        # v1.6: Cache tracking
+        if "is_cache_hit" not in existing_columns:
+            migrations.append(
+                (
+                    "is_cache_hit",
+                    "ALTER TABLE request_logs ADD COLUMN is_cache_hit BOOLEAN DEFAULT false",
+                )
+            )
+        if "cache_name" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_name",
+                    "ALTER TABLE request_logs ADD COLUMN cache_name VARCHAR(100)",
+                )
+            )
+        if "cache_tokens_saved" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_tokens_saved",
+                    "ALTER TABLE request_logs ADD COLUMN cache_tokens_saved INTEGER DEFAULT 0",
+                )
+            )
+        if "cache_cost_saved" not in existing_columns:
+            migrations.append(
+                (
+                    "cache_cost_saved",
+                    "ALTER TABLE request_logs ADD COLUMN cache_cost_saved REAL DEFAULT 0.0",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for request_logs table (v3.2)"
@@ -745,9 +775,7 @@ def _run_migrations(engine) -> None:
                 )
                 row = result.fetchone()
                 if row and row[0] == "NO":
-                    logger.info(
-                        "Making source_path nullable for MCP sources (v1.6.1)"
-                    )
+                    logger.info("Making source_path nullable for MCP sources (v1.6.1)")
                     conn.execute(
                         text(
                             "ALTER TABLE smart_rags ALTER COLUMN source_path DROP NOT NULL"
@@ -788,6 +816,253 @@ def _run_migrations(engine) -> None:
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for smart_augmentors table (v1.5)"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Create document_stores table and migrate existing RAG sources (v3.9)
+    if "document_stores" not in inspector.get_table_names():
+        logger.info("Creating document_stores and smart_rag_stores tables (v3.9)")
+
+        # Create the document_stores table
+        with engine.connect() as conn:
+            conn.execute(
+                text("""
+                    CREATE TABLE document_stores (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name VARCHAR(100) NOT NULL UNIQUE,
+                        source_type VARCHAR(20) DEFAULT 'local',
+                        source_path VARCHAR(500),
+                        mcp_server_config_json TEXT,
+                        embedding_provider VARCHAR(100) DEFAULT 'local',
+                        embedding_model VARCHAR(150),
+                        ollama_url VARCHAR(500),
+                        vision_provider VARCHAR(100) DEFAULT 'local',
+                        vision_model VARCHAR(150),
+                        vision_ollama_url VARCHAR(500),
+                        chunk_size INTEGER DEFAULT 512,
+                        chunk_overlap INTEGER DEFAULT 50,
+                        index_schedule VARCHAR(100),
+                        last_indexed DATETIME,
+                        index_status VARCHAR(20) DEFAULT 'pending',
+                        index_error TEXT,
+                        document_count INTEGER DEFAULT 0,
+                        chunk_count INTEGER DEFAULT 0,
+                        collection_name VARCHAR(100),
+                        description TEXT,
+                        enabled BOOLEAN DEFAULT 1,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            )
+
+            # Create the junction table
+            conn.execute(
+                text("""
+                    CREATE TABLE smart_rag_stores (
+                        smart_rag_id INTEGER NOT NULL,
+                        document_store_id INTEGER NOT NULL,
+                        PRIMARY KEY (smart_rag_id, document_store_id),
+                        FOREIGN KEY (smart_rag_id) REFERENCES smart_rags(id) ON DELETE CASCADE,
+                        FOREIGN KEY (document_store_id) REFERENCES document_stores(id) ON DELETE CASCADE
+                    )
+                """)
+            )
+
+            # Create index on document_stores.name
+            conn.execute(
+                text("CREATE INDEX ix_document_stores_name ON document_stores(name)")
+            )
+
+            conn.commit()
+            logger.info("Created document_stores and smart_rag_stores tables")
+
+        # Migrate existing SmartRAG source configurations to DocumentStore
+        if "smart_rags" in inspector.get_table_names():
+            logger.info("Migrating existing SmartRAG sources to DocumentStores")
+            with engine.connect() as conn:
+                # Get all existing SmartRAGs that have source configuration
+                result = conn.execute(
+                    text("""
+                        SELECT id, name, source_type, source_path, mcp_server_config_json,
+                               embedding_provider, embedding_model, ollama_url,
+                               vision_provider, vision_model, vision_ollama_url,
+                               chunk_size, chunk_overlap, index_schedule,
+                               last_indexed, index_status, index_error,
+                               document_count, chunk_count, collection_name
+                        FROM smart_rags
+                        WHERE source_path IS NOT NULL OR mcp_server_config_json IS NOT NULL
+                    """)
+                )
+
+                migrated_count = 0
+                for row in result:
+                    rag_id = row[0]
+                    rag_name = row[1]
+
+                    # Create a DocumentStore with the same config
+                    store_name = f"{rag_name}-store"
+
+                    # Insert the new document store
+                    conn.execute(
+                        text("""
+                            INSERT INTO document_stores (
+                                name, source_type, source_path, mcp_server_config_json,
+                                embedding_provider, embedding_model, ollama_url,
+                                vision_provider, vision_model, vision_ollama_url,
+                                chunk_size, chunk_overlap, index_schedule,
+                                last_indexed, index_status, index_error,
+                                document_count, chunk_count, collection_name,
+                                enabled, created_at, updated_at
+                            ) VALUES (
+                                :name, :source_type, :source_path, :mcp_config,
+                                :embed_provider, :embed_model, :ollama_url,
+                                :vision_provider, :vision_model, :vision_ollama_url,
+                                :chunk_size, :chunk_overlap, :index_schedule,
+                                :last_indexed, :index_status, :index_error,
+                                :doc_count, :chunk_count, :collection_name,
+                                1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                            )
+                        """),
+                        {
+                            "name": store_name,
+                            "source_type": row[2] or "local",
+                            "source_path": row[3],
+                            "mcp_config": row[4],
+                            "embed_provider": row[5] or "local",
+                            "embed_model": row[6],
+                            "ollama_url": row[7],
+                            "vision_provider": row[8] or "local",
+                            "vision_model": row[9],
+                            "vision_ollama_url": row[10],
+                            "chunk_size": row[11] or 512,
+                            "chunk_overlap": row[12] or 50,
+                            "index_schedule": row[13],
+                            "last_indexed": row[14],
+                            "index_status": row[15] or "pending",
+                            "index_error": row[16],
+                            "doc_count": row[17] or 0,
+                            "chunk_count": row[18] or 0,
+                            "collection_name": row[19],
+                        },
+                    )
+
+                    # Get the new store ID
+                    store_id_result = conn.execute(
+                        text("SELECT id FROM document_stores WHERE name = :name"),
+                        {"name": store_name},
+                    )
+                    store_id = store_id_result.scalar()
+
+                    # Link the RAG to the store
+                    conn.execute(
+                        text("""
+                            INSERT INTO smart_rag_stores (smart_rag_id, document_store_id)
+                            VALUES (:rag_id, :store_id)
+                        """),
+                        {"rag_id": rag_id, "store_id": store_id},
+                    )
+
+                    migrated_count += 1
+
+                conn.commit()
+                logger.info(
+                    f"Migrated {migrated_count} SmartRAG source(s) to DocumentStores"
+                )
+
+    # Migration: Add google_account_id column to document_stores table (v1.7)
+    if "document_stores" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("document_stores")
+        }
+
+        if "google_account_id" not in existing_columns:
+            logger.info("Adding google_account_id column to document_stores table")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN google_account_id INTEGER REFERENCES oauth_tokens(id) ON DELETE SET NULL"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add Google Drive folder columns to document_stores table (v1.7.1)
+    if "document_stores" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("document_stores")
+        }
+
+        migrations = []
+
+        if "gdrive_folder_id" not in existing_columns:
+            migrations.append(
+                (
+                    "gdrive_folder_id",
+                    "ALTER TABLE document_stores ADD COLUMN gdrive_folder_id VARCHAR(100)",
+                )
+            )
+        if "gdrive_folder_name" not in existing_columns:
+            migrations.append(
+                (
+                    "gdrive_folder_name",
+                    "ALTER TABLE document_stores ADD COLUMN gdrive_folder_name VARCHAR(255)",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for document_stores table (v1.7.1 Drive folders)"
+            )
+            with engine.connect() as conn:
+                for col_name, sql in migrations:
+                    logger.debug(f"Adding column: {col_name}")
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add Gmail label columns to document_stores table (v1.7.2)
+    if "document_stores" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("document_stores")
+        }
+
+        migrations = []
+
+        if "gmail_label_id" not in existing_columns:
+            migrations.append(
+                (
+                    "gmail_label_id",
+                    "ALTER TABLE document_stores ADD COLUMN gmail_label_id VARCHAR(100)",
+                )
+            )
+        if "gmail_label_name" not in existing_columns:
+            migrations.append(
+                (
+                    "gmail_label_name",
+                    "ALTER TABLE document_stores ADD COLUMN gmail_label_name VARCHAR(255)",
+                )
+            )
+        if "gcalendar_calendar_id" not in existing_columns:
+            migrations.append(
+                (
+                    "gcalendar_calendar_id",
+                    "ALTER TABLE document_stores ADD COLUMN gcalendar_calendar_id VARCHAR(255)",
+                )
+            )
+        if "gcalendar_calendar_name" not in existing_columns:
+            migrations.append(
+                (
+                    "gcalendar_calendar_name",
+                    "ALTER TABLE document_stores ADD COLUMN gcalendar_calendar_name VARCHAR(255)",
+                )
+            )
+
+        if migrations:
+            logger.info(
+                f"Running {len(migrations)} migration(s) for document_stores table"
             )
             with engine.connect() as conn:
                 for col_name, sql in migrations:

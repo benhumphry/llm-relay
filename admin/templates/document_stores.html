@@ -1,0 +1,2134 @@
+{% extends "base.html" %} {% block title %}Document Stores{% endblock %} {%
+block content %}
+<div x-data="documentStoresPage()" x-init="init()">
+    <!-- Header -->
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
+        <div>
+            <h1 class="text-2xl font-bold">Document Stores</h1>
+            <p class="text-base-content/60">
+                Configure and index document sources for Smart RAGs
+            </p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                />
+            </svg>
+            Add Store
+        </button>
+    </div>
+
+    <!-- Loading State -->
+    <template x-if="loading">
+        <div class="flex justify-center py-12">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    </template>
+
+    <!-- No Stores Configured -->
+    <template x-if="!loading && stores.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-base-content/30"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium">
+                    No Document Stores Configured
+                </h3>
+                <p class="mt-2 text-base-content/60 max-w-md mx-auto">
+                    Document stores index documents from local folders or MCP
+                    sources. They can be shared across multiple Smart RAGs for
+                    multi-source search.
+                </p>
+                <button @click="openAddModal()" class="btn btn-primary mt-4">
+                    Create Your First Store
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Store Table -->
+    <template x-if="!loading && stores.length > 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="overflow-x-auto">
+                <table class="table table-fixed">
+                    <thead>
+                        <tr>
+                            <th class="w-8"></th>
+                            <th class="w-32">Name</th>
+                            <th class="w-1/4">Source</th>
+                            <th class="w-20">Index</th>
+                            <th class="w-20 text-right">Docs</th>
+                            <th class="w-20 text-right">Chunks</th>
+                            <th class="w-20 text-right">RAGs</th>
+                            <th class="w-20">Status</th>
+                            <th class="w-28 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <template x-for="store in stores" :key="store.id">
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
+                                @click="toggleExpand(store.id)"
+                                class="cursor-pointer hover:bg-base-200"
+                            >
+                                <td class="w-8">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 transition-transform"
+                                        :class="{'rotate-90': expandedRows.includes(store.id)}"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
+                                </td>
+                                <td>
+                                    <div
+                                        class="font-mono font-medium"
+                                        x-text="store.name"
+                                    ></div>
+                                </td>
+                                <td>
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="badge badge-sm"
+                                            :class="store.source_type === 'mcp' ? 'badge-info' : 'badge-ghost'"
+                                            x-text="store.source_type === 'mcp' ? 'MCP' : 'Local'"
+                                        ></span>
+                                        <span
+                                            class="font-mono text-sm text-base-content/70 truncate"
+                                            x-text="store.source_type === 'mcp' ? (store.mcp_server_config?.name || 'Unknown') : store.source_path"
+                                            :title="store.source_type === 'mcp' ? (store.mcp_server_config?.name || '') : store.source_path"
+                                        ></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="badge badge-sm"
+                                            :class="{
+                                                'badge-success': store.index_status === 'ready',
+                                                'badge-warning': store.index_status === 'indexing',
+                                                'badge-error': store.index_status === 'error',
+                                                'badge-ghost': store.index_status === 'pending'
+                                            }"
+                                            x-text="store.index_status"
+                                        ></span>
+                                        <span
+                                            x-show="store.index_status === 'indexing'"
+                                            class="loading loading-spinner loading-xs"
+                                        ></span>
+                                    </div>
+                                </td>
+                                <td class="text-right">
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="store.document_count || 0"
+                                    ></span>
+                                </td>
+                                <td class="text-right">
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="store.chunk_count || 0"
+                                    ></span>
+                                </td>
+                                <td class="text-right">
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="store.rag_count || 0"
+                                    ></span>
+                                </td>
+                                <td>
+                                    <span
+                                        class="badge badge-sm"
+                                        :class="store.enabled ? 'badge-success' : 'badge-ghost'"
+                                        x-text="store.enabled ? 'Enabled' : 'Disabled'"
+                                    ></span>
+                                </td>
+                                <td class="text-right" @click.stop>
+                                    <div class="flex justify-end gap-1">
+                                        <!-- Index Now button (hidden when indexing) -->
+                                        <button
+                                            x-show="store.index_status !== 'indexing'"
+                                            @click="indexNow(store)"
+                                            class="btn btn-ghost btn-sm"
+                                            :class="{ 'loading': indexingStores.includes(store.id) }"
+                                            :disabled="indexingStores.includes(store.id)"
+                                            title="Index now"
+                                        >
+                                            <svg
+                                                x-show="!indexingStores.includes(store.id)"
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <!-- Cancel Index button (shown when indexing) -->
+                                        <button
+                                            x-show="store.index_status === 'indexing'"
+                                            @click="cancelIndex(store)"
+                                            class="btn btn-ghost btn-sm text-warning"
+                                            :class="{ 'loading': cancellingStores.includes(store.id) }"
+                                            :disabled="cancellingStores.includes(store.id)"
+                                            title="Cancel indexing"
+                                        >
+                                            <svg
+                                                x-show="!cancellingStores.includes(store.id)"
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M6 18L18 6M6 6l12 12"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <!-- Clear Contents button (shown when has content) -->
+                                        <button
+                                            x-show="store.chunk_count > 0 && store.index_status !== 'indexing'"
+                                            @click="clearContents(store)"
+                                            class="btn btn-ghost btn-sm text-warning"
+                                            :class="{ 'loading': clearingStores.includes(store.id) }"
+                                            :disabled="clearingStores.includes(store.id)"
+                                            title="Clear indexed content"
+                                        >
+                                            <svg
+                                                x-show="!clearingStores.includes(store.id)"
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="openEditModal(store)"
+                                            class="btn btn-ghost btn-sm"
+                                            title="Edit store"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="confirmDelete(store)"
+                                            class="btn btn-ghost btn-sm text-error"
+                                            :disabled="store.rag_count > 0"
+                                            :title="store.rag_count > 0 ? 'Cannot delete - used by RAGs' : 'Delete store'"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <!-- Expanded Details Row -->
+                            <tr
+                                x-show="expandedRows.includes(store.id)"
+                                x-transition
+                            >
+                                <td colspan="9" class="bg-base-200 p-0">
+                                    <div
+                                        class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
+                                    >
+                                        <!-- Description -->
+                                        <div
+                                            x-show="store.description"
+                                            class="md:col-span-2"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Description
+                                            </div>
+                                            <div
+                                                class="text-sm"
+                                                x-text="store.description"
+                                            ></div>
+                                        </div>
+                                        <!-- Embedding Provider -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Embedding
+                                            </div>
+                                            <div class="font-mono text-xs">
+                                                <span
+                                                    x-text="store.embedding_provider"
+                                                ></span>
+                                                <span
+                                                    x-show="store.embedding_model"
+                                                    x-text="' / ' + store.embedding_model"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                        <!-- Vision Provider -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Vision
+                                            </div>
+                                            <div class="font-mono text-xs">
+                                                <span
+                                                    x-text="store.vision_provider"
+                                                ></span>
+                                                <span
+                                                    x-show="store.vision_model"
+                                                    x-text="' / ' + store.vision_model"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                        <!-- Index Schedule -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Schedule
+                                            </div>
+                                            <div
+                                                class="text-xs"
+                                                x-text="store.index_schedule || 'Manual only'"
+                                            ></div>
+                                        </div>
+                                        <!-- Last Indexed -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Last Indexed
+                                            </div>
+                                            <div
+                                                class="text-xs"
+                                                x-text="store.last_indexed ? new Date(store.last_indexed).toLocaleString() : 'Never'"
+                                            ></div>
+                                        </div>
+                                        <!-- Chunking -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Chunking
+                                            </div>
+                                            <div class="text-xs">
+                                                Size:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="store.chunk_size"
+                                                ></span
+                                                >, Overlap:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="store.chunk_overlap"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                        <!-- Collection Name -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Collection
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="store.collection_name || 'Not created'"
+                                            ></div>
+                                        </div>
+                                        <!-- Error (if any) -->
+                                        <div
+                                            x-show="store.index_error"
+                                            class="md:col-span-2"
+                                        >
+                                            <div
+                                                class="text-xs text-error uppercase mb-1"
+                                            >
+                                                Index Error
+                                            </div>
+                                            <div
+                                                class="text-xs text-error"
+                                                x-text="store.index_error"
+                                            ></div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+                </table>
+            </div>
+        </div>
+    </template>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal" :class="{ 'modal-open': showModal }">
+        <div class="modal-box max-w-2xl">
+            <h3
+                class="font-bold text-lg"
+                x-text="editingStore ? 'Edit Document Store' : 'Add Document Store'"
+            ></h3>
+            <form @submit.prevent="saveStore()">
+                <!-- Name -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Store Name</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.name"
+                        class="input input-bordered font-mono"
+                        :class="{ 'input-error': formErrors.name }"
+                        placeholder="e.g., my-drive-docs, company-wiki"
+                        required
+                        :disabled="editingStore"
+                    />
+                    <label class="label" x-show="formErrors.name">
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.name"
+                        ></span>
+                    </label>
+                </div>
+
+                <!-- Source Type -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Document Source</span>
+                    </label>
+                    <select
+                        x-model="form.source_type"
+                        @change="onSourceTypeChange()"
+                        class="select select-bordered"
+                    >
+                        <option value="local">Local Filesystem</option>
+                        <optgroup label="Google">
+                            <option value="mcp:gdrive">Google Drive</option>
+                            <option value="mcp:gmail">Gmail</option>
+                            <option value="mcp:gcalendar">
+                                Google Calendar
+                            </option>
+                        </optgroup>
+                        <optgroup label="MCP Integrations">
+                            <option
+                                value="mcp:notion"
+                                x-show="mcpStatus.notion?.available"
+                            >
+                                Notion
+                            </option>
+                            <option
+                                value="mcp:github"
+                                x-show="mcpStatus.github?.available"
+                            >
+                                GitHub
+                            </option>
+                            <option
+                                value="mcp:slack"
+                                x-show="mcpStatus.slack?.available"
+                            >
+                                Slack
+                            </option>
+                            <option value="mcp:postgres">PostgreSQL</option>
+                            <option value="mcp:custom">
+                                Custom MCP Server
+                            </option>
+                        </optgroup>
+                    </select>
+                    <label
+                        class="label"
+                        x-show="!mcpStatus.google?.available && !mcpStatus.notion?.available && !mcpStatus.github?.available && !mcpStatus.slack?.available"
+                    >
+                        <span class="label-text-alt text-base-content/60">
+                            Set environment variables to enable MCP integrations
+                            (e.g., NOTION_API_KEY, GITHUB_TOKEN)
+                        </span>
+                    </label>
+                </div>
+
+                <!-- Source Path (for local source) -->
+                <div
+                    class="form-control mt-4"
+                    x-show="form.source_type === 'local'"
+                >
+                    <label class="label">
+                        <span class="label-text">Source Path</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.source_path"
+                        class="input input-bordered font-mono"
+                        :class="{ 'input-error': formErrors.source_path }"
+                        placeholder="e.g., /data/documents"
+                        :required="form.source_type === 'local'"
+                    />
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Docker-mounted folder containing documents to
+                            index</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Google OAuth Configuration (for mcp:gdrive, mcp:gmail, mcp:gcalendar) -->
+                <div
+                    x-show="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar'].includes(form.source_type)"
+                    class="mt-4"
+                >
+                    <!-- No OAuth configured -->
+                    <template x-if="!googleOAuth.configured">
+                        <div class="alert alert-warning">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="stroke-current shrink-0 h-6 w-6"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
+                            </svg>
+                            <div>
+                                <h3 class="font-bold">
+                                    Google OAuth Not Configured
+                                </h3>
+                                <div class="text-sm">
+                                    Set GOOGLE_CLIENT_ID and
+                                    GOOGLE_CLIENT_SECRET environment variables.
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- OAuth configured but no accounts connected -->
+                    <template
+                        x-if="googleOAuth.configured && googleOAuth.accounts.length === 0"
+                    >
+                        <div class="alert alert-info">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="stroke-current shrink-0 h-6 w-6"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <div>
+                                <h3 class="font-bold">
+                                    Connect Google Account
+                                </h3>
+                                <div class="text-sm">
+                                    Authorize access to Google Drive to index
+                                    documents.
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                @click="startGoogleOAuth()"
+                                class="btn btn-sm btn-primary"
+                            >
+                                Connect Google Account
+                            </button>
+                        </div>
+                    </template>
+
+                    <!-- OAuth configured with accounts - show selector -->
+                    <template
+                        x-if="googleOAuth.configured && googleOAuth.accounts.length > 0"
+                    >
+                        <div class="space-y-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Google Account</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.google_account_id"
+                                        @change="onGoogleAccountChange()"
+                                        class="select select-bordered flex-1"
+                                        required
+                                    >
+                                        <option value="">
+                                            Select an account...
+                                        </option>
+                                        <template
+                                            x-for="account in googleOAuth.accounts"
+                                            :key="account.id"
+                                        >
+                                            <option
+                                                :value="account.id"
+                                                x-text="account.account_email + (account.account_name ? ' (' + account.account_name + ')' : '')"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="startGoogleOAuth()"
+                                        class="btn btn-ghost btn-sm"
+                                        title="Connect another account"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M12 4v16m8-8H4"
+                                            />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        @click="deleteGoogleAccount()"
+                                        class="btn btn-ghost btn-sm text-error"
+                                        title="Delete selected account"
+                                        :disabled="!form.google_account_id"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Folder Selection (Google Drive only) -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:gdrive' && form.google_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Folder (optional)</span
+                                    >
+                                </label>
+
+                                <!-- Selected folder display -->
+                                <div
+                                    class="flex items-center gap-2 mb-2"
+                                    x-show="form.gdrive_folder_id"
+                                >
+                                    <span class="badge badge-primary gap-1">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                            />
+                                        </svg>
+                                        <span
+                                            x-text="form.gdrive_folder_name || 'Selected folder'"
+                                        ></span>
+                                    </span>
+                                    <button
+                                        type="button"
+                                        @click="clearFolderSelection()"
+                                        class="btn btn-ghost btn-xs"
+                                        title="Clear selection"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <!-- Breadcrumb navigation -->
+                                <div
+                                    class="text-sm breadcrumbs mb-2"
+                                    x-show="folderBreadcrumbs.length > 0"
+                                >
+                                    <ul>
+                                        <li>
+                                            <a
+                                                href="#"
+                                                @click.prevent="navigateToFolder('', 'My Drive')"
+                                                class="link link-hover"
+                                            >
+                                                My Drive
+                                            </a>
+                                        </li>
+                                        <template
+                                            x-for="(crumb, index) in folderBreadcrumbs"
+                                            :key="crumb.id"
+                                        >
+                                            <li>
+                                                <a
+                                                    href="#"
+                                                    @click.prevent="navigateToBreadcrumb(index)"
+                                                    class="link link-hover"
+                                                    x-text="crumb.name"
+                                                ></a>
+                                            </li>
+                                        </template>
+                                    </ul>
+                                </div>
+
+                                <!-- Folder list -->
+                                <div
+                                    class="border rounded-lg max-h-48 overflow-y-auto bg-base-200"
+                                >
+                                    <div
+                                        x-show="loadingFolders"
+                                        class="flex justify-center py-4"
+                                    >
+                                        <span
+                                            class="loading loading-spinner loading-sm"
+                                        ></span>
+                                    </div>
+                                    <ul
+                                        x-show="!loadingFolders"
+                                        class="menu menu-sm p-1"
+                                    >
+                                        <!-- "Select this folder" option when inside a subfolder -->
+                                        <li
+                                            x-show="folderBreadcrumbs.length > 0"
+                                        >
+                                            <a
+                                                href="#"
+                                                @click.prevent="selectCurrentFolder()"
+                                                class="text-primary font-medium"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M5 13l4 4L19 7"
+                                                    />
+                                                </svg>
+                                                Select this folder
+                                            </a>
+                                        </li>
+                                        <!-- "All files" option at root level -->
+                                        <li
+                                            x-show="folderBreadcrumbs.length === 0"
+                                        >
+                                            <a
+                                                href="#"
+                                                @click.prevent="selectFolder('', 'All files (no filter)')"
+                                                class="text-base-content/70"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M4 6h16M4 10h16M4 14h16M4 18h16"
+                                                    />
+                                                </svg>
+                                                All files (no folder filter)
+                                            </a>
+                                        </li>
+                                        <!-- Folder items -->
+                                        <template
+                                            x-for="folder in gdriveFolders"
+                                            :key="folder.id"
+                                        >
+                                            <li>
+                                                <a
+                                                    href="#"
+                                                    @click.prevent="navigateToFolder(folder.id, folder.name)"
+                                                    class="flex justify-between"
+                                                >
+                                                    <span
+                                                        class="flex items-center gap-2"
+                                                    >
+                                                        <svg
+                                                            xmlns="http://www.w3.org/2000/svg"
+                                                            class="h-4 w-4 text-warning"
+                                                            fill="none"
+                                                            viewBox="0 0 24 24"
+                                                            stroke="currentColor"
+                                                        >
+                                                            <path
+                                                                stroke-linecap="round"
+                                                                stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                                            />
+                                                        </svg>
+                                                        <span
+                                                            x-text="folder.name"
+                                                        ></span>
+                                                    </span>
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        class="h-4 w-4 text-base-content/50"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            stroke-linecap="round"
+                                                            stroke-linejoin="round"
+                                                            stroke-width="2"
+                                                            d="M9 5l7 7-7 7"
+                                                        />
+                                                    </svg>
+                                                </a>
+                                            </li>
+                                        </template>
+                                        <!-- No folders message -->
+                                        <li
+                                            x-show="gdriveFolders.length === 0 && !loadingFolders"
+                                        >
+                                            <span
+                                                class="text-base-content/50 italic"
+                                                >No subfolders</span
+                                            >
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Navigate to select a folder, or leave
+                                        empty for all files</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Gmail Label Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:gmail' && form.google_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Label (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.gmail_label_id"
+                                        @change="onLabelChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingLabels"
+                                    >
+                                        <option value="">
+                                            All emails (no label filter)
+                                        </option>
+                                        <template
+                                            x-for="label in gmailLabels"
+                                            :key="label.id"
+                                        >
+                                            <option
+                                                :value="label.id"
+                                                x-text="label.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadGmailLabels()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingLabels }"
+                                        :disabled="loadingLabels || !form.google_account_id"
+                                        title="Refresh labels"
+                                    >
+                                        <svg
+                                            x-show="!loadingLabels"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Limit indexing to emails with this
+                                        label (e.g., INBOX, SENT, or custom
+                                        labels)</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Google Calendar Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:gcalendar' && form.google_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Calendar (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.gcalendar_calendar_id"
+                                        @change="onCalendarChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingCalendars"
+                                    >
+                                        <option value="">
+                                            Primary calendar only
+                                        </option>
+                                        <template
+                                            x-for="cal in googleCalendars"
+                                            :key="cal.id"
+                                        >
+                                            <option
+                                                :value="cal.id"
+                                                x-text="cal.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadGoogleCalendars()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingCalendars }"
+                                        :disabled="loadingCalendars || !form.google_account_id"
+                                        title="Refresh calendars"
+                                    >
+                                        <svg
+                                            x-show="!loadingCalendars"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select a specific calendar to index, or
+                                        leave empty for primary calendar</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- MCP Server Configuration (for mcp sources) -->
+                <div
+                    x-show="form.source_type.startsWith('mcp:') && !['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar'].includes(form.source_type)"
+                    class="mt-4 space-y-4"
+                >
+                    <!-- Custom MCP Server fields (only shown for mcp:custom) -->
+                    <template x-if="form.source_type === 'mcp:custom'">
+                        <div class="space-y-4">
+                            <!-- MCP Server Name -->
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Server Name</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    x-model="form.mcp_name"
+                                    class="input input-bordered"
+                                    placeholder="e.g., my-mcp-server"
+                                    required
+                                />
+                            </div>
+
+                            <!-- MCP Transport Type -->
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Transport</span>
+                                </label>
+                                <select
+                                    x-model="form.mcp_transport"
+                                    class="select select-bordered"
+                                >
+                                    <option value="stdio">
+                                        Stdio (subprocess)
+                                    </option>
+                                    <option value="http">HTTP</option>
+                                </select>
+                            </div>
+
+                            <!-- Stdio Configuration -->
+                            <template x-if="form.mcp_transport === 'stdio'">
+                                <div class="space-y-4">
+                                    <div class="form-control">
+                                        <label class="label">
+                                            <span class="label-text"
+                                                >Command</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="text"
+                                            x-model="form.mcp_command"
+                                            class="input input-bordered font-mono"
+                                            placeholder="e.g., npx, uvx, python"
+                                        />
+                                    </div>
+                                    <div class="form-control">
+                                        <label class="label">
+                                            <span class="label-text"
+                                                >Arguments</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="text"
+                                            x-model="form.mcp_args"
+                                            class="input input-bordered font-mono"
+                                            placeholder="e.g., -y @modelcontextprotocol/server-gdrive"
+                                        />
+                                        <label class="label">
+                                            <span class="label-text-alt"
+                                                >Space-separated arguments</span
+                                            >
+                                        </label>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <!-- HTTP Configuration -->
+                            <template x-if="form.mcp_transport === 'http'">
+                                <div class="form-control">
+                                    <label class="label">
+                                        <span class="label-text"
+                                            >MCP Server URL</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="text"
+                                        x-model="form.mcp_url"
+                                        class="input input-bordered font-mono"
+                                        placeholder="e.g., http://localhost:8000/mcp"
+                                    />
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- URI Patterns (optional - shown for all MCP sources) -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >URI Patterns (optional)</span
+                            >
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.mcp_uri_patterns"
+                            class="input input-bordered font-mono"
+                            placeholder="e.g., file://**/*.pdf, gdrive://**/*"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Comma-separated glob patterns to filter
+                                resources</span
+                            >
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Embedding & Vision Settings Note -->
+                <div
+                    class="mt-4 text-sm text-base-content/60 bg-base-200 rounded-lg p-3"
+                >
+                    <span class="font-medium">Embedding & Vision Models:</span>
+                    Embedding provider and vision model for document parsing are
+                    configured in
+                    <a href="/settings" class="link link-primary"
+                        >Global Settings</a
+                    >.
+                </div>
+
+                <!-- Index Schedule -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Index Schedule</span>
+                    </label>
+                    <select
+                        x-model="form.index_schedule"
+                        class="select select-bordered"
+                    >
+                        <option value="">Manual only</option>
+                        <option value="0 * * * *">Every hour</option>
+                        <option value="0 */6 * * *">Every 6 hours</option>
+                        <option value="0 2 * * *">Daily at 2 AM</option>
+                        <option value="0 2 * * 0">
+                            Weekly on Sunday at 2 AM
+                        </option>
+                        <option value="custom">Custom cron...</option>
+                    </select>
+                </div>
+                <div
+                    class="form-control mt-2"
+                    x-show="form.index_schedule === 'custom'"
+                >
+                    <input
+                        type="text"
+                        x-model="form.custom_schedule"
+                        class="input input-bordered font-mono"
+                        placeholder="0 2 * * * (minute hour day month day_of_week)"
+                    />
+                </div>
+
+                <!-- Description -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Description</span>
+                    </label>
+                    <textarea
+                        x-model="form.description"
+                        class="textarea textarea-bordered"
+                        rows="2"
+                        placeholder="Optional description of this document store"
+                    ></textarea>
+                </div>
+
+                <!-- Advanced Settings (collapsed) -->
+                <div class="collapse collapse-arrow bg-base-200 mt-4">
+                    <input type="checkbox" />
+                    <div class="collapse-title text-sm font-medium">
+                        Advanced Settings
+                    </div>
+                    <div class="collapse-content">
+                        <div class="grid grid-cols-2 gap-4 pt-2">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Chunk Size</span>
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model="form.chunk_size"
+                                    class="input input-bordered input-sm"
+                                    min="100"
+                                    max="2000"
+                                />
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Tokens per chunk (default: 512)</span
+                                    >
+                                </label>
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Chunk Overlap</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model="form.chunk_overlap"
+                                    class="input input-bordered input-sm"
+                                    min="0"
+                                    max="500"
+                                />
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Overlap between chunks (default:
+                                        50)</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Enabled Toggle -->
+                <div class="form-control mt-4">
+                    <label class="label cursor-pointer justify-start gap-2">
+                        <input
+                            type="checkbox"
+                            x-model="form.enabled"
+                            class="toggle toggle-primary"
+                        />
+                        <span class="label-text">Enabled</span>
+                    </label>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="closeModal()"
+                        class="btn btn-ghost"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                        :disabled="saving"
+                    >
+                        <span
+                            x-text="editingStore ? 'Save Changes' : 'Create Store'"
+                        ></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop" @click="closeModal()"></div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal" :class="{ 'modal-open': showDeleteModal }">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg">Delete Document Store</h3>
+            <p class="py-4">
+                Are you sure you want to delete
+                <span
+                    class="font-mono font-bold"
+                    x-text="deleteTarget?.name"
+                ></span
+                >? This will also delete the ChromaDB collection with all
+                indexed chunks.
+            </p>
+            <div class="modal-action">
+                <button @click="showDeleteModal = false" class="btn btn-ghost">
+                    Cancel
+                </button>
+                <button
+                    @click="deleteStore()"
+                    class="btn btn-error"
+                    :class="{ 'loading': deleting }"
+                    :disabled="deleting"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop" @click="showDeleteModal = false"></div>
+    </div>
+</div>
+
+<script>
+    function documentStoresPage() {
+        return {
+            loading: true,
+            stores: [],
+            expandedRows: [],
+            showModal: false,
+            showDeleteModal: false,
+            editingStore: null,
+            deleteTarget: null,
+            saving: false,
+            deleting: false,
+            indexingStores: [],
+            cancellingStores: [],
+            clearingStores: [],
+            formErrors: {},
+
+            // MCP integration availability status
+            mcpStatus: {
+                google: { available: false },
+                notion: { available: false },
+                github: { available: false },
+                slack: { available: false },
+                postgres: { available: true },
+                custom: { available: true },
+            },
+
+            // Google OAuth status
+            googleOAuth: {
+                configured: false,
+                accounts: [],
+            },
+
+            // Google Drive folders
+            gdriveFolders: [],
+            loadingFolders: false,
+            folderBreadcrumbs: [], // [{id, name}, ...] for navigation path
+            currentFolderId: "", // Current folder being browsed
+
+            // Gmail labels
+            gmailLabels: [],
+            loadingLabels: false,
+
+            // Google calendars
+            googleCalendars: [],
+            loadingCalendars: false,
+
+            form: {
+                name: "",
+                source_type: "local",
+                source_path: "",
+                mcp_name: "",
+                mcp_transport: "stdio",
+                mcp_command: "",
+                mcp_args: "",
+                mcp_url: "",
+                mcp_uri_patterns: "",
+                google_account_id: "",
+                gdrive_folder_id: "",
+                gdrive_folder_name: "",
+                gmail_label_id: "",
+                gmail_label_name: "",
+                gcalendar_calendar_id: "",
+                gcalendar_calendar_name: "",
+                index_schedule: "",
+                custom_schedule: "",
+                chunk_size: 512,
+                chunk_overlap: 50,
+                description: "",
+                enabled: true,
+            },
+
+            // MCP presets
+            mcpPresets: {
+                gdrive: {
+                    name: "gdrive",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-gdrive",
+                },
+                gmail: {
+                    name: "gmail",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-gsuite",
+                },
+                gcalendar: {
+                    name: "gcalendar",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-gsuite",
+                },
+                notion: {
+                    name: "notion",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @notionhq/notion-mcp-server",
+                    discovery_tool: "API-post-search",
+                    discovery_args: {
+                        filter: { property: "object", value: "page" },
+                    },
+                    content_tool: "API-get-block-children",
+                    content_id_field: "block_id",
+                },
+                github: {
+                    name: "github",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-github",
+                },
+                slack: {
+                    name: "slack",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-slack",
+                },
+                postgres: {
+                    name: "postgres",
+                    transport: "stdio",
+                    command: "npx",
+                    args: "-y @anthropic/mcp-postgres",
+                },
+            },
+
+            async init() {
+                await Promise.all([
+                    this.loadStores(),
+                    this.loadMcpStatus(),
+                    this.loadGoogleOAuthStatus(),
+                ]);
+                // Poll for status updates
+                setInterval(() => this.loadStores(), 5000);
+            },
+
+            async loadGoogleOAuthStatus() {
+                try {
+                    const response = await fetch("/api/oauth/google/status");
+                    if (response.ok) {
+                        this.googleOAuth = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load Google OAuth status:", error);
+                }
+            },
+
+            async startGoogleOAuth() {
+                try {
+                    // Map source type to OAuth scope
+                    const scopeMap = {
+                        "mcp:gdrive": "drive",
+                        "mcp:gmail": "gmail",
+                        "mcp:gcalendar": "calendar",
+                    };
+                    const scope = scopeMap[this.form.source_type] || "drive";
+                    const response = await fetch(
+                        `/api/oauth/google/start?scope=${scope}&redirect_uri=/document-stores`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        window.location.href = data.auth_url;
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || "Failed to start OAuth");
+                    }
+                } catch (error) {
+                    console.error("Failed to start Google OAuth:", error);
+                    alert("Failed to start Google OAuth");
+                }
+            },
+
+            async deleteGoogleAccount() {
+                if (!this.form.google_account_id) return;
+
+                const account = this.googleOAuth.accounts.find(
+                    (a) => a.id == this.form.google_account_id,
+                );
+                const accountName = account
+                    ? account.account_email
+                    : "this account";
+
+                if (
+                    !confirm(
+                        `Are you sure you want to delete ${accountName}? Any document stores using this account will need to be reconfigured.`,
+                    )
+                ) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(
+                        `/api/oauth/accounts/${this.form.google_account_id}`,
+                        { method: "DELETE" },
+                    );
+                    if (response.ok) {
+                        // Refresh accounts list
+                        await this.loadGoogleOAuthStatus();
+                        this.form.google_account_id = "";
+                        this.gdriveFolders = [];
+                        this.form.gdrive_folder_id = "";
+                        this.form.gdrive_folder_name = "";
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || "Failed to delete account");
+                    }
+                } catch (error) {
+                    console.error("Failed to delete account:", error);
+                    alert("Failed to delete account");
+                }
+            },
+
+            async onGoogleAccountChange() {
+                // Clear folder/label selection when account changes
+                this.form.gdrive_folder_id = "";
+                this.form.gdrive_folder_name = "";
+                this.gdriveFolders = [];
+                this.folderBreadcrumbs = [];
+                this.currentFolderId = "";
+                this.form.gmail_label_id = "";
+                this.form.gmail_label_name = "";
+                this.gmailLabels = [];
+                this.form.gcalendar_calendar_id = "";
+                this.form.gcalendar_calendar_name = "";
+                this.googleCalendars = [];
+
+                // Auto-load folders for Google Drive
+                if (
+                    this.form.source_type === "mcp:gdrive" &&
+                    this.form.google_account_id
+                ) {
+                    await this.loadGdriveFolders();
+                }
+
+                // Auto-load labels for Gmail
+                if (
+                    this.form.source_type === "mcp:gmail" &&
+                    this.form.google_account_id
+                ) {
+                    await this.loadGmailLabels();
+                }
+
+                // Auto-load calendars for Google Calendar
+                if (
+                    this.form.source_type === "mcp:gcalendar" &&
+                    this.form.google_account_id
+                ) {
+                    await this.loadGoogleCalendars();
+                }
+            },
+
+            async loadGdriveFolders(parentId = "") {
+                if (!this.form.google_account_id) return;
+
+                this.loadingFolders = true;
+                this.currentFolderId = parentId;
+                try {
+                    let url = `/api/oauth/google/${this.form.google_account_id}/folders`;
+                    if (parentId) {
+                        url += `?parent=${encodeURIComponent(parentId)}`;
+                    }
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.gdriveFolders = data.folders || [];
+                    } else {
+                        const error = await response.json();
+                        console.error("Failed to load folders:", error);
+                    }
+                } catch (error) {
+                    console.error("Failed to load folders:", error);
+                } finally {
+                    this.loadingFolders = false;
+                }
+            },
+
+            navigateToFolder(folderId, folderName) {
+                // If going to root, clear breadcrumbs
+                if (!folderId) {
+                    this.folderBreadcrumbs = [];
+                } else {
+                    // Add to breadcrumbs
+                    this.folderBreadcrumbs.push({
+                        id: folderId,
+                        name: folderName,
+                    });
+                }
+                // Load subfolders
+                this.loadGdriveFolders(folderId);
+            },
+
+            navigateToBreadcrumb(index) {
+                // Navigate to a specific breadcrumb level
+                const crumb = this.folderBreadcrumbs[index];
+                // Truncate breadcrumbs to this level
+                this.folderBreadcrumbs = this.folderBreadcrumbs.slice(
+                    0,
+                    index + 1,
+                );
+                // Load that folder's contents
+                this.loadGdriveFolders(crumb.id);
+            },
+
+            selectFolder(folderId, folderName) {
+                this.form.gdrive_folder_id = folderId;
+                this.form.gdrive_folder_name = folderName;
+            },
+
+            selectCurrentFolder() {
+                // Select the current folder we're browsing (last breadcrumb)
+                if (this.folderBreadcrumbs.length > 0) {
+                    const current =
+                        this.folderBreadcrumbs[
+                            this.folderBreadcrumbs.length - 1
+                        ];
+                    this.form.gdrive_folder_id = current.id;
+                    this.form.gdrive_folder_name = current.name;
+                }
+            },
+
+            clearFolderSelection() {
+                this.form.gdrive_folder_id = "";
+                this.form.gdrive_folder_name = "";
+            },
+
+            onFolderChange() {
+                // Update folder name when folder is selected
+                const folder = this.gdriveFolders.find(
+                    (f) => f.id === this.form.gdrive_folder_id,
+                );
+                this.form.gdrive_folder_name = folder ? folder.name : "";
+            },
+
+            async loadGmailLabels() {
+                if (!this.form.google_account_id) return;
+
+                this.loadingLabels = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/google/${this.form.google_account_id}/labels`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.gmailLabels = data.labels || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Gmail labels:", error);
+                } finally {
+                    this.loadingLabels = false;
+                }
+            },
+
+            onLabelChange() {
+                // Update label name when label is selected
+                const label = this.gmailLabels.find(
+                    (l) => l.id === this.form.gmail_label_id,
+                );
+                this.form.gmail_label_name = label ? label.name : "";
+            },
+
+            async loadGoogleCalendars() {
+                if (!this.form.google_account_id) return;
+
+                this.loadingCalendars = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/google/${this.form.google_account_id}/calendars`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.googleCalendars = data.calendars || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Google calendars:", error);
+                } finally {
+                    this.loadingCalendars = false;
+                }
+            },
+
+            onCalendarChange() {
+                // Update calendar name when calendar is selected
+                const cal = this.googleCalendars.find(
+                    (c) => c.id === this.form.gcalendar_calendar_id,
+                );
+                this.form.gcalendar_calendar_name = cal ? cal.name : "";
+            },
+
+            async loadMcpStatus() {
+                try {
+                    const response = await fetch(
+                        "/api/mcp-integrations/status",
+                    );
+                    if (response.ok) {
+                        this.mcpStatus = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load MCP status:", error);
+                }
+            },
+
+            async loadStores() {
+                try {
+                    const response = await fetch("/api/document-stores");
+                    if (response.ok) {
+                        this.stores = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load stores:", error);
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            toggleExpand(id) {
+                const idx = this.expandedRows.indexOf(id);
+                if (idx >= 0) {
+                    this.expandedRows.splice(idx, 1);
+                } else {
+                    this.expandedRows.push(id);
+                }
+            },
+
+            getMcpPresetKey() {
+                if (!this.form.source_type.startsWith("mcp:")) return null;
+                const key = this.form.source_type.replace("mcp:", "");
+                return key !== "custom" && this.mcpPresets[key] ? key : null;
+            },
+
+            onSourceTypeChange() {
+                const presetKey = this.getMcpPresetKey();
+                if (presetKey && this.mcpPresets[presetKey]) {
+                    const preset = this.mcpPresets[presetKey];
+                    this.form.mcp_name = preset.name;
+                    this.form.mcp_transport = preset.transport;
+                    this.form.mcp_command = preset.command;
+                    this.form.mcp_args = preset.args;
+                } else if (this.form.source_type === "mcp:custom") {
+                    this.form.mcp_name = "";
+                    this.form.mcp_transport = "stdio";
+                    this.form.mcp_command = "";
+                    this.form.mcp_args = "";
+                }
+            },
+
+            openAddModal() {
+                this.editingStore = null;
+                this.gdriveFolders = [];
+                this.folderBreadcrumbs = [];
+                this.currentFolderId = "";
+                this.gmailLabels = [];
+                this.googleCalendars = [];
+                this.form = {
+                    name: "",
+                    source_type: "local",
+                    source_path: "",
+                    mcp_name: "",
+                    mcp_transport: "stdio",
+                    mcp_command: "",
+                    mcp_args: "",
+                    mcp_url: "",
+                    mcp_uri_patterns: "",
+                    google_account_id: "",
+                    gdrive_folder_id: "",
+                    gdrive_folder_name: "",
+                    gmail_label_id: "",
+                    gmail_label_name: "",
+                    gcalendar_calendar_id: "",
+                    gcalendar_calendar_name: "",
+                    index_schedule: "",
+                    custom_schedule: "",
+                    chunk_size: 512,
+                    chunk_overlap: 50,
+                    description: "",
+                    enabled: true,
+                };
+                this.formErrors = {};
+                this.showModal = true;
+            },
+
+            async openEditModal(store) {
+                this.editingStore = store;
+                this.gdriveFolders = [];
+                this.folderBreadcrumbs = [];
+                this.currentFolderId = "";
+                this.gmailLabels = [];
+                this.googleCalendars = [];
+
+                // Determine source type
+                let sourceType = store.source_type;
+                if (sourceType === "mcp" && store.mcp_server_config) {
+                    const mcpName = store.mcp_server_config.name;
+                    // Check if it matches a preset
+                    for (const [key, preset] of Object.entries(
+                        this.mcpPresets,
+                    )) {
+                        if (preset.name === mcpName) {
+                            sourceType = `mcp:${key}`;
+                            break;
+                        }
+                    }
+                    if (sourceType === "mcp") {
+                        sourceType = "mcp:custom";
+                    }
+                }
+
+                this.form = {
+                    name: store.name,
+                    source_type: sourceType,
+                    source_path: store.source_path || "",
+                    mcp_name: store.mcp_server_config?.name || "",
+                    mcp_transport:
+                        store.mcp_server_config?.transport || "stdio",
+                    mcp_command: store.mcp_server_config?.command || "",
+                    mcp_args: (store.mcp_server_config?.args || []).join(" "),
+                    mcp_url: store.mcp_server_config?.url || "",
+                    mcp_uri_patterns: (
+                        store.mcp_server_config?.uri_patterns || []
+                    ).join(", "),
+                    google_account_id: store.google_account_id || "",
+                    gdrive_folder_id: store.gdrive_folder_id || "",
+                    gdrive_folder_name: store.gdrive_folder_name || "",
+                    gmail_label_id: store.gmail_label_id || "",
+                    gmail_label_name: store.gmail_label_name || "",
+                    gcalendar_calendar_id: store.gcalendar_calendar_id || "",
+                    gcalendar_calendar_name:
+                        store.gcalendar_calendar_name || "",
+                    index_schedule: store.index_schedule || "",
+                    custom_schedule: "",
+                    chunk_size: store.chunk_size || 512,
+                    chunk_overlap: store.chunk_overlap || 50,
+                    description: store.description || "",
+                    enabled: store.enabled,
+                };
+
+                // Load folders if editing a Google Drive store with an account
+                if (sourceType === "mcp:gdrive" && store.google_account_id) {
+                    await this.loadGdriveFolders();
+                }
+                // Load labels if editing a Gmail store with an account
+                if (sourceType === "mcp:gmail" && store.google_account_id) {
+                    await this.loadGmailLabels();
+                }
+                // Load calendars if editing a Google Calendar store with an account
+                if (sourceType === "mcp:gcalendar" && store.google_account_id) {
+                    await this.loadGoogleCalendars();
+                }
+                this.formErrors = {};
+                this.showModal = true;
+            },
+
+            closeModal() {
+                this.showModal = false;
+                this.editingStore = null;
+            },
+
+            async saveStore() {
+                this.formErrors = {};
+                this.saving = true;
+
+                try {
+                    // Build request body
+                    const body = {
+                        name: this.form.name,
+                        enabled: this.form.enabled,
+                        chunk_size: parseInt(this.form.chunk_size),
+                        chunk_overlap: parseInt(this.form.chunk_overlap),
+                        description: this.form.description || null,
+                        index_schedule:
+                            this.form.index_schedule === "custom"
+                                ? this.form.custom_schedule
+                                : this.form.index_schedule || null,
+                    };
+
+                    if (this.form.source_type === "local") {
+                        body.source_type = "local";
+                        body.source_path = this.form.source_path;
+                    } else if (
+                        ["mcp:gdrive", "mcp:gmail", "mcp:gcalendar"].includes(
+                            this.form.source_type,
+                        )
+                    ) {
+                        // Google sources - use specific source type and OAuth account
+                        body.source_type = this.form.source_type;
+                        body.google_account_id = this.form.google_account_id
+                            ? parseInt(this.form.google_account_id)
+                            : null;
+                        // Include folder filter for Google Drive
+                        if (this.form.source_type === "mcp:gdrive") {
+                            body.gdrive_folder_id =
+                                this.form.gdrive_folder_id || null;
+                            body.gdrive_folder_name =
+                                this.form.gdrive_folder_name || null;
+                        }
+                        // Include label filter for Gmail
+                        if (this.form.source_type === "mcp:gmail") {
+                            body.gmail_label_id =
+                                this.form.gmail_label_id || null;
+                            body.gmail_label_name =
+                                this.form.gmail_label_name || null;
+                        }
+                        // Include calendar filter for Google Calendar
+                        if (this.form.source_type === "mcp:gcalendar") {
+                            body.gcalendar_calendar_id =
+                                this.form.gcalendar_calendar_id || null;
+                            body.gcalendar_calendar_name =
+                                this.form.gcalendar_calendar_name || null;
+                        }
+                    } else if (this.form.source_type.startsWith("mcp:")) {
+                        // Other MCP sources - use generic mcp type with config
+                        body.source_type = "mcp";
+                        body.mcp_server_config = {
+                            name: this.form.mcp_name,
+                            transport: this.form.mcp_transport,
+                        };
+                        if (this.form.mcp_transport === "stdio") {
+                            body.mcp_server_config.command =
+                                this.form.mcp_command;
+                            body.mcp_server_config.args = this.form.mcp_args
+                                .split(/\s+/)
+                                .filter(Boolean);
+                        } else {
+                            body.mcp_server_config.url = this.form.mcp_url;
+                        }
+                        if (this.form.mcp_uri_patterns) {
+                            body.mcp_server_config.uri_patterns =
+                                this.form.mcp_uri_patterns
+                                    .split(",")
+                                    .map((p) => p.trim())
+                                    .filter(Boolean);
+                        }
+                        // Add discovery tool config from preset if available
+                        const presetKey = this.getMcpPresetKey();
+                        if (presetKey && this.mcpPresets[presetKey]) {
+                            const preset = this.mcpPresets[presetKey];
+                            if (preset.discovery_tool) {
+                                body.mcp_server_config.discovery_tool =
+                                    preset.discovery_tool;
+                                body.mcp_server_config.discovery_args =
+                                    preset.discovery_args || null;
+                                body.mcp_server_config.content_tool =
+                                    preset.content_tool || null;
+                                body.mcp_server_config.content_id_field =
+                                    preset.content_id_field || null;
+                            }
+                        }
+                    }
+
+                    const url = this.editingStore
+                        ? `/api/document-stores/${this.editingStore.id}`
+                        : "/api/document-stores";
+                    const method = this.editingStore ? "PUT" : "POST";
+
+                    const response = await fetch(url, {
+                        method,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    });
+
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        this.formErrors.general =
+                            result.error || "Failed to save";
+                        return;
+                    }
+
+                    this.closeModal();
+                    await this.loadStores();
+                } catch (error) {
+                    console.error("Save error:", error);
+                    this.formErrors.general = "Failed to save document store";
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            confirmDelete(store) {
+                if (store.rag_count > 0) {
+                    alert(
+                        `Cannot delete "${store.name}" - it is used by ${store.rag_count} RAG(s)`,
+                    );
+                    return;
+                }
+                this.deleteTarget = store;
+                this.showDeleteModal = true;
+            },
+
+            async deleteStore() {
+                if (!this.deleteTarget) return;
+                this.deleting = true;
+
+                try {
+                    const response = await fetch(
+                        `/api/document-stores/${this.deleteTarget.id}`,
+                        { method: "DELETE" },
+                    );
+
+                    if (response.ok) {
+                        this.showDeleteModal = false;
+                        this.deleteTarget = null;
+                        await this.loadStores();
+                    } else {
+                        const result = await response.json();
+                        alert(result.error || "Failed to delete store");
+                    }
+                } catch (error) {
+                    console.error("Delete error:", error);
+                    alert("Failed to delete store");
+                } finally {
+                    this.deleting = false;
+                }
+            },
+
+            async indexNow(store) {
+                this.indexingStores.push(store.id);
+
+                try {
+                    const response = await fetch(
+                        `/api/document-stores/${store.id}/index`,
+                        { method: "POST" },
+                    );
+
+                    if (!response.ok) {
+                        const result = await response.json();
+                        alert(result.error || "Failed to start indexing");
+                    }
+
+                    await this.loadStores();
+                } catch (error) {
+                    console.error("Index error:", error);
+                    alert("Failed to start indexing");
+                } finally {
+                    this.indexingStores = this.indexingStores.filter(
+                        (id) => id !== store.id,
+                    );
+                }
+            },
+
+            async cancelIndex(store) {
+                this.cancellingStores.push(store.id);
+
+                try {
+                    const response = await fetch(
+                        `/api/document-stores/${store.id}/cancel-index`,
+                        { method: "POST" },
+                    );
+
+                    if (!response.ok) {
+                        const result = await response.json();
+                        alert(result.error || "Failed to cancel indexing");
+                    }
+
+                    await this.loadStores();
+                } catch (error) {
+                    console.error("Cancel error:", error);
+                    alert("Failed to cancel indexing");
+                } finally {
+                    this.cancellingStores = this.cancellingStores.filter(
+                        (id) => id !== store.id,
+                    );
+                }
+            },
+
+            async clearContents(store) {
+                if (
+                    !confirm(
+                        `Clear all indexed content from "${store.name}"? This cannot be undone.`,
+                    )
+                ) {
+                    return;
+                }
+
+                this.clearingStores.push(store.id);
+
+                try {
+                    const response = await fetch(
+                        `/api/document-stores/${store.id}/clear`,
+                        { method: "POST" },
+                    );
+
+                    if (!response.ok) {
+                        const result = await response.json();
+                        alert(result.error || "Failed to clear contents");
+                    }
+
+                    await this.loadStores();
+                } catch (error) {
+                    console.error("Clear error:", error);
+                    alert("Failed to clear contents");
+                } finally {
+                    this.clearingStores = this.clearingStores.filter(
+                        (id) => id !== store.id,
+                    );
+                }
+            },
+        };
+    }
+</script>
+{% endblock %}

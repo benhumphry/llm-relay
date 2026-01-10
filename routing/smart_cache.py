@@ -4,23 +4,59 @@ Smart Cache Engine for semantic response caching.
 Uses ChromaDB to find semantically similar past queries and returns
 cached responses when similarity exceeds the threshold, reducing
 token usage and costs.
+
+This engine can be used by any entity that implements the CacheConfig protocol
+(SmartEnricher, Alias, SmartRouter, Redirect).
 """
 
 import hashlib
 import json
 import logging
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from context.chroma import CollectionWrapper, is_chroma_available, require_chroma
 
 if TYPE_CHECKING:
-    from db.models import SmartCache
     from providers.registry import ProviderRegistry, ResolvedModel
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class CacheConfig(Protocol):
+    """
+    Protocol for entities that support caching.
+
+    Any model with these attributes can use the SmartCacheEngine:
+    - SmartEnricher, Alias, SmartRouter, Redirect
+    """
+
+    # Identity
+    name: str
+    target_model: str
+
+    # Cache toggle
+    use_cache: bool
+
+    # Cache behavior
+    cache_similarity_threshold: float  # 0.0-1.0, higher = stricter matching
+    cache_match_system_prompt: bool  # Include system prompt in cache key
+    cache_match_last_message_only: bool  # Only match last user message
+    cache_ttl_hours: int  # How long entries remain valid
+    cache_min_tokens: int  # Don't cache very short responses
+    cache_max_tokens: int  # Don't cache very long responses
+    cache_collection: Optional[str]  # ChromaDB collection name
+
+    # Stats
+    cache_hits: int
+    cache_tokens_saved: int
+    cache_cost_saved: float
+
+    # Tags (for tracking)
+    @property
+    def tags(self) -> list[str]: ...
 
 
 @dataclass
@@ -35,7 +71,8 @@ class CacheResult:
     # Cache hit information
     is_cache_hit: bool = False
     cached_response: dict | None = None  # Full response dict on cache hit
-    cached_tokens: int = 0  # Output tokens from cached response (for logging)
+    cached_tokens: int = 0  # Output tokens saved by cache hit
+    cached_cost: float = 0.0  # Cost saved by cache hit (from original request)
 
     # Cache miss - caller should forward to model
     # After getting response, call store_response() to cache it
@@ -53,21 +90,23 @@ class SmartCacheEngine:
     2. Searches ChromaDB for semantically similar cached queries
     3. Returns cached response if similarity exceeds threshold
     4. On cache miss, caller forwards to target model and stores result
+
+    Can be used with any entity implementing the CacheConfig protocol.
     """
 
-    def __init__(self, cache: "SmartCache", registry: "ProviderRegistry"):
+    def __init__(self, config: CacheConfig, registry: "ProviderRegistry"):
         """
         Initialize the cache engine.
 
         Args:
-            cache: SmartCache configuration
+            config: Entity with cache configuration (SmartEnricher, Alias, etc.)
             registry: Provider registry for model resolution
 
         Raises:
             RuntimeError: If ChromaDB is not configured
         """
         require_chroma()
-        self.cache = cache
+        self.config = config
         self.registry = registry
         self._collection: Optional[CollectionWrapper] = None
 
@@ -75,16 +114,18 @@ class SmartCacheEngine:
     def collection(self) -> CollectionWrapper:
         """Get the ChromaDB collection for this cache (lazy loaded)."""
         if self._collection is None:
-            # Use stored collection name, or generate consistent one from cache name
-            if self.cache.chroma_collection:
-                collection_name = self.cache.chroma_collection
+            # Use stored collection name, or generate consistent one from entity name
+            if self.config.cache_collection:
+                collection_name = self.config.cache_collection
             else:
-                # Normalize name same way as create_smart_cache does
-                normalized = self.cache.name.lower().replace("-", "_").replace(" ", "_")
+                # Normalize name for collection
+                normalized = (
+                    self.config.name.lower().replace("-", "_").replace(" ", "_")
+                )
                 collection_name = f"cache_{normalized}"
             logger.debug(
-                f"Cache '{self.cache.name}' using collection: {collection_name} "
-                f"(stored chroma_collection={self.cache.chroma_collection})"
+                f"Cache '{self.config.name}' using collection: {collection_name} "
+                f"(stored cache_collection={self.config.cache_collection})"
             )
             self._collection = CollectionWrapper(collection_name)
         return self._collection
@@ -112,16 +153,16 @@ class SmartCacheEngine:
         # Resolve the target model (needed regardless of cache hit)
         try:
             target_resolved = self.registry._resolve_actual_model(
-                self.cache.target_model
+                self.config.target_model
             )
             resolved = ResolvedModel(
                 provider=target_resolved.provider,
                 model_id=target_resolved.model_id,
-                alias_name=self.cache.name,
-                alias_tags=self.cache.tags,
+                alias_name=self.config.name,
+                alias_tags=self.config.tags,
             )
         except ValueError as e:
-            logger.error(f"Cache '{self.cache.name}' target model not available: {e}")
+            logger.error(f"Cache '{self.config.name}' target model not available: {e}")
             raise
 
         # Search for similar cached queries
@@ -135,8 +176,8 @@ class SmartCacheEngine:
             logger.warning(f"Cache lookup failed: {e}")
             return CacheResult(
                 resolved=resolved,
-                cache_name=self.cache.name,
-                cache_tags=self.cache.tags,
+                cache_name=self.config.name,
+                cache_tags=self.config.tags,
                 is_cache_hit=False,
             )
 
@@ -148,11 +189,11 @@ class SmartCacheEngine:
             similarity = 1 / (1 + distance)
 
             logger.debug(
-                f"Cache '{self.cache.name}' best match: similarity={similarity:.4f}, "
-                f"threshold={self.cache.similarity_threshold}"
+                f"Cache '{self.config.name}' best match: similarity={similarity:.4f}, "
+                f"threshold={self.config.cache_similarity_threshold}"
             )
 
-            if similarity >= self.cache.similarity_threshold:
+            if similarity >= self.config.cache_similarity_threshold:
                 # Check if cache entry is expired
                 metadata = results["metadatas"][0][0]
                 expires_at = metadata.get("expires_at")
@@ -166,8 +207,8 @@ class SmartCacheEngine:
                             self.collection.delete(ids=[results["ids"][0][0]])
                             return CacheResult(
                                 resolved=resolved,
-                                cache_name=self.cache.name,
-                                cache_tags=self.cache.tags,
+                                cache_name=self.config.name,
+                                cache_tags=self.config.tags,
                                 is_cache_hit=False,
                                 similarity_score=similarity,
                             )
@@ -179,34 +220,38 @@ class SmartCacheEngine:
                     cached_response = json.loads(metadata.get("response", "{}"))
 
                     # Check if cached response meets min token requirement
-                    # (for entries cached before min_cached_tokens was set)
+                    # (for entries cached before cache_min_tokens was set)
                     cached_tokens = metadata.get("output_tokens", 0)
-                    if cached_tokens < self.cache.min_cached_tokens:
+                    if cached_tokens < self.config.cache_min_tokens:
                         logger.debug(
-                            f"Cached response too short: {cached_tokens} < {self.cache.min_cached_tokens}, "
+                            f"Cached response too short: {cached_tokens} < {self.config.cache_min_tokens}, "
                             "deleting stale entry"
                         )
                         # Delete the too-short entry
                         self.collection.delete(ids=[results["ids"][0][0]])
                         return CacheResult(
                             resolved=resolved,
-                            cache_name=self.cache.name,
-                            cache_tags=self.cache.tags,
+                            cache_name=self.config.name,
+                            cache_tags=self.config.tags,
                             is_cache_hit=False,
                             similarity_score=similarity,
                         )
 
+                    # Get the cost from the original request
+                    cached_cost = metadata.get("cost", 0.0)
+
                     logger.info(
-                        f"Cache hit for '{self.cache.name}' "
-                        f"(similarity={similarity:.4f}, tokens={cached_tokens})"
+                        f"Cache hit for '{self.config.name}' "
+                        f"(similarity={similarity:.4f}, tokens={cached_tokens}, cost=${cached_cost:.4f})"
                     )
                     return CacheResult(
                         resolved=resolved,
-                        cache_name=self.cache.name,
-                        cache_tags=self.cache.tags,
+                        cache_name=self.config.name,
+                        cache_tags=self.config.tags,
                         is_cache_hit=True,
                         cached_response=cached_response,
                         cached_tokens=cached_tokens,
+                        cached_cost=cached_cost,
                         similarity_score=similarity,
                     )
                 except json.JSONDecodeError:
@@ -214,8 +259,8 @@ class SmartCacheEngine:
 
             return CacheResult(
                 resolved=resolved,
-                cache_name=self.cache.name,
-                cache_tags=self.cache.tags,
+                cache_name=self.config.name,
+                cache_tags=self.config.tags,
                 is_cache_hit=False,
                 similarity_score=similarity,
             )
@@ -223,8 +268,8 @@ class SmartCacheEngine:
         # No matches found
         return CacheResult(
             resolved=resolved,
-            cache_name=self.cache.name,
-            cache_tags=self.cache.tags,
+            cache_name=self.config.name,
+            cache_tags=self.config.tags,
             is_cache_hit=False,
         )
 
@@ -252,16 +297,16 @@ class SmartCacheEngine:
             True if stored successfully, False otherwise
         """
         # Check if response is too short to cache (filters titles, etc.)
-        if output_tokens < self.cache.min_cached_tokens:
+        if output_tokens < self.config.cache_min_tokens:
             logger.debug(
-                f"Response too short to cache: {output_tokens} < {self.cache.min_cached_tokens}"
+                f"Response too short to cache: {output_tokens} < {self.config.cache_min_tokens}"
             )
             return False
 
         # Check if response is too long to cache
-        if output_tokens > self.cache.max_cached_tokens:
+        if output_tokens > self.config.cache_max_tokens:
             logger.debug(
-                f"Response too long to cache: {output_tokens} > {self.cache.max_cached_tokens}"
+                f"Response too long to cache: {output_tokens} > {self.config.cache_max_tokens}"
             )
             return False
 
@@ -270,7 +315,7 @@ class SmartCacheEngine:
         cache_id = self._generate_cache_id(query_text)
 
         # Calculate expiry
-        expires_at = datetime.utcnow() + timedelta(hours=self.cache.cache_ttl_hours)
+        expires_at = datetime.utcnow() + timedelta(hours=self.config.cache_ttl_hours)
 
         # Prepare metadata
         metadata = {
@@ -280,7 +325,7 @@ class SmartCacheEngine:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost": cost,
-            "model": self.cache.target_model,
+            "model": self.config.target_model,
         }
 
         try:
@@ -290,7 +335,7 @@ class SmartCacheEngine:
                 metadatas=[metadata],
             )
             logger.debug(
-                f"Stored response in cache '{self.cache.name}' (id={cache_id})"
+                f"Stored response in cache '{self.config.name}' (id={cache_id})"
             )
             return True
         except Exception as e:
@@ -306,7 +351,7 @@ class SmartCacheEngine:
         """
         try:
             self.collection.clear()
-            logger.info(f"Cleared cache '{self.cache.name}'")
+            logger.info(f"Cleared cache '{self.config.name}'")
             return True
         except Exception as e:
             logger.error(f"Failed to clear cache: {e}")
@@ -322,18 +367,16 @@ class SmartCacheEngine:
         try:
             count = self.collection.count()
             return {
-                "name": self.cache.name,
+                "name": self.config.name,
                 "entries": count,
-                "total_requests": self.cache.total_requests,
-                "cache_hits": self.cache.cache_hits,
-                "hit_rate": self.cache.hit_rate,
-                "tokens_saved": self.cache.tokens_saved,
-                "cost_saved": self.cache.cost_saved,
+                "cache_hits": self.config.cache_hits,
+                "tokens_saved": self.config.cache_tokens_saved,
+                "cost_saved": self.config.cache_cost_saved,
             }
         except Exception as e:
             logger.error(f"Failed to get cache stats: {e}")
             return {
-                "name": self.cache.name,
+                "name": self.config.name,
                 "error": str(e),
             }
 
@@ -359,17 +402,17 @@ class SmartCacheEngine:
         Combines system prompt (if configured) and user messages into a
         single text string for semantic similarity matching.
 
-        If match_last_message_only is enabled, only uses the last user message
+        If cache_match_last_message_only is enabled, only uses the last user message
         (useful for OpenWebUI and other tools that inject varying context).
         """
         parts = []
 
         # Include system prompt if configured
-        if self.cache.match_system_prompt and system:
+        if self.config.cache_match_system_prompt and system:
             parts.append(f"[SYSTEM]: {system}")
 
-        # If match_last_message_only, only use the last user message
-        if self.cache.match_last_message_only:
+        # If cache_match_last_message_only, only use the last user message
+        if self.config.cache_match_last_message_only:
             # Find last user message
             last_user_msg = None
             for msg in reversed(messages):

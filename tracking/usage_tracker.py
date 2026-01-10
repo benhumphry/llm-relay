@@ -77,14 +77,11 @@ class UsageTracker:
         # Smart router tracking (v3.2)
         is_designator: bool = False,
         router_name: Optional[str] = None,
-        # Smart augmentor tracking (v3.5)
-        augmentor_name: Optional[str] = None,
-        # Augmentation details (v3.5.1)
-        augmentation_type: Optional[str] = None,
-        augmentation_query: Optional[str] = None,
-        augmentation_urls: Optional[list[str]] = None,
-        # Smart RAG tracking (v3.8)
-        rag_name: Optional[str] = None,
+        # Cache tracking (v1.6)
+        is_cache_hit: bool = False,
+        cache_name: Optional[str] = None,
+        cache_tokens_saved: int = 0,
+        cache_cost_saved: float = 0.0,
     ):
         """
         Queue a request log entry.
@@ -111,11 +108,10 @@ class UsageTracker:
             alias: Alias name if request used an alias (v3.1)
             is_designator: Whether this was a designator call (v3.2)
             router_name: Smart router name if request used a router (v3.2)
-            augmentor_name: Smart augmentor name if request used an augmentor (v3.5)
-            augmentation_type: Type of augmentation applied (direct|search|scrape|search+scrape)
-            augmentation_query: Search query used for augmentation (if any)
-            augmentation_urls: List of URLs scraped for augmentation (if any)
-            rag_name: Smart RAG name if request used a RAG (v3.8)
+            is_cache_hit: Whether this was served from cache (v1.6)
+            cache_name: Name of cache entity (alias/router/etc) if cache hit
+            cache_tokens_saved: Output tokens saved by cache hit
+            cache_cost_saved: Estimated cost saved by cache hit
         """
         if not self._is_tracking_enabled():
             return
@@ -143,11 +139,10 @@ class UsageTracker:
                 "alias": alias,
                 "is_designator": is_designator,
                 "router_name": router_name,
-                "augmentor_name": augmentor_name,
-                "augmentation_type": augmentation_type,
-                "augmentation_query": augmentation_query,
-                "augmentation_urls": augmentation_urls,
-                "rag_name": rag_name,
+                "is_cache_hit": is_cache_hit,
+                "cache_name": cache_name,
+                "cache_tokens_saved": cache_tokens_saved,
+                "cache_cost_saved": cache_cost_saved,
             }
         )
 
@@ -223,14 +218,12 @@ class UsageTracker:
                     cost=cost,
                     is_designator=entry.get("is_designator", False),  # v3.2
                     router_name=entry.get("router_name"),  # v3.2
-                    augmentor_name=entry.get("augmentor_name"),  # v3.5
-                    augmentation_type=entry.get("augmentation_type"),  # v3.5.1
-                    augmentation_query=entry.get("augmentation_query"),  # v3.5.1
-                    rag_name=entry.get("rag_name"),  # v3.8
+                    # Cache tracking (v1.6)
+                    is_cache_hit=entry.get("is_cache_hit", False),
+                    cache_name=entry.get("cache_name"),
+                    cache_tokens_saved=entry.get("cache_tokens_saved", 0),
+                    cache_cost_saved=entry.get("cache_cost_saved", 0.0),
                 )
-                # Set scraped URLs using property setter (handles JSON serialization)
-                if entry.get("augmentation_urls"):
-                    log.scraped_urls = entry["augmentation_urls"]
                 db.add(log)
         except Exception as e:
             logger.error(f"Error saving request log: {e}")
