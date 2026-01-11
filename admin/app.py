@@ -6017,9 +6017,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 access_token = new_tokens.get("access_token")
 
                 # Update stored token
-                from db.oauth_tokens import update_oauth_token
+                from db.oauth_tokens import update_oauth_token_data
 
-                update_oauth_token(account_id, {"access_token": access_token})
+                update_oauth_token_data(account_id, {"access_token": access_token})
 
                 # Retry the request
                 response = http_requests.get(
