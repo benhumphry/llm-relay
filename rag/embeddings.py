@@ -112,6 +112,10 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         # Estimate tokens (rough approximation: ~4 chars per token)
         total_chars = sum(len(t) for t in texts)
         estimated_tokens = total_chars // 4
+
+        # Clear CUDA cache after batch to prevent memory buildup
+        self._clear_cuda_cache()
+
         return EmbeddingResult(
             embeddings=embeddings.tolist(),
             usage={"prompt_tokens": estimated_tokens, "total_tokens": estimated_tokens},
@@ -133,6 +137,28 @@ class LocalEmbeddingProvider(EmbeddingProvider):
             model=self.model_name,
             provider=self.name,
         )
+
+    def _clear_cuda_cache(self):
+        """Clear CUDA memory cache if available."""
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
+    def unload(self):
+        """Unload the model and free GPU memory."""
+        if self._model is not None:
+            logger.info(f"Unloading local embedding model: {self.model_name}")
+            del self._model
+            self._model = None
+            self._clear_cuda_cache()
+            # Force garbage collection to free memory
+            import gc
+
+            gc.collect()
 
     def is_available(self) -> bool:
         """Check if sentence-transformers is installed."""

@@ -55,6 +55,24 @@ class RAGIndexer:
         # Track cancelled jobs - checked by indexing loop to stop early
         self._cancelled_jobs: set[str] = set()
 
+    def _clear_gpu_memory(self):
+        """Clear GPU memory after indexing to prevent memory leaks."""
+        try:
+            import gc
+
+            gc.collect()
+
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.debug("Cleared CUDA memory cache")
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to clear GPU memory: {e}")
+
     def start(self):
         """Start the indexer service and scheduler."""
         if self._running:
@@ -435,6 +453,8 @@ class RAGIndexer:
 
         from .retriever import _get_embedding_provider
 
+        embedding_provider = None  # Initialize for cleanup in finally block
+
         # Get store config
         store = get_document_store_by_id(store_id)
         if not store:
@@ -643,6 +663,11 @@ class RAGIndexer:
             return False
 
         finally:
+            # Clean up GPU memory
+            if embedding_provider and hasattr(embedding_provider, "unload"):
+                embedding_provider.unload()
+            self._clear_gpu_memory()
+
             job_key = f"store_{store_id}"
             with self._lock:
                 self._indexing_jobs.pop(job_key, None)
@@ -652,6 +677,8 @@ class RAGIndexer:
         from db import get_smart_rag_by_id, update_smart_rag_index_status
 
         from .retriever import _get_embedding_provider_for_rag
+
+        embedding_provider = None  # Initialize for cleanup in finally block
 
         # Get RAG config
         rag = get_smart_rag_by_id(rag_id)
@@ -837,6 +864,11 @@ class RAGIndexer:
             return False
 
         finally:
+            # Clean up GPU memory
+            if embedding_provider and hasattr(embedding_provider, "unload"):
+                embedding_provider.unload()
+            self._clear_gpu_memory()
+
             # Clean up job reference
             job_key = f"rag_{rag_id}"
             with self._lock:
