@@ -1059,6 +1059,41 @@ def _run_migrations(engine) -> None:
                     "ALTER TABLE document_stores ADD COLUMN gcalendar_calendar_name VARCHAR(255)",
                 )
             )
+        if "paperless_url" not in existing_columns:
+            migrations.append(
+                (
+                    "paperless_url",
+                    "ALTER TABLE document_stores ADD COLUMN paperless_url VARCHAR(500)",
+                )
+            )
+        if "paperless_token" not in existing_columns:
+            migrations.append(
+                (
+                    "paperless_token",
+                    "ALTER TABLE document_stores ADD COLUMN paperless_token VARCHAR(255)",
+                )
+            )
+        if "github_repo" not in existing_columns:
+            migrations.append(
+                (
+                    "github_repo",
+                    "ALTER TABLE document_stores ADD COLUMN github_repo VARCHAR(255)",
+                )
+            )
+        if "github_branch" not in existing_columns:
+            migrations.append(
+                (
+                    "github_branch",
+                    "ALTER TABLE document_stores ADD COLUMN github_branch VARCHAR(100)",
+                )
+            )
+        if "github_path" not in existing_columns:
+            migrations.append(
+                (
+                    "github_path",
+                    "ALTER TABLE document_stores ADD COLUMN github_path VARCHAR(500)",
+                )
+            )
 
         if migrations:
             logger.info(
@@ -1068,6 +1103,20 @@ def _run_migrations(engine) -> None:
                 for col_name, sql in migrations:
                     logger.debug(f"Adding column: {col_name}")
                     conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add system_prompt column to smart_aliases table (v1.7.4)
+    if "smart_aliases" in inspector.get_table_names():
+        existing_columns = {
+            col["name"] for col in inspector.get_columns("smart_aliases")
+        }
+
+        if "system_prompt" not in existing_columns:
+            logger.info("Adding system_prompt column to smart_aliases table (v1.7.4)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE smart_aliases ADD COLUMN system_prompt TEXT")
+                )
                 conn.commit()
 
 

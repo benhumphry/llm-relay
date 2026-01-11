@@ -570,60 +570,54 @@ def estimate_input_chars(messages: list, system: str | None = None) -> int:
     return total
 
 
-def stream_ollama_response(
+def _stream_response_base(
     provider,
     model: str,
     messages: list,
     system: str | None,
     options: dict,
+    format_chunk: callable,
+    format_final: callable,
+    format_error: callable,
+    debug_endpoint: str,
     on_complete: callable = None,
     input_char_count: int = 0,
 ) -> Generator[str, None, None]:
-    """Stream response in Ollama NDJSON format."""
+    """
+    Base streaming function with shared logic.
+
+    Args:
+        format_chunk: (text) -> str - Format a content chunk
+        format_final: (output_chars, input_char_count) -> list[str] - Format final chunk(s)
+        format_error: (error_msg) -> str - Format error response
+        debug_endpoint: Endpoint name for debug logging
+    """
     output_chars = 0
-    llm_chunks = []  # Collect raw LLM response for debug comparison
-    client_chunks = []  # Collect what we send to client
+    llm_chunks = []
+    client_chunks = []
 
     try:
         for text in provider.chat_completion_stream(model, messages, system, options):
             output_chars += len(text)
-            llm_chunks.append(text)  # Raw LLM text
+            llm_chunks.append(text)
+            client_chunks.append(text)
+            yield format_chunk(text)
 
-            chunk = {
-                "model": model,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "message": {"role": "assistant", "content": text},
-                "done": False,
-            }
-            chunk_str = json.dumps(chunk) + "\n"
-            client_chunks.append(text)  # Track content we're sending
-            yield chunk_str
+        # Yield final chunk(s)
+        for final_str in format_final(output_chars, input_char_count):
+            yield final_str
 
-        # Final message
-        final = {
-            "model": model,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "message": {"role": "assistant", "content": ""},
-            "done": True,
-            "total_duration": 0,
-            "load_duration": 0,
-            "prompt_eval_count": input_char_count // 4,
-            "eval_count": output_chars // 4,
-            "eval_duration": 0,
-        }
-        yield json.dumps(final) + "\n"
-
-        # Debug comparison: raw LLM response vs what client receives
+        # Debug comparison
         llm_full = "".join(llm_chunks)
         client_full = "".join(client_chunks)
-        debug_compare_response("/api/chat (stream)", llm_full, client_full)
+        debug_compare_response(debug_endpoint, llm_full, client_full)
 
-        # Get streaming result (cost, tokens) if provider supports it (e.g., OpenRouter)
+        # Get streaming result (cost, tokens) if provider supports it
         stream_result = None
         if hasattr(provider, "get_last_stream_result"):
             stream_result = provider.get_last_stream_result()
 
-        # Call completion callback with tokens and optional cost
+        # Call completion callback
         if on_complete:
             input_tokens = (
                 stream_result.get("input_tokens")
@@ -636,7 +630,6 @@ def stream_ollama_response(
                 else output_chars // 4
             )
             cost = stream_result.get("cost") if stream_result else None
-            # Pass the full stream_result for extended token info
             on_complete(
                 input_tokens,
                 output_tokens,
@@ -647,10 +640,69 @@ def stream_ollama_response(
 
     except Exception as e:
         logger.error(f"Provider error during streaming: {e}")
-        error_response = {"error": str(e), "done": True}
-        yield json.dumps(error_response) + "\n"
+        yield format_error(str(e))
         if on_complete:
-            on_complete(0, 0, error=str(e))
+            on_complete(0, 0, error=str(e), stream_result=None)
+
+
+def stream_ollama_response(
+    provider,
+    model: str,
+    messages: list,
+    system: str | None,
+    options: dict,
+    on_complete: callable = None,
+    input_char_count: int = 0,
+) -> Generator[str, None, None]:
+    """Stream response in Ollama NDJSON format."""
+
+    def format_chunk(text: str) -> str:
+        return (
+            json.dumps(
+                {
+                    "model": model,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "message": {"role": "assistant", "content": text},
+                    "done": False,
+                }
+            )
+            + "\n"
+        )
+
+    def format_final(output_chars: int, input_char_count: int) -> list[str]:
+        return [
+            json.dumps(
+                {
+                    "model": model,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "message": {"role": "assistant", "content": ""},
+                    "done": True,
+                    "total_duration": 0,
+                    "load_duration": 0,
+                    "prompt_eval_count": input_char_count // 4,
+                    "eval_count": output_chars // 4,
+                    "eval_duration": 0,
+                }
+            )
+            + "\n"
+        ]
+
+    def format_error(error_msg: str) -> str:
+        return json.dumps({"error": error_msg, "done": True}) + "\n"
+
+    yield from _stream_response_base(
+        provider,
+        model,
+        messages,
+        system,
+        options,
+        format_chunk,
+        format_final,
+        format_error,
+        "/api/chat (stream)",
+        on_complete,
+        input_char_count,
+    )
 
 
 def stream_openai_response(
@@ -666,76 +718,47 @@ def stream_openai_response(
     """Stream response in OpenAI SSE format."""
     response_id = generate_openai_id()
     created = int(time.time())
-    output_chars = 0
-    llm_chunks = []  # Collect raw LLM response for debug comparison
-    client_chunks = []  # Collect what we send to client
 
-    try:
-        for text in provider.chat_completion_stream(model, messages, system, options):
-            output_chars += len(text)
-            llm_chunks.append(text)  # Raw LLM text
-
-            chunk = {
-                "id": response_id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": request_model,
-                "choices": [
-                    {"index": 0, "delta": {"content": text}, "finish_reason": None}
-                ],
-            }
-            client_chunks.append(text)  # Track content we're sending
-            yield f"data: {json.dumps(chunk)}\n\n"
-
-        # Final chunk
-        final_chunk = {
+    def format_chunk(text: str) -> str:
+        chunk = {
             "id": response_id,
             "object": "chat.completion.chunk",
             "created": created,
             "model": request_model,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "choices": [
+                {"index": 0, "delta": {"content": text}, "finish_reason": None}
+            ],
         }
-        yield f"data: {json.dumps(final_chunk)}\n\n"
-        yield "data: [DONE]\n\n"
+        return f"data: {json.dumps(chunk)}\n\n"
 
-        # Debug comparison: raw LLM response vs what client receives
-        llm_full = "".join(llm_chunks)
-        client_full = "".join(client_chunks)
-        debug_compare_response("/v1/chat/completions (stream)", llm_full, client_full)
+    def format_final(output_chars: int, input_char_count: int) -> list[str]:
+        final_chunk = json.dumps(
+            {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": request_model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }
+        )
+        return [f"data: {final_chunk}\n\n", "data: [DONE]\n\n"]
 
-        # Get streaming result (cost, tokens) if provider supports it (e.g., OpenRouter)
-        stream_result = None
-        if hasattr(provider, "get_last_stream_result"):
-            stream_result = provider.get_last_stream_result()
+    def format_error(error_msg: str) -> str:
+        return f"data: {json.dumps({'error': {'message': error_msg, 'type': 'api_error'}})}\n\n"
 
-        # Call completion callback with tokens and optional cost
-        if on_complete:
-            input_tokens = (
-                stream_result.get("input_tokens")
-                if stream_result and stream_result.get("input_tokens")
-                else input_char_count // 4
-            )
-            output_tokens = (
-                stream_result.get("output_tokens")
-                if stream_result and stream_result.get("output_tokens")
-                else output_chars // 4
-            )
-            cost = stream_result.get("cost") if stream_result else None
-            # Pass the full stream_result for extended token info
-            on_complete(
-                input_tokens,
-                output_tokens,
-                cost=cost,
-                stream_result=stream_result,
-                full_content=llm_full,
-            )
-
-    except Exception as e:
-        logger.error(f"Provider error during streaming: {e}")
-        error_chunk = {"error": {"message": str(e), "type": "api_error"}}
-        yield f"data: {json.dumps(error_chunk)}\n\n"
-        if on_complete:
-            on_complete(0, 0, error=str(e), stream_result=None)
+    yield from _stream_response_base(
+        provider,
+        model,
+        messages,
+        system,
+        options,
+        format_chunk,
+        format_final,
+        format_error,
+        "/v1/chat/completions (stream)",
+        on_complete,
+        input_char_count,
+    )
 
 
 # ============================================================================
@@ -899,16 +922,36 @@ def chat():
                 f"(RAG: {enrichment_result.chunks_retrieved} chunks, Web: {len(enrichment_result.scraped_urls)} URLs)"
             )
 
-        # Update enricher statistics
-        from db import update_smart_enricher_stats
-
-        update_smart_enricher_stats(
-            enricher_id=enrichment_result.enricher_id,
-            increment_requests=1,
-            increment_injections=1 if enrichment_result.context_injected else 0,
-            increment_search=1 if enrichment_result.search_query else 0,
-            increment_scrape=1 if enrichment_result.scraped_urls else 0,
+        # Update enricher/alias statistics
+        # Check if this is a SmartAlias or SmartEnricher by looking up the name
+        from db import (
+            get_smart_alias_by_name,
+            update_smart_alias_stats,
+            update_smart_enricher_stats,
         )
+
+        smart_alias = get_smart_alias_by_name(enricher_name)
+        if smart_alias:
+            # Track routing decision if this alias uses routing
+            is_routing = smart_alias.use_routing
+            if is_routing:
+                router_name = enricher_name  # For request log tracking
+            update_smart_alias_stats(
+                alias_id=enrichment_result.enricher_id,
+                increment_requests=1,
+                increment_routing=1 if is_routing else 0,
+                increment_injections=1 if enrichment_result.context_injected else 0,
+                increment_search=1 if enrichment_result.search_query else 0,
+                increment_scrape=1 if enrichment_result.scraped_urls else 0,
+            )
+        else:
+            update_smart_enricher_stats(
+                enricher_id=enrichment_result.enricher_id,
+                increment_requests=1,
+                increment_injections=1 if enrichment_result.context_injected else 0,
+                increment_search=1 if enrichment_result.search_query else 0,
+                increment_scrape=1 if enrichment_result.scraped_urls else 0,
+            )
 
         # Log designator usage for enricher (if web search was used)
         if enrichment_result.designator_usage:
@@ -1022,13 +1065,21 @@ def chat():
                         f"tokens={cached_tokens}, cost_saved=${cached_cost_saved:.4f})"
                     )
 
-                    # Update cache stats
-                    from db import update_smart_enricher_stats
-
+                    # Update cache stats on the appropriate entity
                     config = resolved.cache_config
                     if hasattr(config, "id"):
-                        # Determine which stats update function to use based on entity type
-                        if hasattr(config, "use_rag"):  # SmartEnricher
+                        if hasattr(config, "use_routing"):  # SmartAlias
+                            from db import update_smart_alias_stats
+
+                            update_smart_alias_stats(
+                                alias_id=config.id,
+                                increment_cache_hits=1,
+                                increment_tokens_saved=cached_tokens,
+                                increment_cost_saved=cached_cost_saved,
+                            )
+                        elif hasattr(config, "use_rag"):  # SmartEnricher
+                            from db import update_smart_enricher_stats
+
                             update_smart_enricher_stats(
                                 enricher_id=config.id,
                                 increment_cache_hits=1,
@@ -1597,16 +1648,36 @@ def openai_chat_completions():
                 f"(RAG: {enrichment_result.chunks_retrieved} chunks, Web: {len(enrichment_result.scraped_urls)} URLs)"
             )
 
-        # Update enricher statistics
-        from db import update_smart_enricher_stats
-
-        update_smart_enricher_stats(
-            enricher_id=enrichment_result.enricher_id,
-            increment_requests=1,
-            increment_injections=1 if enrichment_result.context_injected else 0,
-            increment_search=1 if enrichment_result.search_query else 0,
-            increment_scrape=1 if enrichment_result.scraped_urls else 0,
+        # Update enricher/alias statistics
+        # Check if this is a SmartAlias or SmartEnricher by looking up the name
+        from db import (
+            get_smart_alias_by_name,
+            update_smart_alias_stats,
+            update_smart_enricher_stats,
         )
+
+        smart_alias = get_smart_alias_by_name(enricher_name)
+        if smart_alias:
+            # Track routing decision if this alias uses routing
+            is_routing = smart_alias.use_routing
+            if is_routing:
+                router_name = enricher_name  # For request log tracking
+            update_smart_alias_stats(
+                alias_id=enrichment_result.enricher_id,
+                increment_requests=1,
+                increment_routing=1 if is_routing else 0,
+                increment_injections=1 if enrichment_result.context_injected else 0,
+                increment_search=1 if enrichment_result.search_query else 0,
+                increment_scrape=1 if enrichment_result.scraped_urls else 0,
+            )
+        else:
+            update_smart_enricher_stats(
+                enricher_id=enrichment_result.enricher_id,
+                increment_requests=1,
+                increment_injections=1 if enrichment_result.context_injected else 0,
+                increment_search=1 if enrichment_result.search_query else 0,
+                increment_scrape=1 if enrichment_result.scraped_urls else 0,
+            )
 
         # Log designator usage for enricher (if web search was used)
         if enrichment_result.designator_usage:
@@ -1707,12 +1778,21 @@ def openai_chat_completions():
                         f"tokens={cached_tokens}, cost_saved=${cached_cost_saved:.4f})"
                     )
 
-                    # Update cache stats
-                    from db import update_smart_enricher_stats
-
+                    # Update cache stats on the appropriate entity
                     config = resolved.cache_config
                     if hasattr(config, "id"):
-                        if hasattr(config, "use_rag"):  # SmartEnricher
+                        if hasattr(config, "use_routing"):  # SmartAlias
+                            from db import update_smart_alias_stats
+
+                            update_smart_alias_stats(
+                                alias_id=config.id,
+                                increment_cache_hits=1,
+                                increment_tokens_saved=cached_tokens,
+                                increment_cost_saved=cached_cost_saved,
+                            )
+                        elif hasattr(config, "use_rag"):  # SmartEnricher
+                            from db import update_smart_enricher_stats
+
                             update_smart_enricher_stats(
                                 enricher_id=config.id,
                                 increment_cache_hits=1,
@@ -2359,6 +2439,14 @@ if __name__ == "__main__":
             target=run_admin_server, args=(admin_host, admin_port, debug), daemon=True
         )
         admin_thread.start()
+
+    # Start RAG indexer (resets stuck jobs and enables scheduled indexing)
+    try:
+        from rag import start_indexer
+
+        start_indexer()
+    except Exception as e:
+        logger.warning(f"Failed to start RAG indexer: {e}")
 
     # Run API server in main thread
     app.run(host=api_host, port=api_port, debug=debug, threaded=True)

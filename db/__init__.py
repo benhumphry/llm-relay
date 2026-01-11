@@ -48,8 +48,10 @@ from .models import (
     Redirect,
     RequestLog,
     Setting,
+    SmartAlias,
     SmartEnricher,
     SmartRouter,
+    smart_alias_stores,
     smart_enricher_stores,
 )
 from .redirects import (
@@ -73,6 +75,18 @@ from .settings import (
     get_all_settings,
     get_setting,
     set_setting,
+)
+from .smart_aliases import (
+    create_smart_alias,
+    delete_smart_alias,
+    get_all_smart_aliases,
+    get_enabled_smart_aliases,
+    get_smart_alias_by_id,
+    get_smart_alias_by_name,
+    reset_smart_alias_stats,
+    smart_alias_name_available,
+    update_smart_alias,
+    update_smart_alias_stats,
 )
 from .smart_enrichers import (
     create_smart_enricher,
@@ -194,4 +208,17 @@ __all__ = [
     "set_setting",
     "delete_setting",
     "get_all_settings",
+    # Smart Aliases (unified routing + enrichment + caching)
+    "SmartAlias",
+    "smart_alias_stores",
+    "get_all_smart_aliases",
+    "get_smart_alias_by_name",
+    "get_smart_alias_by_id",
+    "create_smart_alias",
+    "update_smart_alias",
+    "update_smart_alias_stats",
+    "reset_smart_alias_stats",
+    "delete_smart_alias",
+    "smart_alias_name_available",
+    "get_enabled_smart_aliases",
 ]

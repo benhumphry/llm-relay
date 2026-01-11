@@ -210,6 +210,145 @@ The `gate` node enables conditional routing based on a designator LLM's yes/no d
 
 ---
 
+# v2.1 Features
+
+## Smart Actions (Bidirectional Google Integration)
+
+**Goal**: Allow LLMs to take actions (create calendar events, send emails, etc.) with user approval.
+
+### The Problem
+Current RAG integration is read-only - we inject context from Gmail, Calendar, Drive into requests, but the LLM can't act on that data. Users want to say "Schedule a meeting with John next Tuesday" or "Reply to that email saying I'll be there."
+
+### Proposed Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         REQUEST FLOW                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  User Request ──▶ Smart Alias ──▶ LLM (with action instructions)    │
+│                                          │                           │
+│                                          ▼                           │
+│                                   LLM Response                       │
+│                                   (may contain                       │
+│                                    action blocks)                    │
+│                                          │                           │
+│                                          ▼                           │
+│                              ┌───────────────────┐                   │
+│                              │  Action Detector  │                   │
+│                              │  (proxy layer)    │                   │
+│                              └─────────┬─────────┘                   │
+│                                        │                             │
+│                    ┌───────────────────┼───────────────────┐        │
+│                    │                   │                   │        │
+│                    ▼                   ▼                   ▼        │
+│              No Actions          Has Actions         Invalid        │
+│                    │                   │              Format        │
+│                    ▼                   ▼                   │        │
+│              Pass through      Replace with             Log &      │
+│              unchanged         approval request      pass through   │
+│                                        │                             │
+│                                        ▼                             │
+│                              "I can do that. Please                  │
+│                               confirm: [Create event                 │
+│                               'Meeting with John'                    │
+│                               on Tuesday 2pm] [✓] [✗]"              │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                        APPROVAL FLOW                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  User clicks [✓] ──▶ Client sends approval ──▶ Proxy executes       │
+│                      (special message format)      action via        │
+│                                                    Google API        │
+│                                                         │            │
+│                                                         ▼            │
+│                                                  Return result       │
+│                                                  "Event created!"    │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Action Block Format
+
+The LLM is instructed (via system_prompt) to output actions in a structured format:
+
+```xml
+<smart_action type="calendar_create">
+{
+  "summary": "Meeting with John",
+  "start": "2026-01-14T14:00:00",
+  "end": "2026-01-14T15:00:00",
+  "attendees": ["john@example.com"]
+}
+</smart_action>
+```
+
+Or for email:
+
+```xml
+<smart_action type="email_reply" thread_id="18d4a2b3c4d5e6f7">
+{
+  "body": "Thanks for the invite! I'll be there.",
+  "cc": []
+}
+</smart_action>
+```
+
+### Supported Action Types
+
+| Type | Description | Google API |
+|------|-------------|------------|
+| `calendar_create` | Create calendar event | Calendar API |
+| `calendar_update` | Modify existing event | Calendar API |
+| `calendar_delete` | Cancel/delete event | Calendar API |
+| `email_reply` | Reply to email thread | Gmail API |
+| `email_compose` | New email | Gmail API |
+| `email_forward` | Forward email | Gmail API |
+| `drive_create` | Create document | Drive API |
+| `drive_share` | Share file/folder | Drive API |
+
+### Implementation Components
+
+1. **System Prompt Injection**: Smart Aliases with actions enabled get instructions on the action format
+2. **Action Detector**: Post-processing layer in proxy that parses responses for `<smart_action>` blocks
+3. **Action Registry**: Maps action types to handlers (Google API calls)
+4. **Approval UI**: Client-side rendering of approval buttons (or simple confirm message for non-UI clients)
+5. **Approval Handler**: Endpoint to receive and execute approved actions
+
+### Security Considerations
+
+- Actions require explicit user approval (no auto-execute)
+- OAuth scopes must include write permissions
+- Action audit log for all executed actions
+- Rate limiting on action execution
+- Configurable action allow-list per Smart Alias
+
+### Client Compatibility
+
+| Client | Approval UX |
+|--------|-------------|
+| Open WebUI | Rich UI with approve/reject buttons |
+| API clients | JSON response with pending_actions array |
+| CLI tools | Text prompt for confirmation |
+
+### Configuration (Smart Alias)
+
+```python
+class SmartAlias:
+    # ... existing fields ...
+    
+    # Action settings
+    enable_actions: bool = False
+    allowed_actions: list[str] = []  # e.g., ["calendar_create", "email_reply"]
+    require_approval: bool = True  # False = auto-execute (dangerous!)
+    action_audit_log: bool = True
+```
+
+---
+
 # Implementation Priority
 
 ## Phase 1: v1.5 (Completed)
@@ -234,3 +373,6 @@ The `gate` node enables conditional routing based on a designator LLM's yes/no d
 - [ ] Smart Pipe Studio (visual pipeline builder)
 - [ ] Smart Query Studio (chat interface)
 - [ ] Model Sync subscription service
+
+## Phase 5: v2.1
+- [ ] Bidirectional Google Integration (Smart Actions)

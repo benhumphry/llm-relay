@@ -46,6 +46,12 @@
         />
         <script src="https://cdn.tailwindcss.com"></script>
 
+        <!-- Alpine.js plugins (must load before Alpine.js) -->
+        <script
+            defer
+            src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.14.3/dist/cdn.min.js"
+        ></script>
+
         <!-- Alpine.js for interactivity -->
         <script
             defer
@@ -262,8 +268,8 @@
                         </li>
                         <li>
                             <a
-                                href="{{ url_for('admin.aliases_page') }}"
-                                class="{% if request.endpoint == 'admin.aliases_page' %}active{% endif %}"
+                                href="{{ url_for('admin.smart_aliases_page') }}"
+                                class="{% if request.endpoint == 'admin.smart_aliases_page' %}active{% endif %}"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -276,10 +282,10 @@
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                         stroke-width="2"
-                                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"
+                                        d="M13 10V3L4 14h7v7l9-11h-7z"
                                     />
                                 </svg>
-                                Aliases
+                                Smart Aliases
                             </a>
                         </li>
                         <li>
@@ -304,10 +310,35 @@
                                 Redirects
                             </a>
                         </li>
+                        <!-- Legacy items (will be removed after migration) -->
+                        <li>
+                            <a
+                                href="{{ url_for('admin.aliases_page') }}"
+                                class="{% if request.endpoint == 'admin.aliases_page' %}active{% endif %} opacity-60"
+                                title="Legacy - Use Smart Aliases"
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"
+                                    />
+                                </svg>
+                                Aliases (legacy)
+                            </a>
+                        </li>
                         <li>
                             <a
                                 href="{{ url_for('admin.routers_page') }}"
-                                class="{% if request.endpoint == 'admin.routers_page' %}active{% endif %}"
+                                class="{% if request.endpoint == 'admin.routers_page' %}active{% endif %} opacity-60"
+                                title="Legacy - Use Smart Aliases"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -323,13 +354,14 @@
                                         d="M13 10V3L4 14h7v7l9-11h-7z"
                                     />
                                 </svg>
-                                Smart Routers
+                                Smart Routers (legacy)
                             </a>
                         </li>
                         <li>
                             <a
                                 href="{{ url_for('admin.enrichers_page') }}"
-                                class="{% if request.endpoint == 'admin.enrichers_page' %}active{% endif %}"
+                                class="{% if request.endpoint == 'admin.enrichers_page' %}active{% endif %} opacity-60"
+                                title="Legacy - Use Smart Aliases"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -345,7 +377,7 @@
                                         d="M13 10V3L4 14h7v7l9-11h-7z"
                                     />
                                 </svg>
-                                Smart Enrichers
+                                Smart Enrichers (legacy)
                             </a>
                         </li>
 

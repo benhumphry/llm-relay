@@ -48,6 +48,7 @@ class DocumentInfo:
     name: str  # Display name
     mime_type: Optional[str] = None
     size: Optional[int] = None
+    modified_time: Optional[str] = None  # ISO format timestamp for incremental indexing
 
 
 @dataclass
@@ -121,6 +122,8 @@ class LocalDocumentSource(DocumentSource):
 
     def list_documents(self) -> Iterator[DocumentInfo]:
         """List all supported documents in the directory."""
+        from datetime import datetime
+
         if not self.is_available():
             logger.warning(f"Source path not available: {self.source_path}")
             return
@@ -128,11 +131,14 @@ class LocalDocumentSource(DocumentSource):
         for file_path in self.source_path.rglob("*"):
             if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 relative_path = file_path.relative_to(self.source_path)
+                stat = file_path.stat()
+                modified_time = datetime.fromtimestamp(stat.st_mtime).isoformat()
                 yield DocumentInfo(
                     uri=str(file_path),
                     name=str(relative_path),
                     mime_type=self._get_mime_type(file_path.suffix),
-                    size=file_path.stat().st_size,
+                    size=stat.st_size,
+                    modified_time=modified_time,
                 )
 
     def read_document(self, uri: str) -> Optional[DocumentContent]:
@@ -360,10 +366,21 @@ class MCPDocumentSource(DocumentSource):
                         else "text/markdown"
                     )
 
+                    # Extract modified time (Notion: last_edited_time, others: modifiedTime)
+                    modified_time = None
+                    if isinstance(item, dict):
+                        modified_time = (
+                            item.get("last_edited_time")
+                            or item.get("modifiedTime")
+                            or item.get("updated_at")
+                            or item.get("modified")
+                        )
+
                     yield DocumentInfo(
                         uri=uri,
                         name=name,
                         mime_type=mime_type,
+                        modified_time=modified_time,
                     )
 
                 # Check for more pages
@@ -1042,6 +1059,7 @@ class GoogleDriveDocumentSource(DocumentSource):
                     size=int(file_info.get("size", 0))
                     if file_info.get("size")
                     else None,
+                    modified_time=file_info.get("modifiedTime"),
                 )
 
             # Check for more pages
@@ -1731,12 +1749,15 @@ class GoogleCalendarDocumentSource(DocumentSource):
             for event in events:
                 event_id = event.get("id")
                 summary = event.get("summary", "(No title)")
+                # Use updated timestamp for change detection
+                modified_time = event.get("updated")
 
                 total_events += 1
                 yield DocumentInfo(
                     uri=f"gcal://{self.calendar_id}/{event_id}",
                     name=summary[:100],
                     mime_type="text/calendar",
+                    modified_time=modified_time,
                 )
 
             # Check for more pages
@@ -1832,6 +1853,191 @@ Attendees: {attendee_list}
         )
 
 
+class PaperlessDocumentSource(DocumentSource):
+    """
+    Document source for Paperless-ngx using the REST API.
+
+    Connects to a Paperless-ngx instance and retrieves documents for indexing.
+    Uses the /api/documents/ endpoint which returns document metadata and
+    extracted text content.
+
+    Credentials are read from environment variables:
+    - PAPERLESS_URL: Base URL (e.g., "http://paperless:8000")
+    - PAPERLESS_TOKEN: API token for authentication
+    """
+
+    def __init__(self, base_url: Optional[str] = None, api_token: Optional[str] = None):
+        """
+        Initialize with Paperless-ngx connection details.
+
+        Args:
+            base_url: Base URL of the Paperless instance (defaults to PAPERLESS_URL env var)
+            api_token: API token for authentication (defaults to PAPERLESS_TOKEN env var)
+        """
+        self.base_url = (base_url or os.environ.get("PAPERLESS_URL", "")).rstrip("/")
+        self.api_token = api_token or os.environ.get("PAPERLESS_TOKEN", "")
+
+    def _get_headers(self) -> dict:
+        """Get headers for API requests."""
+        return {
+            "Authorization": f"Token {self.api_token}",
+            "Accept": "application/json",
+        }
+
+    def is_available(self) -> bool:
+        """Check if we can connect to Paperless."""
+        import requests as http_requests
+
+        try:
+            # Use /api/documents/ with page_size=1 to verify authentication works
+            response = http_requests.get(
+                f"{self.base_url}/api/documents/",
+                headers=self._get_headers(),
+                params={"page_size": 1},
+                timeout=10,
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"Paperless not available at {self.base_url}: {e}")
+            return False
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all documents from Paperless."""
+        import requests as http_requests
+
+        logger.info(f"Listing documents from Paperless at {self.base_url}")
+
+        page = 1
+        total_docs = 0
+
+        while True:
+            try:
+                response = http_requests.get(
+                    f"{self.base_url}/api/documents/",
+                    headers=self._get_headers(),
+                    params={"page": page, "page_size": 100},
+                    timeout=30,
+                )
+
+                if response.status_code != 200:
+                    logger.error(
+                        f"Paperless API error: {response.status_code} - {response.text}"
+                    )
+                    return
+
+                data = response.json()
+                results = data.get("results", [])
+
+                if not results:
+                    break
+
+                for doc in results:
+                    doc_id = doc.get("id")
+                    title = doc.get("title", f"Document {doc_id}")
+                    modified = doc.get("modified")
+
+                    total_docs += 1
+                    yield DocumentInfo(
+                        uri=f"paperless://{doc_id}",
+                        name=title,
+                        mime_type="text/plain",
+                        modified_time=modified,
+                    )
+
+                # Check for more pages
+                if not data.get("next"):
+                    break
+
+                page += 1
+
+            except Exception as e:
+                logger.error(f"Error listing Paperless documents: {e}")
+                return
+
+        logger.info(f"Found {total_docs} documents in Paperless")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a document from Paperless."""
+        import requests as http_requests
+
+        # Extract document ID from URI (paperless://doc_id)
+        if not uri.startswith("paperless://"):
+            logger.error(f"Invalid Paperless URI: {uri}")
+            return None
+
+        doc_id = uri.replace("paperless://", "")
+
+        try:
+            response = http_requests.get(
+                f"{self.base_url}/api/documents/{doc_id}/",
+                headers=self._get_headers(),
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Failed to get Paperless document {doc_id}: {response.status_code}"
+                )
+                return None
+
+            doc = response.json()
+
+            # Extract document fields
+            title = doc.get("title", f"Document {doc_id}")
+            content = doc.get("content", "")
+            correspondent = doc.get("correspondent_name", "")
+            document_type = doc.get("document_type_name", "")
+            created = doc.get("created", "")
+            added = doc.get("added", "")
+            tags = doc.get("tags", [])
+
+            # Get tag names if tags are IDs
+            tag_names = []
+            if tags and isinstance(tags[0], int):
+                # Tags are IDs, would need separate API call to get names
+                # For now, just note the count
+                tag_names = [f"tag_{t}" for t in tags]
+            else:
+                tag_names = tags
+
+            # Format as readable text with metadata
+            text_parts = [f"Title: {title}"]
+            if correspondent:
+                text_parts.append(f"Correspondent: {correspondent}")
+            if document_type:
+                text_parts.append(f"Type: {document_type}")
+            if created:
+                text_parts.append(f"Created: {created}")
+            if tag_names:
+                text_parts.append(f"Tags: {', '.join(str(t) for t in tag_names)}")
+            text_parts.append("")
+            text_parts.append(content)
+
+            full_text = "\n".join(text_parts)
+
+            # Extract date for metadata (YYYY-MM-DD format)
+            doc_date = None
+            if created:
+                doc_date = created[:10] if len(created) >= 10 else created
+
+            return DocumentContent(
+                uri=uri,
+                name=title[:100],
+                mime_type="text/plain",
+                text=full_text,
+                metadata={
+                    "doc_date": doc_date,
+                    "correspondent": correspondent or None,
+                    "document_type": document_type or None,
+                    "source_type": "paperless",
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"Error reading Paperless document {doc_id}: {e}")
+            return None
+
+
 def _inject_mcp_env_vars(mcp_config: dict) -> dict:
     """
     Inject required environment variables into MCP config based on server name.
@@ -1894,6 +2100,232 @@ def _inject_mcp_env_vars(mcp_config: dict) -> dict:
     return config
 
 
+class GitHubDocumentSource(DocumentSource):
+    """
+    Document source for GitHub repositories using the REST API.
+
+    Fetches files from a GitHub repository for indexing.
+    Credentials are read from GITHUB_TOKEN environment variable.
+    """
+
+    # File extensions to index (code and docs)
+    INDEXABLE_EXTENSIONS = {
+        ".md",
+        ".txt",
+        ".rst",
+        ".adoc",  # Documentation
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",  # Code
+        ".java",
+        ".go",
+        ".rs",
+        ".rb",
+        ".php",
+        ".c",
+        ".cpp",
+        ".h",
+        ".hpp",
+        ".cs",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",  # Config
+        ".html",
+        ".css",
+        ".scss",  # Web
+        ".sql",
+        ".sh",
+        ".bash",  # Scripts
+    }
+
+    def __init__(
+        self,
+        repo: str,
+        branch: Optional[str] = None,
+        path_filter: Optional[str] = None,
+    ):
+        """
+        Initialize with GitHub repository details.
+
+        Args:
+            repo: Repository in "owner/repo" format
+            branch: Branch name (defaults to repo default branch)
+            path_filter: Optional path prefix to filter files (e.g., "docs/")
+        """
+        self.repo = repo
+        self.branch = branch
+        self.path_filter = path_filter
+        self.api_token = os.environ.get("GITHUB_TOKEN") or os.environ.get(
+            "GITHUB_PERSONAL_ACCESS_TOKEN", ""
+        )
+        self.base_url = "https://api.github.com"
+
+    def _get_headers(self) -> dict:
+        """Get headers for API requests."""
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if self.api_token:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+        return headers
+
+    def is_available(self) -> bool:
+        """Check if we can access the repository."""
+        import requests as http_requests
+
+        try:
+            response = http_requests.get(
+                f"{self.base_url}/repos/{self.repo}",
+                headers=self._get_headers(),
+                timeout=10,
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"GitHub repo {self.repo} not available: {e}")
+            return False
+
+    def _get_default_branch(self) -> Optional[str]:
+        """Get the default branch for the repository."""
+        import requests as http_requests
+
+        try:
+            response = http_requests.get(
+                f"{self.base_url}/repos/{self.repo}",
+                headers=self._get_headers(),
+                timeout=10,
+            )
+            if response.status_code == 200:
+                return response.json().get("default_branch", "main")
+        except Exception as e:
+            logger.warning(f"Failed to get default branch: {e}")
+        return "main"
+
+    def _should_index_file(self, path: str) -> bool:
+        """Check if a file should be indexed based on extension and path filter."""
+        # Check extension
+        ext = os.path.splitext(path)[1].lower()
+        if ext not in self.INDEXABLE_EXTENSIONS:
+            return False
+
+        # Check path filter
+        if self.path_filter:
+            if not path.startswith(self.path_filter.rstrip("/")):
+                return False
+
+        return True
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all indexable files in the repository."""
+        import requests as http_requests
+
+        branch = self.branch or self._get_default_branch()
+        logger.info(f"Listing files from GitHub {self.repo} (branch: {branch})")
+
+        try:
+            # Get the tree recursively
+            response = http_requests.get(
+                f"{self.base_url}/repos/{self.repo}/git/trees/{branch}",
+                headers=self._get_headers(),
+                params={"recursive": "1"},
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"GitHub API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            tree = data.get("tree", [])
+
+            for item in tree:
+                if item.get("type") != "blob":
+                    continue
+
+                path = item.get("path", "")
+                if not self._should_index_file(path):
+                    continue
+
+                yield DocumentInfo(
+                    uri=f"github://{self.repo}/{branch}/{path}",
+                    name=path,
+                    mime_type=self._get_mime_type(path),
+                    size=item.get("size"),
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to list GitHub files: {e}")
+
+    def _get_mime_type(self, path: str) -> str:
+        """Get MIME type based on file extension."""
+        ext = os.path.splitext(path)[1].lower()
+        mime_types = {
+            ".md": "text/markdown",
+            ".txt": "text/plain",
+            ".py": "text/x-python",
+            ".js": "text/javascript",
+            ".ts": "text/typescript",
+            ".json": "application/json",
+            ".yaml": "text/yaml",
+            ".yml": "text/yaml",
+            ".html": "text/html",
+            ".css": "text/css",
+        }
+        return mime_types.get(ext, "text/plain")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a file from the repository."""
+        import requests as http_requests
+
+        # Parse URI: github://owner/repo/branch/path
+        if not uri.startswith("github://"):
+            return None
+
+        parts = uri[9:].split("/", 3)  # Remove "github://"
+        if len(parts) < 4:
+            return None
+
+        owner, repo, branch, path = parts[0], parts[1], parts[2], parts[3]
+
+        try:
+            # Get file content
+            response = http_requests.get(
+                f"{self.base_url}/repos/{owner}/{repo}/contents/{path}",
+                headers=self._get_headers(),
+                params={"ref": branch},
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Failed to read {path}: {response.status_code}")
+                return None
+
+            data = response.json()
+
+            # Content is base64 encoded
+            import base64
+
+            content = base64.b64decode(data.get("content", "")).decode(
+                "utf-8", errors="replace"
+            )
+
+            return DocumentContent(
+                uri=uri,
+                name=path,
+                mime_type=self._get_mime_type(path),
+                text=content,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to read GitHub file {path}: {e}")
+            return None
+
+
 def get_document_source(
     source_type: str,
     source_path: Optional[str] = None,
@@ -1902,6 +2334,11 @@ def get_document_source(
     gdrive_folder_id: Optional[str] = None,
     gmail_label_id: Optional[str] = None,
     gcalendar_calendar_id: Optional[str] = None,
+    paperless_url: Optional[str] = None,  # Deprecated - use PAPERLESS_URL env var
+    paperless_token: Optional[str] = None,  # Deprecated - use PAPERLESS_TOKEN env var
+    github_repo: Optional[str] = None,
+    github_branch: Optional[str] = None,
+    github_path: Optional[str] = None,
     vision_provider: str = "local",
     vision_model: Optional[str] = None,
     vision_ollama_url: Optional[str] = None,
@@ -1910,13 +2347,18 @@ def get_document_source(
     Factory function to create the appropriate document source.
 
     Args:
-        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", or "mcp:gcalendar"
+        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", or "paperless"
         source_path: Path for local sources
         mcp_config: Configuration dict for MCP sources
         google_account_id: OAuth account ID for Google sources
         gdrive_folder_id: Optional folder ID to filter Google Drive indexing
         gmail_label_id: Optional label ID to filter Gmail indexing (e.g., "INBOX", "SENT")
         gcalendar_calendar_id: Optional calendar ID to filter Calendar indexing
+        paperless_url: Deprecated - credentials read from PAPERLESS_URL env var
+        paperless_token: Deprecated - credentials read from PAPERLESS_TOKEN env var
+        github_repo: Repository in "owner/repo" format for GitHub sources
+        github_branch: Branch name for GitHub sources
+        github_path: Path filter for GitHub sources
         vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
         vision_model: Vision model name (e.g., "granite3.2-vision:latest")
         vision_ollama_url: Ollama URL when using ollama provider
@@ -1924,7 +2366,29 @@ def get_document_source(
     Returns:
         Appropriate DocumentSource instance
     """
-    if source_type == "local":
+    if source_type == "paperless":
+        # Credentials from environment variables (PAPERLESS_URL, PAPERLESS_TOKEN)
+        source = PaperlessDocumentSource()
+        if not source.base_url or not source.api_token:
+            raise ValueError(
+                "PAPERLESS_URL and PAPERLESS_TOKEN environment variables required for paperless source"
+            )
+        logger.info(f"Creating Paperless source (url={source.base_url})")
+        return source
+
+    elif source_type == "mcp:github":
+        if not github_repo:
+            raise ValueError("github_repo required for GitHub source")
+        logger.info(
+            f"Creating GitHub source (repo={github_repo}, branch={github_branch or 'default'}, path={github_path or 'all'})"
+        )
+        return GitHubDocumentSource(
+            repo=github_repo,
+            branch=github_branch,
+            path_filter=github_path,
+        )
+
+    elif source_type == "local":
         if not source_path:
             raise ValueError("source_path required for local document source")
         return LocalDocumentSource(source_path)

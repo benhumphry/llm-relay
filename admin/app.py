@@ -4921,15 +4921,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         data = request.get_json() or {}
         model_ids = data.get("model_ids", [])
+        summarizer_model = data.get("summarizer_model")
         force = data.get("force", False)
 
         if not model_ids:
             return jsonify({"error": "model_ids is required"}), 400
 
+        if not summarizer_model:
+            return jsonify({"error": "summarizer_model is required"}), 400
+
         try:
             from context.model_intelligence import ModelIntelligence
 
-            mi = ModelIntelligence()
+            mi = ModelIntelligence(summarizer_model=summarizer_model)
             results = mi.refresh_models(model_ids, force=force)
 
             return jsonify(
@@ -5187,6 +5191,28 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         elif source_type == "mcp":
             if not mcp_server_config or not mcp_server_config.get("name"):
                 return jsonify({"error": "MCP server configuration is required"}), 400
+        elif source_type == "paperless":
+            # Credentials come from PAPERLESS_URL and PAPERLESS_TOKEN env vars
+            if not os.environ.get("PAPERLESS_URL") or not os.environ.get(
+                "PAPERLESS_TOKEN"
+            ):
+                return jsonify(
+                    {
+                        "error": "PAPERLESS_URL and PAPERLESS_TOKEN environment variables are required"
+                    }
+                ), 400
+        elif source_type == "mcp:github":
+            # Credentials come from GITHUB_TOKEN env var
+            if not os.environ.get("GITHUB_TOKEN") and not os.environ.get(
+                "GITHUB_PERSONAL_ACCESS_TOKEN"
+            ):
+                return jsonify(
+                    {"error": "GITHUB_TOKEN environment variable is required"}
+                ), 400
+            if not data.get("github_repo"):
+                return jsonify(
+                    {"error": "Repository is required for GitHub source"}
+                ), 400
         else:
             return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
@@ -5203,6 +5229,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 gmail_label_name=data.get("gmail_label_name"),
                 gcalendar_calendar_id=data.get("gcalendar_calendar_id"),
                 gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
+                paperless_url=data.get("paperless_url"),
+                paperless_token=data.get("paperless_token"),
+                github_repo=data.get("github_repo"),
+                github_branch=data.get("github_branch"),
+                github_path=data.get("github_path"),
                 embedding_provider=data.get("embedding_provider", "local"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5243,6 +5274,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 gmail_label_name=data.get("gmail_label_name"),
                 gcalendar_calendar_id=data.get("gcalendar_calendar_id"),
                 gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
+                paperless_url=data.get("paperless_url"),
+                paperless_token=data.get("paperless_token"),
+                github_repo=data.get("github_repo"),
+                github_branch=data.get("github_branch"),
+                github_path=data.get("github_path"),
                 embedding_provider=data.get("embedding_provider"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5770,6 +5806,95 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             }
         )
 
+    @admin.route("/api/local-folders", methods=["GET"])
+    @require_auth_api
+    def list_local_folders():
+        """
+        List folders from the local filesystem for document store configuration.
+
+        Query params:
+            path: The path to list folders from. Defaults to /.
+
+        Returns a list of folders the user can select for indexing.
+        Excludes system directories for cleaner browsing.
+        """
+        from pathlib import Path
+
+        # Directories to exclude from browsing (system/uninteresting dirs)
+        EXCLUDED_DIRS = {
+            "proc",
+            "sys",
+            "dev",
+            "run",
+            "snap",
+            "boot",
+            "lib",
+            "lib64",
+            "sbin",
+            "bin",
+            "usr",
+            "etc",
+            "var",
+            "tmp",
+            "lost+found",
+            "__pycache__",
+            "node_modules",
+            ".git",
+            ".venv",
+            "venv",
+        }
+
+        # Get requested path, default to /
+        requested_path = request.args.get("path", "/")
+
+        try:
+            target_path = Path(requested_path).resolve()
+        except Exception:
+            return jsonify({"error": "Invalid path"}), 400
+
+        # Check if path exists
+        if not target_path.exists():
+            return jsonify({"error": f"Path does not exist: {requested_path}"}), 404
+
+        if not target_path.is_dir():
+            return jsonify({"error": f"Path is not a directory: {requested_path}"}), 400
+
+        folders = []
+        root = Path("/")
+        try:
+            for item in sorted(target_path.iterdir()):
+                if item.is_dir() and not item.name.startswith("."):
+                    # Skip excluded directories at root level
+                    if target_path == root and item.name in EXCLUDED_DIRS:
+                        continue
+                    folders.append(
+                        {
+                            "name": item.name,
+                            "path": str(item),
+                        }
+                    )
+        except PermissionError:
+            return jsonify({"error": "Permission denied"}), 403
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+        # Build breadcrumb path from root
+        breadcrumbs = []
+        current = target_path
+        while current != root and current != current.parent:
+            breadcrumbs.insert(0, {"name": current.name, "path": str(current)})
+            current = current.parent
+
+        return jsonify(
+            {
+                "folders": folders,
+                "current_path": str(target_path),
+                "parent_path": str(target_path.parent) if target_path != root else None,
+                "breadcrumbs": breadcrumbs,
+                "is_root": target_path == root,
+            }
+        )
+
     @admin.route("/api/oauth/google/<int:account_id>/labels", methods=["GET"])
     @require_auth_api
     def list_gmail_labels(account_id):
@@ -5930,6 +6055,260 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     # =========================================================================
     # Smart Enrichers (unified RAG + Web)
     # =========================================================================
+
+    # ========================================================================
+    # Smart Aliases (unified routing + enrichment + caching)
+    # ========================================================================
+
+    @admin.route("/smart-aliases")
+    @require_auth
+    def smart_aliases_page():
+        """Smart Aliases management page."""
+        return render_template("smart_aliases.html")
+
+    @admin.route("/api/smart-aliases/models", methods=["GET"])
+    @require_auth_api
+    def list_available_models_for_smart_alias():
+        """List all available models that can be used as targets/candidates."""
+        models = []
+
+        # Only provider models - no aliases/routers to avoid circular routing
+        for provider in registry.get_available_providers():
+            for model_id, info in provider.get_models().items():
+                models.append(
+                    {
+                        "id": f"{provider.name}/{model_id}",
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "family": info.family,
+                        "description": info.description,
+                        "context_length": info.context_length,
+                        "capabilities": info.capabilities,
+                        "input_cost": info.input_cost,
+                        "output_cost": info.output_cost,
+                    }
+                )
+
+        # Sort by provider, then model_id
+        models.sort(key=lambda m: (m["provider"], m["model_id"]))
+        return jsonify(models)
+
+    @admin.route("/api/smart-aliases/stores", methods=["GET"])
+    @require_auth_api
+    def list_document_stores_for_smart_alias():
+        """List all document stores for RAG configuration."""
+        from db import get_all_document_stores
+
+        stores = get_all_document_stores()
+        return jsonify([s.to_dict() for s in stores])
+
+    @admin.route("/api/smart-aliases", methods=["GET"])
+    @require_auth_api
+    def list_smart_aliases():
+        """List all smart aliases."""
+        from db import get_all_smart_aliases
+
+        aliases = get_all_smart_aliases()
+        return jsonify([a.to_dict() for a in aliases])
+
+    @admin.route("/api/smart-aliases/<int:alias_id>", methods=["GET"])
+    @require_auth_api
+    def get_smart_alias(alias_id: int):
+        """Get a specific smart alias."""
+        from db import get_smart_alias_by_id
+
+        alias = get_smart_alias_by_id(alias_id)
+        if not alias:
+            return jsonify({"error": "Smart alias not found"}), 404
+        return jsonify(alias.to_dict())
+
+    @admin.route("/api/smart-aliases", methods=["POST"])
+    @require_auth_api
+    def create_smart_alias_endpoint():
+        """Create a new smart alias."""
+        from db import create_smart_alias
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+
+        target_model = data.get("target_model", "").strip()
+        if not target_model:
+            return jsonify({"error": "Target model is required"}), 400
+
+        # Feature toggles
+        use_routing = data.get("use_routing", False)
+        use_rag = data.get("use_rag", False)
+        use_web = data.get("use_web", False)
+        use_cache = data.get("use_cache", False)
+
+        # Validate: can't have cache + web
+        if use_cache and use_web:
+            return jsonify(
+                {"error": "Cannot enable caching with realtime web search"}
+            ), 400
+
+        # Validate routing requirements
+        if use_routing:
+            if not data.get("designator_model"):
+                return jsonify(
+                    {"error": "Designator model is required for routing"}
+                ), 400
+            if not data.get("candidates"):
+                return jsonify(
+                    {"error": "Candidate models are required for routing"}
+                ), 400
+
+        # Validate RAG requirements
+        store_ids = data.get("document_store_ids") or data.get("store_ids")
+        if use_rag and not store_ids:
+            return jsonify(
+                {"error": "Document stores are required when RAG is enabled"}
+            ), 400
+
+        try:
+            alias = create_smart_alias(
+                name=name,
+                target_model=target_model,
+                # Feature toggles
+                use_routing=use_routing,
+                use_rag=use_rag,
+                use_web=use_web,
+                use_cache=use_cache,
+                # Routing settings
+                designator_model=data.get("designator_model"),
+                purpose=data.get("purpose"),
+                candidates=data.get("candidates"),
+                fallback_model=data.get("fallback_model"),
+                routing_strategy=data.get("routing_strategy", "per_request"),
+                session_ttl=data.get("session_ttl", 3600),
+                use_model_intelligence=data.get("use_model_intelligence", False),
+                search_provider=data.get("search_provider"),
+                intelligence_model=data.get("intelligence_model"),
+                # RAG settings
+                store_ids=store_ids,
+                max_results=data.get("max_results", 5),
+                similarity_threshold=data.get("similarity_threshold", 0.7),
+                # Web settings
+                max_search_results=data.get("max_search_results", 5),
+                max_scrape_urls=data.get("max_scrape_urls", 3),
+                # Common enrichment
+                max_context_tokens=data.get("max_context_tokens", 4000),
+                rerank_provider=data.get("rerank_provider", "local"),
+                rerank_model=data.get("rerank_model"),
+                rerank_top_n=data.get("rerank_top_n", 20),
+                # Cache settings
+                cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
+                cache_match_system_prompt=data.get("cache_match_system_prompt", True),
+                cache_match_last_message_only=data.get(
+                    "cache_match_last_message_only", False
+                ),
+                cache_ttl_hours=data.get("cache_ttl_hours", 168),
+                cache_min_tokens=data.get("cache_min_tokens", 50),
+                cache_max_tokens=data.get("cache_max_tokens", 4000),
+                cache_collection=data.get("cache_collection"),
+                # Metadata
+                tags=data.get("tags", []),
+                description=data.get("description"),
+                system_prompt=data.get("system_prompt"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(alias.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/smart-aliases/<int:alias_id>", methods=["PUT"])
+    @require_auth_api
+    def update_smart_alias_endpoint(alias_id: int):
+        """Update a smart alias."""
+        from db import update_smart_alias
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Document store IDs
+        store_ids = data.get("document_store_ids") or data.get("store_ids")
+
+        try:
+            alias = update_smart_alias(
+                alias_id=alias_id,
+                name=data.get("name"),
+                target_model=data.get("target_model"),
+                # Feature toggles
+                use_routing=data.get("use_routing"),
+                use_rag=data.get("use_rag"),
+                use_web=data.get("use_web"),
+                use_cache=data.get("use_cache"),
+                # Routing settings
+                designator_model=data.get("designator_model"),
+                purpose=data.get("purpose"),
+                candidates=data.get("candidates"),
+                fallback_model=data.get("fallback_model"),
+                routing_strategy=data.get("routing_strategy"),
+                session_ttl=data.get("session_ttl"),
+                use_model_intelligence=data.get("use_model_intelligence"),
+                search_provider=data.get("search_provider"),
+                intelligence_model=data.get("intelligence_model"),
+                # RAG settings
+                store_ids=store_ids,
+                max_results=data.get("max_results"),
+                similarity_threshold=data.get("similarity_threshold"),
+                # Web settings
+                max_search_results=data.get("max_search_results"),
+                max_scrape_urls=data.get("max_scrape_urls"),
+                # Common enrichment
+                max_context_tokens=data.get("max_context_tokens"),
+                rerank_provider=data.get("rerank_provider"),
+                rerank_model=data.get("rerank_model"),
+                rerank_top_n=data.get("rerank_top_n"),
+                # Cache settings
+                cache_similarity_threshold=data.get("cache_similarity_threshold"),
+                cache_match_system_prompt=data.get("cache_match_system_prompt"),
+                cache_match_last_message_only=data.get("cache_match_last_message_only"),
+                cache_ttl_hours=data.get("cache_ttl_hours"),
+                cache_min_tokens=data.get("cache_min_tokens"),
+                cache_max_tokens=data.get("cache_max_tokens"),
+                cache_collection=data.get("cache_collection"),
+                # Metadata
+                tags=data.get("tags"),
+                description=data.get("description"),
+                system_prompt=data.get("system_prompt"),
+                enabled=data.get("enabled"),
+            )
+            if not alias:
+                return jsonify({"error": "Smart alias not found"}), 404
+            return jsonify(alias.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @admin.route("/api/smart-aliases/<int:alias_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_smart_alias_endpoint(alias_id: int):
+        """Delete a smart alias."""
+        from db import delete_smart_alias
+
+        if delete_smart_alias(alias_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Failed to delete smart alias"}), 500
+
+    @admin.route("/api/smart-aliases/<int:alias_id>/reset-stats", methods=["POST"])
+    @require_auth_api
+    def reset_smart_alias_stats_endpoint(alias_id: int):
+        """Reset statistics for a smart alias."""
+        from db import reset_smart_alias_stats
+
+        if reset_smart_alias_stats(alias_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Smart alias not found"}), 404
+
+    # ========================================================================
+    # Smart Enrichers (legacy - unified RAG + Web)
+    # ========================================================================
 
     @admin.route("/enrichers")
     @require_auth

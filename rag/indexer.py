@@ -73,6 +73,45 @@ class RAGIndexer:
         except Exception as e:
             logger.warning(f"Failed to clear GPU memory: {e}")
 
+    def _get_existing_doc_metadata(self, collection) -> dict[str, Optional[str]]:
+        """
+        Get existing document URIs and their modified times from a ChromaDB collection.
+
+        Returns:
+            Dict mapping source_uri -> modified_time (or None if not available)
+        """
+        existing_docs = {}
+        try:
+            # Get all documents with metadata
+            results = collection.get(include=["metadatas"])
+            if results and results.get("metadatas"):
+                for meta in results["metadatas"]:
+                    uri = meta.get("source_uri")
+                    if uri and uri not in existing_docs:
+                        existing_docs[uri] = meta.get("modified_time")
+        except Exception as e:
+            logger.warning(f"Failed to get existing documents: {e}")
+        return existing_docs
+
+    def _delete_doc_chunks(self, collection, source_uri: str) -> int:
+        """
+        Delete all chunks for a specific document URI from a collection.
+
+        Returns:
+            Number of chunks deleted
+        """
+        try:
+            # Get IDs of chunks with this source_uri
+            results = collection.get(where={"source_uri": source_uri}, include=[])
+            if results and results.get("ids"):
+                ids_to_delete = results["ids"]
+                collection.delete(ids=ids_to_delete)
+                logger.debug(f"Deleted {len(ids_to_delete)} chunks for {source_uri}")
+                return len(ids_to_delete)
+        except Exception as e:
+            logger.warning(f"Failed to delete chunks for {source_uri}: {e}")
+        return 0
+
     def start(self):
         """Start the indexer service and scheduler."""
         if self._running:
@@ -461,11 +500,14 @@ class RAGIndexer:
             logger.error(f"Store {store_id} not found")
             return False
 
-        source_desc = (
-            store.source_path
-            if store.source_type == "local"
-            else f"MCP:{store.mcp_server_config.get('name', 'unknown') if store.mcp_server_config else 'unknown'}"
-        )
+        if store.source_type == "local":
+            source_desc = store.source_path
+        elif store.source_type == "paperless":
+            source_desc = f"Paperless:{os.environ.get('PAPERLESS_URL', 'unknown')}"
+        elif store.source_type == "mcp:github":
+            source_desc = f"GitHub:{store.github_repo or 'unknown'}"
+        else:
+            source_desc = f"MCP:{store.mcp_server_config.get('name', 'unknown') if store.mcp_server_config else 'unknown'}"
         logger.info(f"Starting indexing for store '{store.name}' from {source_desc}")
 
         # Update status to indexing
@@ -483,6 +525,11 @@ class RAGIndexer:
                 gdrive_folder_id=store.gdrive_folder_id,
                 gmail_label_id=store.gmail_label_id,
                 gcalendar_calendar_id=store.gcalendar_calendar_id,
+                paperless_url=store.paperless_url,
+                paperless_token=store.paperless_token,
+                github_repo=store.github_repo,
+                github_branch=store.github_branch,
+                github_path=store.github_path,
                 vision_provider=store.vision_provider,
                 vision_model=store.vision_model,
                 vision_ollama_url=store.vision_ollama_url,
@@ -510,19 +557,25 @@ class RAGIndexer:
                 metadata={"hnsw:space": "cosine"},
             )
 
-            # Clear existing documents
-            try:
-                collection.delete(where={})
-            except Exception:
-                pass
+            # Get existing indexed documents for incremental indexing
+            existing_docs = self._get_existing_doc_metadata(collection)
+            logger.info(f"Found {len(existing_docs)} existing documents in index")
 
             # Find and process documents
             documents = []
             doc_count = 0
+            skipped_count = 0
+            deleted_uris = set()
+            existing_chunk_count = (
+                collection.count()
+            )  # Track existing chunks for progress
 
             all_docs = list(source.list_documents())
             total_files = len(all_docs)
-            logger.info(f"Found {total_files} documents to index")
+            logger.info(f"Found {total_files} documents in source")
+
+            # Track which URIs we see in source (for deletion detection)
+            source_uris = {doc_info.uri for doc_info in all_docs}
 
             job_key = f"store_{store_id}"
             for file_idx, doc_info in enumerate(all_docs):
@@ -532,6 +585,32 @@ class RAGIndexer:
                     with self._lock:
                         self._cancelled_jobs.discard(job_key)
                     return False
+
+                # Check if document needs re-indexing (incremental)
+                if doc_info.uri in existing_docs:
+                    existing_modified = existing_docs[doc_info.uri]
+
+                    # If source provides modified_time, compare timestamps
+                    if doc_info.modified_time:
+                        if (
+                            existing_modified
+                            and existing_modified >= doc_info.modified_time
+                        ):
+                            # Document hasn't changed, skip
+                            skipped_count += 1
+                            logger.debug(
+                                f"Skipping unchanged document {file_idx + 1}/{total_files}: {doc_info.name}"
+                            )
+                            continue
+                        # Document changed - delete old chunks before re-indexing
+                        self._delete_doc_chunks(collection, doc_info.uri)
+                    else:
+                        # No modified_time from source (e.g., Gmail) - assume immutable, skip
+                        skipped_count += 1
+                        logger.debug(
+                            f"Skipping existing document {file_idx + 1}/{total_files}: {doc_info.name}"
+                        )
+                        continue
 
                 logger.info(
                     f"Processing document {file_idx + 1}/{total_files}: {doc_info.name}"
@@ -559,38 +638,68 @@ class RAGIndexer:
 
                     for chunk in chunks:
                         chunk["source_file"] = doc_info.name
-                        chunk["source_uri"] = (
-                            doc_info.uri
-                        )  # Unique identifier for ID generation
+                        chunk["source_uri"] = doc_info.uri
+                        chunk["modified_time"] = (
+                            doc_info.modified_time
+                        )  # Track for incremental
                     documents.extend(chunks)
                     doc_count += 1
                     logger.info(
                         f"Completed {doc_info.name}: {len(chunks)} chunks "
-                        f"(total: {len(documents)} chunks from {doc_count} docs)"
+                        f"(total: {len(documents)} chunks from {doc_count} docs, skipped: {skipped_count})"
                     )
 
                     update_document_store_index_status(
                         store_id,
                         "indexing",
-                        document_count=doc_count,
-                        chunk_count=len(documents),
+                        document_count=doc_count + skipped_count,
+                        chunk_count=existing_chunk_count + len(documents),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to process {doc_info.uri}: {e}")
 
-            if not documents:
-                logger.warning(f"No documents found in {source_desc}")
-                update_document_store_index_status(
-                    store_id,
-                    "ready",
-                    document_count=0,
-                    chunk_count=0,
-                    collection_name=collection_name,
+            # Delete documents that no longer exist in source
+            for uri in existing_docs:
+                if uri not in source_uris:
+                    self._delete_doc_chunks(collection, uri)
+                    deleted_uris.add(uri)
+
+            if deleted_uris:
+                logger.info(
+                    f"Deleted {len(deleted_uris)} documents no longer in source"
                 )
+
+            if not documents:
+                if skipped_count > 0:
+                    # All documents were unchanged - still a success
+                    logger.info(
+                        f"No new/modified documents to index (skipped {skipped_count} unchanged)"
+                    )
+                    # Get current chunk count from collection
+                    existing_chunk_count = collection.count()
+                    update_document_store_index_status(
+                        store_id,
+                        "ready",
+                        document_count=skipped_count,
+                        chunk_count=existing_chunk_count,
+                        collection_name=collection_name,
+                    )
+                else:
+                    logger.warning(f"No documents found in {source_desc}")
+                    update_document_store_index_status(
+                        store_id,
+                        "ready",
+                        document_count=0,
+                        chunk_count=0,
+                        collection_name=collection_name,
+                    )
                 return True
 
             # Generate embeddings and store in ChromaDB
-            logger.info(f"Generating embeddings for {len(documents)} chunks...")
+            logger.info(
+                f"Generating embeddings for {len(documents)} chunks "
+                f"({doc_count} new/modified docs, {skipped_count} unchanged)..."
+            )
 
             batch_size = 100
             total_chunks = 0
@@ -626,6 +735,9 @@ class RAGIndexer:
                         "store_id": store_id,
                         "store_name": store.name,
                     }
+                    # Add modified_time for incremental indexing
+                    if doc.get("modified_time"):
+                        meta["modified_time"] = doc["modified_time"]
                     # Add document-level metadata (dates, location, etc.)
                     if doc.get("metadata"):
                         for key, value in doc["metadata"].items():
@@ -643,17 +755,22 @@ class RAGIndexer:
                 total_chunks += len(batch)
                 logger.debug(f"Indexed {total_chunks}/{len(documents)} chunks")
 
+            # Get total chunk count (new + existing unchanged)
+            final_chunk_count = collection.count()
+            total_doc_count = doc_count + skipped_count
+
             update_document_store_index_status(
                 store_id,
                 "ready",
-                document_count=doc_count,
-                chunk_count=total_chunks,
+                document_count=total_doc_count,
+                chunk_count=final_chunk_count,
                 collection_name=collection_name,
             )
 
             logger.info(
                 f"Indexing complete for store '{store.name}': "
-                f"{doc_count} documents, {total_chunks} chunks"
+                f"{total_doc_count} documents ({doc_count} new/modified, {skipped_count} unchanged), "
+                f"{final_chunk_count} total chunks"
             )
             return True
 

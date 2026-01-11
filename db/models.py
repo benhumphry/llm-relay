@@ -1109,6 +1109,25 @@ class DocumentStore(Base):
         String(255), nullable=True
     )  # For display purposes
 
+    # Paperless-ngx configuration (for source_type="paperless")
+    paperless_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Base URL (e.g., "http://paperless:8000")
+    paperless_token: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # API token
+
+    # GitHub configuration (for source_type="mcp:github")
+    github_repo: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Repository in "owner/repo" format
+    github_branch: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # Branch name (defaults to repo default)
+    github_path: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Path filter pattern
+
     # Embedding configuration
     embedding_provider: Mapped[str] = mapped_column(String(100), default="local")
     embedding_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
@@ -1174,6 +1193,11 @@ class DocumentStore(Base):
             "gmail_label_name": self.gmail_label_name,
             "gcalendar_calendar_id": self.gcalendar_calendar_id,
             "gcalendar_calendar_name": self.gcalendar_calendar_name,
+            "paperless_url": self.paperless_url,
+            "paperless_token": self.paperless_token,
+            "github_repo": self.github_repo,
+            "github_branch": self.github_branch,
+            "github_path": self.github_path,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "ollama_url": self.ollama_url,
@@ -1409,6 +1433,281 @@ class SmartEnricher(Base):
             "cache_min_tokens": self.cache_min_tokens,
             "cache_max_tokens": self.cache_max_tokens,
             "cache_collection": self.cache_collection,
+            "cache_hits": self.cache_hits,
+            "cache_tokens_saved": self.cache_tokens_saved,
+            "cache_cost_saved": self.cache_cost_saved,
+            # Metadata
+            "tags": self.tags,
+            "description": self.description,
+            "system_prompt": self.system_prompt,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            # Document stores
+            "document_store_ids": [s.id for s in stores] if stores else [],
+            "document_stores": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "source_type": s.source_type,
+                    "index_status": s.index_status,
+                    "document_count": s.document_count,
+                    "chunk_count": s.chunk_count,
+                }
+                for s in stores
+            ]
+            if stores
+            else [],
+        }
+
+
+# ============================================================================
+# Smart Alias Model (unified routing + enrichment + caching)
+# ============================================================================
+
+# Association table for SmartAlias <-> DocumentStore many-to-many relationship
+smart_alias_stores = Table(
+    "smart_alias_stores",
+    Base.metadata,
+    Column(
+        "smart_alias_id",
+        Integer,
+        ForeignKey("smart_aliases.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "document_store_id",
+        Integer,
+        ForeignKey("document_stores.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+
+class SmartAlias(Base):
+    """
+    Unified Smart Alias - combines routing, enrichment, and caching.
+
+    A SmartAlias is the single entry point for all smart features:
+    - Simple alias (no features enabled) - just forwards to target_model
+    - Smart routing (use_routing=True) - designator picks from candidates
+    - RAG enrichment (use_rag=True) - injects document context
+    - Web enrichment (use_web=True) - injects realtime web context
+    - Response caching (use_cache=True) - semantic response caching
+
+    Note: use_cache is only permitted when use_web=False (realtime data shouldn't be cached)
+    """
+
+    __tablename__ = "smart_aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+
+    # ===== FEATURE TOGGLES =====
+    use_routing: Mapped[bool] = mapped_column(Boolean, default=False)
+    use_rag: Mapped[bool] = mapped_column(Boolean, default=False)
+    use_web: Mapped[bool] = mapped_column(Boolean, default=False)
+    use_cache: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # ===== TARGET CONFIGURATION =====
+    # Always required - the default/fallback target model
+    target_model: Mapped[str] = mapped_column(String(150), nullable=False)
+
+    # ===== ROUTING SETTINGS (when use_routing=True) =====
+    designator_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    purpose: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    candidates_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fallback_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    routing_strategy: Mapped[str] = mapped_column(String(20), default="per_request")
+    session_ttl: Mapped[int] = mapped_column(Integer, default=3600)
+
+    # Model Intelligence (for routing)
+    use_model_intelligence: Mapped[bool] = mapped_column(Boolean, default=False)
+    search_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    intelligence_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )
+
+    # ===== RAG SETTINGS (when use_rag=True) =====
+    # document_stores via junction table
+    max_results: Mapped[int] = mapped_column(Integer, default=5)
+    similarity_threshold: Mapped[float] = mapped_column(Float, default=0.7)
+
+    # ===== WEB SETTINGS (when use_web=True) =====
+    max_search_results: Mapped[int] = mapped_column(Integer, default=5)
+    max_scrape_urls: Mapped[int] = mapped_column(Integer, default=3)
+
+    # ===== COMMON ENRICHMENT SETTINGS =====
+    max_context_tokens: Mapped[int] = mapped_column(Integer, default=4000)
+    rerank_provider: Mapped[str] = mapped_column(String(50), default="local")
+    rerank_model: Mapped[str] = mapped_column(
+        String(150), default="cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+    rerank_top_n: Mapped[int] = mapped_column(Integer, default=20)
+
+    # ===== CACHE SETTINGS (when use_cache=True) =====
+    cache_similarity_threshold: Mapped[float] = mapped_column(Float, default=0.95)
+    cache_match_system_prompt: Mapped[bool] = mapped_column(Boolean, default=True)
+    cache_match_last_message_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    cache_ttl_hours: Mapped[int] = mapped_column(Integer, default=168)
+    cache_min_tokens: Mapped[int] = mapped_column(Integer, default=50)
+    cache_max_tokens: Mapped[int] = mapped_column(Integer, default=4000)
+    cache_collection: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # ===== STATISTICS =====
+    total_requests: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Routing stats
+    routing_decisions: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Enrichment stats
+    context_injections: Mapped[int] = mapped_column(Integer, default=0)
+    search_requests: Mapped[int] = mapped_column(Integer, default=0)
+    scrape_requests: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Cache stats
+    cache_hits: Mapped[int] = mapped_column(Integer, default=0)
+    cache_tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
+    cache_cost_saved: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # ===== METADATA =====
+    tags_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationships
+    document_stores: Mapped[list["DocumentStore"]] = relationship(
+        "DocumentStore",
+        secondary=smart_alias_stores,
+        backref="smart_aliases",
+    )
+
+    __table_args__ = ({"sqlite_autoincrement": True},)
+
+    @property
+    def tags(self) -> list[str]:
+        """Get tags as a list."""
+        if not self.tags_json:
+            return []
+        try:
+            return json.loads(self.tags_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @tags.setter
+    def tags(self, value: list[str]) -> None:
+        """Set tags from a list."""
+        self.tags_json = json.dumps(value) if value else None
+
+    @property
+    def candidates(self) -> list[dict]:
+        """Get candidates as a list of dicts."""
+        if not self.candidates_json:
+            return []
+        try:
+            return json.loads(self.candidates_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @candidates.setter
+    def candidates(self, value: list[dict]) -> None:
+        """Set candidates from a list of dicts."""
+        self.candidates_json = json.dumps(value) if value else None
+
+    @property
+    def cache_enabled(self) -> bool:
+        """
+        Check if caching is actually enabled.
+
+        Caching is only permitted when use_web=False (realtime web data
+        shouldn't be cached). Returns True only if use_cache=True AND
+        caching is permitted.
+        """
+        return self.use_cache and not self.use_web
+
+    @property
+    def feature_type(self) -> str:
+        """Get a description of enabled features."""
+        features = []
+        if self.use_routing:
+            features.append("routing")
+        if self.use_rag:
+            features.append("rag")
+        if self.use_web:
+            features.append("web")
+        if self.cache_enabled:
+            features.append("cache")
+        return "+".join(features) if features else "simple"
+
+    @property
+    def injection_rate(self) -> float:
+        """Calculate context injection rate as a percentage."""
+        if self.total_requests == 0:
+            return 0.0
+        return (self.context_injections / self.total_requests) * 100
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        # Get stores from either relationship or detached stores
+        stores = getattr(self, "_detached_stores", None) or self.document_stores or []
+
+        return {
+            "id": self.id,
+            "name": self.name,
+            # Feature toggles
+            "use_routing": self.use_routing,
+            "use_rag": self.use_rag,
+            "use_web": self.use_web,
+            "use_cache": self.use_cache,
+            "feature_type": self.feature_type,
+            # Target
+            "target_model": self.target_model,
+            # Routing settings
+            "designator_model": self.designator_model,
+            "purpose": self.purpose,
+            "candidates": self.candidates,
+            "fallback_model": self.fallback_model,
+            "routing_strategy": self.routing_strategy,
+            "session_ttl": self.session_ttl,
+            "use_model_intelligence": self.use_model_intelligence,
+            "search_provider": self.search_provider,
+            "intelligence_model": self.intelligence_model,
+            # RAG settings
+            "max_results": self.max_results,
+            "similarity_threshold": self.similarity_threshold,
+            # Web settings
+            "max_search_results": self.max_search_results,
+            "max_scrape_urls": self.max_scrape_urls,
+            # Common enrichment
+            "max_context_tokens": self.max_context_tokens,
+            "rerank_provider": self.rerank_provider,
+            "rerank_model": self.rerank_model,
+            "rerank_top_n": self.rerank_top_n,
+            # Cache settings
+            "cache_enabled": self.cache_enabled,
+            "cache_allowed": not self.use_web,
+            "cache_similarity_threshold": self.cache_similarity_threshold,
+            "cache_match_system_prompt": self.cache_match_system_prompt,
+            "cache_match_last_message_only": self.cache_match_last_message_only,
+            "cache_ttl_hours": self.cache_ttl_hours,
+            "cache_min_tokens": self.cache_min_tokens,
+            "cache_max_tokens": self.cache_max_tokens,
+            "cache_collection": self.cache_collection,
+            # Statistics
+            "total_requests": self.total_requests,
+            "routing_decisions": self.routing_decisions,
+            "context_injections": self.context_injections,
+            "search_requests": self.search_requests,
+            "scrape_requests": self.scrape_requests,
+            "injection_rate": self.injection_rate,
             "cache_hits": self.cache_hits,
             "cache_tokens_saved": self.cache_tokens_saved,
             "cache_cost_saved": self.cache_cost_saved,

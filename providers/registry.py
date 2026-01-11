@@ -115,6 +115,7 @@ class EnricherResolvedModel(ResolvedModel):
         return "none"
 
 
+@dataclass
 class ProviderRegistry:
     """
     Central registry for all LLM providers.
@@ -168,12 +169,13 @@ class ProviderRegistry:
 
         Resolution order:
         1. Check for redirects (v3.7) - transparent model name mapping
-        2. Check if it's a smart router (v3.2) - requires messages
-        3. Check if it's a smart enricher (unified RAG+Web) - returns EnricherResolvedModel
-        4. Check if it's an alias (v3.1)
-        5. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        6. Check each configured provider's models
-        7. Fall back to default provider/model
+        2. Check if it's a smart alias (unified) - routing + enrichment + caching
+        3. Check if it's a smart router (v3.2, legacy) - requires messages
+        4. Check if it's a smart enricher (legacy) - returns EnricherResolvedModel
+        5. Check if it's an alias (v3.1, legacy)
+        6. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        7. Check each configured provider's models
+        8. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
@@ -183,7 +185,7 @@ class ProviderRegistry:
 
         Returns:
             ResolvedModel with provider, model_id, and optional alias info
-            OR EnricherResolvedModel for smart enricher lookups
+            OR EnricherResolvedModel for smart enricher/smart alias lookups
 
         Raises:
             ValueError: If model not found and no default configured
@@ -192,11 +194,13 @@ class ProviderRegistry:
         from db import (
             find_matching_redirect,
             get_alias_by_name,
+            get_smart_alias_by_name,
             get_smart_enricher_by_name,
             get_smart_router_by_name,
             increment_redirect_count,
         )
         from routing import (
+            SmartAliasEngine,
             SmartEnricherEngine,
             SmartRouterEngine,
         )
@@ -244,7 +248,64 @@ class ProviderRegistry:
                 result._cache_config = redirect
             return result
 
-        # Step 2: Check if it's a smart router (v3.2)
+        # Step 2: Check if it's a smart alias (unified routing + enrichment + caching)
+        smart_alias = get_smart_alias_by_name(name)
+        if smart_alias and smart_alias.enabled:
+            # Check if smart alias needs ChromaDB (for RAG functionality)
+            needs_chroma = smart_alias.use_rag
+            if not needs_chroma or is_chroma_available():
+                if messages is not None:
+                    logger.debug(f"Using smart alias '{name}'")
+                    engine = SmartAliasEngine(smart_alias, self)
+                    enrichment_result = engine.process(messages, system, session_key)
+
+                    # Return an EnricherResolvedModel (same as SmartEnricher)
+                    # This ensures proxy.py handles it correctly
+                    result = EnricherResolvedModel(
+                        provider=enrichment_result.resolved.provider,
+                        model_id=enrichment_result.resolved.model_id,
+                        alias_name=smart_alias.name,
+                        alias_tags=smart_alias.tags or [],
+                        enrichment_result=enrichment_result,
+                    )
+                    # Set cache config if caching is enabled
+                    if smart_alias.cache_enabled:
+                        result._cache_config = smart_alias
+                    return result
+                else:
+                    # No messages - just resolve to target model
+                    logger.debug(
+                        f"Smart alias '{name}' called without messages, resolving target"
+                    )
+                    try:
+                        target_result = self._resolve_actual_model(
+                            smart_alias.target_model
+                        )
+                        return ResolvedModel(
+                            provider=target_result.provider,
+                            model_id=target_result.model_id,
+                            alias_name=smart_alias.name,
+                            alias_tags=smart_alias.tags or [],
+                        )
+                    except ValueError:
+                        pass  # Fall through to normal resolution
+            else:
+                logger.warning(
+                    f"Smart alias '{name}' requires ChromaDB for RAG but it's not available, "
+                    "falling back to target model"
+                )
+                try:
+                    target_result = self._resolve_actual_model(smart_alias.target_model)
+                    return ResolvedModel(
+                        provider=target_result.provider,
+                        model_id=target_result.model_id,
+                        alias_name=smart_alias.name,
+                        alias_tags=smart_alias.tags or [],
+                    )
+                except ValueError:
+                    pass  # Fall through to normal resolution
+
+        # Step 3: Check if it's a smart router (v3.2, legacy)
         router = get_smart_router_by_name(name)
         if router and router.enabled:
             if messages is not None:
@@ -277,7 +338,7 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 3: Check if it's a smart enricher (unified RAG+Web)
+        # Step 4: Check if it's a smart enricher (legacy)
         enricher = get_smart_enricher_by_name(name)
         if enricher and enricher.enabled:
             # Check if enricher needs ChromaDB (for RAG functionality)
@@ -333,7 +394,7 @@ class ProviderRegistry:
                 except ValueError:
                     pass  # Fall through to normal resolution
 
-        # Step 4: Check if it's an alias (v3.1)
+        # Step 5: Check if it's an alias (v3.1, legacy)
         alias = get_alias_by_name(name)
         if alias and alias.enabled:
             logger.debug(f"Resolving alias '{name}' -> '{alias.target_model}'")
@@ -369,7 +430,7 @@ class ProviderRegistry:
                             result._cache_config = alias
                         return result
 
-        # Step 5-7: Normal model resolution
+        # Step 6-8: Normal model resolution
         return self._resolve_actual_model(name)
 
     def _resolve_actual_model(self, model_name: str) -> ResolvedModel:
@@ -452,7 +513,7 @@ class ProviderRegistry:
 
     def list_all_models(self) -> list[dict]:
         """
-        Get combined model list from all available providers, aliases, smart routers, and smart enrichers.
+        Get combined model list from all available providers, smart aliases, and legacy entities.
 
         Returns list of model info dicts suitable for /api/tags response.
         Models are already filtered for enabled status in load_models_for_provider().
@@ -460,6 +521,7 @@ class ProviderRegistry:
         from context.chroma import is_chroma_available
         from db import (
             get_enabled_aliases,
+            get_enabled_smart_aliases,
             get_enabled_smart_enrichers,
             get_enabled_smart_routers,
         )
@@ -467,9 +529,45 @@ class ProviderRegistry:
         models = []
         seen = set()
 
-        # Add aliases first (user-defined shortcuts)
+        # Add smart aliases first (unified feature)
+        smart_aliases = get_enabled_smart_aliases()
+        for sa_name, sa in smart_aliases.items():
+            # Skip if RAG-only and ChromaDB not available
+            if sa.use_rag and not sa.use_web and not is_chroma_available():
+                continue
+            seen.add(sa_name)
+            # Build capabilities list
+            capabilities = []
+            if sa.use_routing:
+                capabilities.append("routing")
+            if sa.use_rag:
+                capabilities.extend(["rag", "documents"])
+            if sa.use_web:
+                capabilities.extend(["search", "scrape"])
+            if sa.cache_enabled:
+                capabilities.append("cache")
+            models.append(
+                {
+                    "name": sa_name,
+                    "model": sa_name,
+                    "provider": "smart-alias",
+                    "details": {
+                        "family": "smart-alias",
+                        "parameter_size": "",
+                        "quantization_level": "",
+                    },
+                    "description": sa.description
+                    or f"Smart alias for {sa.target_model}",
+                    "context_length": 0,
+                    "capabilities": capabilities,
+                }
+            )
+
+        # Add legacy aliases (user-defined shortcuts)
         aliases = get_enabled_aliases()
         for alias_name, alias in aliases.items():
+            if alias_name in seen:
+                continue
             seen.add(alias_name)
             models.append(
                 {
@@ -488,9 +586,11 @@ class ProviderRegistry:
                 }
             )
 
-        # Add smart routers
+        # Add legacy smart routers
         routers = get_enabled_smart_routers()
         for router_name, router in routers.items():
+            if router_name in seen:
+                continue
             seen.add(router_name)
             models.append(
                 {
@@ -508,9 +608,11 @@ class ProviderRegistry:
                 }
             )
 
-        # Add smart enrichers (unified RAG + Web)
+        # Add legacy smart enrichers (RAG + Web)
         enrichers = get_enabled_smart_enrichers()
         for enricher_name, enricher in enrichers.items():
+            if enricher_name in seen:
+                continue
             # Skip if RAG-only enricher and ChromaDB not available
             if enricher.use_rag and not enricher.use_web and not is_chroma_available():
                 continue
@@ -571,11 +673,12 @@ class ProviderRegistry:
         Get combined model list in OpenAI format.
 
         Returns list of model info dicts suitable for /v1/models response.
-        Includes aliases, smart routers, smart enrichers, and provider models.
+        Includes smart aliases, legacy entities, and provider models.
         """
         from context.chroma import is_chroma_available
         from db import (
             get_enabled_aliases,
+            get_enabled_smart_aliases,
             get_enabled_smart_enrichers,
             get_enabled_smart_routers,
         )
@@ -583,9 +686,26 @@ class ProviderRegistry:
         models = []
         seen = set()
 
-        # Add aliases first (user-defined shortcuts)
+        # Add smart aliases first (unified feature)
+        smart_aliases = get_enabled_smart_aliases()
+        for sa_name, sa in smart_aliases.items():
+            # Skip if RAG-only and ChromaDB not available
+            if sa.use_rag and not sa.use_web and not is_chroma_available():
+                continue
+            seen.add(sa_name)
+            models.append(
+                {
+                    "id": sa_name,
+                    "object": "model",
+                    "owned_by": "smart-alias",
+                }
+            )
+
+        # Add legacy aliases
         aliases = get_enabled_aliases()
         for alias_name in aliases.keys():
+            if alias_name in seen:
+                continue
             seen.add(alias_name)
             models.append(
                 {
@@ -595,9 +715,11 @@ class ProviderRegistry:
                 }
             )
 
-        # Add smart routers
+        # Add legacy smart routers
         routers = get_enabled_smart_routers()
         for router_name in routers.keys():
+            if router_name in seen:
+                continue
             seen.add(router_name)
             models.append(
                 {
@@ -607,9 +729,11 @@ class ProviderRegistry:
                 }
             )
 
-        # Add smart enrichers (unified RAG + Web)
+        # Add legacy smart enrichers
         enrichers = get_enabled_smart_enrichers()
         for enricher_name, enricher in enrichers.items():
+            if enricher_name in seen:
+                continue
             # Skip if RAG-only enricher and ChromaDB not available
             if enricher.use_rag and not enricher.use_web and not is_chroma_available():
                 continue

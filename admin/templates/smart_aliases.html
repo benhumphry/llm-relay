@@ -1,0 +1,2054 @@
+{% extends "base.html" %} {% block title %}Smart Aliases{% endblock %} {% block
+content %}
+<div x-data="smartAliasesPage()" x-init="init()">
+    <!-- Header -->
+    <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
+    >
+        <div>
+            <h1 class="text-2xl font-bold">Smart Aliases</h1>
+            <p class="text-base-content/60">
+                Unified model routing, enrichment, and caching
+            </p>
+        </div>
+        <button @click="openAddModal()" class="btn btn-primary btn-sm">
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                />
+            </svg>
+            Add Smart Alias
+        </button>
+    </div>
+
+    <!-- Loading State -->
+    <template x-if="loading">
+        <div class="flex justify-center py-12">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    </template>
+
+    <!-- No Aliases Configured -->
+    <template x-if="!loading && aliases.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-base-content/30"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium">
+                    No Smart Aliases Configured
+                </h3>
+                <p class="mt-2 text-base-content/60 max-w-md mx-auto">
+                    Smart Aliases unify model routing, document retrieval (RAG),
+                    web search, and response caching into a single powerful
+                    feature.
+                </p>
+                <button @click="openAddModal()" class="btn btn-primary mt-4">
+                    Create Your First Smart Alias
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Aliases Table -->
+    <template x-if="!loading && aliases.length > 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="overflow-x-auto">
+                <table class="table table-fixed">
+                    <thead>
+                        <tr>
+                            <th class="w-8"></th>
+                            <th class="w-32">Name</th>
+                            <th class="w-28">Features</th>
+                            <th class="w-1/4">Target</th>
+                            <th class="w-20 text-right">Requests</th>
+                            <th class="w-24 text-right">Cache Hits</th>
+                            <th class="w-20">Status</th>
+                            <th class="w-24 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <template x-for="alias in aliases" :key="alias.id">
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
+                                @click="toggleExpand(alias.id)"
+                                class="cursor-pointer hover:bg-base-200"
+                            >
+                                <td class="w-8">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 transition-transform"
+                                        :class="{'rotate-90': expandedRows.includes(alias.id)}"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
+                                </td>
+                                <td>
+                                    <div
+                                        class="font-mono font-medium"
+                                        x-text="alias.name"
+                                    ></div>
+                                </td>
+                                <td>
+                                    <div class="flex gap-1 flex-wrap">
+                                        <span
+                                            x-show="alias.use_routing"
+                                            class="badge badge-sm badge-primary"
+                                            title="Smart Routing"
+                                            >Route</span
+                                        >
+                                        <span
+                                            x-show="alias.use_rag"
+                                            class="badge badge-sm badge-info"
+                                            title="RAG enabled"
+                                            >RAG</span
+                                        >
+                                        <span
+                                            x-show="alias.use_web"
+                                            class="badge badge-sm badge-warning"
+                                            title="Web search enabled"
+                                            >Web</span
+                                        >
+                                        <span
+                                            x-show="alias.use_cache && !alias.use_web"
+                                            class="badge badge-sm badge-secondary"
+                                            title="Response caching"
+                                            >Cache</span
+                                        >
+                                        <span
+                                            x-show="!alias.use_routing && !alias.use_rag && !alias.use_web && !alias.use_cache"
+                                            class="badge badge-sm badge-ghost"
+                                            >Simple</span
+                                        >
+                                    </div>
+                                </td>
+                                <td>
+                                    <div
+                                        class="font-mono text-sm text-base-content/70 truncate"
+                                        x-text="alias.use_routing ? 'Routed (' + (alias.candidates?.length || 0) + ' candidates)' : alias.target_model"
+                                    ></div>
+                                </td>
+                                <td class="text-right">
+                                    <span
+                                        class="font-mono text-sm"
+                                        x-text="alias.total_requests || 0"
+                                    ></span>
+                                </td>
+                                <td class="text-right">
+                                    <template
+                                        x-if="alias.use_cache && !alias.use_web"
+                                    >
+                                        <span>
+                                            <span
+                                                class="font-mono text-sm"
+                                                x-text="alias.cache_hits || 0"
+                                            ></span>
+                                            <span
+                                                class="text-xs text-base-content/50"
+                                                x-text="'(' + getCacheHitRate(alias) + '%)'"
+                                            ></span>
+                                        </span>
+                                    </template>
+                                    <template
+                                        x-if="!alias.use_cache || alias.use_web"
+                                    >
+                                        <span
+                                            class="text-base-content/40 text-sm"
+                                            >-</span
+                                        >
+                                    </template>
+                                </td>
+                                <td>
+                                    <span
+                                        class="badge badge-sm"
+                                        :class="alias.enabled ? 'badge-success' : 'badge-ghost'"
+                                        x-text="alias.enabled ? 'Enabled' : 'Disabled'"
+                                    ></span>
+                                </td>
+                                <td class="text-right" @click.stop>
+                                    <div class="flex justify-end gap-1">
+                                        <button
+                                            @click="openEditModal(alias)"
+                                            class="btn btn-ghost btn-sm"
+                                            title="Edit"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="confirmDelete(alias)"
+                                            class="btn btn-ghost btn-sm text-error"
+                                            title="Delete"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <!-- Expanded Details Row -->
+                            <tr
+                                x-show="expandedRows.includes(alias.id)"
+                                x-transition
+                            >
+                                <td colspan="8" class="bg-base-200 p-0">
+                                    <div
+                                        class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
+                                    >
+                                        <!-- Description -->
+                                        <div
+                                            x-show="alias.description"
+                                            class="md:col-span-2"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Description
+                                            </div>
+                                            <div
+                                                class="text-sm"
+                                                x-text="alias.description"
+                                            ></div>
+                                        </div>
+
+                                        <!-- Target Model -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Target Model
+                                            </div>
+                                            <div
+                                                class="font-mono text-xs"
+                                                x-text="alias.target_model"
+                                            ></div>
+                                        </div>
+
+                                        <!-- Routing Info (if enabled) -->
+                                        <template x-if="alias.use_routing">
+                                            <div>
+                                                <div
+                                                    class="text-xs text-base-content/50 uppercase mb-1"
+                                                >
+                                                    Designator
+                                                </div>
+                                                <div
+                                                    class="font-mono text-xs"
+                                                    x-text="alias.designator_model"
+                                                ></div>
+                                            </div>
+                                        </template>
+
+                                        <template x-if="alias.use_routing">
+                                            <div>
+                                                <div
+                                                    class="text-xs text-base-content/50 uppercase mb-1"
+                                                >
+                                                    Strategy
+                                                </div>
+                                                <span
+                                                    class="badge badge-outline badge-sm"
+                                                    x-text="alias.routing_strategy === 'per_session' ? 'Per Session' : 'Per Request'"
+                                                ></span>
+                                            </div>
+                                        </template>
+
+                                        <!-- Candidates (if routing) -->
+                                        <template
+                                            x-if="alias.use_routing && alias.candidates"
+                                        >
+                                            <div class="md:col-span-4">
+                                                <div
+                                                    class="text-xs text-base-content/50 uppercase mb-2"
+                                                >
+                                                    Candidate Models
+                                                </div>
+                                                <div class="space-y-1">
+                                                    <template
+                                                        x-for="candidate in getSortedCandidates(alias)"
+                                                        :key="candidate.model"
+                                                    >
+                                                        <div
+                                                            class="flex items-center gap-2"
+                                                        >
+                                                            <div class="flex-1">
+                                                                <div
+                                                                    class="flex items-center gap-2"
+                                                                >
+                                                                    <span
+                                                                        class="font-mono text-xs"
+                                                                        x-text="candidate.model"
+                                                                    ></span>
+                                                                    <span
+                                                                        class="text-base-content/50 text-xs"
+                                                                        x-text="'(' + getCandidateRequests(alias.name, candidate.model) + ')'"
+                                                                    ></span>
+                                                                </div>
+                                                                <div
+                                                                    class="w-full bg-base-300 rounded-full h-1 mt-1"
+                                                                >
+                                                                    <div
+                                                                        class="bg-primary h-1 rounded-full transition-all"
+                                                                        :style="'width: ' + getCandidatePercent(alias.name, candidate.model) + '%'"
+                                                                    ></div>
+                                                                </div>
+                                                            </div>
+                                                            <div
+                                                                class="w-12 text-right text-xs text-base-content/50"
+                                                            >
+                                                                <span
+                                                                    x-text="getCandidatePercent(alias.name, candidate.model).toFixed(0) + '%'"
+                                                                ></span>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </template>
+
+                                        <!-- Document Stores (if RAG enabled) -->
+                                        <div x-show="alias.use_rag">
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Document Stores
+                                            </div>
+                                            <div class="text-xs">
+                                                <template
+                                                    x-if="alias.document_stores && alias.document_stores.length > 0"
+                                                >
+                                                    <span
+                                                        x-text="alias.document_stores.map(s => s.name).join(', ')"
+                                                    ></span>
+                                                </template>
+                                                <template
+                                                    x-if="!alias.document_stores || alias.document_stores.length === 0"
+                                                >
+                                                    <span
+                                                        class="text-base-content/50"
+                                                        >None configured</span
+                                                    >
+                                                </template>
+                                            </div>
+                                        </div>
+
+                                        <!-- RAG Settings -->
+                                        <div x-show="alias.use_rag">
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                RAG Settings
+                                            </div>
+                                            <div class="text-xs">
+                                                Max chunks:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="alias.max_results"
+                                                ></span
+                                                >, Threshold:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="alias.similarity_threshold"
+                                                ></span>
+                                            </div>
+                                        </div>
+
+                                        <!-- Web Settings -->
+                                        <div x-show="alias.use_web">
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Web Settings
+                                            </div>
+                                            <div class="text-xs">
+                                                Search:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="alias.max_search_results"
+                                                ></span
+                                                >, Scrape:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="alias.max_scrape_urls"
+                                                ></span>
+                                            </div>
+                                        </div>
+
+                                        <!-- Cache Settings -->
+                                        <div
+                                            x-show="alias.use_cache && !alias.use_web"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Cache Settings
+                                            </div>
+                                            <div class="text-xs">
+                                                Threshold:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="alias.cache_similarity_threshold"
+                                                ></span
+                                                >, TTL:
+                                                <span
+                                                    class="font-mono"
+                                                    x-text="alias.cache_ttl_hours + 'h'"
+                                                ></span>
+                                            </div>
+                                        </div>
+
+                                        <!-- Tags -->
+                                        <div
+                                            x-show="alias.tags && alias.tags.length > 0"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Tags
+                                            </div>
+                                            <div class="flex flex-wrap gap-1">
+                                                <template
+                                                    x-for="tag in alias.tags"
+                                                    :key="tag"
+                                                >
+                                                    <span
+                                                        class="badge badge-primary badge-sm"
+                                                        x-text="tag"
+                                                    ></span>
+                                                </template>
+                                            </div>
+                                        </div>
+
+                                        <!-- Statistics -->
+                                        <div>
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase mb-1"
+                                            >
+                                                Statistics
+                                            </div>
+                                            <div class="text-xs space-y-1">
+                                                <div>
+                                                    Total:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="alias.total_requests || 0"
+                                                    ></span>
+                                                </div>
+                                                <div x-show="alias.use_routing">
+                                                    Routing decisions:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="alias.routing_decisions || 0"
+                                                    ></span>
+                                                </div>
+                                                <div
+                                                    x-show="alias.use_rag || alias.use_web"
+                                                >
+                                                    Context injections:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="alias.context_injections || 0"
+                                                    ></span>
+                                                </div>
+                                                <div
+                                                    x-show="alias.use_cache && !alias.use_web"
+                                                >
+                                                    Cache hits:
+                                                    <span
+                                                        class="font-mono"
+                                                        x-text="alias.cache_hits || 0"
+                                                    ></span>
+                                                    (<span
+                                                        class="font-mono"
+                                                        x-text="alias.cache_tokens_saved || 0"
+                                                    ></span>
+                                                    tokens saved)
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Reset Stats Button -->
+                                        <div
+                                            class="md:col-span-4 pt-2 border-t border-base-300"
+                                        >
+                                            <button
+                                                @click.stop="resetStats(alias)"
+                                                class="btn btn-ghost btn-xs"
+                                                :disabled="resettingStats === alias.id"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-3 w-3 mr-1"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                                    />
+                                                </svg>
+                                                Reset Statistics
+                                            </button>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+                </table>
+            </div>
+        </div>
+    </template>
+
+    <!-- Add/Edit Modal -->
+    <div class="modal" :class="{ 'modal-open': showModal }">
+        <div class="modal-box max-w-3xl max-h-[90vh]">
+            <h3
+                class="font-bold text-lg"
+                x-text="editingAlias ? 'Edit Smart Alias' : 'Add Smart Alias'"
+            ></h3>
+            <form @submit.prevent="saveAlias()">
+                <!-- Name -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Alias Name</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.name"
+                        class="input input-bordered font-mono"
+                        :class="{ 'input-error': formErrors.name }"
+                        placeholder="e.g., smart-assistant, research-bot"
+                        required
+                        :disabled="editingAlias"
+                    />
+                    <label class="label" x-show="formErrors.name">
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.name"
+                        ></span>
+                    </label>
+                    <label class="label" x-show="!formErrors.name">
+                        <span class="label-text-alt"
+                            >Use this name as the model name in your API
+                            requests</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Target Model -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Target Model</span>
+                    </label>
+                    <select
+                        x-model="form.target_model"
+                        class="select select-bordered"
+                        required
+                    >
+                        <option value="">Select a model...</option>
+                        <template
+                            x-for="model in availableModels"
+                            :key="model.id"
+                        >
+                            <option
+                                :value="model.id"
+                                x-text="`${model.id} (${model.family})`"
+                            ></option>
+                        </template>
+                    </select>
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Default model (or fallback when routing is
+                            enabled)</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Feature Toggles -->
+                <div class="form-control mt-6">
+                    <label class="label">
+                        <span class="label-text font-medium">Features</span>
+                    </label>
+                    <div class="bg-base-200 rounded-lg p-4 space-y-4">
+                        <!-- Smart Routing Option -->
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                x-model="form.use_routing"
+                                class="checkbox checkbox-primary mt-1"
+                            />
+                            <div>
+                                <div class="font-medium">Smart Routing</div>
+                                <div class="text-sm text-base-content/60">
+                                    Use a designator model to pick the best
+                                    candidate for each request
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- Routing Settings (shown when enabled) -->
+                        <div
+                            x-show="form.use_routing"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-primary space-y-3"
+                        >
+                            <!-- Designator Model -->
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Designator Model</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="form.designator_model"
+                                    class="select select-bordered select-sm"
+                                    :class="{ 'select-error': formErrors.designator_model }"
+                                >
+                                    <option value="">Select model...</option>
+                                    <template
+                                        x-for="model in availableModels"
+                                        :key="model.id"
+                                    >
+                                        <option
+                                            :value="model.id"
+                                            x-text="model.id"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <label
+                                    class="label py-0"
+                                    x-show="formErrors.designator_model"
+                                >
+                                    <span
+                                        class="label-text-alt text-error"
+                                        x-text="formErrors.designator_model"
+                                    ></span>
+                                </label>
+                            </div>
+
+                            <!-- Purpose -->
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Purpose (optional)</span
+                                    >
+                                </label>
+                                <textarea
+                                    x-model="form.purpose"
+                                    class="textarea textarea-bordered textarea-sm"
+                                    placeholder="Context for routing decisions"
+                                    rows="2"
+                                ></textarea>
+                            </div>
+
+                            <!-- Candidates -->
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Candidate Models</span
+                                    >
+                                </label>
+                                <div class="space-y-2">
+                                    <template
+                                        x-for="(candidate, index) in form.candidates"
+                                        :key="index"
+                                    >
+                                        <div
+                                            class="flex gap-2 items-start p-2 bg-base-300 rounded"
+                                        >
+                                            <div class="flex-1 space-y-1">
+                                                <select
+                                                    x-model="candidate.model"
+                                                    @change="onCandidateModelChange(index, candidate.model)"
+                                                    class="select select-bordered select-sm w-full"
+                                                >
+                                                    <option value="">
+                                                        Select model...
+                                                    </option>
+                                                    <template
+                                                        x-for="model in availableModels"
+                                                        :key="model.id"
+                                                    >
+                                                        <option
+                                                            :value="model.id"
+                                                            x-text="model.id"
+                                                        ></option>
+                                                    </template>
+                                                </select>
+                                                <textarea
+                                                    x-model="candidate.description"
+                                                    class="textarea textarea-bordered textarea-sm w-full"
+                                                    placeholder="Description for designator"
+                                                    rows="3"
+                                                ></textarea>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                @click="removeCandidate(index)"
+                                                class="btn btn-ghost btn-xs text-error"
+                                                :disabled="form.candidates.length <= 2"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M6 18L18 6M6 6l12 12"
+                                                    />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                                <button
+                                    type="button"
+                                    @click="addCandidate()"
+                                    class="btn btn-ghost btn-xs mt-2"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-3 w-3 mr-1"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M12 4v16m8-8H4"
+                                        />
+                                    </svg>
+                                    Add Candidate
+                                </button>
+                                <label
+                                    class="label py-0"
+                                    x-show="formErrors.candidates"
+                                >
+                                    <span
+                                        class="label-text-alt text-error"
+                                        x-text="formErrors.candidates"
+                                    ></span>
+                                </label>
+                            </div>
+
+                            <!-- Routing Strategy -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Strategy</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.routing_strategy"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="per_request">
+                                            Per Request
+                                        </option>
+                                        <option value="per_session">
+                                            Per Session
+                                        </option>
+                                    </select>
+                                </div>
+                                <div
+                                    class="form-control"
+                                    x-show="form.routing_strategy === 'per_session'"
+                                >
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Session TTL (sec)</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.session_ttl"
+                                        class="input input-bordered input-sm"
+                                        min="60"
+                                        max="86400"
+                                    />
+                                </div>
+                            </div>
+
+                            <!-- Model Intelligence -->
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.use_model_intelligence"
+                                        class="checkbox checkbox-sm checkbox-primary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Use Model Intelligence</span
+                                    >
+                                </label>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs"
+                                        >Enhance designator with web-gathered
+                                        model assessments</span
+                                    >
+                                </label>
+                            </div>
+                            <div
+                                x-show="form.use_model_intelligence"
+                                class="form-control"
+                            >
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Intelligence Model</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="form.intelligence_model"
+                                    class="select select-bordered select-sm"
+                                >
+                                    <option value="">Select model...</option>
+                                    <template
+                                        x-for="model in availableModels"
+                                        :key="model.id"
+                                    >
+                                        <option
+                                            :value="model.id"
+                                            x-text="model.id"
+                                        ></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <!-- Refresh Intelligence Button (only shown when editing) -->
+                            <div
+                                x-show="form.use_model_intelligence && editingAlias"
+                                class="mt-2"
+                            >
+                                <button
+                                    type="button"
+                                    @click="refreshIntelligence()"
+                                    class="btn btn-outline btn-sm"
+                                    :class="{ 'loading': refreshingIntelligence }"
+                                    :disabled="refreshingIntelligence || !form.intelligence_model || form.candidates.length === 0"
+                                >
+                                    <svg
+                                        x-show="!refreshingIntelligence"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 mr-1"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                        />
+                                    </svg>
+                                    Refresh Intelligence
+                                </button>
+                                <span
+                                    x-show="intelligenceMessage"
+                                    class="text-xs ml-2"
+                                    :class="intelligenceError ? 'text-error' : 'text-success'"
+                                    x-text="intelligenceMessage"
+                                ></span>
+                            </div>
+                        </div>
+
+                        <!-- RAG Option -->
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                x-model="form.use_rag"
+                                class="checkbox checkbox-info mt-1"
+                            />
+                            <div>
+                                <div class="font-medium">
+                                    RAG (Document Retrieval)
+                                </div>
+                                <div class="text-sm text-base-content/60">
+                                    Retrieve relevant chunks from indexed
+                                    document stores
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- RAG Settings (shown when RAG is enabled) -->
+                        <div
+                            x-show="form.use_rag"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-info space-y-3"
+                        >
+                            <!-- Document Stores Selection -->
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Document Stores</span
+                                    >
+                                    <a
+                                        href="/document-stores"
+                                        class="label-text-alt link link-primary text-xs"
+                                        >Manage Stores</a
+                                    >
+                                </label>
+                                <template x-if="documentStores.length === 0">
+                                    <div
+                                        class="text-sm text-base-content/60 bg-base-300 rounded-lg p-3"
+                                    >
+                                        No document stores configured.
+                                        <a
+                                            href="/document-stores"
+                                            class="link link-primary"
+                                            >Create a document store</a
+                                        >
+                                        first.
+                                    </div>
+                                </template>
+                                <template x-if="documentStores.length > 0">
+                                    <div
+                                        class="bg-base-300 rounded-lg p-2 max-h-36 overflow-y-auto"
+                                    >
+                                        <template
+                                            x-for="store in documentStores"
+                                            :key="store.id"
+                                        >
+                                            <label
+                                                class="flex items-center gap-2 py-1 hover:bg-base-200 px-2 rounded cursor-pointer"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    :value="store.id"
+                                                    x-model="form.store_ids"
+                                                    class="checkbox checkbox-sm checkbox-info"
+                                                />
+                                                <div class="flex-1 min-w-0">
+                                                    <span
+                                                        class="font-mono text-sm"
+                                                        x-text="store.name"
+                                                    ></span>
+                                                    <span
+                                                        class="badge badge-xs ml-2"
+                                                        :class="store.index_status === 'ready' ? 'badge-success' : 'badge-ghost'"
+                                                        x-text="store.index_status"
+                                                    ></span>
+                                                </div>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </template>
+                                <label
+                                    class="label py-0"
+                                    x-show="formErrors.store_ids"
+                                >
+                                    <span
+                                        class="label-text-alt text-error"
+                                        x-text="formErrors.store_ids"
+                                    ></span>
+                                </label>
+                            </div>
+                            <!-- RAG Parameters -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Chunks</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.max_results"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="50"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Similarity Threshold</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.similarity_threshold"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                        max="1"
+                                        step="0.05"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Web Option -->
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                x-model="form.use_web"
+                                class="checkbox checkbox-warning mt-1"
+                            />
+                            <div>
+                                <div class="font-medium">
+                                    Realtime Web Access
+                                </div>
+                                <div class="text-sm text-base-content/60">
+                                    Search the web and scrape relevant pages for
+                                    current information
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- Web Settings (shown when Web is enabled) -->
+                        <div
+                            x-show="form.use_web"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-warning space-y-3"
+                        >
+                            <!-- Web Designator Model (uses designator_model if routing, otherwise separate) -->
+                            <div
+                                class="form-control"
+                                x-show="!form.use_routing"
+                            >
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Query Optimizer Model (optional)</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="form.designator_model"
+                                    class="select select-bordered select-sm"
+                                >
+                                    <option value="">Use query as-is</option>
+                                    <template
+                                        x-for="model in availableModels"
+                                        :key="model.id"
+                                    >
+                                        <option
+                                            :value="model.id"
+                                            x-text="model.id"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs"
+                                        >Fast model to optimize search
+                                        queries</span
+                                    >
+                                </label>
+                            </div>
+                            <div
+                                x-show="form.use_routing"
+                                class="text-xs text-base-content/60"
+                            >
+                                Uses the routing designator model for query
+                                optimization
+                            </div>
+                            <!-- Web Parameters -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Search Results</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.max_search_results"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="20"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max URLs to Scrape</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.max_scrape_urls"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                        max="10"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Cache Option -->
+                        <label
+                            class="flex items-start gap-3 cursor-pointer"
+                            :class="{ 'opacity-50': form.use_web }"
+                        >
+                            <input
+                                type="checkbox"
+                                x-model="form.use_cache"
+                                class="checkbox checkbox-secondary mt-1"
+                                :disabled="form.use_web"
+                            />
+                            <div>
+                                <div class="font-medium">Response Caching</div>
+                                <div class="text-sm text-base-content/60">
+                                    Cache responses for semantically similar
+                                    queries
+                                </div>
+                                <div
+                                    x-show="form.use_web"
+                                    class="text-xs text-warning mt-1"
+                                >
+                                    Caching disabled when Web Access is enabled
+                                    (realtime data shouldn't be cached)
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- Cache Settings (shown when caching enabled and web not enabled) -->
+                        <div
+                            x-show="form.use_cache && !form.use_web"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-secondary space-y-3"
+                        >
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Similarity Threshold</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_similarity_threshold"
+                                        class="input input-bordered input-sm"
+                                        min="0.5"
+                                        max="1"
+                                        step="0.01"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Cache TTL (hours)</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_ttl_hours"
+                                        class="input input-bordered input-sm"
+                                        min="1"
+                                        max="8760"
+                                    />
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Min Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_min_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Max Tokens</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.cache_max_tokens"
+                                        class="input input-bordered input-sm"
+                                        min="0"
+                                    />
+                                </div>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_system_prompt"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match System Prompt</span
+                                    >
+                                </label>
+                            </div>
+                            <div class="form-control">
+                                <label
+                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.cache_match_last_message_only"
+                                        class="checkbox checkbox-sm checkbox-secondary"
+                                    />
+                                    <span class="label-text text-sm"
+                                        >Match Last Message Only</span
+                                    >
+                                </label>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs"
+                                        >Useful for OpenWebUI (ignores
+                                        conversation history)</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Common Settings (collapsed) -->
+                <div class="collapse collapse-arrow bg-base-200 mt-4">
+                    <input type="checkbox" :checked="form.system_prompt" />
+                    <div class="collapse-title text-sm font-medium">
+                        Advanced Settings
+                    </div>
+                    <div class="collapse-content space-y-4">
+                        <!-- System Prompt / Context -->
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >System Prompt / Context</span
+                                >
+                            </label>
+                            <textarea
+                                x-model="form.system_prompt"
+                                class="textarea textarea-bordered font-mono text-sm"
+                                rows="3"
+                                placeholder="e.g., You are a highly efficient and friendly personal assistant with access to my work inbox, calendar, and documents."
+                            ></textarea>
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >This context will be prepended to every
+                                    request sent through this alias</span
+                                >
+                            </label>
+                        </div>
+
+                        <!-- Max Context Tokens -->
+                        <div
+                            class="form-control"
+                            x-show="form.use_rag || form.use_web"
+                        >
+                            <label class="label">
+                                <span class="label-text"
+                                    >Max Context Tokens</span
+                                >
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.max_context_tokens"
+                                class="input input-bordered"
+                                min="100"
+                                max="32000"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Maximum tokens for injected context</span
+                                >
+                            </label>
+                        </div>
+
+                        <!-- Reranking -->
+                        <div
+                            class="grid grid-cols-2 gap-4"
+                            x-show="form.use_rag || form.use_web"
+                        >
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Rerank Provider</span
+                                    >
+                                </label>
+                                <select
+                                    x-model="form.rerank_provider"
+                                    class="select select-bordered"
+                                >
+                                    <option value="local">
+                                        Local (cross-encoder)
+                                    </option>
+                                    <option value="jina">Jina AI</option>
+                                </select>
+                            </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text">Rerank Top N</span>
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.rerank_top_n"
+                                    class="input input-bordered"
+                                    min="5"
+                                    max="100"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tags -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Tags (optional)</span>
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.tags_input"
+                        class="input input-bordered"
+                        placeholder="tag1, tag2, tag3"
+                    />
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Comma-separated tags for usage tracking</span
+                        >
+                    </label>
+                </div>
+
+                <!-- Description -->
+                <div class="form-control mt-4">
+                    <label class="label">
+                        <span class="label-text">Description (optional)</span>
+                    </label>
+                    <textarea
+                        x-model="form.description"
+                        class="textarea textarea-bordered"
+                        rows="2"
+                        placeholder="Brief description of what this alias is for"
+                    ></textarea>
+                </div>
+
+                <!-- Enabled -->
+                <div class="form-control mt-4">
+                    <label class="label cursor-pointer justify-start gap-3">
+                        <input
+                            type="checkbox"
+                            x-model="form.enabled"
+                            class="checkbox checkbox-primary"
+                        />
+                        <span class="label-text">Enabled</span>
+                    </label>
+                </div>
+
+                <!-- Error Display -->
+                <div x-show="formErrors.general" class="alert alert-error mt-4">
+                    <span x-text="formErrors.general"></span>
+                </div>
+
+                <!-- Modal Actions -->
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="closeModal()"
+                        class="btn btn-ghost"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                        :disabled="saving"
+                    >
+                        <span
+                            x-text="editingAlias ? 'Save Changes' : 'Create Smart Alias'"
+                        ></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop" @click="closeModal()"></div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal" :class="{ 'modal-open': showDeleteModal }">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg">Delete Smart Alias</h3>
+            <p class="py-4">
+                Are you sure you want to delete
+                <span
+                    class="font-mono font-bold"
+                    x-text="deletingAlias?.name"
+                ></span
+                >? This action cannot be undone.
+            </p>
+            <div class="modal-action">
+                <button @click="showDeleteModal = false" class="btn btn-ghost">
+                    Cancel
+                </button>
+                <button
+                    @click="deleteAlias()"
+                    class="btn btn-error"
+                    :class="{ 'loading': deleting }"
+                    :disabled="deleting"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop" @click="showDeleteModal = false"></div>
+    </div>
+</div>
+
+<script>
+    function smartAliasesPage() {
+        return {
+            loading: true,
+            aliases: [],
+            availableModels: [],
+            documentStores: [],
+            routerStats: {}, // Per-candidate request counts
+            expandedRows: [],
+            showModal: false,
+            showDeleteModal: false,
+            editingAlias: null,
+            deletingAlias: null,
+            saving: false,
+            deleting: false,
+            resettingStats: null,
+            refreshingIntelligence: false,
+            intelligenceMessage: "",
+            intelligenceError: false,
+            modelIntelligence: {}, // Cache for fetched intelligence
+            formErrors: {},
+            form: {
+                name: "",
+                target_model: "",
+                // Routing
+                use_routing: false,
+                designator_model: "",
+                purpose: "",
+                candidates: [
+                    { model: "", description: "" },
+                    { model: "", description: "" },
+                ],
+                routing_strategy: "per_request",
+                session_ttl: 3600,
+                use_model_intelligence: false,
+                intelligence_model: "",
+                // RAG
+                use_rag: false,
+                store_ids: [],
+                max_results: 5,
+                similarity_threshold: 0.7,
+                // Web
+                use_web: false,
+                max_search_results: 5,
+                max_scrape_urls: 3,
+                // Common enrichment
+                max_context_tokens: 4000,
+                rerank_provider: "local",
+                rerank_top_n: 20,
+                // Cache
+                use_cache: false,
+                cache_similarity_threshold: 0.95,
+                cache_match_system_prompt: false,
+                cache_match_last_message_only: true,
+                cache_ttl_hours: 168,
+                cache_min_tokens: 50,
+                cache_max_tokens: 10000,
+                // Metadata
+                tags_input: "",
+                description: "",
+                system_prompt: "",
+                enabled: true,
+            },
+
+            async init() {
+                await Promise.all([
+                    this.loadAliases(),
+                    this.loadModels(),
+                    this.loadDocumentStores(),
+                    this.loadRouterStats(),
+                ]);
+                this.loading = false;
+            },
+
+            async loadAliases() {
+                try {
+                    const response = await fetch("/api/smart-aliases");
+                    this.aliases = await response.json();
+                } catch (error) {
+                    console.error("Failed to load smart aliases:", error);
+                }
+            },
+
+            async loadModels() {
+                try {
+                    const response = await fetch("/api/smart-aliases/models");
+                    this.availableModels = await response.json();
+                } catch (error) {
+                    console.error("Failed to load models:", error);
+                }
+            },
+
+            async loadDocumentStores() {
+                try {
+                    const response = await fetch("/api/smart-aliases/stores");
+                    this.documentStores = await response.json();
+                } catch (error) {
+                    console.error("Failed to load document stores:", error);
+                }
+            },
+
+            async loadRouterStats() {
+                try {
+                    const response = await fetch("/api/routers/stats");
+                    if (response.ok) {
+                        this.routerStats = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load router stats:", error);
+                }
+            },
+
+            getCandidateRequests(aliasName, modelId) {
+                // Stats are stored by model_id only (e.g., "gpt-5"), not full path (e.g., "openai/gpt-5")
+                const shortModelId = modelId.includes("/")
+                    ? modelId.split("/").pop()
+                    : modelId;
+                return (
+                    this.routerStats[aliasName]?.candidates?.[shortModelId] || 0
+                );
+            },
+
+            getCandidatePercent(aliasName, modelId) {
+                const total = this.routerStats[aliasName]?.requests || 0;
+                if (total === 0) return 0;
+                const count = this.getCandidateRequests(aliasName, modelId);
+                return (count / total) * 100;
+            },
+
+            getSortedCandidates(alias) {
+                if (!alias.candidates) return [];
+                // Sort candidates by request count descending
+                return [...alias.candidates].sort((a, b) => {
+                    const aCount = this.getCandidateRequests(
+                        alias.name,
+                        a.model,
+                    );
+                    const bCount = this.getCandidateRequests(
+                        alias.name,
+                        b.model,
+                    );
+                    return bCount - aCount;
+                });
+            },
+
+            toggleExpand(id) {
+                const index = this.expandedRows.indexOf(id);
+                if (index === -1) {
+                    this.expandedRows.push(id);
+                } else {
+                    this.expandedRows.splice(index, 1);
+                }
+            },
+
+            getCacheHitRate(alias) {
+                const total = alias.total_requests || 0;
+                const hits = alias.cache_hits || 0;
+                if (total === 0) return 0;
+                return ((hits / total) * 100).toFixed(0);
+            },
+
+            openAddModal() {
+                this.editingAlias = null;
+                this.formErrors = {};
+                this.form = {
+                    name: "",
+                    target_model: "",
+                    // Routing
+                    use_routing: false,
+                    designator_model: "",
+                    purpose: "",
+                    candidates: [
+                        { model: "", description: "" },
+                        { model: "", description: "" },
+                    ],
+                    routing_strategy: "per_request",
+                    session_ttl: 3600,
+                    use_model_intelligence: false,
+                    intelligence_model: "",
+                    // RAG
+                    use_rag: false,
+                    store_ids: [],
+                    max_results: 5,
+                    similarity_threshold: 0.7,
+                    // Web
+                    use_web: false,
+                    max_search_results: 5,
+                    max_scrape_urls: 3,
+                    // Common enrichment
+                    max_context_tokens: 4000,
+                    rerank_provider: "local",
+                    rerank_top_n: 20,
+                    // Cache
+                    use_cache: false,
+                    cache_similarity_threshold: 0.95,
+                    cache_match_system_prompt: false,
+                    cache_match_last_message_only: true,
+                    cache_ttl_hours: 168,
+                    cache_min_tokens: 50,
+                    cache_max_tokens: 10000,
+                    // Metadata
+                    tags_input: "",
+                    description: "",
+                    system_prompt: "",
+                    enabled: true,
+                };
+                this.showModal = true;
+            },
+
+            async openEditModal(alias) {
+                this.editingAlias = alias;
+                this.formErrors = {};
+
+                // Deep clone candidates
+                const candidates = JSON.parse(
+                    JSON.stringify(alias.candidates || []),
+                );
+                while (candidates.length < 2) {
+                    candidates.push({ model: "", description: "" });
+                }
+
+                this.form = {
+                    name: alias.name,
+                    target_model: alias.target_model,
+                    // Routing
+                    use_routing: alias.use_routing || false,
+                    designator_model: alias.designator_model || "",
+                    purpose: alias.purpose || "",
+                    candidates: candidates,
+                    routing_strategy: alias.routing_strategy || "per_request",
+                    session_ttl: alias.session_ttl || 3600,
+                    use_model_intelligence:
+                        alias.use_model_intelligence || false,
+                    intelligence_model: alias.intelligence_model || "",
+                    // RAG
+                    use_rag: alias.use_rag || false,
+                    store_ids: alias.document_store_ids || [],
+                    max_results: alias.max_results || 5,
+                    similarity_threshold: alias.similarity_threshold || 0.7,
+                    // Web
+                    use_web: alias.use_web || false,
+                    max_search_results: alias.max_search_results || 5,
+                    max_scrape_urls: alias.max_scrape_urls || 3,
+                    // Common enrichment
+                    max_context_tokens: alias.max_context_tokens || 4000,
+                    rerank_provider: alias.rerank_provider || "local",
+                    rerank_top_n: alias.rerank_top_n || 20,
+                    // Cache
+                    use_cache: alias.use_cache || false,
+                    cache_similarity_threshold:
+                        alias.cache_similarity_threshold || 0.95,
+                    cache_match_system_prompt:
+                        alias.cache_match_system_prompt || false,
+                    cache_match_last_message_only:
+                        alias.cache_match_last_message_only !== false,
+                    cache_ttl_hours: alias.cache_ttl_hours || 168,
+                    cache_min_tokens: alias.cache_min_tokens || 50,
+                    cache_max_tokens: alias.cache_max_tokens || 10000,
+                    // Metadata
+                    tags_input: (alias.tags || []).join(", "),
+                    description: alias.description || "",
+                    system_prompt: alias.system_prompt || "",
+                    enabled: alias.enabled,
+                };
+                this.showModal = true;
+
+                // If intelligence is enabled, load intelligence descriptions for candidates
+                if (alias.use_model_intelligence) {
+                    await this.loadIntelligenceForCandidates();
+                }
+            },
+
+            closeModal() {
+                this.showModal = false;
+                this.editingAlias = null;
+            },
+
+            addCandidate() {
+                this.form.candidates.push({ model: "", description: "" });
+            },
+
+            removeCandidate(index) {
+                if (this.form.candidates.length > 2) {
+                    this.form.candidates.splice(index, 1);
+                }
+            },
+
+            getModelDescription(modelId) {
+                if (!modelId) return null;
+                const model = this.availableModels.find(
+                    (m) => m.id === modelId,
+                );
+                return model?.description || null;
+            },
+
+            async onCandidateModelChange(index, modelId) {
+                if (modelId) {
+                    let description = null;
+
+                    // If model intelligence is enabled, try to get intelligence description
+                    if (this.form.use_model_intelligence) {
+                        description =
+                            await this.getModelIntelligenceDescription(modelId);
+                    }
+
+                    // Fall back to regular model description
+                    if (!description) {
+                        description = this.getModelDescription(modelId);
+                    }
+
+                    this.form.candidates[index].description = description || "";
+                }
+            },
+
+            async saveAlias() {
+                this.saving = true;
+                this.formErrors = {};
+
+                // Parse tags
+                const tags = this.form.tags_input
+                    ? this.form.tags_input
+                          .split(",")
+                          .map((t) => t.trim().toLowerCase())
+                          .filter((t) => t)
+                    : [];
+
+                // Filter out empty candidates
+                const candidates = this.form.candidates.filter((c) => c.model);
+
+                // Validation
+                if (this.form.use_routing && candidates.length < 2) {
+                    this.formErrors.candidates =
+                        "At least 2 candidates required for routing";
+                    this.saving = false;
+                    return;
+                }
+
+                if (this.form.use_routing && !this.form.designator_model) {
+                    this.formErrors.designator_model =
+                        "Designator model required for routing";
+                    this.saving = false;
+                    return;
+                }
+
+                if (this.form.use_rag && this.form.store_ids.length === 0) {
+                    this.formErrors.store_ids =
+                        "At least one document store required for RAG";
+                    this.saving = false;
+                    return;
+                }
+
+                const data = {
+                    name: this.form.name.toLowerCase().trim(),
+                    target_model: this.form.target_model,
+                    // Routing
+                    use_routing: this.form.use_routing,
+                    designator_model: this.form.designator_model || null,
+                    purpose: this.form.purpose || null,
+                    candidates: candidates,
+                    routing_strategy: this.form.routing_strategy,
+                    session_ttl: this.form.session_ttl,
+                    use_model_intelligence: this.form.use_model_intelligence,
+                    intelligence_model: this.form.intelligence_model || null,
+                    // RAG
+                    use_rag: this.form.use_rag,
+                    document_store_ids: this.form.store_ids,
+                    max_results: this.form.max_results,
+                    similarity_threshold: this.form.similarity_threshold,
+                    // Web
+                    use_web: this.form.use_web,
+                    max_search_results: this.form.max_search_results,
+                    max_scrape_urls: this.form.max_scrape_urls,
+                    // Common enrichment
+                    max_context_tokens: this.form.max_context_tokens,
+                    rerank_provider: this.form.rerank_provider,
+                    rerank_top_n: this.form.rerank_top_n,
+                    // Cache (only if web not enabled)
+                    use_cache: this.form.use_web ? false : this.form.use_cache,
+                    cache_similarity_threshold:
+                        this.form.cache_similarity_threshold,
+                    cache_match_system_prompt:
+                        this.form.cache_match_system_prompt,
+                    cache_match_last_message_only:
+                        this.form.cache_match_last_message_only,
+                    cache_ttl_hours: this.form.cache_ttl_hours,
+                    cache_min_tokens: this.form.cache_min_tokens,
+                    cache_max_tokens: this.form.cache_max_tokens,
+                    // Metadata
+                    tags: tags,
+                    description: this.form.description || null,
+                    system_prompt: this.form.system_prompt || null,
+                    enabled: this.form.enabled,
+                };
+
+                try {
+                    const url = this.editingAlias
+                        ? `/api/smart-aliases/${this.editingAlias.id}`
+                        : "/api/smart-aliases";
+                    const method = this.editingAlias ? "PUT" : "POST";
+
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(data),
+                    });
+
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        if (result.error && result.error.includes("name")) {
+                            this.formErrors.name = result.error;
+                        } else {
+                            this.formErrors.general =
+                                result.error || "Failed to save";
+                        }
+                        return;
+                    }
+
+                    await this.loadAliases();
+                    this.closeModal();
+                } catch (error) {
+                    console.error("Failed to save smart alias:", error);
+                    this.formErrors.general = "Failed to save smart alias";
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            confirmDelete(alias) {
+                this.deletingAlias = alias;
+                this.showDeleteModal = true;
+            },
+
+            async deleteAlias() {
+                if (!this.deletingAlias) return;
+
+                this.deleting = true;
+                try {
+                    const response = await fetch(
+                        `/api/smart-aliases/${this.deletingAlias.id}`,
+                        { method: "DELETE" },
+                    );
+
+                    if (response.ok) {
+                        await this.loadAliases();
+                        this.showDeleteModal = false;
+                        this.deletingAlias = null;
+                    }
+                } catch (error) {
+                    console.error("Failed to delete smart alias:", error);
+                } finally {
+                    this.deleting = false;
+                }
+            },
+
+            async resetStats(alias) {
+                this.resettingStats = alias.id;
+                try {
+                    const response = await fetch(
+                        `/api/smart-aliases/${alias.id}/reset-stats`,
+                        { method: "POST" },
+                    );
+
+                    if (response.ok) {
+                        await this.loadAliases();
+                    }
+                } catch (error) {
+                    console.error("Failed to reset stats:", error);
+                } finally {
+                    this.resettingStats = null;
+                }
+            },
+
+            async getModelIntelligenceDescription(modelId) {
+                if (!modelId) return null;
+
+                // Check cache first
+                if (this.modelIntelligence[modelId]) {
+                    return this.modelIntelligence[modelId].intelligence || null;
+                }
+
+                // Fetch from API
+                try {
+                    const response = await fetch(
+                        `/api/model-intelligence/${encodeURIComponent(modelId)}`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.modelIntelligence[modelId] = data;
+                        return data.intelligence || null;
+                    }
+                } catch (error) {
+                    console.error(
+                        `Failed to fetch intelligence for ${modelId}:`,
+                        error,
+                    );
+                }
+                return null;
+            },
+
+            async loadIntelligenceForCandidates() {
+                // Load intelligence for all candidates in parallel, then update descriptions
+                const candidates = this.form.candidates;
+                const promises = candidates.map(async (candidate, index) => {
+                    if (candidate.model) {
+                        // Clear cache to get fresh data
+                        delete this.modelIntelligence[candidate.model];
+                        const intelligence =
+                            await this.getModelIntelligenceDescription(
+                                candidate.model,
+                            );
+                        return { index, intelligence };
+                    }
+                    return { index, intelligence: null };
+                });
+
+                const results = await Promise.all(promises);
+
+                // Update descriptions after all fetches complete
+                for (const { index, intelligence } of results) {
+                    if (intelligence && this.form.candidates[index]) {
+                        this.form.candidates[index].description = intelligence;
+                    }
+                }
+            },
+
+            async refreshIntelligence() {
+                if (!this.editingAlias || this.form.candidates.length === 0) {
+                    return;
+                }
+
+                this.refreshingIntelligence = true;
+                this.intelligenceMessage = "";
+                this.intelligenceError = false;
+
+                // Get model IDs from candidates
+                const modelIds = this.form.candidates
+                    .map((c) => c.model)
+                    .filter((m) => m);
+
+                if (modelIds.length === 0) {
+                    this.intelligenceMessage = "No candidates configured";
+                    this.intelligenceError = true;
+                    this.refreshingIntelligence = false;
+                    return;
+                }
+
+                if (!this.form.intelligence_model) {
+                    this.intelligenceMessage = "Intelligence model required";
+                    this.intelligenceError = true;
+                    this.refreshingIntelligence = false;
+                    return;
+                }
+
+                try {
+                    const response = await fetch(
+                        "/api/model-intelligence/refresh",
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                model_ids: modelIds,
+                                summarizer_model: this.form.intelligence_model,
+                                force: true,
+                            }),
+                        },
+                    );
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        this.intelligenceMessage = `Refreshed ${data.count} of ${modelIds.length} models`;
+                        this.intelligenceError = false;
+                        // Update candidate descriptions with new intelligence
+                        await this.loadIntelligenceForCandidates();
+                    } else {
+                        this.intelligenceMessage =
+                            data.error || "Failed to refresh";
+                        this.intelligenceError = true;
+                    }
+                } catch (error) {
+                    console.error("Failed to refresh intelligence:", error);
+                    this.intelligenceMessage = "Network error";
+                    this.intelligenceError = true;
+                } finally {
+                    this.refreshingIntelligence = false;
+                }
+            },
+        };
+    }
+</script>
+{% endblock %}

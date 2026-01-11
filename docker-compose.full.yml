@@ -26,120 +26,134 @@
 # See INSTALLATION.md for detailed setup instructions.
 
 services:
-  # ===========================================================================
-  # CORE SERVICE
-  # ===========================================================================
-  llm-relay:
-    image: ghcr.io/benhumphry/llm-relay:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "11434:11434"  # API server (Ollama/OpenAI compatible)
-      - "8080:8080"    # Admin UI
-    volumes:
-      - llm-relay-data:/data
-    env_file:
-      - .env
-    environment:
-      # Server configuration
-      - PORT=11434
-      - HOST=0.0.0.0
-      - ADMIN_PORT=8080
-      - ADMIN_HOST=0.0.0.0
-      # PostgreSQL (comment out for SQLite)
-      - DATABASE_URL=postgresql://llmrelay:llmrelay@postgres:5432/llmrelay
-      # ChromaDB (comment out if not using)
-      - CHROMA_URL=http://chroma:8000
-      # SearXNG (comment out if not using)
-      - SEARXNG_URL=http://searxng:8080
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:11434/')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+    # ===========================================================================
+    # CORE SERVICE
+    # ===========================================================================
+    llm-relay:
+        image: ghcr.io/benhumphry/llm-relay:latest
+        build:
+            context: .
+            dockerfile: Dockerfile
+        ports:
+            - "11434:11434" # API server (Ollama/OpenAI compatible)
+            - "8080:8080" # Admin UI
+        volumes:
+            - llm-relay-data:/data
+        env_file:
+            - .env
+        environment:
+            # Server configuration
+            - PORT=11434
+            - HOST=0.0.0.0
+            - ADMIN_PORT=8080
+            - ADMIN_HOST=0.0.0.0
+            # PostgreSQL (comment out for SQLite)
+            - DATABASE_URL=postgresql://llmrelay:llmrelay@postgres:5432/llmrelay
+            # ChromaDB (comment out if not using)
+            - CHROMA_URL=http://chroma:8000
+            # SearXNG (comment out if not using)
+            - SEARXNG_URL=http://searxng:8080
+        depends_on:
+            postgres:
+                condition: service_healthy
+        restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "python",
+                    "-c",
+                    "import urllib.request; urllib.request.urlopen('http://localhost:11434/')",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
 
-  # ===========================================================================
-  # DATABASE (Recommended for production)
-  # ===========================================================================
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER=llmrelay
-      - POSTGRES_PASSWORD=llmrelay
-      - POSTGRES_DB=llmrelay
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U llmrelay -d llmrelay"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+    # ===========================================================================
+    # DATABASE (Recommended for production)
+    # ===========================================================================
+    postgres:
+        image: postgres:16-alpine
+        environment:
+            - POSTGRES_USER=llmrelay
+            - POSTGRES_PASSWORD=llmrelay
+            - POSTGRES_DB=llmrelay
+        volumes:
+            - postgres-data:/var/lib/postgresql/data
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U llmrelay -d llmrelay"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
 
-  # ===========================================================================
-  # CHROMADB (Required for Smart Cache, Smart Augmentor, Smart RAG)
-  # ===========================================================================
-  # ChromaDB provides vector storage for:
-  #   - Smart Cache: Semantic response caching
-  #   - Smart Augmentor: Web search result caching
-  #   - Smart RAG: Document chunk storage
-  #   - Model Intelligence: Cached model assessments
-  #
-  # Remove or comment out if not using these features.
-  chroma:
-    image: chromadb/chroma:latest
-    volumes:
-      - chroma-data:/chroma/chroma
-    environment:
-      - ANONYMIZED_TELEMETRY=false
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+    # ===========================================================================
+    # CHROMADB (Required for Smart Cache, Smart Augmentor, Smart RAG)
+    # ===========================================================================
+    # ChromaDB provides vector storage for:
+    #   - Smart Cache: Semantic response caching
+    #   - Smart Augmentor: Web search result caching
+    #   - Smart RAG: Document chunk storage
+    #   - Model Intelligence: Cached model assessments
+    #
+    # Remove or comment out if not using these features.
+    chroma:
+        image: chromadb/chroma:latest
+        volumes:
+            - chroma-data:/data
+        environment:
+            - ANONYMIZED_TELEMETRY=false
+        restart: unless-stopped
+        healthcheck:
+            test:
+                ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
 
-  # ===========================================================================
-  # SEARXNG (Optional, for Smart Augmentor web search)
-  # ===========================================================================
-  # SearXNG is a privacy-respecting metasearch engine.
-  # Used by Smart Augmentor for web search context injection.
-  #
-  # Remove or comment out if:
-  #   - Not using Smart Augmentor
-  #   - Using Perplexity API for search instead
-  #
-  # First-time setup:
-  #   1. Start the container: docker compose -f docker-compose.full.yml up -d searxng
-  #   2. Access http://localhost:8888 to verify it's working
-  #   3. Optionally customize settings in ./searxng/settings.yml
-  searxng:
-    image: searxng/searxng:latest
-    volumes:
-      - searxng-data:/etc/searxng
-    environment:
-      - SEARXNG_BASE_URL=http://localhost:8888
-      - SEARXNG_SECRET_KEY=change-me-in-production
-    ports:
-      - "8888:8080"  # Expose for testing; remove in production
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+    # ===========================================================================
+    # SEARXNG (Optional, for Smart Augmentor web search)
+    # ===========================================================================
+    # SearXNG is a privacy-respecting metasearch engine.
+    # Used by Smart Augmentor for web search context injection.
+    #
+    # Remove or comment out if:
+    #   - Not using Smart Augmentor
+    #   - Using Perplexity API for search instead
+    #
+    # First-time setup:
+    #   1. Start the container: docker compose -f docker-compose.full.yml up -d searxng
+    #   2. Access http://localhost:8888 to verify it's working
+    #   3. Optionally customize settings in ./searxng/settings.yml
+    searxng:
+        image: searxng/searxng:latest
+        volumes:
+            - searxng-data:/etc/searxng
+        environment:
+            - SEARXNG_BASE_URL=http://localhost:8888
+            - SEARXNG_SECRET_KEY=change-me-in-production
+        ports:
+            - "8888:8080" # Expose for testing; remove in production
+        restart: unless-stopped
+        healthcheck:
+            test:
+                [
+                    "CMD",
+                    "wget",
+                    "-q",
+                    "--spider",
+                    "http://localhost:8080/healthz",
+                ]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 30s
 
 volumes:
-  llm-relay-data:
-  postgres-data:
-  chroma-data:
-  searxng-data:
+    llm-relay-data:
+    postgres-data:
+    chroma-data:
+    searxng-data:

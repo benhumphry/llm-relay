@@ -74,6 +74,11 @@ def create_document_store(
     gmail_label_name: Optional[str] = None,
     gcalendar_calendar_id: Optional[str] = None,
     gcalendar_calendar_name: Optional[str] = None,
+    paperless_url: Optional[str] = None,
+    paperless_token: Optional[str] = None,
+    github_repo: Optional[str] = None,
+    github_branch: Optional[str] = None,
+    github_path: Optional[str] = None,
     embedding_provider: str = "local",
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -108,6 +113,11 @@ def create_document_store(
             gmail_label_name=gmail_label_name,
             gcalendar_calendar_id=gcalendar_calendar_id,
             gcalendar_calendar_name=gcalendar_calendar_name,
+            paperless_url=paperless_url,
+            paperless_token=paperless_token,
+            github_repo=github_repo,
+            github_branch=github_branch,
+            github_path=github_path,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             ollama_url=ollama_url,
@@ -150,6 +160,11 @@ def update_document_store(
     gmail_label_name: Optional[str] = None,
     gcalendar_calendar_id: Optional[str] = None,
     gcalendar_calendar_name: Optional[str] = None,
+    paperless_url: Optional[str] = None,
+    paperless_token: Optional[str] = None,
+    github_repo: Optional[str] = None,
+    github_branch: Optional[str] = None,
+    github_path: Optional[str] = None,
     embedding_provider: Optional[str] = None,
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -199,6 +214,16 @@ def update_document_store(
             store.gcalendar_calendar_name = (
                 gcalendar_calendar_name if gcalendar_calendar_name else None
             )
+        if paperless_url is not None:
+            store.paperless_url = paperless_url if paperless_url else None
+        if paperless_token is not None:
+            store.paperless_token = paperless_token if paperless_token else None
+        if github_repo is not None:
+            store.github_repo = github_repo if github_repo else None
+        if github_branch is not None:
+            store.github_branch = github_branch if github_branch else None
+        if github_path is not None:
+            store.github_path = github_path if github_path else None
         if embedding_provider is not None:
             store.embedding_provider = embedding_provider
         if embedding_model is not None:
@@ -510,6 +535,11 @@ def _store_to_detached(
         gmail_label_name=store.gmail_label_name,
         gcalendar_calendar_id=store.gcalendar_calendar_id,
         gcalendar_calendar_name=store.gcalendar_calendar_name,
+        paperless_url=store.paperless_url,
+        paperless_token=store.paperless_token,
+        github_repo=store.github_repo,
+        github_branch=store.github_branch,
+        github_path=store.github_path,
         embedding_provider=store.embedding_provider,
         embedding_model=store.embedding_model,
         ollama_url=store.ollama_url,

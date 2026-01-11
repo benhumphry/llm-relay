@@ -654,7 +654,7 @@ AVOID_FOR: [use case1, use case2, ...]"""
                 model=resolved.model_id,
                 messages=[{"role": "user", "content": prompt}],
                 system=None,
-                options={"max_tokens": 500, "temperature": 0.3},
+                options={"max_tokens": 1000, "temperature": 0.3},
             )
 
             content = response.get("content", "")
@@ -676,9 +676,16 @@ AVOID_FOR: [use case1, use case2, ...]"""
         import re
 
         def extract_field(field_name: str) -> str:
-            pattern = rf"{field_name}:\s*(.+?)(?:\n[A-Z_]+:|$)"
+            # Match field until the next FIELD_NAME: or end of string
+            # Handle both newline-separated and same-line formats
+            pattern = rf"{field_name}:\s*(.+?)(?=\n\s*[A-Z_]+:|$)"
             match = re.search(pattern, response, re.IGNORECASE | re.DOTALL)
-            return match.group(1).strip() if match else ""
+            if match:
+                return match.group(1).strip()
+            # Try alternate pattern for fields on same line
+            pattern2 = rf"{field_name}:\s*([^\n]+)"
+            match2 = re.search(pattern2, response, re.IGNORECASE)
+            return match2.group(1).strip() if match2 else ""
 
         def split_list(text: str) -> list[str]:
             # Split on comma, clean up
@@ -688,7 +695,7 @@ AVOID_FOR: [use case1, use case2, ...]"""
         assessment = extract_field("ASSESSMENT")
         if not assessment:
             # Try to use the whole response as assessment
-            assessment = response.strip()[:500]
+            assessment = response.strip()[:1000]
 
         now = datetime.utcnow()
 
