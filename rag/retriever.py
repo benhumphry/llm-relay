@@ -394,67 +394,75 @@ class RAGRetriever:
                 stores_queried=stores_queried,
             )
 
-        # Rerank all combined results
-        try:
-            from .reranker import rerank_documents
+        # Separate date-matched results from semantic results
+        # Date-matched results skip reranking - they're already what the user asked for
+        date_matched_chunks = [
+            c for c in all_chunks if getattr(c, "_date_matched", False)
+        ]
+        semantic_chunks = [
+            c for c in all_chunks if not getattr(c, "_date_matched", False)
+        ]
 
-            chunk_dicts = [
-                {
-                    "content": c.content,
-                    "source_file": c.source_file,
-                    "chunk_index": c.chunk_index,
-                    "original_score": c.score,
-                    "store_name": c.store_name,
-                    "store_id": c.store_id,
-                    "date_matched": getattr(c, "_date_matched", False),
-                }
-                for c in all_chunks
-            ]
+        logger.debug(
+            f"Retrieved {len(date_matched_chunks)} date-matched + {len(semantic_chunks)} semantic chunks"
+        )
 
-            reranked = rerank_documents(
-                query=query,
-                documents=chunk_dicts,
-                model_name=rerank_model,
-                top_k=max_results * 2,  # Fetch more before boosting
-                provider_type=rerank_provider,
-            )
+        # Only rerank semantic results
+        reranked_semantic = []
+        if semantic_chunks:
+            try:
+                from .reranker import rerank_documents
 
-            # Apply boost to date-matched results and re-sort
-            # Cross-encoder scores are typically in range -12 to +2, so we need a large boost
-            DATE_MATCH_BOOST = 15.0  # Large boost to prioritize date-matched results
-            for doc in reranked:
-                if doc.get("date_matched"):
-                    doc["rerank_score"] = doc.get("rerank_score", 0) + DATE_MATCH_BOOST
+                chunk_dicts = [
+                    {
+                        "content": c.content,
+                        "source_file": c.source_file,
+                        "chunk_index": c.chunk_index,
+                        "original_score": c.score,
+                        "store_name": c.store_name,
+                        "store_id": c.store_id,
+                    }
+                    for c in semantic_chunks
+                ]
 
-            # Re-sort after boosting and limit to max_results
-            reranked = sorted(
-                reranked, key=lambda x: x.get("rerank_score", 0), reverse=True
-            )[:max_results]
+                # Rerank semantic results, leaving room for date-matched at top
+                semantic_limit = max(0, max_results - len(date_matched_chunks))
+                if semantic_limit > 0:
+                    reranked = rerank_documents(
+                        query=query,
+                        documents=chunk_dicts,
+                        model_name=rerank_model,
+                        top_k=semantic_limit,
+                        provider_type=rerank_provider,
+                    )
 
-            all_chunks = [
-                RetrievedChunk(
-                    content=d["content"],
-                    source_file=d["source_file"],
-                    chunk_index=d["chunk_index"],
-                    score=d.get("rerank_score", d.get("original_score", 0)),
-                    store_name=d.get("store_name"),
-                    store_id=d.get("store_id"),
-                )
-                for d in reranked
-            ]
+                    reranked_semantic = [
+                        RetrievedChunk(
+                            content=d["content"],
+                            source_file=d["source_file"],
+                            chunk_index=d["chunk_index"],
+                            score=d.get("rerank_score", d.get("original_score", 0)),
+                            store_name=d.get("store_name"),
+                            store_id=d.get("store_id"),
+                        )
+                        for d in reranked
+                    ]
 
-            # Count how many date-matched results made it through
-            date_matched_count = sum(1 for d in reranked if d.get("date_matched"))
-            logger.debug(
-                f"Reranked {len(chunk_dicts)} chunks from {len(stores_queried)} stores to {len(all_chunks)} "
-                f"({date_matched_count} date-matched)"
-            )
-        except Exception as e:
-            logger.warning(f"Reranking failed, using original order: {e}")
-            # Sort by score and limit
-            all_chunks = sorted(all_chunks, key=lambda c: c.score, reverse=True)[
-                :max_results
-            ]
+                    logger.debug(
+                        f"Reranked {len(chunk_dicts)} semantic chunks to {len(reranked_semantic)}"
+                    )
+            except Exception as e:
+                logger.warning(f"Reranking failed, using original order: {e}")
+                # Sort by score and limit
+                reranked_semantic = sorted(
+                    semantic_chunks, key=lambda c: c.score, reverse=True
+                )[: max(0, max_results - len(date_matched_chunks))]
+
+        # Combine: date-matched first (sorted by score), then reranked semantic
+        date_matched_chunks = sorted(
+            date_matched_chunks, key=lambda c: c.score, reverse=True
+        )
+        all_chunks = date_matched_chunks + reranked_semantic
 
         # Calculate total tokens
         total_tokens = sum(len(c.content) // 4 for c in all_chunks)
