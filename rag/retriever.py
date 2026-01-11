@@ -331,15 +331,24 @@ class RAGRetriever:
 
                 results = collection.query(**query_kwargs)
 
-                # If date filter returned no results, skip this store
-                # (don't fall back to semantic - that would return irrelevant results)
+                # Track whether these results matched the date filter
+                date_matched = bool(
+                    where_filter and results["documents"] and results["documents"][0]
+                )
+
+                # If date filter returned no results, fall back to semantic-only
                 if where_filter and (
                     not results["documents"] or not results["documents"][0]
                 ):
                     logger.debug(
-                        f"No results with date filter for store '{store_name}', skipping"
+                        f"No results with date filter for store '{store_name}', falling back to semantic"
                     )
-                    continue
+                    results = collection.query(
+                        query_embeddings=[query_embedding],
+                        n_results=rerank_top_n,
+                        include=["documents", "metadatas", "distances"],
+                    )
+                    date_matched = False
             except Exception as e:
                 logger.warning(f"ChromaDB query failed for store '{store_name}': {e}")
                 continue
@@ -373,6 +382,8 @@ class RAGRetriever:
                             store_name=store_name,
                             store_id=store_id,
                         )
+                        # Track if this chunk matched the date filter
+                        chunk._date_matched = date_matched
                         all_chunks.append(chunk)
 
         if not all_chunks:
@@ -395,6 +406,7 @@ class RAGRetriever:
                     "original_score": c.score,
                     "store_name": c.store_name,
                     "store_id": c.store_id,
+                    "date_matched": getattr(c, "_date_matched", False),
                 }
                 for c in all_chunks
             ]
@@ -403,9 +415,21 @@ class RAGRetriever:
                 query=query,
                 documents=chunk_dicts,
                 model_name=rerank_model,
-                top_k=max_results,
+                top_k=max_results * 2,  # Fetch more before boosting
                 provider_type=rerank_provider,
             )
+
+            # Apply boost to date-matched results and re-sort
+            # Cross-encoder scores are typically in range -12 to +2, so we need a large boost
+            DATE_MATCH_BOOST = 15.0  # Large boost to prioritize date-matched results
+            for doc in reranked:
+                if doc.get("date_matched"):
+                    doc["rerank_score"] = doc.get("rerank_score", 0) + DATE_MATCH_BOOST
+
+            # Re-sort after boosting and limit to max_results
+            reranked = sorted(
+                reranked, key=lambda x: x.get("rerank_score", 0), reverse=True
+            )[:max_results]
 
             all_chunks = [
                 RetrievedChunk(
@@ -419,8 +443,11 @@ class RAGRetriever:
                 for d in reranked
             ]
 
+            # Count how many date-matched results made it through
+            date_matched_count = sum(1 for d in reranked if d.get("date_matched"))
             logger.debug(
-                f"Reranked {len(chunk_dicts)} chunks from {len(stores_queried)} stores to {len(all_chunks)}"
+                f"Reranked {len(chunk_dicts)} chunks from {len(stores_queried)} stores to {len(all_chunks)} "
+                f"({date_matched_count} date-matched)"
             )
         except Exception as e:
             logger.warning(f"Reranking failed, using original order: {e}")
