@@ -26,7 +26,7 @@ class AliasAsRouter:
 
     Maps SmartAlias fields to SmartRouter field names:
     - routing_strategy -> strategy
-    - candidates (list[str]) -> candidates (list[dict] with 'model' key)
+    - candidates: SmartAlias already stores list[dict] with 'model' key
     """
 
     def __init__(self, alias: "SmartAlias"):
@@ -36,9 +36,9 @@ class AliasAsRouter:
         if name == "strategy":
             return self._alias.routing_strategy
         if name == "candidates":
-            # SmartRouter expects list of dicts with 'model' key
-            # SmartAlias stores list of strings
-            return [{"model": m} for m in (self._alias.candidates or [])]
+            # SmartAlias.candidates is already list[dict] with 'model' key
+            # Same format as SmartRouter expects
+            return self._alias.candidates or []
         return getattr(self._alias, name)
 
 
