@@ -58,10 +58,10 @@ def extract_date_range(query: str) -> Optional[Tuple[str, str]]:
         yesterday = today - timedelta(days=1)
         return (yesterday.isoformat(), yesterday.isoformat())
 
-    # This week (Mon-Sun containing today)
+    # This week (current week + next week, so LLM can decide past vs future)
     if "this week" in query_lower:
-        start = today - timedelta(days=today.weekday())
-        end = start + timedelta(days=6)
+        start = today - timedelta(days=today.weekday())  # Monday of this week
+        end = start + timedelta(days=13)  # Sunday of next week
         return (start.isoformat(), end.isoformat())
 
     # Next week
