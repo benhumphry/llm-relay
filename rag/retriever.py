@@ -293,9 +293,10 @@ class RAGRetriever:
                     start_date, end_date = date_range
                     logger.debug(f"Date filter detected: {start_date} to {end_date}")
                     # Filter by event_date (calendar) or email_date (email)
-                    # ChromaDB requires $and for range queries (can't combine $gte/$lte in one expr)
+                    # ChromaDB $gte/$lte only work with numbers, not strings
+                    # So we generate list of dates and use $in operator
                     if start_date == end_date:
-                        # Single day - use simple equality or $and with same date
+                        # Single day - use simple equality
                         where_filter = {
                             "$or": [
                                 {"event_date": start_date},
@@ -303,21 +304,21 @@ class RAGRetriever:
                             ]
                         }
                     else:
-                        # Date range - need $and for each field, then $or between fields
+                        # Date range - generate all dates in range and use $in
+                        from datetime import datetime, timedelta
+
+                        start = datetime.fromisoformat(start_date).date()
+                        end = datetime.fromisoformat(end_date).date()
+                        date_list = []
+                        current = start
+                        while current <= end:
+                            date_list.append(current.isoformat())
+                            current += timedelta(days=1)
+
                         where_filter = {
                             "$or": [
-                                {
-                                    "$and": [
-                                        {"event_date": {"$gte": start_date}},
-                                        {"event_date": {"$lte": end_date}},
-                                    ]
-                                },
-                                {
-                                    "$and": [
-                                        {"email_date": {"$gte": start_date}},
-                                        {"email_date": {"$lte": end_date}},
-                                    ]
-                                },
+                                {"event_date": {"$in": date_list}},
+                                {"email_date": {"$in": date_list}},
                             ]
                         }
 
