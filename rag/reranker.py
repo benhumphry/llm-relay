@@ -92,6 +92,22 @@ class LocalRerankerProvider(RerankerProvider):
                 )
         return LocalRerankerProvider._model_cache[self.model_name]
 
+    def _clear_cuda_cache(self):
+        """Clear CUDA memory cache after inference."""
+        try:
+            import gc
+
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            gc.collect()
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.debug(f"Failed to clear CUDA cache: {e}")
+
     def rerank(
         self,
         query: str,
@@ -117,6 +133,9 @@ class LocalRerankerProvider(RerankerProvider):
 
             # Get cross-encoder scores
             scores = model.predict(pairs)
+
+            # Clear CUDA cache after inference to prevent memory buildup
+            self._clear_cuda_cache()
 
             # Attach scores to documents (create copies to avoid mutating originals)
             scored_docs = []

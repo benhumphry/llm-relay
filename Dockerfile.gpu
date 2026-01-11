@@ -58,6 +58,9 @@ ENV HOST=0.0.0.0
 ENV HF_HOME=/data/models
 ENV TRANSFORMERS_CACHE=/data/models
 
+# PyTorch CUDA memory management - use expandable segments to reduce fragmentation
+ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 # Expose both API and Admin ports
 EXPOSE 11434
 EXPOSE 8080

@@ -141,12 +141,18 @@ class LocalEmbeddingProvider(EmbeddingProvider):
     def _clear_cuda_cache(self):
         """Clear CUDA memory cache if available."""
         try:
+            import gc
+
             import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            gc.collect()
         except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"Failed to clear CUDA cache: {e}")
 
     def unload(self):
         """Unload the model and free GPU memory."""
