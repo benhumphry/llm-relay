@@ -331,18 +331,15 @@ class RAGRetriever:
 
                 results = collection.query(**query_kwargs)
 
-                # If date filter returned no results, fall back to semantic-only
+                # If date filter returned no results, skip this store
+                # (don't fall back to semantic - that would return irrelevant results)
                 if where_filter and (
                     not results["documents"] or not results["documents"][0]
                 ):
                     logger.debug(
-                        f"No results with date filter, falling back to semantic search"
+                        f"No results with date filter for store '{store_name}', skipping"
                     )
-                    results = collection.query(
-                        query_embeddings=[query_embedding],
-                        n_results=rerank_top_n,
-                        include=["documents", "metadatas", "distances"],
-                    )
+                    continue
             except Exception as e:
                 logger.warning(f"ChromaDB query failed for store '{store_name}': {e}")
                 continue
