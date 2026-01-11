@@ -123,7 +123,7 @@ class SmartAliasEngine:
                     messages, effective_system, session_key
                 )
                 # Extract the routed model name from the result
-                target_model = f"{routing_result.resolved.provider.prefix}/{routing_result.resolved.model_id}"
+                target_model = f"{routing_result.resolved.provider.name}/{routing_result.resolved.model_id}"
                 routing_designator_usage = routing_result.designator_usage
                 routing_designator_model = routing_result.designator_model
                 logger.debug(
