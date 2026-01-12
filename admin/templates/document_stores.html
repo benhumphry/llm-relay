@@ -492,14 +492,29 @@ block content %}
                             </option>
                         </optgroup>
                         <optgroup label="Document Management">
-                            <option value="paperless">Paperless-ngx</option>
-                            <option value="notion">Notion</option>
-                            <option value="nextcloud">Nextcloud</option>
+                            <option
+                                value="paperless"
+                                x-show="documentSources.paperless?.configured"
+                            >
+                                Paperless-ngx
+                            </option>
+                            <option
+                                value="notion"
+                                x-show="documentSources.notion?.configured"
+                            >
+                                Notion
+                            </option>
+                            <option
+                                value="nextcloud"
+                                x-show="documentSources.nextcloud?.configured"
+                            >
+                                Nextcloud
+                            </option>
                         </optgroup>
                         <optgroup label="Other Integrations">
                             <option
                                 value="mcp:github"
-                                x-show="mcpStatus.github?.available"
+                                x-show="documentSources.github?.configured"
                             >
                                 GitHub
                             </option>
@@ -686,68 +701,11 @@ block content %}
                     </label>
                 </div>
 
-                <!-- Paperless-ngx Configuration -->
-                <div class="mt-4" x-show="form.source_type === 'paperless'">
-                    <div class="alert alert-info">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="stroke-current shrink-0 h-6 w-6"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                        </svg>
-                        <div>
-                            <h3 class="font-bold">Paperless-ngx Connection</h3>
-                            <div class="text-sm">
-                                Credentials are configured via environment
-                                variables:<br />
-                                <code class="font-mono">PAPERLESS_URL</code> and
-                                <code class="font-mono">PAPERLESS_TOKEN</code>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Nextcloud Configuration -->
                 <div
                     class="mt-4 space-y-4"
                     x-show="form.source_type === 'nextcloud'"
                 >
-                    <div class="alert alert-info">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="stroke-current shrink-0 h-6 w-6"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                        </svg>
-                        <div>
-                            <h3 class="font-bold">Nextcloud Connection</h3>
-                            <div class="text-sm">
-                                Credentials are configured via environment
-                                variables:<br />
-                                <code class="font-mono">NEXTCLOUD_URL</code>,
-                                <code class="font-mono">NEXTCLOUD_USER</code>,
-                                and
-                                <code class="font-mono"
-                                    >NEXTCLOUD_PASSWORD</code
-                                >
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Folder Path (optional) -->
                     <div class="form-control">
                         <label class="label">
@@ -1773,6 +1731,7 @@ block content %}
             formErrors: {},
 
             // MCP integration availability status
+            documentSources: {},
             mcpStatus: {
                 google: { available: false },
                 notion: { available: false },
@@ -1904,6 +1863,7 @@ block content %}
                     this.loadStores(),
                     this.loadMcpStatus(),
                     this.loadGoogleOAuthStatus(),
+                    this.loadDocumentSources(),
                 ]);
                 // Poll for status updates
                 setInterval(() => this.loadStores(), 5000);
@@ -2322,6 +2282,19 @@ block content %}
                     }
                 } catch (error) {
                     console.error("Failed to load MCP status:", error);
+                }
+            },
+
+            async loadDocumentSources() {
+                try {
+                    const response = await fetch("/api/feature-status");
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.documentSources =
+                            data.dependencies?.document_sources || {};
+                    }
+                } catch (error) {
+                    console.error("Failed to load document sources:", error);
                 }
             },
 

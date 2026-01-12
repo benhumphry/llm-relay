@@ -1423,6 +1423,33 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             },
             "search_providers": search_providers,
             "has_search_provider": has_search_provider,
+            "document_sources": {
+                "paperless": {
+                    "configured": bool(
+                        os.environ.get("PAPERLESS_URL")
+                        and os.environ.get("PAPERLESS_TOKEN")
+                    ),
+                },
+                "nextcloud": {
+                    "configured": bool(
+                        os.environ.get("NEXTCLOUD_URL")
+                        and os.environ.get("NEXTCLOUD_USER")
+                        and os.environ.get("NEXTCLOUD_PASSWORD")
+                    ),
+                },
+                "notion": {
+                    "configured": bool(
+                        os.environ.get("NOTION_TOKEN")
+                        or os.environ.get("NOTION_API_KEY")
+                    ),
+                },
+                "github": {
+                    "configured": bool(
+                        os.environ.get("GITHUB_TOKEN")
+                        or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
+                    ),
+                },
+            },
         }
 
         return jsonify(
