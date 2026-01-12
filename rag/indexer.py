@@ -517,6 +517,18 @@ class RAGIndexer:
             # Get document source based on source_type
             from mcp.sources import get_document_source
 
+            # Always use global vision settings
+            from .vision import get_vision_config_from_settings
+
+            global_vision = get_vision_config_from_settings()
+            vision_provider = global_vision.provider_type or "local"
+            vision_model = global_vision.model_name
+            vision_ollama_url = global_vision.base_url
+            if vision_provider != "local":
+                logger.info(
+                    f"Using global vision settings: {vision_provider}/{vision_model}"
+                )
+
             source = get_document_source(
                 source_type=store.source_type,
                 source_path=store.source_path,
@@ -530,9 +542,11 @@ class RAGIndexer:
                 github_repo=store.github_repo,
                 github_branch=store.github_branch,
                 github_path=store.github_path,
-                vision_provider=store.vision_provider,
-                vision_model=store.vision_model,
-                vision_ollama_url=store.vision_ollama_url,
+                notion_database_id=store.notion_database_id,
+                notion_page_id=store.notion_page_id,
+                vision_provider=vision_provider,
+                vision_model=vision_model,
+                vision_ollama_url=vision_ollama_url,
             )
 
             if not source.is_available():
@@ -621,9 +635,9 @@ class RAGIndexer:
                             Path(doc_info.uri),
                             store.chunk_size,
                             store.chunk_overlap,
-                            vision_provider=store.vision_provider,
-                            vision_model=store.vision_model,
-                            vision_ollama_url=store.vision_ollama_url,
+                            vision_provider=vision_provider,
+                            vision_model=vision_model,
+                            vision_ollama_url=vision_ollama_url,
                         )
                     else:
                         content = source.read_document(doc_info.uri)
@@ -1009,7 +1023,7 @@ class RAGIndexer:
         """
         Process a document and return chunks.
 
-        Uses Docling for parsing if available, falls back to simple text extraction.
+        Uses configured PDF parser for PDFs, Docling for other formats.
 
         Args:
             file_path: Path to the document
@@ -1021,7 +1035,27 @@ class RAGIndexer:
         """
         suffix = file_path.suffix.lower()
 
-        # Try Docling first
+        # For PDFs, check the configured parser setting
+        if suffix == ".pdf":
+            pdf_parser = self._get_pdf_parser_setting()
+
+            if pdf_parser == "pypdf":
+                try:
+                    return self._process_pdf_with_pypdf(
+                        file_path, chunk_size, chunk_overlap
+                    )
+                except Exception:
+                    # Fall through to Docling
+                    pass
+            elif pdf_parser == "jina":
+                # Jina doesn't support local files, fall through to Docling
+                logger.info(
+                    f"Jina parser not supported for local files ({file_path.name}), "
+                    "using Docling"
+                )
+            # Fall through to Docling for PDFs
+
+        # Try Docling (for PDFs with docling setting, and all other document types)
         try:
             return self._process_with_docling(
                 file_path,
@@ -1038,6 +1072,66 @@ class RAGIndexer:
 
         # Fallback to simple parsing
         return self._process_simple(file_path, suffix, chunk_size, chunk_overlap)
+
+    def _get_pdf_parser_setting(self) -> str:
+        """Get the configured RAG PDF parser from settings."""
+        try:
+            from db.connection import get_db_context
+            from db.models import Setting
+
+            with get_db_context() as db:
+                setting = (
+                    db.query(Setting)
+                    .filter(Setting.key == Setting.KEY_RAG_PDF_PARSER)
+                    .first()
+                )
+                return setting.value if setting else "docling"
+        except Exception:
+            return "docling"
+
+    def _process_pdf_with_pypdf(
+        self, file_path: Path, chunk_size: int, chunk_overlap: int
+    ) -> list[dict]:
+        """Process PDF using pypdf (fast, text-only)."""
+        try:
+            import pypdf
+
+            reader = pypdf.PdfReader(str(file_path))
+            text_parts = []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    text_parts.append(text)
+
+            text = "\n\n".join(text_parts)
+
+            if not text.strip():
+                logger.warning(
+                    f"pypdf extracted no text from {file_path} (possibly scanned), "
+                    "falling back to Docling"
+                )
+                raise ValueError("No text extracted")
+
+            logger.info(f"Processed {file_path.name} with pypdf")
+            return self._chunk_text(text, chunk_size, chunk_overlap)
+
+        except Exception as e:
+            logger.warning(
+                f"pypdf failed for {file_path}: {e}, falling back to Docling"
+            )
+            raise
+
+    def _process_pdf_with_jina(
+        self, file_path: Path, chunk_size: int, chunk_overlap: int
+    ) -> list[dict]:
+        """Process PDF using Jina Reader API - NOT supported for local files."""
+        # Jina Reader requires a URL, not local files
+        # This should not be called for local document stores
+        logger.info(
+            f"Jina parser not supported for local files ({file_path.name}), "
+            "falling back to Docling"
+        )
+        raise ValueError("Jina not supported for local files")
 
     def _process_with_docling(
         self,

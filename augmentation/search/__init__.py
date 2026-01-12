@@ -136,11 +136,12 @@ try:
 except ImportError:
     pass
 
-# Jina provider (requires JINA_API_KEY)
+# Jina providers - free tier (always available) and API tier (requires key)
 try:
-    from .jina import JinaSearchProvider
+    from .jina import JinaApiSearchProvider, JinaFreeSearchProvider
 
-    register_provider(JinaSearchProvider)
+    register_provider(JinaFreeSearchProvider)
+    register_provider(JinaApiSearchProvider)
 except ImportError:
     pass
 

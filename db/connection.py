@@ -1095,6 +1095,22 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        if "notion_database_id" not in existing_columns:
+            migrations.append(
+                (
+                    "notion_database_id",
+                    "ALTER TABLE document_stores ADD COLUMN notion_database_id VARCHAR(100)",
+                )
+            )
+
+        if "notion_page_id" not in existing_columns:
+            migrations.append(
+                (
+                    "notion_page_id",
+                    "ALTER TABLE document_stores ADD COLUMN notion_page_id VARCHAR(100)",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for document_stores table"
@@ -1118,6 +1134,25 @@ def _run_migrations(engine) -> None:
                     text("ALTER TABLE smart_aliases ADD COLUMN system_prompt TEXT")
                 )
                 conn.commit()
+
+    # Migration: Drop legacy tables (v1.8 - Smart Aliases unification)
+    # These tables have been replaced by the unified smart_aliases table
+    legacy_tables = [
+        "smart_enricher_stores",  # Junction table first (has FK constraints)
+        "smart_enrichers",
+        "smart_routers",
+        "aliases",
+    ]
+
+    tables_to_drop = [t for t in legacy_tables if t in inspector.get_table_names()]
+    if tables_to_drop:
+        logger.info(f"Dropping legacy tables (v1.8): {', '.join(tables_to_drop)}")
+        with engine.connect() as conn:
+            for table_name in tables_to_drop:
+                logger.debug(f"Dropping table: {table_name}")
+                conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+            conn.commit()
+        logger.info("Legacy tables dropped successfully")
 
 
 def init_db(drop_all: bool = False) -> None:

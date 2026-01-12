@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from db.models import SmartRouter
+    from db.models import SmartAlias
     from providers.registry import ProviderRegistry, ResolvedModel
 
 logger = logging.getLogger(__name__)
@@ -46,12 +46,12 @@ class SmartRouterEngine:
     # Session cache: {session_key: (model_name, timestamp)}
     _session_cache: dict[str, tuple[str, float]] = {}
 
-    def __init__(self, router: "SmartRouter", registry: "ProviderRegistry"):
+    def __init__(self, router: "SmartAlias", registry: "ProviderRegistry"):
         """
         Initialize the routing engine.
 
         Args:
-            router: SmartRouter configuration
+            router: SmartAlias (or adapter) with routing configuration
             registry: Provider registry for model resolution
         """
         self.router = router

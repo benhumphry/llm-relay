@@ -4,16 +4,6 @@ Database layer for LLM Relay.
 Provides SQLAlchemy models and database connection management.
 """
 
-from .aliases import (
-    alias_name_available,
-    create_alias,
-    delete_alias,
-    get_alias_by_id,
-    get_alias_by_name,
-    get_all_aliases,
-    get_enabled_aliases,
-    update_alias,
-)
 from .connection import (
     check_db_initialized,
     get_db,
@@ -35,7 +25,6 @@ from .document_stores import (
     update_document_store_index_status,
 )
 from .models import (
-    Alias,
     Base,
     CustomModel,
     CustomProvider,
@@ -49,10 +38,7 @@ from .models import (
     RequestLog,
     Setting,
     SmartAlias,
-    SmartEnricher,
-    SmartRouter,
     smart_alias_stores,
-    smart_enricher_stores,
 )
 from .redirects import (
     create_redirect,
@@ -88,28 +74,6 @@ from .smart_aliases import (
     update_smart_alias,
     update_smart_alias_stats,
 )
-from .smart_enrichers import (
-    create_smart_enricher,
-    delete_smart_enricher,
-    enricher_name_available,
-    get_all_smart_enrichers,
-    get_enabled_smart_enrichers,
-    get_smart_enricher_by_id,
-    get_smart_enricher_by_name,
-    reset_smart_enricher_stats,
-    update_smart_enricher,
-    update_smart_enricher_stats,
-)
-from .smart_routers import (
-    create_smart_router,
-    delete_smart_router,
-    get_all_smart_routers,
-    get_enabled_smart_routers,
-    get_smart_router_by_id,
-    get_smart_router_by_name,
-    router_name_available,
-    update_smart_router,
-)
 from .sync_descriptions import (
     get_available_description_providers,
     get_descriptions_for_models,
@@ -138,26 +102,6 @@ __all__ = [
     # Usage tracking
     "RequestLog",
     "DailyStats",
-    # Aliases (v3.1)
-    "Alias",
-    "get_all_aliases",
-    "get_alias_by_name",
-    "get_alias_by_id",
-    "create_alias",
-    "update_alias",
-    "delete_alias",
-    "alias_name_available",
-    "get_enabled_aliases",
-    # Smart Routers (v3.2)
-    "SmartRouter",
-    "get_all_smart_routers",
-    "get_smart_router_by_name",
-    "get_smart_router_by_id",
-    "create_smart_router",
-    "update_smart_router",
-    "delete_smart_router",
-    "router_name_available",
-    "get_enabled_smart_routers",
     # Seeding
     "ensure_seeded",
     "seed_providers",
@@ -167,7 +111,7 @@ __all__ = [
     "get_model_description",
     "get_descriptions_for_models",
     "get_available_description_providers",
-    # Redirects (v3.7)
+    # Redirects
     "Redirect",
     "get_all_redirects",
     "get_redirect_by_id",
@@ -190,19 +134,6 @@ __all__ = [
     "store_name_available",
     "get_enabled_document_stores",
     "get_stores_with_schedule",
-    # Smart Enrichers (unified RAG + Web)
-    "SmartEnricher",
-    "smart_enricher_stores",
-    "get_all_smart_enrichers",
-    "get_smart_enricher_by_name",
-    "get_smart_enricher_by_id",
-    "create_smart_enricher",
-    "update_smart_enricher",
-    "update_smart_enricher_stats",
-    "reset_smart_enricher_stats",
-    "delete_smart_enricher",
-    "enricher_name_available",
-    "get_enabled_smart_enrichers",
     # Settings
     "get_setting",
     "set_setting",

@@ -393,18 +393,126 @@ class WebScraper:
         self, url: str, content: bytes, content_type: str
     ) -> ScrapeResult:
         """
-        Parse document content using Docling.
+        Parse document content using configured PDF parser.
 
-        Uses configurable vision model from settings for document parsing.
+        Supports:
+        - docling: Uses Docling with configured vision model (best quality, slower)
+        - pypdf: Fast text extraction (won't work on scanned docs)
+        - jina: Jina Reader API (fast, handles scans, requires API key)
         """
+        # Get PDF parser setting
+        pdf_parser = self._get_pdf_parser_setting()
+        extension = DOCLING_CONTENT_TYPES.get(content_type, ".pdf")
+
+        # Only PDF supports alternative parsers
+        if extension == ".pdf":
+            if pdf_parser == "pypdf":
+                return self._parse_pdf_with_pypdf(url, content, content_type)
+            elif pdf_parser == "jina":
+                return self._parse_pdf_with_jina(url, content_type)
+
+        # Default to Docling for all documents (or non-PDF files)
+        return self._parse_document_with_docling(url, content, content_type, extension)
+
+    def _get_pdf_parser_setting(self) -> str:
+        """Get the configured PDF parser from settings."""
+        try:
+            from db.connection import get_db_context
+            from db.models import Setting
+
+            with get_db_context() as db:
+                setting = (
+                    db.query(Setting)
+                    .filter(Setting.key == Setting.KEY_WEB_PDF_PARSER)
+                    .first()
+                )
+                return setting.value if setting else "docling"
+        except Exception:
+            return "docling"
+
+    def _parse_pdf_with_pypdf(
+        self, url: str, content: bytes, content_type: str
+    ) -> ScrapeResult:
+        """Parse PDF using pypdf (fast, text-only)."""
+        try:
+            import io
+
+            import pypdf
+
+            reader = pypdf.PdfReader(io.BytesIO(content))
+            text_parts = []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    text_parts.append(text)
+
+            text = "\n\n".join(text_parts)
+            title = Path(urlparse(url).path).stem or url
+
+            if not text.strip():
+                logger.warning(f"pypdf extracted no text from {url} (possibly scanned)")
+                return ScrapeResult(
+                    url=url,
+                    title=title,
+                    content="",
+                    success=False,
+                    error="No text extracted (document may be scanned)",
+                    content_type=content_type,
+                )
+
+            logger.info(f"Extracted {len(text)} chars from {url} using pypdf")
+            return ScrapeResult(
+                url=url,
+                title=title,
+                content=text,
+                success=True,
+                content_type=content_type,
+            )
+        except Exception as e:
+            logger.warning(f"pypdf extraction failed for {url}: {e}")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error=f"pypdf parsing failed: {e}",
+                content_type=content_type,
+            )
+
+    def _parse_pdf_with_jina(self, url: str, content_type: str) -> ScrapeResult:
+        """Parse PDF using Jina Reader API."""
+        try:
+            import os
+
+            api_key = os.environ.get("JINA_API_KEY")
+            jina_scraper = JinaScraper(api_key=api_key)
+            result = jina_scraper.scrape(url)
+
+            if result.success:
+                logger.info(
+                    f"Extracted {len(result.content)} chars from {url} using Jina"
+                )
+            return result
+        except Exception as e:
+            logger.warning(f"Jina extraction failed for {url}: {e}")
+            return ScrapeResult(
+                url=url,
+                title="",
+                content="",
+                success=False,
+                error=f"Jina parsing failed: {e}",
+                content_type=content_type,
+            )
+
+    def _parse_document_with_docling(
+        self, url: str, content: bytes, content_type: str, extension: str
+    ) -> ScrapeResult:
+        """Parse document using Docling with configured vision model."""
         try:
             from rag.vision import (
                 get_document_converter,
                 get_vision_config_from_settings,
             )
-
-            # Get file extension for content type
-            extension = DOCLING_CONTENT_TYPES.get(content_type, ".pdf")
 
             # Write to temp file (Docling needs a file path)
             with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as f:

@@ -355,6 +355,60 @@ content %}
                                                         </div>
                                                     </template>
                                                 </div>
+                                                <!-- Fallback/Other models -->
+                                                <template
+                                                    x-if="getFallbackModels(alias).length > 0"
+                                                >
+                                                    <div class="mt-3">
+                                                        <div
+                                                            class="text-xs text-base-content/50 uppercase mb-2"
+                                                        >
+                                                            Fallback/Other
+                                                        </div>
+                                                        <div class="space-y-1">
+                                                            <template
+                                                                x-for="model in getFallbackModels(alias)"
+                                                                :key="model.id"
+                                                            >
+                                                                <div
+                                                                    class="flex items-center gap-2"
+                                                                >
+                                                                    <div
+                                                                        class="flex-1"
+                                                                    >
+                                                                        <div
+                                                                            class="flex items-center gap-2"
+                                                                        >
+                                                                            <span
+                                                                                class="font-mono text-xs text-base-content/70"
+                                                                                x-text="model.id"
+                                                                            ></span>
+                                                                            <span
+                                                                                class="text-base-content/50 text-xs"
+                                                                                x-text="'(' + model.count + ')'"
+                                                                            ></span>
+                                                                        </div>
+                                                                        <div
+                                                                            class="w-full bg-base-300 rounded-full h-1 mt-1"
+                                                                        >
+                                                                            <div
+                                                                                class="bg-warning h-1 rounded-full transition-all"
+                                                                                :style="'width: ' + model.percent + '%'"
+                                                                            ></div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div
+                                                                        class="w-12 text-right text-xs text-base-content/50"
+                                                                    >
+                                                                        <span
+                                                                            x-text="model.percent.toFixed(0) + '%'"
+                                                                        ></span>
+                                                                    </div>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                </template>
                                             </div>
                                         </template>
 
@@ -1563,7 +1617,7 @@ content %}
 
             async loadRouterStats() {
                 try {
-                    const response = await fetch("/api/routers/stats");
+                    const response = await fetch("/api/smart-aliases/stats");
                     if (response.ok) {
                         this.routerStats = await response.json();
                     }
@@ -1573,13 +1627,8 @@ content %}
             },
 
             getCandidateRequests(aliasName, modelId) {
-                // Stats are stored by model_id only (e.g., "gpt-5"), not full path (e.g., "openai/gpt-5")
-                const shortModelId = modelId.includes("/")
-                    ? modelId.split("/").pop()
-                    : modelId;
-                return (
-                    this.routerStats[aliasName]?.candidates?.[shortModelId] || 0
-                );
+                // Stats are stored by full path (e.g., "openai/gpt-5")
+                return this.routerStats[aliasName]?.candidates?.[modelId] || 0;
             },
 
             getCandidatePercent(aliasName, modelId) {
@@ -1603,6 +1652,35 @@ content %}
                     );
                     return bCount - aCount;
                 });
+            },
+
+            getFallbackModels(alias) {
+                // Get models from stats that aren't in the candidates list
+                const stats = this.routerStats[alias.name];
+                if (!stats?.candidates) return [];
+
+                // Get candidate model IDs (full paths)
+                const candidateIds = new Set(
+                    (alias.candidates || []).map((c) => c.model),
+                );
+
+                const total = stats.requests || 0;
+                const fallbacks = [];
+
+                for (const [modelId, count] of Object.entries(
+                    stats.candidates,
+                )) {
+                    if (!candidateIds.has(modelId)) {
+                        fallbacks.push({
+                            id: modelId,
+                            count: count,
+                            percent: total > 0 ? (count / total) * 100 : 0,
+                        });
+                    }
+                }
+
+                // Sort by count descending
+                return fallbacks.sort((a, b) => b.count - a.count);
             },
 
             toggleExpand(id) {

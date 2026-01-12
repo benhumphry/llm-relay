@@ -168,12 +168,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Ollama management page."""
         return render_template("ollama.html")
 
-    @admin.route("/aliases")
-    @require_auth
-    def aliases_page():
-        """Aliases management page."""
-        return render_template("aliases.html")
-
     # -------------------------------------------------------------------------
     # Provider API
     # -------------------------------------------------------------------------
@@ -922,6 +916,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER,
             Setting.KEY_WEB_SEARCH_URL,
             Setting.KEY_WEB_SCRAPER_PROVIDER,
+            Setting.KEY_WEB_PDF_PARSER,
+            Setting.KEY_RAG_PDF_PARSER,
             Setting.KEY_EMBEDDING_PROVIDER,
             Setting.KEY_EMBEDDING_MODEL,
             Setting.KEY_EMBEDDING_OLLAMA_URL,
@@ -945,6 +941,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "search_url": settings_dict.get(Setting.KEY_WEB_SEARCH_URL) or "",
                 "scraper_provider": settings_dict.get(Setting.KEY_WEB_SCRAPER_PROVIDER)
                 or "builtin",
+                "pdf_parser": settings_dict.get(Setting.KEY_WEB_PDF_PARSER) or "pypdf",
+                "rag_pdf_parser": settings_dict.get(Setting.KEY_RAG_PDF_PARSER)
+                or "docling",
                 "embedding_provider": settings_dict.get(Setting.KEY_EMBEDDING_PROVIDER)
                 or "local",
                 "embedding_model": settings_dict.get(Setting.KEY_EMBEDDING_MODEL) or "",
@@ -981,6 +980,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if scraper_provider not in ("builtin", "jina"):
             return jsonify({"error": "Invalid scraper provider"}), 400
 
+        # Validate PDF parser (for web scraping)
+        pdf_parser = data.get("pdf_parser", "pypdf")
+        if pdf_parser not in ("docling", "pypdf", "jina"):
+            return jsonify({"error": "Invalid PDF parser"}), 400
+
+        # Validate RAG PDF parser (for document indexing)
+        rag_pdf_parser = data.get("rag_pdf_parser", "docling")
+        if rag_pdf_parser not in ("docling", "pypdf"):
+            return jsonify({"error": "Invalid RAG PDF parser"}), 400
+
         # Embedding provider can be "local", "ollama:<instance>", or any provider name
         embedding_provider = data.get("embedding_provider", "local")
         embedding_model = data.get("embedding_model", "")
@@ -1001,6 +1010,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER: search_provider,
             Setting.KEY_WEB_SEARCH_URL: data.get("search_url", ""),
             Setting.KEY_WEB_SCRAPER_PROVIDER: scraper_provider,
+            Setting.KEY_WEB_PDF_PARSER: pdf_parser,
+            Setting.KEY_RAG_PDF_PARSER: rag_pdf_parser,
             Setting.KEY_EMBEDDING_PROVIDER: embedding_provider,
             Setting.KEY_EMBEDDING_MODEL: embedding_model,
             Setting.KEY_EMBEDDING_OLLAMA_URL: embedding_ollama_url,
@@ -1020,6 +1031,205 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             db.commit()
 
         return jsonify({"success": True})
+
+    @admin.route("/api/settings/web", methods=["POST"])
+    @require_auth_api
+    def save_web_settings_post():
+        """Save web settings (POST alias for PUT)."""
+        return save_web_settings()
+
+    @admin.route("/api/settings/embedding-models", methods=["GET"])
+    @require_auth_api
+    def get_embedding_models():
+        """Get available embedding models from Ollama instances and providers."""
+        from providers.ollama_provider import OllamaProvider
+
+        result = {
+            "ollama": {"available": False, "instances": []},
+            "providers": [],
+        }
+
+        embedding_patterns = ["embed", "nomic", "mxbai", "bge", "e5", "gte"]
+
+        # Get Ollama instances with embedding models
+        try:
+            ollama_providers = [
+                p
+                for p in registry.get_all_providers()
+                if isinstance(p, OllamaProvider) and p.is_configured()
+            ]
+
+            for provider in ollama_providers:
+                try:
+                    raw_models = provider.get_raw_models()
+                    embedding_models = [
+                        m.get("name", "")
+                        for m in raw_models
+                        if any(
+                            kw in m.get("name", "").lower() for kw in embedding_patterns
+                        )
+                    ]
+                    if embedding_models:
+                        result["ollama"]["instances"].append(
+                            {
+                                "name": provider.name,
+                                "url": provider.base_url,
+                                "embedding_models": embedding_models,
+                            }
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to get models from {provider.name}: {e}")
+
+            if result["ollama"]["instances"]:
+                result["ollama"]["available"] = True
+        except Exception as e:
+            logger.warning(f"Failed to enumerate Ollama providers: {e}")
+
+        # Get providers with embedding support (OpenAI)
+        try:
+            for provider in registry.get_available_providers():
+                if provider.name.lower() == "openai":
+                    result["providers"].append(
+                        {
+                            "name": provider.name,
+                            "models": [
+                                "text-embedding-3-small",
+                                "text-embedding-3-large",
+                                "text-embedding-ada-002",
+                            ],
+                        }
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to enumerate embedding providers: {e}")
+
+        return jsonify(result)
+
+    @admin.route("/api/settings/vision-models", methods=["GET"])
+    @require_auth_api
+    def get_vision_models():
+        """Get available vision models from Ollama instances and providers."""
+        from providers.ollama_provider import OllamaProvider
+
+        PROVIDER_VISION_MODELS = {
+            "openai": [
+                {"id": "gpt-4o", "name": "GPT-4o"},
+                {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+                {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
+            ],
+            "anthropic": [
+                {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
+                {"id": "claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet"},
+                {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku"},
+            ],
+            "openrouter": [
+                {"id": "openai/gpt-4o", "name": "OpenAI GPT-4o"},
+                {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet"},
+                {"id": "google/gemini-pro-1.5", "name": "Gemini Pro 1.5"},
+            ],
+            "google": [
+                {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
+                {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
+                {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+            ],
+            "together": [
+                {
+                    "id": "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+                    "name": "Llama 3.2 11B Vision",
+                },
+                {
+                    "id": "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo",
+                    "name": "Llama 3.2 90B Vision",
+                },
+            ],
+            "fireworks": [
+                {
+                    "id": "accounts/fireworks/models/llama-v3p2-11b-vision-instruct",
+                    "name": "Llama 3.2 11B Vision",
+                },
+            ],
+        }
+
+        result = {
+            "local": {
+                "available": True,
+                "description": "Bundled Docling models (CPU/GPU)",
+                "models": [
+                    {"id": "default", "name": "Docling Default (local processing)"}
+                ],
+            },
+            "ollama": {"available": False, "instances": []},
+            "providers": [],
+        }
+
+        vision_patterns = [
+            "vision",
+            "llava",
+            "granite3.2-vision",
+            "granite-vision",
+            "granite-docling",
+            "moondream",
+            "bakllava",
+            "llama3.2-vision",
+            "minicpm-v",
+        ]
+
+        # Get Ollama instances with vision models
+        try:
+            ollama_providers = [
+                p
+                for p in registry.get_all_providers()
+                if isinstance(p, OllamaProvider) and p.is_configured()
+            ]
+
+            for provider in ollama_providers:
+                try:
+                    raw_models = provider.get_raw_models()
+                    vision_models = [
+                        {
+                            "id": m.get("name", ""),
+                            "name": m.get("name", ""),
+                            "size": m.get("size"),
+                        }
+                        for m in raw_models
+                        if any(
+                            pattern in m.get("name", "").lower()
+                            for pattern in vision_patterns
+                        )
+                    ]
+                    if vision_models:
+                        result["ollama"]["instances"].append(
+                            {
+                                "name": provider.name,
+                                "url": provider.base_url,
+                                "vision_models": vision_models,
+                            }
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to get models from {provider.name}: {e}")
+
+            if result["ollama"]["instances"]:
+                result["ollama"]["available"] = True
+        except Exception as e:
+            logger.warning(f"Failed to enumerate Ollama providers: {e}")
+
+        # Include ALL configured providers
+        try:
+            for provider in registry.get_available_providers():
+                if provider.name.startswith("ollama"):
+                    continue
+                provider_name = provider.name.lower()
+                suggested_models = PROVIDER_VISION_MODELS.get(provider_name, [])
+                result["providers"].append(
+                    {
+                        "name": provider.name,
+                        "models": suggested_models,
+                        "supports_custom": True,
+                    }
+                )
+        except Exception as e:
+            logger.warning(f"Failed to enumerate vision providers: {e}")
+
+        return jsonify(result)
 
     # -------------------------------------------------------------------------
     # ChromaDB Status
@@ -1231,7 +1441,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def export_config():
         """Export database configuration as JSON for backup/migration."""
         from db.models import (
-            Alias,
             CustomModel,
             CustomProvider,
             DailyStats,
@@ -1240,7 +1449,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Provider,
             RequestLog,
             Setting,
-            SmartRouter,
+            SmartAlias,
         )
 
         # Check if request logs should be included
@@ -1308,30 +1517,45 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     }
                     for p in db.query(CustomProvider).all()
                 ],
-                "aliases": [
+                "smart_aliases": [
                     {
                         "name": a.name,
                         "target_model": a.target_model,
+                        "use_routing": a.use_routing,
+                        "use_rag": a.use_rag,
+                        "use_web": a.use_web,
+                        "use_cache": a.use_cache,
+                        "designator_model": a.designator_model,
+                        "purpose": a.purpose,
+                        "candidates": a.candidates,
+                        "fallback_model": a.fallback_model,
+                        "routing_strategy": a.routing_strategy,
+                        "session_ttl": a.session_ttl,
+                        "use_model_intelligence": a.use_model_intelligence,
+                        "search_provider": a.search_provider,
+                        "intelligence_model": a.intelligence_model,
+                        "max_results": a.max_results,
+                        "similarity_threshold": a.similarity_threshold,
+                        "max_search_results": a.max_search_results,
+                        "max_scrape_urls": a.max_scrape_urls,
+                        "max_context_tokens": a.max_context_tokens,
+                        "rerank_provider": a.rerank_provider,
+                        "rerank_model": a.rerank_model,
+                        "rerank_top_n": a.rerank_top_n,
+                        "cache_similarity_threshold": a.cache_similarity_threshold,
+                        "cache_match_system_prompt": a.cache_match_system_prompt,
+                        "cache_match_last_message_only": a.cache_match_last_message_only,
+                        "cache_ttl_hours": a.cache_ttl_hours,
+                        "cache_min_tokens": a.cache_min_tokens,
+                        "cache_max_tokens": a.cache_max_tokens,
+                        "cache_collection": a.cache_collection,
                         "tags": a.tags,
                         "description": a.description,
+                        "system_prompt": a.system_prompt,
                         "enabled": a.enabled,
+                        "document_store_ids": [s.id for s in a.document_stores],
                     }
-                    for a in db.query(Alias).all()
-                ],
-                "smart_routers": [
-                    {
-                        "name": r.name,
-                        "designator_model": r.designator_model,
-                        "purpose": r.purpose,
-                        "candidates": r.candidates,
-                        "strategy": r.strategy,
-                        "fallback_model": r.fallback_model,
-                        "session_ttl": r.session_ttl,
-                        "tags": r.tags,
-                        "description": r.description,
-                        "enabled": r.enabled,
-                    }
-                    for r in db.query(SmartRouter).all()
+                    for a in db.query(SmartAlias).all()
                 ],
                 # Provider enabled/disabled state (only system providers)
                 "providers": [
@@ -1405,16 +1629,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     def import_config():
         """Import database configuration from JSON backup."""
         from db.models import (
-            Alias,
             CustomModel,
             CustomProvider,
             DailyStats,
+            DocumentStore,
             ModelOverride,
             OllamaInstance,
             Provider,
             RequestLog,
             Setting,
-            SmartRouter,
+            SmartAlias,
         )
 
         try:
@@ -1433,8 +1657,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "custom_models": 0,
             "ollama_instances": 0,
             "custom_providers": 0,
-            "aliases": 0,
-            "smart_routers": 0,
+            "smart_aliases": 0,
             "providers": 0,
             "request_logs": 0,
             "daily_stats": 0,
@@ -1587,57 +1810,173 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         )
                     stats["custom_providers"] += 1
 
-                # Import aliases
-                for a in data.get("aliases", []):
-                    existing = db.query(Alias).filter(Alias.name == a["name"]).first()
+                # Import smart aliases (new format)
+                for a in data.get("smart_aliases", []):
+                    existing = (
+                        db.query(SmartAlias)
+                        .filter(SmartAlias.name == a["name"])
+                        .first()
+                    )
                     if existing:
                         existing.target_model = a["target_model"]
+                        existing.use_routing = a.get("use_routing", False)
+                        existing.use_rag = a.get("use_rag", False)
+                        existing.use_web = a.get("use_web", False)
+                        existing.use_cache = a.get("use_cache", False)
+                        existing.designator_model = a.get("designator_model")
+                        existing.purpose = a.get("purpose")
+                        existing.candidates_json = json.dumps(a.get("candidates", []))
+                        existing.fallback_model = a.get("fallback_model")
+                        existing.routing_strategy = a.get(
+                            "routing_strategy", "per_request"
+                        )
+                        existing.session_ttl = a.get("session_ttl", 3600)
+                        existing.use_model_intelligence = a.get(
+                            "use_model_intelligence", False
+                        )
+                        existing.search_provider = a.get("search_provider")
+                        existing.intelligence_model = a.get("intelligence_model")
+                        existing.max_results = a.get("max_results", 5)
+                        existing.similarity_threshold = a.get(
+                            "similarity_threshold", 0.7
+                        )
+                        existing.max_search_results = a.get("max_search_results", 5)
+                        existing.max_scrape_urls = a.get("max_scrape_urls", 3)
+                        existing.max_context_tokens = a.get("max_context_tokens", 4000)
+                        existing.rerank_provider = a.get("rerank_provider", "local")
+                        existing.rerank_model = a.get(
+                            "rerank_model", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                        )
+                        existing.rerank_top_n = a.get("rerank_top_n", 20)
+                        existing.cache_similarity_threshold = a.get(
+                            "cache_similarity_threshold", 0.95
+                        )
+                        existing.cache_match_system_prompt = a.get(
+                            "cache_match_system_prompt", True
+                        )
+                        existing.cache_match_last_message_only = a.get(
+                            "cache_match_last_message_only", False
+                        )
+                        existing.cache_ttl_hours = a.get("cache_ttl_hours", 168)
+                        existing.cache_min_tokens = a.get("cache_min_tokens", 50)
+                        existing.cache_max_tokens = a.get("cache_max_tokens", 4000)
+                        existing.cache_collection = a.get("cache_collection")
                         existing.tags = a.get("tags", [])
                         existing.description = a.get("description")
+                        existing.system_prompt = a.get("system_prompt")
                         existing.enabled = a.get("enabled", True)
                     else:
-                        alias = Alias(
+                        alias = SmartAlias(
                             name=a["name"],
                             target_model=a["target_model"],
+                            use_routing=a.get("use_routing", False),
+                            use_rag=a.get("use_rag", False),
+                            use_web=a.get("use_web", False),
+                            use_cache=a.get("use_cache", False),
+                            designator_model=a.get("designator_model"),
+                            purpose=a.get("purpose"),
+                            candidates_json=json.dumps(a.get("candidates", [])),
+                            fallback_model=a.get("fallback_model"),
+                            routing_strategy=a.get("routing_strategy", "per_request"),
+                            session_ttl=a.get("session_ttl", 3600),
+                            use_model_intelligence=a.get(
+                                "use_model_intelligence", False
+                            ),
+                            search_provider=a.get("search_provider"),
+                            intelligence_model=a.get("intelligence_model"),
+                            max_results=a.get("max_results", 5),
+                            similarity_threshold=a.get("similarity_threshold", 0.7),
+                            max_search_results=a.get("max_search_results", 5),
+                            max_scrape_urls=a.get("max_scrape_urls", 3),
+                            max_context_tokens=a.get("max_context_tokens", 4000),
+                            rerank_provider=a.get("rerank_provider", "local"),
+                            rerank_model=a.get(
+                                "rerank_model", "cross-encoder/ms-marco-MiniLM-L-6-v2"
+                            ),
+                            rerank_top_n=a.get("rerank_top_n", 20),
+                            cache_similarity_threshold=a.get(
+                                "cache_similarity_threshold", 0.95
+                            ),
+                            cache_match_system_prompt=a.get(
+                                "cache_match_system_prompt", True
+                            ),
+                            cache_match_last_message_only=a.get(
+                                "cache_match_last_message_only", False
+                            ),
+                            cache_ttl_hours=a.get("cache_ttl_hours", 168),
+                            cache_min_tokens=a.get("cache_min_tokens", 50),
+                            cache_max_tokens=a.get("cache_max_tokens", 4000),
+                            cache_collection=a.get("cache_collection"),
                             description=a.get("description"),
+                            system_prompt=a.get("system_prompt"),
                             enabled=a.get("enabled", True),
                         )
                         alias.tags = a.get("tags", [])
                         db.add(alias)
-                    stats["aliases"] += 1
+                        db.flush()  # Get the ID for document store linking
 
-                # Import smart routers
-                for r in data.get("smart_routers", []):
+                    # Link document stores if specified
+                    store_ids = a.get("document_store_ids", [])
+                    if store_ids and existing:
+                        existing.document_stores = [
+                            db.get(DocumentStore, sid)
+                            for sid in store_ids
+                            if db.get(DocumentStore, sid)
+                        ]
+                    elif store_ids:
+                        alias.document_stores = [
+                            db.get(DocumentStore, sid)
+                            for sid in store_ids
+                            if db.get(DocumentStore, sid)
+                        ]
+                    stats["smart_aliases"] += 1
+
+                # Import legacy aliases (convert to SmartAlias)
+                for a in data.get("aliases", []):
                     existing = (
-                        db.query(SmartRouter)
-                        .filter(SmartRouter.name == r["name"])
+                        db.query(SmartAlias)
+                        .filter(SmartAlias.name == a["name"])
                         .first()
                     )
                     if existing:
-                        existing.designator_model = r["designator_model"]
-                        existing.purpose = r["purpose"]
-                        existing.candidates_json = json.dumps(r.get("candidates", []))
-                        existing.strategy = r.get("strategy", "per_request")
-                        existing.fallback_model = r["fallback_model"]
-                        existing.session_ttl = r.get("session_ttl", 3600)
-                        existing.tags = r.get("tags", [])
-                        existing.description = r.get("description")
-                        existing.enabled = r.get("enabled", True)
-                    else:
-                        router = SmartRouter(
-                            name=r["name"],
-                            designator_model=r["designator_model"],
-                            purpose=r["purpose"],
-                            candidates_json=json.dumps(r.get("candidates", [])),
-                            strategy=r.get("strategy", "per_request"),
-                            fallback_model=r["fallback_model"],
-                            session_ttl=r.get("session_ttl", 3600),
-                            description=r.get("description"),
-                            enabled=r.get("enabled", True),
-                        )
-                        router.tags = r.get("tags", [])
-                        db.add(router)
-                    stats["smart_routers"] += 1
+                        # Skip - already exists as SmartAlias
+                        continue
+                    alias = SmartAlias(
+                        name=a["name"],
+                        target_model=a["target_model"],
+                        description=a.get("description"),
+                        enabled=a.get("enabled", True),
+                    )
+                    alias.tags = a.get("tags", [])
+                    db.add(alias)
+                    stats["smart_aliases"] += 1
+
+                # Import legacy smart routers (convert to SmartAlias with routing)
+                for r in data.get("smart_routers", []):
+                    existing = (
+                        db.query(SmartAlias)
+                        .filter(SmartAlias.name == r["name"])
+                        .first()
+                    )
+                    if existing:
+                        # Skip - already exists as SmartAlias
+                        continue
+                    alias = SmartAlias(
+                        name=r["name"],
+                        target_model=r["fallback_model"],
+                        use_routing=True,
+                        designator_model=r["designator_model"],
+                        purpose=r["purpose"],
+                        candidates_json=json.dumps(r.get("candidates", [])),
+                        fallback_model=r["fallback_model"],
+                        routing_strategy=r.get("strategy", "per_request"),
+                        session_ttl=r.get("session_ttl", 3600),
+                        description=r.get("description"),
+                        enabled=r.get("enabled", True),
+                    )
+                    alias.tags = r.get("tags", [])
+                    db.add(alias)
+                    stats["smart_aliases"] += 1
 
                 # Import provider enabled/disabled state
                 for p in data.get("providers", []):
@@ -3860,222 +4199,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         return jsonify({"success": True})
 
     # -------------------------------------------------------------------------
-    # Aliases API (v3.1)
-    # -------------------------------------------------------------------------
-
-    @admin.route("/api/aliases", methods=["GET"])
-    @require_auth_api
-    def list_aliases():
-        """List all aliases."""
-        from db import get_all_aliases
-
-        aliases = get_all_aliases()
-        return jsonify([a.to_dict() for a in aliases])
-
-    @admin.route("/api/aliases/<int:alias_id>", methods=["GET"])
-    @require_auth_api
-    def get_alias(alias_id: int):
-        """Get a single alias by ID."""
-        from db import get_alias_by_id
-
-        alias = get_alias_by_id(alias_id)
-        if not alias:
-            return jsonify({"error": "Alias not found"}), 404
-        return jsonify(alias.to_dict())
-
-    @admin.route("/api/aliases", methods=["POST"])
-    @require_auth_api
-    def create_alias_endpoint():
-        """Create a new alias."""
-        from db import alias_name_available, create_alias
-
-        data = request.get_json() or {}
-
-        # Validate required fields
-        if not data.get("name"):
-            return jsonify({"error": "Name is required"}), 400
-        if not data.get("target_model"):
-            return jsonify({"error": "Target model is required"}), 400
-
-        name = data["name"].lower().strip()
-
-        # Check if name is available
-        if not alias_name_available(name):
-            return jsonify({"error": f"Alias name '{name}' is already in use"}), 409
-
-        # Check if name conflicts with an existing model
-        try:
-            from providers import registry
-
-            resolved = registry.resolve_model(name)
-            # If we get here without using an alias or default fallback,
-            # the name matches a real model
-            if not resolved.has_alias and not resolved.is_default_fallback:
-                return jsonify(
-                    {"error": f"Name '{name}' conflicts with an existing model"}
-                ), 409
-        except ValueError:
-            # Model not found - that's fine, the name is available
-            pass
-
-        try:
-            alias = create_alias(
-                name=name,
-                target_model=data["target_model"],
-                tags=data.get("tags", []),
-                description=data.get("description"),
-                enabled=data.get("enabled", True),
-                # Caching
-                use_cache=data.get("use_cache", False),
-                cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
-                cache_match_system_prompt=data.get("cache_match_system_prompt", True),
-                cache_match_last_message_only=data.get(
-                    "cache_match_last_message_only", False
-                ),
-                cache_ttl_hours=data.get("cache_ttl_hours", 168),
-                cache_min_tokens=data.get("cache_min_tokens", 50),
-                cache_max_tokens=data.get("cache_max_tokens", 4000),
-            )
-            return jsonify(alias.to_dict()), 201
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/aliases/<int:alias_id>", methods=["PUT"])
-    @require_auth_api
-    def update_alias_endpoint(alias_id: int):
-        """Update an existing alias."""
-        from db import alias_name_available, get_alias_by_id, update_alias
-
-        data = request.get_json() or {}
-
-        # Check alias exists
-        existing = get_alias_by_id(alias_id)
-        if not existing:
-            return jsonify({"error": "Alias not found"}), 404
-
-        # If name is being changed, validate it
-        new_name = data.get("name")
-        if new_name and new_name.lower().strip() != existing.name:
-            new_name = new_name.lower().strip()
-            if not alias_name_available(new_name, exclude_id=alias_id):
-                return jsonify(
-                    {"error": f"Alias name '{new_name}' is already in use"}
-                ), 409
-
-            # Check if new name conflicts with an existing model
-            try:
-                from providers import registry
-
-                resolved = registry.resolve_model(new_name)
-                if not resolved.has_alias and not resolved.is_default_fallback:
-                    return jsonify(
-                        {"error": f"Name '{new_name}' conflicts with an existing model"}
-                    ), 409
-            except ValueError:
-                pass
-
-        try:
-            alias = update_alias(
-                alias_id=alias_id,
-                name=data.get("name"),
-                target_model=data.get("target_model"),
-                tags=data.get("tags"),
-                description=data.get("description"),
-                enabled=data.get("enabled"),
-                # Caching
-                use_cache=data.get("use_cache"),
-                cache_similarity_threshold=data.get("cache_similarity_threshold"),
-                cache_match_system_prompt=data.get("cache_match_system_prompt"),
-                cache_match_last_message_only=data.get("cache_match_last_message_only"),
-                cache_ttl_hours=data.get("cache_ttl_hours"),
-                cache_min_tokens=data.get("cache_min_tokens"),
-                cache_max_tokens=data.get("cache_max_tokens"),
-            )
-            if not alias:
-                return jsonify({"error": "Alias not found"}), 404
-            return jsonify(alias.to_dict())
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/aliases/<int:alias_id>", methods=["DELETE"])
-    @require_auth_api
-    def delete_alias_endpoint(alias_id: int):
-        """Delete an alias."""
-        from db import delete_alias
-
-        if delete_alias(alias_id):
-            return jsonify({"success": True})
-        return jsonify({"error": "Alias not found"}), 404
-
-    @admin.route("/api/aliases/validate/<name>", methods=["GET"])
-    @require_auth_api
-    def validate_alias_name(name: str):
-        """Check if an alias name is available."""
-        from db import alias_name_available
-
-        name = name.lower().strip()
-        exclude_id = request.args.get("exclude_id", type=int)
-
-        # Check if name is taken by another alias
-        if not alias_name_available(name, exclude_id=exclude_id):
-            return jsonify(
-                {"available": False, "reason": "Name is already used by another alias"}
-            )
-
-        # Check if name conflicts with an existing model
-        try:
-            from providers import registry
-
-            resolved = registry.resolve_model(name)
-            if not resolved.has_alias and not resolved.is_default_fallback:
-                return jsonify(
-                    {
-                        "available": False,
-                        "reason": "Name conflicts with an existing model",
-                    }
-                )
-        except ValueError:
-            pass
-
-        return jsonify({"available": True})
-
-    @admin.route("/api/aliases/models", methods=["GET"])
-    @require_auth_api
-    def list_available_models_for_alias():
-        """List all available models that can be used as alias targets."""
-        models = []
-        for provider in registry.get_available_providers():
-            for model_id, info in provider.get_models().items():
-                models.append(
-                    {
-                        "id": f"{provider.name}/{model_id}",
-                        "provider": provider.name,
-                        "model_id": model_id,
-                        "family": info.family,
-                        "description": info.description,
-                    }
-                )
-        return jsonify(models)
-
-    @admin.route("/api/aliases/stats", methods=["GET"])
-    @require_auth_api
-    def get_alias_stats():
-        """Get request counts for all aliases."""
-        with get_db_context() as db:
-            # Count requests per alias
-            stats = (
-                db.query(
-                    RequestLog.alias,
-                    func.count(RequestLog.id).label("requests"),
-                )
-                .filter(RequestLog.alias.isnot(None))
-                .group_by(RequestLog.alias)
-                .all()
-            )
-            return jsonify({row.alias: row.requests for row in stats})
-
-    # -------------------------------------------------------------------------
-    # Redirects API (v3.7)
+    # Redirects API
     # -------------------------------------------------------------------------
 
     @admin.route("/redirects")
@@ -4244,299 +4368,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 results[model] = {"redirected": False}
 
         return jsonify(results)
-
-    # -------------------------------------------------------------------------
-    # Smart Router API (v3.2)
-    # -------------------------------------------------------------------------
-
-    @admin.route("/routers")
-    @require_auth
-    def routers_page():
-        """Smart Routers management page."""
-        return render_template("routers.html")
-
-    @admin.route("/api/routers", methods=["GET"])
-    @require_auth_api
-    def list_routers():
-        """List all smart routers."""
-        from db import get_all_smart_routers
-
-        routers = get_all_smart_routers()
-        return jsonify([r.to_dict() for r in routers])
-
-    @admin.route("/api/routers/<int:router_id>", methods=["GET"])
-    @require_auth_api
-    def get_router(router_id: int):
-        """Get a single smart router by ID."""
-        from db import get_smart_router_by_id
-
-        router = get_smart_router_by_id(router_id)
-        if not router:
-            return jsonify({"error": "Router not found"}), 404
-        return jsonify(router.to_dict())
-
-    @admin.route("/api/routers", methods=["POST"])
-    @require_auth_api
-    def create_router_endpoint():
-        """Create a new smart router."""
-        from db import create_smart_router, router_name_available
-
-        data = request.get_json() or {}
-
-        # Validate required fields
-        if not data.get("name"):
-            return jsonify({"error": "Name is required"}), 400
-        if not data.get("designator_model"):
-            return jsonify({"error": "Designator model is required"}), 400
-        if not data.get("purpose"):
-            return jsonify({"error": "Purpose is required"}), 400
-        if not data.get("candidates") or len(data["candidates"]) < 2:
-            return jsonify({"error": "At least 2 candidates are required"}), 400
-        if not data.get("fallback_model"):
-            return jsonify({"error": "Fallback model is required"}), 400
-
-        name = data["name"].lower().strip()
-
-        # Check if name is available
-        if not router_name_available(name):
-            return jsonify({"error": f"Router name '{name}' is already in use"}), 409
-
-        # Check if name conflicts with an existing model or alias
-        try:
-            from providers import registry
-
-            resolved = registry.resolve_model(name)
-            # If we get here without using default fallback, the name matches something
-            if not resolved.is_default_fallback:
-                return jsonify(
-                    {
-                        "error": f"Name '{name}' conflicts with an existing model or alias"
-                    }
-                ), 409
-        except ValueError:
-            # Model not found - that's fine, the name is available
-            pass
-
-        try:
-            router = create_smart_router(
-                name=name,
-                designator_model=data["designator_model"],
-                purpose=data["purpose"],
-                candidates=data["candidates"],
-                fallback_model=data["fallback_model"],
-                strategy=data.get("strategy", "per_request"),
-                session_ttl=data.get("session_ttl", 3600),
-                tags=data.get("tags", []),
-                description=data.get("description"),
-                enabled=data.get("enabled", True),
-                use_model_intelligence=data.get("use_model_intelligence", False),
-                search_provider=data.get("search_provider"),
-                intelligence_model=data.get("intelligence_model"),
-                # Caching
-                use_cache=data.get("use_cache", False),
-                cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
-                cache_match_system_prompt=data.get("cache_match_system_prompt", True),
-                cache_match_last_message_only=data.get(
-                    "cache_match_last_message_only", False
-                ),
-                cache_ttl_hours=data.get("cache_ttl_hours", 168),
-                cache_min_tokens=data.get("cache_min_tokens", 50),
-                cache_max_tokens=data.get("cache_max_tokens", 4000),
-            )
-            return jsonify(router.to_dict()), 201
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/routers/<int:router_id>", methods=["PUT"])
-    @require_auth_api
-    def update_router_endpoint(router_id: int):
-        """Update an existing smart router."""
-        from db import (
-            get_smart_router_by_id,
-            router_name_available,
-            update_smart_router,
-        )
-
-        data = request.get_json() or {}
-
-        # Check router exists
-        existing = get_smart_router_by_id(router_id)
-        if not existing:
-            return jsonify({"error": "Router not found"}), 404
-
-        # If name is being changed, validate it
-        new_name = data.get("name")
-        if new_name and new_name.lower().strip() != existing.name:
-            new_name = new_name.lower().strip()
-            if not router_name_available(new_name, exclude_id=router_id):
-                return jsonify(
-                    {"error": f"Router name '{new_name}' is already in use"}
-                ), 409
-
-            # Check if new name conflicts with an existing model or alias
-            try:
-                from providers import registry
-
-                resolved = registry.resolve_model(new_name)
-                if not resolved.is_default_fallback:
-                    return jsonify(
-                        {
-                            "error": f"Name '{new_name}' conflicts with an existing model or alias"
-                        }
-                    ), 409
-            except ValueError:
-                pass
-
-        try:
-            router = update_smart_router(
-                router_id=router_id,
-                name=data.get("name"),
-                designator_model=data.get("designator_model"),
-                purpose=data.get("purpose"),
-                candidates=data.get("candidates"),
-                fallback_model=data.get("fallback_model"),
-                strategy=data.get("strategy"),
-                session_ttl=data.get("session_ttl"),
-                tags=data.get("tags"),
-                description=data.get("description"),
-                enabled=data.get("enabled"),
-                use_model_intelligence=data.get("use_model_intelligence"),
-                search_provider=data.get("search_provider"),
-                intelligence_model=data.get("intelligence_model"),
-                # Caching
-                use_cache=data.get("use_cache"),
-                cache_similarity_threshold=data.get("cache_similarity_threshold"),
-                cache_match_system_prompt=data.get("cache_match_system_prompt"),
-                cache_match_last_message_only=data.get("cache_match_last_message_only"),
-                cache_ttl_hours=data.get("cache_ttl_hours"),
-                cache_min_tokens=data.get("cache_min_tokens"),
-                cache_max_tokens=data.get("cache_max_tokens"),
-            )
-            if not router:
-                return jsonify({"error": "Router not found"}), 404
-            return jsonify(router.to_dict())
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/routers/<int:router_id>", methods=["DELETE"])
-    @require_auth_api
-    def delete_router_endpoint(router_id: int):
-        """Delete a smart router."""
-        from db import delete_smart_router
-
-        if delete_smart_router(router_id):
-            return jsonify({"success": True})
-        return jsonify({"error": "Router not found"}), 404
-
-    @admin.route("/api/routers/validate/<name>", methods=["GET"])
-    @require_auth_api
-    def validate_router_name(name: str):
-        """Check if a router name is available."""
-        from db import router_name_available
-
-        name = name.lower().strip()
-        exclude_id = request.args.get("exclude_id", type=int)
-
-        # Check if name is taken by another router
-        if not router_name_available(name, exclude_id=exclude_id):
-            return jsonify(
-                {"available": False, "reason": "Name is already used by another router"}
-            )
-
-        # Check if name conflicts with an existing model or alias
-        try:
-            from providers import registry
-
-            resolved = registry.resolve_model(name)
-            if not resolved.is_default_fallback:
-                return jsonify(
-                    {
-                        "available": False,
-                        "reason": "Name conflicts with an existing model or alias",
-                    }
-                )
-        except ValueError:
-            pass
-
-        return jsonify({"available": True})
-
-    @admin.route("/api/routers/models", methods=["GET"])
-    @require_auth_api
-    def list_available_models_for_router():
-        """List all available models that can be used as router candidates/designators."""
-        models = []
-
-        # Only provider models - no aliases/routers/augmentors to avoid circular routing
-        for provider in registry.get_available_providers():
-            for model_id, info in provider.get_models().items():
-                models.append(
-                    {
-                        "id": f"{provider.name}/{model_id}",
-                        "provider": provider.name,
-                        "model_id": model_id,
-                        "family": info.family,
-                        "description": info.description,
-                        "context_length": info.context_length,
-                        "capabilities": info.capabilities,
-                        "input_cost": info.input_cost,
-                        "output_cost": info.output_cost,
-                    }
-                )
-        return jsonify(models)
-
-    @admin.route("/api/usage/by-router", methods=["GET"])
-    @require_auth_api
-    def usage_by_router():
-        """Get usage statistics grouped by smart router."""
-        from datetime import datetime, timedelta
-
-        from sqlalchemy import func
-
-        # Parse date range
-        days = request.args.get("days", 7, type=int)
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
-
-        with get_db_context() as db:
-            # Query daily stats grouped by router
-            stats = (
-                db.query(
-                    DailyStats.router_name,
-                    func.sum(DailyStats.request_count).label("requests"),
-                    func.sum(DailyStats.input_tokens).label("input_tokens"),
-                    func.sum(DailyStats.output_tokens).label("output_tokens"),
-                    func.sum(DailyStats.estimated_cost).label("cost"),
-                    func.sum(DailyStats.success_count).label("success"),
-                    func.sum(DailyStats.error_count).label("errors"),
-                )
-                .filter(
-                    DailyStats.date >= start_date,
-                    DailyStats.router_name.isnot(None),
-                    # Only get router-level totals (no other dimensions)
-                    DailyStats.tag.is_(None),
-                    DailyStats.provider_id.is_(None),
-                    DailyStats.model_id.is_(None),
-                    DailyStats.alias.is_(None),
-                )
-                .group_by(DailyStats.router_name)
-                .all()
-            )
-
-            result = []
-            for stat in stats:
-                result.append(
-                    {
-                        "router_name": stat.router_name,
-                        "requests": stat.requests or 0,
-                        "input_tokens": stat.input_tokens or 0,
-                        "output_tokens": stat.output_tokens or 0,
-                        "cost": float(stat.cost or 0),
-                        "success": stat.success or 0,
-                        "errors": stat.errors or 0,
-                    }
-                )
-
-            return jsonify(result)
 
     # -------------------------------------------------------------------------
     # Alerts API (System Health Monitoring)
@@ -4782,58 +4613,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 }
             )
 
-    @admin.route("/api/routers/stats", methods=["GET"])
-    @require_auth_api
-    def get_router_stats():
-        """Get request counts and candidate distribution for all routers."""
-        from sqlalchemy import func
-
-        with get_db_context() as db:
-            # Count total requests per router (excluding designator calls)
-            router_stats = (
-                db.query(
-                    RequestLog.router_name,
-                    func.count(RequestLog.id).label("requests"),
-                )
-                .filter(
-                    RequestLog.router_name.isnot(None),
-                    RequestLog.is_designator == False,
-                )
-                .group_by(RequestLog.router_name)
-                .all()
-            )
-
-            # Get candidate distribution per router
-            candidate_stats = (
-                db.query(
-                    RequestLog.router_name,
-                    RequestLog.model_id,
-                    func.count(RequestLog.id).label("requests"),
-                )
-                .filter(
-                    RequestLog.router_name.isnot(None),
-                    RequestLog.is_designator == False,
-                )
-                .group_by(RequestLog.router_name, RequestLog.model_id)
-                .all()
-            )
-
-            # Build response
-            result = {}
-            for row in router_stats:
-                result[row.router_name] = {
-                    "requests": row.requests,
-                    "candidates": {},
-                }
-
-            for row in candidate_stats:
-                if row.router_name in result:
-                    result[row.router_name]["candidates"][row.model_id] = row.requests
-
-            return jsonify(result)
-
     # -------------------------------------------------------------------------
-    # Model Intelligence API (v3.6)
+    # Model Intelligence API
     # -------------------------------------------------------------------------
 
     @admin.route("/api/model-intelligence", methods=["GET"])
@@ -5063,10 +4844,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Document Stores management page."""
         return render_template("document_stores.html")
 
+    @admin.route("/rag-config")
+    @require_auth
+    def rag_config_page():
+        """RAG Configuration page (embeddings, reranking, vision settings)."""
+        return render_template("rag_config.html")
+
     @admin.route("/web-sources")
     @require_auth
     def web_sources_page():
-        """Web Sources configuration page (search and scraping settings)."""
+        """Web Configuration page (search and scraping settings)."""
         return render_template("web_sources.html")
 
     @admin.route("/api/mcp-integrations/status", methods=["GET"])
@@ -5122,6 +4909,129 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "custom": {"available": True, "reason": None},  # Always available
             }
         )
+
+    @admin.route("/api/notion/search", methods=["GET"])
+    @require_auth_api
+    def notion_search():
+        """Search Notion for databases and pages."""
+        import os
+
+        import requests
+
+        token = os.environ.get("NOTION_TOKEN") or os.environ.get("NOTION_API_KEY")
+        if not token:
+            return jsonify({"error": "NOTION_TOKEN not configured"}), 400
+
+        query = request.args.get("query", "")
+        filter_type = request.args.get("filter", "")  # "database" or "page" or ""
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28",
+        }
+
+        # Build search request
+        search_body = {}
+        if query:
+            search_body["query"] = query
+        if filter_type in ("database", "page"):
+            search_body["filter"] = {"property": "object", "value": filter_type}
+
+        try:
+            resp = requests.post(
+                "https://api.notion.com/v1/search",
+                headers=headers,
+                json=search_body,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            results = []
+            for item in data.get("results", []):
+                obj_type = item.get("object")
+                item_id = item.get("id", "")
+
+                # Extract title
+                title = "Untitled"
+                if obj_type == "database":
+                    title_arr = item.get("title", [])
+                    if title_arr:
+                        title = title_arr[0].get("plain_text", "Untitled")
+                elif obj_type == "page":
+                    props = item.get("properties", {})
+                    # Try common title property names
+                    for key in ["title", "Title", "Name", "name"]:
+                        if key in props:
+                            title_prop = props[key]
+                            if title_prop.get("type") == "title":
+                                title_arr = title_prop.get("title", [])
+                                if title_arr:
+                                    title = title_arr[0].get("plain_text", "Untitled")
+                                    break
+                results.append(
+                    {
+                        "id": item_id,
+                        "type": obj_type,
+                        "title": title,
+                        "url": item.get("url", ""),
+                    }
+                )
+
+            return jsonify({"results": results})
+
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Notion API error: {str(e)}"}), 500
+
+    @admin.route("/api/notion/databases", methods=["GET"])
+    @require_auth_api
+    def notion_list_databases():
+        """List all accessible Notion databases."""
+        import os
+
+        import requests
+
+        token = os.environ.get("NOTION_TOKEN") or os.environ.get("NOTION_API_KEY")
+        if not token:
+            return jsonify({"error": "NOTION_TOKEN not configured"}), 400
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28",
+        }
+
+        try:
+            resp = requests.post(
+                "https://api.notion.com/v1/search",
+                headers=headers,
+                json={"filter": {"property": "object", "value": "database"}},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            databases = []
+            for item in data.get("results", []):
+                title_arr = item.get("title", [])
+                title = (
+                    title_arr[0].get("plain_text", "Untitled")
+                    if title_arr
+                    else "Untitled"
+                )
+                databases.append(
+                    {
+                        "id": item.get("id", ""),
+                        "title": title,
+                        "url": item.get("url", ""),
+                    }
+                )
+
+            return jsonify({"databases": databases})
+
+        except requests.exceptions.RequestException as e:
+            return jsonify({"error": f"Notion API error: {str(e)}"}), 500
 
     @admin.route("/api/document-stores", methods=["GET"])
     @require_auth_api
@@ -5213,6 +5123,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 return jsonify(
                     {"error": "Repository is required for GitHub source"}
                 ), 400
+        elif source_type == "notion":
+            # Credentials come from NOTION_TOKEN or NOTION_API_KEY env var
+            if not os.environ.get("NOTION_TOKEN") and not os.environ.get(
+                "NOTION_API_KEY"
+            ):
+                return jsonify(
+                    {
+                        "error": "NOTION_TOKEN or NOTION_API_KEY environment variable is required"
+                    }
+                ), 400
         else:
             return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
@@ -5234,6 +5154,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 github_repo=data.get("github_repo"),
                 github_branch=data.get("github_branch"),
                 github_path=data.get("github_path"),
+                notion_database_id=data.get("notion_database_id"),
+                notion_page_id=data.get("notion_page_id"),
                 embedding_provider=data.get("embedding_provider", "local"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5279,6 +5201,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 github_repo=data.get("github_repo"),
                 github_branch=data.get("github_branch"),
                 github_path=data.get("github_path"),
+                notion_database_id=data.get("notion_database_id"),
+                notion_page_id=data.get("notion_page_id"),
                 embedding_provider=data.get("embedding_provider"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5899,68 +5823,32 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @require_auth_api
     def list_gmail_labels(account_id):
         """
-        List labels from a Gmail account.
+        List standard Gmail labels.
 
         Returns a list of labels the user can select to limit indexing scope.
-        Gmail labels include system labels (INBOX, SENT, etc.) and user labels.
+        Gmail labels include system labels (INBOX, SENT, etc.).
         """
-        from mcp.client import MCPClient, MCPServerConfig
-        from mcp.sources import _setup_google_oauth_files
+        # Provide standard Gmail labels
+        # Gmail API doesn't easily enumerate custom labels without full OAuth,
+        # so we provide the standard system labels
+        standard_labels = [
+            {"id": "", "name": "All emails (no filter)"},
+            {"id": "INBOX", "name": "Inbox"},
+            {"id": "SENT", "name": "Sent"},
+            {"id": "DRAFT", "name": "Drafts"},
+            {"id": "STARRED", "name": "Starred"},
+            {"id": "IMPORTANT", "name": "Important"},
+            {"id": "UNREAD", "name": "Unread"},
+            {"id": "SPAM", "name": "Spam"},
+            {"id": "TRASH", "name": "Trash"},
+            {"id": "CATEGORY_PERSONAL", "name": "Category: Personal"},
+            {"id": "CATEGORY_SOCIAL", "name": "Category: Social"},
+            {"id": "CATEGORY_PROMOTIONS", "name": "Category: Promotions"},
+            {"id": "CATEGORY_UPDATES", "name": "Category: Updates"},
+            {"id": "CATEGORY_FORUMS", "name": "Category: Forums"},
+        ]
 
-        # Set up credentials for this account
-        creds_dir = _setup_google_oauth_files(account_id)
-        if not creds_dir:
-            return jsonify({"error": "Failed to set up Google credentials"}), 400
-
-        config = MCPServerConfig(
-            name="gmail",
-            transport="stdio",
-            command="uvx",
-            args=[
-                "mcp-gsuite",
-                "--gauth-file",
-                f"{creds_dir}/.gauth.json",
-                "--accounts-file",
-                f"{creds_dir}/.accounts.json",
-                "--credentials-dir",
-                creds_dir,
-            ],
-        )
-
-        labels = []
-        try:
-            client = MCPClient(config)
-            if not client.connect():
-                return jsonify({"error": "Failed to connect to Gmail"}), 500
-
-            # Query emails to get available labels
-            # mcp-gsuite doesn't have a list_labels tool, so we'll provide common labels
-            # and let the user type custom ones
-            client.disconnect()
-
-            # Provide standard Gmail labels
-            standard_labels = [
-                {"id": "", "name": "All emails (no filter)"},
-                {"id": "INBOX", "name": "Inbox"},
-                {"id": "SENT", "name": "Sent"},
-                {"id": "DRAFT", "name": "Drafts"},
-                {"id": "STARRED", "name": "Starred"},
-                {"id": "IMPORTANT", "name": "Important"},
-                {"id": "UNREAD", "name": "Unread"},
-                {"id": "SPAM", "name": "Spam"},
-                {"id": "TRASH", "name": "Trash"},
-                {"id": "CATEGORY_PERSONAL", "name": "Category: Personal"},
-                {"id": "CATEGORY_SOCIAL", "name": "Category: Social"},
-                {"id": "CATEGORY_PROMOTIONS", "name": "Category: Promotions"},
-                {"id": "CATEGORY_UPDATES", "name": "Category: Updates"},
-                {"id": "CATEGORY_FORUMS", "name": "Category: Forums"},
-            ]
-
-            return jsonify({"labels": standard_labels})
-
-        except Exception as e:
-            logger.error(f"Failed to list Gmail labels: {e}")
-            return jsonify({"error": str(e)}), 500
+        return jsonify({"labels": standard_labels})
 
     @admin.route("/api/oauth/google/<int:account_id>/calendars", methods=["GET"])
     @require_auth_api
@@ -6306,180 +6194,47 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"success": True})
         return jsonify({"error": "Smart alias not found"}), 404
 
-    # ========================================================================
-    # Smart Enrichers (legacy - unified RAG + Web)
-    # ========================================================================
-
-    @admin.route("/enrichers")
-    @require_auth
-    def enrichers_page():
-        """Smart Enrichers management page."""
-        return render_template("enrichers.html")
-
-    @admin.route("/api/enrichers/models", methods=["GET"])
+    @admin.route("/api/smart-aliases/stats", methods=["GET"])
     @require_auth_api
-    def list_available_models_for_enricher():
-        """List all available models that can be used as enricher targets."""
-        models = []
+    def get_smart_alias_routing_stats():
+        """Get per-candidate routing statistics from request logs."""
+        from sqlalchemy import func
 
-        # Only provider models - no aliases/routers to avoid circular routing
-        for provider in registry.get_available_providers():
-            for model_id, info in provider.get_models().items():
-                models.append(
-                    {
-                        "id": f"{provider.name}/{model_id}",
-                        "provider": provider.name,
-                        "model_id": model_id,
-                        "family": info.family,
-                        "description": info.description,
-                        "context_length": info.context_length,
-                        "capabilities": info.capabilities,
-                        "input_cost": info.input_cost,
-                        "output_cost": info.output_cost,
-                    }
+        from db import get_db_context
+        from db.models import RequestLog
+
+        stats = {}
+        try:
+            with get_db_context() as db:
+                # Get routing stats grouped by router_name, provider_id, and model_id
+                results = (
+                    db.query(
+                        RequestLog.router_name,
+                        RequestLog.provider_id,
+                        RequestLog.model_id,
+                        func.count().label("count"),
+                    )
+                    .filter(RequestLog.router_name.isnot(None))
+                    .filter(RequestLog.router_name != "")
+                    .group_by(
+                        RequestLog.router_name,
+                        RequestLog.provider_id,
+                        RequestLog.model_id,
+                    )
+                    .all()
                 )
 
-        # Sort by provider, then model_id
-        models.sort(key=lambda m: (m["provider"], m["model_id"]))
-        return jsonify(models)
+                for router_name, provider_id, model_id, count in results:
+                    if router_name not in stats:
+                        stats[router_name] = {"requests": 0, "candidates": {}}
+                    # Use full path format: provider/model (e.g., "anthropic/claude-haiku-4-5")
+                    full_model = f"{provider_id}/{model_id}"
+                    stats[router_name]["candidates"][full_model] = count
+                    stats[router_name]["requests"] += count
 
-    @admin.route("/api/enrichers", methods=["GET"])
-    @require_auth_api
-    def list_enrichers():
-        """List all smart enrichers."""
-        from db import get_all_smart_enrichers
+        except Exception as e:
+            logger.error(f"Error getting routing stats: {e}")
 
-        enrichers = get_all_smart_enrichers()
-        return jsonify([e.to_dict() for e in enrichers])
-
-    @admin.route("/api/enrichers/<int:enricher_id>", methods=["GET"])
-    @require_auth_api
-    def get_enricher(enricher_id: int):
-        """Get a specific smart enricher."""
-        from db import get_smart_enricher_by_id
-
-        enricher = get_smart_enricher_by_id(enricher_id)
-        if not enricher:
-            return jsonify({"error": "Enricher not found"}), 404
-        return jsonify(enricher.to_dict())
-
-    @admin.route("/api/enrichers", methods=["POST"])
-    @require_auth_api
-    def create_enricher():
-        """Create a new smart enricher."""
-        from db import create_smart_enricher
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        name = data.get("name", "").strip()
-        if not name:
-            return jsonify({"error": "Name is required"}), 400
-
-        target_model = data.get("target_model", "").strip()
-        if not target_model:
-            return jsonify({"error": "Target model is required"}), 400
-
-        use_rag = data.get("use_rag", False)
-        use_web = data.get("use_web", False)
-
-        if not use_rag and not use_web:
-            return jsonify(
-                {"error": "At least one enrichment option (RAG or Web) must be enabled"}
-            ), 400
-
-        # Document store IDs (for RAG)
-        store_ids = data.get("document_store_ids") or data.get("store_ids")
-
-        # If RAG is enabled, we need document stores
-        if use_rag and not store_ids:
-            return jsonify(
-                {"error": "Document stores are required when RAG is enabled"}
-            ), 400
-
-        try:
-            enricher = create_smart_enricher(
-                name=name,
-                target_model=target_model,
-                use_rag=use_rag,
-                use_web=use_web,
-                store_ids=store_ids,
-                designator_model=data.get("designator_model"),
-                max_results=data.get("max_results", 5),
-                similarity_threshold=data.get("similarity_threshold", 0.7),
-                max_search_results=data.get("max_search_results", 5),
-                max_scrape_urls=data.get("max_scrape_urls", 3),
-                max_context_tokens=data.get("max_context_tokens", 4000),
-                rerank_provider=data.get("rerank_provider", "local"),
-                rerank_model=data.get("rerank_model"),
-                rerank_top_n=data.get("rerank_top_n", 20),
-                tags=data.get("tags", []),
-                description=data.get("description"),
-                enabled=data.get("enabled", True),
-            )
-            return jsonify(enricher.to_dict()), 201
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/enrichers/<int:enricher_id>", methods=["PUT"])
-    @require_auth_api
-    def update_enricher_endpoint(enricher_id: int):
-        """Update a smart enricher."""
-        from db import update_smart_enricher
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
-
-        # Document store IDs
-        store_ids = data.get("document_store_ids") or data.get("store_ids")
-
-        try:
-            enricher = update_smart_enricher(
-                enricher_id=enricher_id,
-                name=data.get("name"),
-                target_model=data.get("target_model"),
-                use_rag=data.get("use_rag"),
-                use_web=data.get("use_web"),
-                store_ids=store_ids,
-                designator_model=data.get("designator_model"),
-                max_results=data.get("max_results"),
-                similarity_threshold=data.get("similarity_threshold"),
-                max_search_results=data.get("max_search_results"),
-                max_scrape_urls=data.get("max_scrape_urls"),
-                max_context_tokens=data.get("max_context_tokens"),
-                rerank_provider=data.get("rerank_provider"),
-                rerank_model=data.get("rerank_model"),
-                rerank_top_n=data.get("rerank_top_n"),
-                tags=data.get("tags"),
-                description=data.get("description"),
-                enabled=data.get("enabled"),
-            )
-            if not enricher:
-                return jsonify({"error": "Enricher not found"}), 404
-            return jsonify(enricher.to_dict())
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
-
-    @admin.route("/api/enrichers/<int:enricher_id>", methods=["DELETE"])
-    @require_auth_api
-    def delete_enricher_endpoint(enricher_id: int):
-        """Delete a smart enricher."""
-        from db import delete_smart_enricher
-
-        if delete_smart_enricher(enricher_id):
-            return jsonify({"success": True})
-        return jsonify({"error": "Failed to delete enricher"}), 500
-
-    @admin.route("/api/enrichers/<int:enricher_id>/reset-stats", methods=["POST"])
-    @require_auth_api
-    def reset_enricher_stats(enricher_id: int):
-        """Reset statistics for an enricher."""
-        from db import reset_smart_enricher_stats
-
-        if reset_smart_enricher_stats(enricher_id):
-            return jsonify({"success": True})
-        return jsonify({"error": "Enricher not found"}), 404
+        return jsonify(stats)
 
     return admin

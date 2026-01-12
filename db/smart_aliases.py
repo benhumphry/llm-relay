@@ -731,6 +731,8 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         tags_json=alias.tags_json,
         description=alias.description,
         enabled=alias.enabled,
+        # System prompt
+        system_prompt=alias.system_prompt,
     )
     detached.id = alias.id
     detached.created_at = alias.created_at

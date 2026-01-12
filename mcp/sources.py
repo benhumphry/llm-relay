@@ -2100,6 +2100,391 @@ def _inject_mcp_env_vars(mcp_config: dict) -> dict:
     return config
 
 
+class NotionDocumentSource(DocumentSource):
+    """
+    Document source for Notion using the REST API directly.
+
+    Uses Notion API v1 to list and read pages, bypassing MCP for
+    simpler deployment (no Node.js required).
+
+    Credentials are read from NOTION_TOKEN or NOTION_API_KEY environment variable.
+    """
+
+    def __init__(
+        self,
+        database_id: Optional[str] = None,
+        root_page_id: Optional[str] = None,
+    ):
+        """
+        Initialize with optional database or page filter.
+
+        Args:
+            database_id: Optional database ID to index pages from
+            root_page_id: Optional root page ID to index (and children)
+        """
+        self.database_id = database_id
+        self.root_page_id = root_page_id
+        self.api_token = os.environ.get("NOTION_TOKEN") or os.environ.get(
+            "NOTION_API_KEY", ""
+        )
+        self.base_url = "https://api.notion.com/v1"
+        self.api_version = "2022-06-28"
+
+    def _get_headers(self) -> dict:
+        """Get headers for API requests."""
+        return {
+            "Authorization": f"Bearer {self.api_token}",
+            "Notion-Version": self.api_version,
+            "Content-Type": "application/json",
+        }
+
+    def is_available(self) -> bool:
+        """Check if we can connect to Notion."""
+        import requests as http_requests
+
+        if not self.api_token:
+            logger.warning("No Notion API token configured")
+            return False
+
+        try:
+            response = http_requests.get(
+                f"{self.base_url}/users/me",
+                headers=self._get_headers(),
+                timeout=10,
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"Notion not available: {e}")
+            return False
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List pages from Notion."""
+        import requests as http_requests
+
+        if self.database_id:
+            # Query a specific database
+            logger.info(f"Listing pages from Notion database: {self.database_id}")
+            yield from self._list_database_pages(self.database_id)
+        elif self.root_page_id:
+            # List children of a specific page
+            logger.info(f"Listing child pages from Notion page: {self.root_page_id}")
+            yield from self._list_page_children(self.root_page_id)
+        else:
+            # Search all accessible pages
+            logger.info("Searching all accessible Notion pages")
+            yield from self._search_all_pages()
+
+    def _list_database_pages(self, database_id: str) -> Iterator[DocumentInfo]:
+        """Query pages from a Notion database."""
+        import requests as http_requests
+
+        next_cursor = None
+        total_pages = 0
+
+        while True:
+            payload = {"page_size": 100}
+            if next_cursor:
+                payload["start_cursor"] = next_cursor
+
+            response = http_requests.post(
+                f"{self.base_url}/databases/{database_id}/query",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Notion API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            results = data.get("results", [])
+
+            for page in results:
+                page_id = page.get("id")
+                title = self._extract_page_title(page)
+                modified_time = page.get("last_edited_time")
+
+                total_pages += 1
+                yield DocumentInfo(
+                    uri=f"notion://{page_id}",
+                    name=title or page_id,
+                    mime_type="text/markdown",
+                    modified_time=modified_time,
+                )
+
+            # Check for more pages
+            if not data.get("has_more"):
+                break
+            next_cursor = data.get("next_cursor")
+
+        logger.info(f"Found {total_pages} pages in Notion database")
+
+    def _list_page_children(self, page_id: str) -> Iterator[DocumentInfo]:
+        """List child pages of a Notion page."""
+        import requests as http_requests
+
+        next_cursor = None
+        total_pages = 0
+
+        while True:
+            params = {"page_size": 100}
+            if next_cursor:
+                params["start_cursor"] = next_cursor
+
+            response = http_requests.get(
+                f"{self.base_url}/blocks/{page_id}/children",
+                headers=self._get_headers(),
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Notion API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            results = data.get("results", [])
+
+            for block in results:
+                # Only yield child pages
+                if block.get("type") == "child_page":
+                    child_id = block.get("id")
+                    title = block.get("child_page", {}).get("title", child_id)
+                    modified_time = block.get("last_edited_time")
+
+                    total_pages += 1
+                    yield DocumentInfo(
+                        uri=f"notion://{child_id}",
+                        name=title,
+                        mime_type="text/markdown",
+                        modified_time=modified_time,
+                    )
+
+            # Check for more pages
+            if not data.get("has_more"):
+                break
+            next_cursor = data.get("next_cursor")
+
+        logger.info(f"Found {total_pages} child pages in Notion")
+
+    def _search_all_pages(self) -> Iterator[DocumentInfo]:
+        """Search all accessible Notion pages."""
+        import requests as http_requests
+
+        next_cursor = None
+        total_pages = 0
+
+        while True:
+            payload = {
+                "filter": {"property": "object", "value": "page"},
+                "page_size": 100,
+            }
+            if next_cursor:
+                payload["start_cursor"] = next_cursor
+
+            response = http_requests.post(
+                f"{self.base_url}/search",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Notion API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            results = data.get("results", [])
+
+            for page in results:
+                page_id = page.get("id")
+                title = self._extract_page_title(page)
+                modified_time = page.get("last_edited_time")
+
+                total_pages += 1
+                yield DocumentInfo(
+                    uri=f"notion://{page_id}",
+                    name=title or page_id,
+                    mime_type="text/markdown",
+                    modified_time=modified_time,
+                )
+
+            # Check for more pages
+            if not data.get("has_more"):
+                break
+            next_cursor = data.get("next_cursor")
+
+        logger.info(f"Found {total_pages} pages in Notion")
+
+    def _extract_page_title(self, page: dict) -> Optional[str]:
+        """Extract title from a Notion page object."""
+        properties = page.get("properties", {})
+
+        # Look for title property (could be named "title", "Name", etc.)
+        for prop_name, prop_val in properties.items():
+            if isinstance(prop_val, dict) and prop_val.get("type") == "title":
+                title_arr = prop_val.get("title", [])
+                if title_arr and isinstance(title_arr[0], dict):
+                    return title_arr[0].get("plain_text", "")
+
+        return None
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a Notion page and convert to markdown."""
+        import requests as http_requests
+
+        # Extract page ID from URI (notion://page_id)
+        if not uri.startswith("notion://"):
+            logger.error(f"Invalid Notion URI: {uri}")
+            return None
+
+        page_id = uri.replace("notion://", "")
+
+        try:
+            # First get page metadata for title
+            page_response = http_requests.get(
+                f"{self.base_url}/pages/{page_id}",
+                headers=self._get_headers(),
+                timeout=30,
+            )
+
+            title = page_id
+            if page_response.status_code == 200:
+                page_data = page_response.json()
+                title = self._extract_page_title(page_data) or page_id
+
+            # Get all blocks (content)
+            blocks = self._get_all_blocks(page_id)
+
+            # Convert blocks to markdown
+            markdown = self._blocks_to_markdown(blocks)
+
+            return DocumentContent(
+                uri=uri,
+                name=title[:100],
+                mime_type="text/markdown",
+                text=markdown,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to read Notion page {page_id}: {e}")
+            return None
+
+    def _get_all_blocks(self, page_id: str) -> list:
+        """Get all blocks from a page, handling pagination."""
+        import requests as http_requests
+
+        blocks = []
+        next_cursor = None
+
+        while True:
+            params = {"page_size": 100}
+            if next_cursor:
+                params["start_cursor"] = next_cursor
+
+            response = http_requests.get(
+                f"{self.base_url}/blocks/{page_id}/children",
+                headers=self._get_headers(),
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Failed to get blocks: {response.status_code}")
+                break
+
+            data = response.json()
+            blocks.extend(data.get("results", []))
+
+            if not data.get("has_more"):
+                break
+            next_cursor = data.get("next_cursor")
+
+        return blocks
+
+    def _blocks_to_markdown(self, blocks: list) -> str:
+        """Convert Notion blocks to markdown."""
+        lines = []
+
+        for block in blocks:
+            block_type = block.get("type", "")
+            block_data = block.get(block_type, {})
+
+            # Extract rich text
+            rich_text = block_data.get("rich_text", [])
+            text = "".join(rt.get("plain_text", "") for rt in rich_text)
+
+            # Format based on block type
+            if block_type == "paragraph":
+                if text:
+                    lines.append(text)
+                    lines.append("")
+            elif block_type.startswith("heading_"):
+                level = block_type[-1]  # heading_1, heading_2, heading_3
+                prefix = "#" * int(level)
+                lines.append(f"{prefix} {text}")
+                lines.append("")
+            elif block_type == "bulleted_list_item":
+                lines.append(f"- {text}")
+            elif block_type == "numbered_list_item":
+                lines.append(f"1. {text}")
+            elif block_type == "to_do":
+                checked = block_data.get("checked", False)
+                checkbox = "[x]" if checked else "[ ]"
+                lines.append(f"- {checkbox} {text}")
+            elif block_type == "toggle":
+                lines.append(f"<details><summary>{text}</summary></details>")
+                lines.append("")
+            elif block_type == "code":
+                language = block_data.get("language", "")
+                lines.append(f"```{language}")
+                lines.append(text)
+                lines.append("```")
+                lines.append("")
+            elif block_type == "quote":
+                lines.append(f"> {text}")
+                lines.append("")
+            elif block_type == "callout":
+                icon = block_data.get("icon", {}).get("emoji", "")
+                lines.append(f"> {icon} {text}")
+                lines.append("")
+            elif block_type == "divider":
+                lines.append("---")
+                lines.append("")
+            elif block_type == "table_row":
+                cells = block_data.get("cells", [])
+                cell_texts = []
+                for cell in cells:
+                    cell_text = "".join(rt.get("plain_text", "") for rt in cell)
+                    cell_texts.append(cell_text)
+                lines.append("| " + " | ".join(cell_texts) + " |")
+            elif block_type == "child_page":
+                # Reference to child page
+                child_title = block_data.get("title", "Untitled")
+                lines.append(f"📄 [{child_title}](notion://{block.get('id')})")
+                lines.append("")
+            elif block_type == "bookmark":
+                url = block_data.get("url", "")
+                caption = "".join(
+                    rt.get("plain_text", "") for rt in block_data.get("caption", [])
+                )
+                lines.append(f"🔗 [{caption or url}]({url})")
+                lines.append("")
+            elif text:
+                # Fallback for other types with text
+                lines.append(text)
+                lines.append("")
+
+        return "\n".join(lines).strip()
+
+
 class GitHubDocumentSource(DocumentSource):
     """
     Document source for GitHub repositories using the REST API.
@@ -2339,6 +2724,8 @@ def get_document_source(
     github_repo: Optional[str] = None,
     github_branch: Optional[str] = None,
     github_path: Optional[str] = None,
+    notion_database_id: Optional[str] = None,
+    notion_page_id: Optional[str] = None,
     vision_provider: str = "local",
     vision_model: Optional[str] = None,
     vision_ollama_url: Optional[str] = None,
@@ -2347,7 +2734,7 @@ def get_document_source(
     Factory function to create the appropriate document source.
 
     Args:
-        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", or "paperless"
+        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", "notion", or "paperless"
         source_path: Path for local sources
         mcp_config: Configuration dict for MCP sources
         google_account_id: OAuth account ID for Google sources
@@ -2359,6 +2746,8 @@ def get_document_source(
         github_repo: Repository in "owner/repo" format for GitHub sources
         github_branch: Branch name for GitHub sources
         github_path: Path filter for GitHub sources
+        notion_database_id: Optional Notion database ID to index
+        notion_page_id: Optional Notion page ID (indexes children)
         vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
         vision_model: Vision model name (e.g., "granite3.2-vision:latest")
         vision_ollama_url: Ollama URL when using ollama provider
@@ -2366,7 +2755,23 @@ def get_document_source(
     Returns:
         Appropriate DocumentSource instance
     """
-    if source_type == "paperless":
+    if source_type == "notion":
+        # Notion direct API integration (no MCP/Node.js required)
+        source = NotionDocumentSource(
+            database_id=notion_database_id,
+            root_page_id=notion_page_id,
+        )
+        if not source.api_token:
+            raise ValueError(
+                "NOTION_TOKEN or NOTION_API_KEY environment variable required for Notion source"
+            )
+        logger.info(
+            f"Creating Notion source (database={notion_database_id or 'none'}, "
+            f"page={notion_page_id or 'none'})"
+        )
+        return source
+
+    elif source_type == "paperless":
         # Credentials from environment variables (PAPERLESS_URL, PAPERLESS_TOKEN)
         source = PaperlessDocumentSource()
         if not source.base_url or not source.api_token:

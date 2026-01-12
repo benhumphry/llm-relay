@@ -1,11 +1,11 @@
-{% extends "base.html" %} {% block title %}Web Sources{% endblock %} {% block
-content %}
-<div x-data="webSourcesPage()" x-init="loadSettings()">
+{% extends "base.html" %} {% block title %}Web Configuration{% endblock %} {%
+block content %}
+<div x-data="webConfigPage()" x-init="loadSettings()">
     <!-- Header -->
     <div class="mb-6">
-        <h1 class="text-2xl font-bold">Web Sources</h1>
+        <h1 class="text-2xl font-bold">Web Configuration</h1>
         <p class="text-base-content/60">
-            Configure web search and scraping for Smart Enrichers
+            Configure web search and scraping for Smart Aliases
         </p>
     </div>
 
@@ -15,7 +15,7 @@ content %}
             <div class="card-body">
                 <h2 class="card-title text-lg">Web Search</h2>
                 <p class="text-sm text-base-content/60 mb-4">
-                    Search provider for realtime web access in Smart Enrichers
+                    Search provider for realtime web access
                 </p>
 
                 <div class="space-y-4">
@@ -36,7 +36,7 @@ content %}
                             >
                                 <option
                                     :value="provider.name"
-                                    x-text="provider.name.charAt(0).toUpperCase() + provider.name.slice(1)"
+                                    x-text="getProviderDisplayName(provider.name)"
                                 ></option>
                             </template>
                         </select>
@@ -75,7 +75,9 @@ content %}
                                             d="M5 13l4 4L19 7"
                                         />
                                     </svg>
-                                    <span x-text="provider.name"></span>
+                                    <span
+                                        x-text="getProviderDisplayName(provider.name)"
+                                    ></span>
                                 </span>
                             </template>
                             <span
@@ -117,7 +119,7 @@ content %}
                         </select>
                         <label class="label">
                             <span class="label-text-alt">
-                                Used by Smart Enrichers to extract content from
+                                Used by Smart Aliases to extract content from
                                 web pages
                             </span>
                         </label>
@@ -172,378 +174,117 @@ content %}
                             extraction. Works well for most static websites.
                         </div>
                     </template>
-                </div>
-            </div>
-        </div>
 
-        <!-- Embedding Settings -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body">
-                <h2 class="card-title text-lg">Embeddings</h2>
-                <p class="text-sm text-base-content/60 mb-4">
-                    Vector embeddings for document stores and semantic search
-                </p>
-
-                <div class="space-y-4">
-                    <!-- Embedding Provider -->
+                    <!-- PDF Parser -->
                     <div class="form-control">
                         <label class="label">
-                            <span class="label-text">Embedding Provider</span>
-                            <template
-                                x-if="settings.embedding_provider === 'local'"
-                            >
-                                <span
-                                    class="badge badge-sm"
-                                    :class="settings.gpu_available ? 'badge-success' : 'badge-warning'"
-                                    x-text="settings.gpu_available ? 'GPU: ' + settings.gpu_name : 'CPU'"
-                                ></span>
-                            </template>
+                            <span class="label-text">Web PDF Parser</span>
                         </label>
                         <select
-                            x-model="settings.embedding_provider"
-                            @change="onEmbeddingProviderChange()"
+                            x-model="settings.pdf_parser"
                             class="select select-bordered"
                         >
-                            <option value="local">
-                                Local (BAAI/bge-small-en-v1.5)
+                            <option value="docling">
+                                Docling (with Vision model)
+                            </option>
+                            <option value="pypdf">
+                                PyPDF (fast, text-only)
                             </option>
                             <option
-                                x-show="embeddingModels.ollama?.available"
-                                value="ollama"
+                                value="jina"
+                                x-show="settings.jina_api_configured"
                             >
-                                Ollama
+                                Jina Reader (API)
                             </option>
-                            <template
-                                x-for="provider in embeddingModels.providers || []"
-                                :key="provider.name"
-                            >
-                                <option
-                                    :value="provider.name"
-                                    x-text="provider.name"
-                                ></option>
-                            </template>
                         </select>
-                    </div>
-
-                    <!-- Ollama Instance & Model -->
-                    <template
-                        x-if="settings.embedding_provider === 'ollama' && embeddingModels.ollama?.available"
-                    >
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="form-control">
-                                <label class="label">
-                                    <span class="label-text"
-                                        >Ollama Instance</span
-                                    >
-                                </label>
-                                <select
-                                    x-model="settings.embedding_ollama_instance"
-                                    @change="onEmbeddingOllamaInstanceChange()"
-                                    class="select select-bordered"
-                                >
-                                    <template
-                                        x-for="instance in embeddingModels.ollama.instances"
-                                        :key="instance.name"
-                                    >
-                                        <option
-                                            :value="instance.name"
-                                            x-text="instance.name + ' (' + instance.url + ')'"
-                                        ></option>
-                                    </template>
-                                </select>
-                            </div>
-                            <div class="form-control">
-                                <label class="label">
-                                    <span class="label-text"
-                                        >Embedding Model</span
-                                    >
-                                </label>
-                                <select
-                                    x-model="settings.embedding_model"
-                                    class="select select-bordered"
-                                >
-                                    <template
-                                        x-for="model in currentOllamaEmbeddingModels"
-                                        :key="model"
-                                    >
-                                        <option
-                                            :value="model"
-                                            x-text="model"
-                                        ></option>
-                                    </template>
-                                </select>
-                            </div>
-                        </div>
-                    </template>
-
-                    <!-- Provider Embedding Model -->
-                    <template
-                        x-if="settings.embedding_provider !== 'local' && settings.embedding_provider !== 'ollama'"
-                    >
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Embedding Model</span>
-                            </label>
-                            <select
-                                x-model="settings.embedding_model"
-                                class="select select-bordered"
-                            >
+                        <label class="label">
+                            <span class="label-text-alt text-base-content/60">
                                 <template
-                                    x-for="model in currentProviderEmbeddingModels"
-                                    :key="model"
+                                    x-if="settings.pdf_parser === 'docling'"
                                 >
-                                    <option
-                                        :value="model"
-                                        x-text="model"
-                                    ></option>
+                                    <span
+                                        >Uses configured Vision model. Best
+                                        quality but slower.</span
+                                    >
                                 </template>
-                            </select>
-                        </div>
-                    </template>
-
-                    <!-- Local Embedding Info -->
-                    <template x-if="settings.embedding_provider === 'local'">
-                        <div
-                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
-                        >
-                            Uses bundled BAAI/bge-small-en-v1.5 model (~130MB).
-                            No external dependencies required.
-                        </div>
-                    </template>
+                                <template
+                                    x-if="settings.pdf_parser === 'pypdf'"
+                                >
+                                    <span
+                                        >Fast text extraction. Won't work on
+                                        scanned documents.</span
+                                    >
+                                </template>
+                                <template x-if="settings.pdf_parser === 'jina'">
+                                    <span
+                                        >Fast cloud parsing via Jina. Handles
+                                        scanned docs. Requires API key.</span
+                                    >
+                                </template>
+                            </span>
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Reranking Settings -->
-        <div class="card bg-base-100 shadow-lg">
+        <!-- Reranking Info Card -->
+        <div class="card bg-base-100 shadow-lg lg:col-span-2">
             <div class="card-body">
-                <h2 class="card-title text-lg">Reranking</h2>
-                <p class="text-sm text-base-content/60 mb-4">
-                    Rerank retrieved documents for better relevance
-                </p>
-
-                <div class="space-y-4">
-                    <!-- Rerank Provider -->
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">Rerank Provider</span>
-                            <template
-                                x-if="settings.rerank_provider === 'local'"
-                            >
-                                <span
-                                    class="badge badge-sm"
-                                    :class="settings.gpu_available ? 'badge-success' : 'badge-warning'"
-                                    x-text="settings.gpu_available ? 'GPU: ' + settings.gpu_name : 'CPU'"
-                                ></span>
-                            </template>
-                        </label>
-                        <select
-                            x-model="settings.rerank_provider"
-                            class="select select-bordered"
-                        >
-                            <option value="local">Local (cross-encoder)</option>
-                            <option value="jina">
-                                Jina Reranker (requires API key)
-                            </option>
-                        </select>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h2 class="card-title text-lg">Content Reranking</h2>
+                        <p class="text-sm text-base-content/60">
+                            Web search results are reranked for relevance before
+                            injection
+                        </p>
                     </div>
-
-                    <!-- Jina Warning -->
-                    <template
-                        x-if="settings.rerank_provider === 'jina' && !settings.jina_api_configured"
+                    <a
+                        href="{{ url_for('admin.rag_config_page') }}"
+                        class="btn btn-outline btn-sm"
                     >
-                        <div class="alert alert-warning py-2">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                                />
-                            </svg>
-                            <span class="text-sm"
-                                >Jina reranker requires JINA_API_KEY to be
-                                set</span
-                            >
-                        </div>
-                    </template>
-
-                    <!-- Local Rerank Model -->
-                    <template x-if="settings.rerank_provider === 'local'">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Rerank Model</span>
-                            </label>
-                            <select
-                                x-model="settings.rerank_model"
-                                class="select select-bordered"
-                            >
-                                <option
-                                    value="cross-encoder/ms-marco-MiniLM-L-6-v2"
-                                >
-                                    ms-marco-MiniLM-L-6-v2 (fast)
-                                </option>
-                                <option
-                                    value="cross-encoder/ms-marco-TinyBERT-L-2-v2"
-                                >
-                                    ms-marco-TinyBERT-L-2-v2 (fastest)
-                                </option>
-                                <option value="BAAI/bge-reranker-base">
-                                    bge-reranker-base (accurate)
-                                </option>
-                            </select>
-                        </div>
-                    </template>
-
-                    <!-- Local Rerank Info -->
-                    <template x-if="settings.rerank_provider === 'local'">
-                        <div
-                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-4 w-4 mr-1"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
                         >
-                            Cross-encoder models run locally. GPU recommended
-                            for large document sets.
-                        </div>
-                    </template>
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                            />
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                        </svg>
+                        Configure in RAG Settings
+                    </a>
                 </div>
-            </div>
-        </div>
-
-        <!-- Vision Settings -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body">
-                <h2 class="card-title text-lg">Document Vision</h2>
-                <p class="text-sm text-base-content/60 mb-4">
-                    Vision provider for parsing PDFs and images in documents
-                </p>
-
-                <div class="space-y-4">
-                    <!-- Vision Provider -->
-                    <div class="form-control">
-                        <label class="label">
-                            <span class="label-text">Vision Provider</span>
-                            <template
-                                x-if="settings.vision_provider === 'local'"
-                            >
-                                <span
-                                    class="badge badge-sm"
-                                    :class="settings.gpu_available ? 'badge-success' : 'badge-warning'"
-                                    x-text="settings.gpu_available ? 'GPU: ' + settings.gpu_name : 'CPU'"
-                                ></span>
-                            </template>
-                        </label>
-                        <select
-                            x-model="settings.vision_provider"
-                            @change="onVisionProviderChange()"
-                            class="select select-bordered"
+                <div class="mt-3 flex items-center gap-4">
+                    <div class="bg-base-200 rounded-lg px-4 py-2">
+                        <span class="text-xs text-base-content/60"
+                            >Provider</span
                         >
-                            <option value="local">
-                                Local (Docling default)
-                            </option>
-                            <option
-                                x-show="visionModels.ollama?.available"
-                                value="ollama"
-                            >
-                                Ollama
-                            </option>
-                            <template
-                                x-for="provider in visionModels.providers || []"
-                                :key="provider.name"
-                            >
-                                <option
-                                    :value="provider.name"
-                                    x-text="provider.name"
-                                ></option>
-                            </template>
-                        </select>
-                    </div>
-
-                    <!-- Ollama Vision Instance & Model -->
-                    <template
-                        x-if="settings.vision_provider === 'ollama' && visionModels.ollama?.available"
-                    >
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="form-control">
-                                <label class="label">
-                                    <span class="label-text"
-                                        >Ollama Instance</span
-                                    >
-                                </label>
-                                <select
-                                    x-model="settings.vision_ollama_instance"
-                                    @change="onVisionOllamaInstanceChange()"
-                                    class="select select-bordered"
-                                >
-                                    <template
-                                        x-for="instance in visionModels.ollama.instances"
-                                        :key="instance.name"
-                                    >
-                                        <option
-                                            :value="instance.name"
-                                            x-text="instance.name + ' (' + instance.url + ')'"
-                                        ></option>
-                                    </template>
-                                </select>
-                            </div>
-                            <div class="form-control">
-                                <label class="label">
-                                    <span class="label-text">Vision Model</span>
-                                </label>
-                                <select
-                                    x-model="settings.vision_model"
-                                    class="select select-bordered"
-                                >
-                                    <template
-                                        x-for="model in currentOllamaVisionModels"
-                                        :key="model"
-                                    >
-                                        <option
-                                            :value="model"
-                                            x-text="model"
-                                        ></option>
-                                    </template>
-                                </select>
-                            </div>
-                        </div>
-                    </template>
-
-                    <!-- Provider Vision Model -->
-                    <template
-                        x-if="settings.vision_provider !== 'local' && settings.vision_provider !== 'ollama'"
-                    >
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Vision Model</span>
-                            </label>
-                            <select
-                                x-model="settings.vision_model"
-                                class="select select-bordered"
-                            >
-                                <template
-                                    x-for="model in currentProviderVisionModels"
-                                    :key="model"
-                                >
-                                    <option
-                                        :value="model"
-                                        x-text="model"
-                                    ></option>
-                                </template>
-                            </select>
-                        </div>
-                    </template>
-
-                    <!-- Local Vision Info -->
-                    <template x-if="settings.vision_provider === 'local'">
                         <div
-                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
-                        >
-                            Uses bundled Docling models for document parsing.
-                            Runs on CPU/GPU.
+                            class="font-medium"
+                            x-text="settings.rerank_provider === 'local' ? 'Local (cross-encoder)' : 'Jina Reranker'"
+                        ></div>
+                    </div>
+                    <template x-if="settings.rerank_provider === 'local'">
+                        <div class="bg-base-200 rounded-lg px-4 py-2">
+                            <span class="text-xs text-base-content/60"
+                                >Model</span
+                            >
+                            <div
+                                class="font-medium text-sm"
+                                x-text="settings.rerank_model.split('/').pop()"
+                            ></div>
                         </div>
                     </template>
                 </div>
@@ -559,7 +300,7 @@ content %}
             :class="{ 'loading': saving }"
             :disabled="saving"
         >
-            Save All Settings
+            Save Settings
         </button>
     </div>
 
@@ -572,33 +313,33 @@ content %}
 </div>
 
 <script>
-    function webSourcesPage() {
+    function webConfigPage() {
         return {
             settings: {
                 search_provider: "",
                 scraper_provider: "builtin",
+                pdf_parser: "pypdf",
                 jina_api_configured: false,
-                gpu_available: false,
-                gpu_name: "",
-                embedding_provider: "local",
-                embedding_model: "",
-                embedding_ollama_instance: "",
                 rerank_provider: "local",
                 rerank_model: "cross-encoder/ms-marco-MiniLM-L-6-v2",
-                vision_provider: "local",
-                vision_model: "",
-                vision_ollama_instance: "",
             },
             availableSearchProviders: [],
             hasAnySearchProvider: false,
-            embeddingModels: {},
-            visionModels: {},
-            currentOllamaEmbeddingModels: [],
-            currentProviderEmbeddingModels: [],
-            currentOllamaVisionModels: [],
-            currentProviderVisionModels: [],
             saving: false,
             toast: { show: false, message: "", type: "info" },
+
+            getProviderDisplayName(name) {
+                const displayNames = {
+                    searxng: "SearXNG",
+                    perplexity: "Perplexity",
+                    jina: "Jina (Free)",
+                    "jina-api": "Jina (API)",
+                };
+                return (
+                    displayNames[name] ||
+                    name.charAt(0).toUpperCase() + name.slice(1)
+                );
+            },
 
             async loadSettings() {
                 try {
@@ -620,145 +361,19 @@ content %}
                             webData.search_provider || "";
                         this.settings.scraper_provider =
                             webData.scraper_provider || "builtin";
+                        this.settings.pdf_parser =
+                            webData.pdf_parser || "pypdf";
                         this.settings.jina_api_configured =
                             webData.jina_api_configured || false;
-                        this.settings.gpu_available =
-                            webData.gpu_available || false;
-                        this.settings.gpu_name = webData.gpu_name || "";
-                        this.settings.embedding_provider =
-                            webData.embedding_provider || "local";
-                        this.settings.embedding_model =
-                            webData.embedding_model || "";
-                        this.settings.embedding_ollama_instance =
-                            webData.embedding_ollama_instance || "";
                         this.settings.rerank_provider =
                             webData.rerank_provider || "local";
                         this.settings.rerank_model =
                             webData.rerank_model ||
                             "cross-encoder/ms-marco-MiniLM-L-6-v2";
-                        this.settings.vision_provider =
-                            webData.vision_provider || "local";
-                        this.settings.vision_model = webData.vision_model || "";
-                        this.settings.vision_ollama_instance =
-                            webData.vision_ollama_instance || "";
-                    }
-
-                    // Load embedding models
-                    const embedRes = await fetch(
-                        "/api/settings/embedding-models",
-                    );
-                    if (embedRes.ok) {
-                        this.embeddingModels = await embedRes.json();
-                        this.updateEmbeddingModelLists();
-                    }
-
-                    // Load vision models
-                    const visionRes = await fetch(
-                        "/api/settings/vision-models",
-                    );
-                    if (visionRes.ok) {
-                        this.visionModels = await visionRes.json();
-                        this.updateVisionModelLists();
                     }
                 } catch (error) {
                     console.error("Error loading settings:", error);
                     this.showToast("Failed to load settings", "error");
-                }
-            },
-
-            updateEmbeddingModelLists() {
-                // Update Ollama embedding models
-                if (
-                    this.embeddingModels.ollama?.available &&
-                    this.settings.embedding_ollama_instance
-                ) {
-                    const instance = this.embeddingModels.ollama.instances.find(
-                        (i) =>
-                            i.name === this.settings.embedding_ollama_instance,
-                    );
-                    this.currentOllamaEmbeddingModels =
-                        instance?.embedding_models || [];
-                }
-                // Update provider embedding models
-                if (
-                    this.settings.embedding_provider &&
-                    this.settings.embedding_provider !== "local" &&
-                    this.settings.embedding_provider !== "ollama"
-                ) {
-                    const provider = this.embeddingModels.providers?.find(
-                        (p) => p.name === this.settings.embedding_provider,
-                    );
-                    this.currentProviderEmbeddingModels =
-                        provider?.models || [];
-                }
-            },
-
-            updateVisionModelLists() {
-                // Update Ollama vision models
-                if (
-                    this.visionModels.ollama?.available &&
-                    this.settings.vision_ollama_instance
-                ) {
-                    const instance = this.visionModels.ollama.instances.find(
-                        (i) => i.name === this.settings.vision_ollama_instance,
-                    );
-                    this.currentOllamaVisionModels =
-                        instance?.vision_models || [];
-                }
-                // Update provider vision models
-                if (
-                    this.settings.vision_provider &&
-                    this.settings.vision_provider !== "local" &&
-                    this.settings.vision_provider !== "ollama"
-                ) {
-                    const provider = this.visionModels.providers?.find(
-                        (p) => p.name === this.settings.vision_provider,
-                    );
-                    this.currentProviderVisionModels = provider?.models || [];
-                }
-            },
-
-            onEmbeddingProviderChange() {
-                this.settings.embedding_model = "";
-                this.settings.embedding_ollama_instance = "";
-                if (
-                    this.settings.embedding_provider === "ollama" &&
-                    this.embeddingModels.ollama?.instances?.length > 0
-                ) {
-                    this.settings.embedding_ollama_instance =
-                        this.embeddingModels.ollama.instances[0].name;
-                    this.onEmbeddingOllamaInstanceChange();
-                }
-                this.updateEmbeddingModelLists();
-            },
-
-            onEmbeddingOllamaInstanceChange() {
-                this.updateEmbeddingModelLists();
-                if (this.currentOllamaEmbeddingModels.length > 0) {
-                    this.settings.embedding_model =
-                        this.currentOllamaEmbeddingModels[0];
-                }
-            },
-
-            onVisionProviderChange() {
-                this.settings.vision_model = "";
-                this.settings.vision_ollama_instance = "";
-                if (
-                    this.settings.vision_provider === "ollama" &&
-                    this.visionModels.ollama?.instances?.length > 0
-                ) {
-                    this.settings.vision_ollama_instance =
-                        this.visionModels.ollama.instances[0].name;
-                    this.onVisionOllamaInstanceChange();
-                }
-                this.updateVisionModelLists();
-            },
-
-            onVisionOllamaInstanceChange() {
-                this.updateVisionModelLists();
-                if (this.currentOllamaVisionModels.length > 0) {
-                    this.settings.vision_model =
-                        this.currentOllamaVisionModels[0];
                 }
             },
 
@@ -771,17 +386,7 @@ content %}
                         body: JSON.stringify({
                             search_provider: this.settings.search_provider,
                             scraper_provider: this.settings.scraper_provider,
-                            embedding_provider:
-                                this.settings.embedding_provider,
-                            embedding_model: this.settings.embedding_model,
-                            embedding_ollama_instance:
-                                this.settings.embedding_ollama_instance,
-                            rerank_provider: this.settings.rerank_provider,
-                            rerank_model: this.settings.rerank_model,
-                            vision_provider: this.settings.vision_provider,
-                            vision_model: this.settings.vision_model,
-                            vision_ollama_instance:
-                                this.settings.vision_ollama_instance,
+                            pdf_parser: this.settings.pdf_parser,
                         }),
                     });
 

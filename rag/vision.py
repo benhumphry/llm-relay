@@ -48,10 +48,10 @@ def get_document_converter(
     """
     from docling.document_converter import DocumentConverter
 
-    # Local processing (default) - use standard DocumentConverter
+    # Local processing (default) - use standard DocumentConverter with Tesseract OCR
     if vision_provider == "local" or not vision_provider:
-        logger.debug("Using local Docling processing")
-        return DocumentConverter()
+        logger.debug("Using local Docling processing with Tesseract OCR")
+        return _get_local_converter()
 
     # Ollama instance
     if vision_provider.startswith("ollama:") or vision_provider == "ollama":
@@ -59,6 +59,29 @@ def get_document_converter(
 
     # External provider via OpenAI-compatible API
     return _get_provider_converter(vision_provider, vision_model)
+
+
+def _get_local_converter() -> "DocumentConverter":
+    """Get DocumentConverter configured for local processing with Tesseract OCR."""
+    from docling.datamodel.pipeline_options import (
+        PdfPipelineOptions,
+        TesseractOcrOptions,
+    )
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    # Configure Tesseract OCR for scanned documents
+    ocr_options = TesseractOcrOptions(lang=["eng"])
+
+    pipeline_options = PdfPipelineOptions(
+        do_ocr=True,
+        ocr_options=ocr_options,
+    )
+
+    return DocumentConverter(
+        format_options={
+            "pdf": PdfFormatOption(pipeline_options=pipeline_options),
+        }
+    )
 
 
 def _get_ollama_converter(
@@ -72,7 +95,11 @@ def _get_ollama_converter(
         ResponseFormat,
         VlmPipelineOptions,
     )
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.document_converter import (
+        DocumentConverter,
+        ImageFormatOption,
+        PdfFormatOption,
+    )
     from docling.pipeline.vlm_pipeline import VlmPipeline
 
     # Parse ollama URL
@@ -107,11 +134,15 @@ def _get_ollama_converter(
         vlm_options=vlm_options,
     )
 
-    # Create converter with VLM pipeline for PDFs
+    # Create converter with VLM pipeline for PDFs and images
     # Must use VlmPipeline class with VlmPipelineOptions
     return DocumentConverter(
         format_options={
             "pdf": PdfFormatOption(
+                pipeline_options=pipeline_options,
+                pipeline_cls=VlmPipeline,
+            ),
+            "image": ImageFormatOption(
                 pipeline_options=pipeline_options,
                 pipeline_cls=VlmPipeline,
             ),
@@ -129,7 +160,11 @@ def _get_provider_converter(
         ResponseFormat,
         VlmPipelineOptions,
     )
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.document_converter import (
+        DocumentConverter,
+        ImageFormatOption,
+        PdfFormatOption,
+    )
     from docling.pipeline.vlm_pipeline import VlmPipeline
 
     # Look up provider from registry
@@ -197,6 +232,10 @@ def _get_provider_converter(
     return DocumentConverter(
         format_options={
             "pdf": PdfFormatOption(
+                pipeline_options=pipeline_options,
+                pipeline_cls=VlmPipeline,
+            ),
+            "image": ImageFormatOption(
                 pipeline_options=pipeline_options,
                 pipeline_cls=VlmPipeline,
             ),

@@ -1,8 +1,8 @@
 """
 Document Store CRUD operations for LLM Relay.
 
-Handles creation, retrieval, updating, and deletion of document stores,
-as well as linking/unlinking stores to Smart Enrichers.
+Handles creation, retrieval, updating, and deletion of document stores.
+Document stores are linked to Smart Aliases via the smart_alias_stores junction table.
 """
 
 import json
@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .connection import get_db_context
-from .models import DocumentStore, SmartEnricher, smart_enricher_stores
+from .models import DocumentStore, smart_alias_stores
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,8 @@ def create_document_store(
     github_repo: Optional[str] = None,
     github_branch: Optional[str] = None,
     github_path: Optional[str] = None,
+    notion_database_id: Optional[str] = None,
+    notion_page_id: Optional[str] = None,
     embedding_provider: str = "local",
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -118,6 +120,8 @@ def create_document_store(
             github_repo=github_repo,
             github_branch=github_branch,
             github_path=github_path,
+            notion_database_id=notion_database_id,
+            notion_page_id=notion_page_id,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             ollama_url=ollama_url,
@@ -165,6 +169,8 @@ def update_document_store(
     github_repo: Optional[str] = None,
     github_branch: Optional[str] = None,
     github_path: Optional[str] = None,
+    notion_database_id: Optional[str] = None,
+    notion_page_id: Optional[str] = None,
     embedding_provider: Optional[str] = None,
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -224,6 +230,12 @@ def update_document_store(
             store.github_branch = github_branch if github_branch else None
         if github_path is not None:
             store.github_path = github_path if github_path else None
+        if notion_database_id is not None:
+            store.notion_database_id = (
+                notion_database_id if notion_database_id else None
+            )
+        if notion_page_id is not None:
+            store.notion_page_id = notion_page_id if notion_page_id else None
         if embedding_provider is not None:
             store.embedding_provider = embedding_provider
         if embedding_model is not None:
@@ -304,7 +316,7 @@ def delete_document_store(store_id: int, db=None) -> bool:
     """
     Delete a document store.
 
-    Fails if any Enrichers are currently linked to it.
+    Fails if any Smart Aliases are currently linked to it.
     Note: Does NOT delete the ChromaDB collection - that should be handled separately.
     """
 
@@ -314,18 +326,18 @@ def delete_document_store(store_id: int, db=None) -> bool:
         if not store:
             return False
 
-        # Check if any enrichers are using this store via junction table
+        # Check if any Smart Aliases are using this store via junction table
         from sqlalchemy import func
 
-        enricher_count = session.execute(
+        alias_count = session.execute(
             select(func.count())
-            .select_from(smart_enricher_stores)
-            .where(smart_enricher_stores.c.document_store_id == store_id)
+            .select_from(smart_alias_stores)
+            .where(smart_alias_stores.c.document_store_id == store_id)
         ).scalar()
 
-        if enricher_count > 0:
+        if alias_count > 0:
             logger.error(
-                f"Cannot delete store {store.name}: used by {enricher_count} enricher(s)"
+                f"Cannot delete store {store.name}: used by {alias_count} Smart Alias(es)"
             )
             return False
 
@@ -393,124 +405,6 @@ def get_stores_with_schedule(db: Optional[Session] = None) -> list[DocumentStore
         return [_store_to_detached(s) for s in stores]
 
 
-def get_stores_for_enricher(
-    enricher_id: int, db: Optional[Session] = None
-) -> list[DocumentStore]:
-    """Get all document stores linked to an Enricher."""
-
-    def _query(session: Session) -> list[DocumentStore]:
-        stmt = (
-            select(DocumentStore)
-            .join(smart_enricher_stores)
-            .where(smart_enricher_stores.c.smart_enricher_id == enricher_id)
-            .order_by(DocumentStore.name)
-        )
-        return list(session.execute(stmt).scalars().all())
-
-    if db:
-        return _query(db)
-    with get_db_context() as session:
-        stores = _query(session)
-        return [_store_to_detached(s) for s in stores]
-
-
-def link_store_to_enricher(
-    store_id: int, enricher_id: int, db: Optional[Session] = None
-) -> bool:
-    """Link a document store to an Enricher."""
-
-    def _link(session: Session) -> bool:
-        # Verify both exist
-        store = session.get(DocumentStore, store_id)
-        enricher = session.get(SmartEnricher, enricher_id)
-        if not store or not enricher:
-            return False
-
-        # Check if already linked
-        if store in enricher.document_stores:
-            return True  # Already linked
-
-        enricher.document_stores.append(store)
-        session.commit()
-        logger.info(f"Linked store {store.name} to Enricher {enricher.name}")
-        return True
-
-    if db:
-        return _link(db)
-    with get_db_context() as session:
-        return _link(session)
-
-
-def unlink_store_from_enricher(
-    store_id: int, enricher_id: int, db: Optional[Session] = None
-) -> bool:
-    """Unlink a document store from an Enricher."""
-
-    def _unlink(session: Session) -> bool:
-        # Verify both exist
-        store = session.get(DocumentStore, store_id)
-        enricher = session.get(SmartEnricher, enricher_id)
-        if not store or not enricher:
-            return False
-
-        # Check if linked
-        if store not in enricher.document_stores:
-            return True  # Already unlinked
-
-        enricher.document_stores.remove(store)
-        session.commit()
-        logger.info(f"Unlinked store {store.name} from Enricher {enricher.name}")
-        return True
-
-    if db:
-        return _unlink(db)
-    with get_db_context() as session:
-        return _unlink(session)
-
-
-def set_enricher_stores(
-    enricher_id: int, store_ids: list[int], db: Optional[Session] = None
-) -> bool:
-    """
-    Set the document stores for an Enricher (replaces existing links).
-
-    Args:
-        enricher_id: The Enricher ID
-        store_ids: List of store IDs to link (replaces current links)
-
-    Returns:
-        True if successful, False if Enricher not found
-    """
-
-    def _set(session: Session) -> bool:
-        enricher = session.get(SmartEnricher, enricher_id)
-        if not enricher:
-            return False
-
-        # Get the stores
-        stores = []
-        for store_id in store_ids:
-            store = session.get(DocumentStore, store_id)
-            if store:
-                stores.append(store)
-            else:
-                logger.warning(f"Store {store_id} not found, skipping")
-
-        # Replace the relationship
-        enricher.document_stores = stores
-        session.commit()
-
-        logger.info(
-            f"Set Enricher {enricher.name} stores to: {[s.name for s in stores]}"
-        )
-        return True
-
-    if db:
-        return _set(db)
-    with get_db_context() as session:
-        return _set(session)
-
-
 def _store_to_detached(
     store: Optional[DocumentStore], session=None
 ) -> Optional[DocumentStore]:
@@ -540,6 +434,8 @@ def _store_to_detached(
         github_repo=store.github_repo,
         github_branch=store.github_branch,
         github_path=store.github_path,
+        notion_database_id=store.notion_database_id,
+        notion_page_id=store.notion_page_id,
         embedding_provider=store.embedding_provider,
         embedding_model=store.embedding_model,
         ollama_url=store.ollama_url,
@@ -561,17 +457,17 @@ def _store_to_detached(
         updated_at=store.updated_at,
     )
 
-    # Get enricher count via junction table query if session is provided
+    # Get alias count via junction table query if session is provided
     if session:
         from sqlalchemy import func
 
-        enricher_count = session.execute(
+        alias_count = session.execute(
             select(func.count())
-            .select_from(smart_enricher_stores)
-            .where(smart_enricher_stores.c.document_store_id == store.id)
+            .select_from(smart_alias_stores)
+            .where(smart_alias_stores.c.document_store_id == store.id)
         ).scalar()
-        detached._enricher_count = enricher_count
+        detached._alias_count = alias_count
     else:
-        detached._enricher_count = 0
+        detached._alias_count = 0
 
     return detached

@@ -922,13 +922,8 @@ def chat():
                 f"(RAG: {enrichment_result.chunks_retrieved} chunks, Web: {len(enrichment_result.scraped_urls)} URLs)"
             )
 
-        # Update enricher/alias statistics
-        # Check if this is a SmartAlias or SmartEnricher by looking up the name
-        from db import (
-            get_smart_alias_by_name,
-            update_smart_alias_stats,
-            update_smart_enricher_stats,
-        )
+        # Update Smart Alias statistics
+        from db import get_smart_alias_by_name, update_smart_alias_stats
 
         smart_alias = get_smart_alias_by_name(enricher_name)
         if smart_alias:
@@ -940,14 +935,6 @@ def chat():
                 alias_id=enrichment_result.enricher_id,
                 increment_requests=1,
                 increment_routing=1 if is_routing else 0,
-                increment_injections=1 if enrichment_result.context_injected else 0,
-                increment_search=1 if enrichment_result.search_query else 0,
-                increment_scrape=1 if enrichment_result.scraped_urls else 0,
-            )
-        else:
-            update_smart_enricher_stats(
-                enricher_id=enrichment_result.enricher_id,
-                increment_requests=1,
                 increment_injections=1 if enrichment_result.context_injected else 0,
                 increment_search=1 if enrichment_result.search_query else 0,
                 increment_scrape=1 if enrichment_result.scraped_urls else 0,
@@ -1065,26 +1052,17 @@ def chat():
                         f"tokens={cached_tokens}, cost_saved=${cached_cost_saved:.4f})"
                     )
 
-                    # Update cache stats on the appropriate entity
+                    # Update cache stats on the SmartAlias
                     config = resolved.cache_config
                     if hasattr(config, "id"):
-                        if hasattr(config, "use_routing"):  # SmartAlias
-                            from db import update_smart_alias_stats
+                        from db import update_smart_alias_stats
 
-                            update_smart_alias_stats(
-                                alias_id=config.id,
-                                increment_cache_hits=1,
-                                increment_tokens_saved=cached_tokens,
-                                increment_cost_saved=cached_cost_saved,
-                            )
-                        elif hasattr(config, "use_rag"):  # SmartEnricher
-                            from db import update_smart_enricher_stats
-
-                            update_smart_enricher_stats(
-                                enricher_id=config.id,
-                                increment_cache_hits=1,
-                                increment_tokens_saved=cached_tokens,
-                            )
+                        update_smart_alias_stats(
+                            alias_id=config.id,
+                            increment_cache_hits=1,
+                            increment_tokens_saved=cached_tokens,
+                            increment_cost_saved=cached_cost_saved,
+                        )
 
                     # Build Ollama-format response
                     response_obj = {
@@ -1648,13 +1626,8 @@ def openai_chat_completions():
                 f"(RAG: {enrichment_result.chunks_retrieved} chunks, Web: {len(enrichment_result.scraped_urls)} URLs)"
             )
 
-        # Update enricher/alias statistics
-        # Check if this is a SmartAlias or SmartEnricher by looking up the name
-        from db import (
-            get_smart_alias_by_name,
-            update_smart_alias_stats,
-            update_smart_enricher_stats,
-        )
+        # Update Smart Alias statistics
+        from db import get_smart_alias_by_name, update_smart_alias_stats
 
         smart_alias = get_smart_alias_by_name(enricher_name)
         if smart_alias:
@@ -1666,14 +1639,6 @@ def openai_chat_completions():
                 alias_id=enrichment_result.enricher_id,
                 increment_requests=1,
                 increment_routing=1 if is_routing else 0,
-                increment_injections=1 if enrichment_result.context_injected else 0,
-                increment_search=1 if enrichment_result.search_query else 0,
-                increment_scrape=1 if enrichment_result.scraped_urls else 0,
-            )
-        else:
-            update_smart_enricher_stats(
-                enricher_id=enrichment_result.enricher_id,
-                increment_requests=1,
                 increment_injections=1 if enrichment_result.context_injected else 0,
                 increment_search=1 if enrichment_result.search_query else 0,
                 increment_scrape=1 if enrichment_result.scraped_urls else 0,
@@ -1778,26 +1743,17 @@ def openai_chat_completions():
                         f"tokens={cached_tokens}, cost_saved=${cached_cost_saved:.4f})"
                     )
 
-                    # Update cache stats on the appropriate entity
+                    # Update cache stats on the SmartAlias
                     config = resolved.cache_config
                     if hasattr(config, "id"):
-                        if hasattr(config, "use_routing"):  # SmartAlias
-                            from db import update_smart_alias_stats
+                        from db import update_smart_alias_stats
 
-                            update_smart_alias_stats(
-                                alias_id=config.id,
-                                increment_cache_hits=1,
-                                increment_tokens_saved=cached_tokens,
-                                increment_cost_saved=cached_cost_saved,
-                            )
-                        elif hasattr(config, "use_rag"):  # SmartEnricher
-                            from db import update_smart_enricher_stats
-
-                            update_smart_enricher_stats(
-                                enricher_id=config.id,
-                                increment_cache_hits=1,
-                                increment_tokens_saved=cached_tokens,
-                            )
+                        update_smart_alias_stats(
+                            alias_id=config.id,
+                            increment_cache_hits=1,
+                            increment_tokens_saved=cached_tokens,
+                            increment_cost_saved=cached_cost_saved,
+                        )
 
                     # Build OpenAI-format response
                     response_obj = {

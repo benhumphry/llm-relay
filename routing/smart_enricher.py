@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from db.models import SmartEnricher
+    from db.models import SmartAlias
     from providers.registry import ProviderRegistry, ResolvedModel
 
 logger = logging.getLogger(__name__)
@@ -62,12 +62,12 @@ class SmartEnricherEngine:
     6. Returns the augmented request for forwarding to the target model
     """
 
-    def __init__(self, enricher: "SmartEnricher", registry: "ProviderRegistry"):
+    def __init__(self, enricher: "SmartAlias", registry: "ProviderRegistry"):
         """
         Initialize the enrichment engine.
 
         Args:
-            enricher: SmartEnricher configuration
+            enricher: SmartAlias (or adapter) with enrichment configuration
             registry: Provider registry for model resolution
         """
         self.enricher = enricher

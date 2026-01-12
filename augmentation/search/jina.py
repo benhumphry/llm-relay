@@ -1,8 +1,12 @@
 """
-Jina Search provider.
+Jina Search providers.
 
 Jina Search (s.jina.ai) is a web search API that returns clean, LLM-friendly
 results with optional content extraction.
+
+Two variants:
+- JinaFreeSearchProvider: Free tier, no API key required (rate limited)
+- JinaApiSearchProvider: Paid tier with API key (higher rate limits)
 
 See: https://jina.ai/search/
 """
@@ -18,16 +22,13 @@ from .base import SearchProvider, SearchResult
 logger = logging.getLogger(__name__)
 
 
-class JinaSearchProvider(SearchProvider):
+class JinaSearchProviderBase(SearchProvider):
     """
-    Search provider using Jina Search API.
+    Base class for Jina Search providers.
 
     Uses the s.jina.ai endpoint which returns search results optimized
-    for LLM consumption. Requires a Jina API key.
+    for LLM consumption.
     """
-
-    name = "jina"
-    requires_api_key = True
 
     JINA_SEARCH_URL = "https://s.jina.ai/"
 
@@ -35,11 +36,7 @@ class JinaSearchProvider(SearchProvider):
         self, url_override: Optional[str] = None, api_key: Optional[str] = None
     ):
         super().__init__(url_override)
-        self._api_key = api_key or os.environ.get("JINA_API_KEY")
-
-    def is_configured(self) -> bool:
-        """Jina Search requires a JINA_API_KEY."""
-        return bool(self._api_key)
+        self._api_key = api_key
 
     def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
         """
@@ -117,3 +114,52 @@ class JinaSearchProvider(SearchProvider):
             lines.append(f"{result.snippet}\n")
 
         return "\n".join(lines)
+
+
+class JinaFreeSearchProvider(JinaSearchProviderBase):
+    """
+    Jina Search - Free tier (no API key required).
+
+    Works without authentication but has lower rate limits.
+    Good for testing or low-volume usage.
+    """
+
+    name = "jina"
+    requires_api_key = False
+
+    def __init__(
+        self, url_override: Optional[str] = None, api_key: Optional[str] = None
+    ):
+        # Free tier doesn't use API key
+        super().__init__(url_override, api_key=None)
+
+    def is_configured(self) -> bool:
+        """Free tier is always available."""
+        return True
+
+
+class JinaApiSearchProvider(JinaSearchProviderBase):
+    """
+    Jina Search - API tier (requires JINA_API_KEY).
+
+    Uses authenticated API for higher rate limits and priority access.
+    """
+
+    name = "jina-api"
+    requires_api_key = True
+
+    def __init__(
+        self, url_override: Optional[str] = None, api_key: Optional[str] = None
+    ):
+        # API tier requires the key
+        super().__init__(
+            url_override, api_key=api_key or os.environ.get("JINA_API_KEY")
+        )
+
+    def is_configured(self) -> bool:
+        """API tier requires JINA_API_KEY."""
+        return bool(self._api_key)
+
+
+# Keep backward compatibility - JinaSearchProvider defaults to API version
+JinaSearchProvider = JinaApiSearchProvider
