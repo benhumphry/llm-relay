@@ -5963,6 +5963,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     continue
 
                 # Get display name or use path segment
+                displayname = prop.find("d:displayname", ns)
                 name = (
                     displayname.text
                     if displayname is not None and displayname.text
