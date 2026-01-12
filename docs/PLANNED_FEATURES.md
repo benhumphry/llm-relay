@@ -37,6 +37,7 @@ Consolidated separate features into unified **Smart Aliases**:
 - **Passthrough Model**: Honor original model when triggered as Smart Tag
 - **@relay commands**: In-content tag syntax (`@relay[tag:name]`)
 - **Extensible format**: `@relay[command:key=value]` for future commands
+- **Context Priority**: Token allocation for hybrid RAG+Web (balanced/prefer_rag/prefer_web)
 
 ## Document Sources (v1.6+)
 
