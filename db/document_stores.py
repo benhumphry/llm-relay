@@ -81,6 +81,7 @@ def create_document_store(
     github_path: Optional[str] = None,
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
+    nextcloud_folder: Optional[str] = None,
     embedding_provider: str = "local",
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -122,6 +123,7 @@ def create_document_store(
             github_path=github_path,
             notion_database_id=notion_database_id,
             notion_page_id=notion_page_id,
+            nextcloud_folder=nextcloud_folder,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             ollama_url=ollama_url,
@@ -171,6 +173,7 @@ def update_document_store(
     github_path: Optional[str] = None,
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
+    nextcloud_folder: Optional[str] = None,
     embedding_provider: Optional[str] = None,
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -236,6 +239,8 @@ def update_document_store(
             )
         if notion_page_id is not None:
             store.notion_page_id = notion_page_id if notion_page_id else None
+        if nextcloud_folder is not None:
+            store.nextcloud_folder = nextcloud_folder if nextcloud_folder else None
         if embedding_provider is not None:
             store.embedding_provider = embedding_provider
         if embedding_model is not None:
@@ -436,6 +441,7 @@ def _store_to_detached(
         github_path=store.github_path,
         notion_database_id=store.notion_database_id,
         notion_page_id=store.notion_page_id,
+        nextcloud_folder=store.nextcloud_folder,
         embedding_provider=store.embedding_provider,
         embedding_model=store.embedding_model,
         ollama_url=store.ollama_url,

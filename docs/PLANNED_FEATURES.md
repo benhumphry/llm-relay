@@ -66,12 +66,13 @@ Direct API integrations (no Node.js required):
 
 ### Document Store Providers
 
-Additional sources for RAG document stores (TBD):
-- Confluence
-- SharePoint
-- Dropbox
-- S3/MinIO
-- IMAP (email archives)
+Additional sources for RAG document stores:
+- Nextcloud (done - v1.8)
+- Confluence (planned)
+- SharePoint (planned)
+- Dropbox (planned)
+- S3/MinIO (planned)
+- IMAP (email archives) (planned)
 
 ### Media Endpoints
 

@@ -1111,6 +1111,14 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        if "nextcloud_folder" not in existing_columns:
+            migrations.append(
+                (
+                    "nextcloud_folder",
+                    "ALTER TABLE document_stores ADD COLUMN nextcloud_folder VARCHAR(500)",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for document_stores table"

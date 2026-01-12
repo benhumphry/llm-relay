@@ -544,6 +544,7 @@ class RAGIndexer:
                 github_path=store.github_path,
                 notion_database_id=store.notion_database_id,
                 notion_page_id=store.notion_page_id,
+                nextcloud_folder=store.nextcloud_folder,
                 vision_provider=vision_provider,
                 vision_model=vision_model,
                 vision_ollama_url=vision_ollama_url,

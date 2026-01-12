@@ -912,6 +912,11 @@ class DocumentStore(Base):
         String(100), nullable=True
     )  # Root page ID (indexes children)
 
+    # Nextcloud configuration (for source_type="nextcloud")
+    nextcloud_folder: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Folder path to restrict indexing (e.g., "/Documents")
+
     # Embedding configuration
     embedding_provider: Mapped[str] = mapped_column(String(100), default="local")
     embedding_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
@@ -984,6 +989,7 @@ class DocumentStore(Base):
             "github_path": self.github_path,
             "notion_database_id": self.notion_database_id,
             "notion_page_id": self.notion_page_id,
+            "nextcloud_folder": self.nextcloud_folder,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "ollama_url": self.ollama_url,

@@ -2711,6 +2711,355 @@ class GitHubDocumentSource(DocumentSource):
             return None
 
 
+class NextcloudDocumentSource(DocumentSource):
+    """
+    Document source for Nextcloud using WebDAV API.
+
+    Uses Nextcloud's WebDAV endpoint to list and retrieve files for indexing.
+    Supports Docling processing with optional vision models for PDFs
+    and other binary document formats.
+
+    Credentials are read from environment variables:
+    - NEXTCLOUD_URL: Base URL (e.g., "https://nextcloud.example.com")
+    - NEXTCLOUD_USER: Username for authentication
+    - NEXTCLOUD_PASSWORD: Password or app password for authentication
+    """
+
+    # Binary file types that should be processed through Docling
+    DOCLING_EXTENSIONS = {
+        ".pdf",
+        ".docx",
+        ".pptx",
+        ".xlsx",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tiff",
+        ".bmp",
+    }
+
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        folder_path: Optional[str] = None,
+        vision_provider: str = "local",
+        vision_model: Optional[str] = None,
+        vision_ollama_url: Optional[str] = None,
+    ):
+        """
+        Initialize with Nextcloud connection details.
+
+        Args:
+            base_url: Base URL of the Nextcloud instance (defaults to NEXTCLOUD_URL env var)
+            username: Username for authentication (defaults to NEXTCLOUD_USER env var)
+            password: Password or app password (defaults to NEXTCLOUD_PASSWORD env var)
+            folder_path: Optional folder path to restrict indexing scope (e.g., "/Documents")
+            vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
+            vision_model: Vision model name (e.g., "granite3.2-vision:latest")
+            vision_ollama_url: Ollama URL when using ollama provider
+        """
+        self.base_url = (base_url or os.environ.get("NEXTCLOUD_URL", "")).rstrip("/")
+        self.username = username or os.environ.get("NEXTCLOUD_USER", "")
+        self.password = password or os.environ.get("NEXTCLOUD_PASSWORD", "")
+        self.folder_path = (folder_path or "").strip("/")
+        self.vision_provider = vision_provider
+        self.vision_model = vision_model
+        self.vision_ollama_url = vision_ollama_url
+        self._document_converter = None
+
+    def _get_webdav_url(self, path: str = "") -> str:
+        """Get the full WebDAV URL for a path."""
+        # Nextcloud WebDAV endpoint: /remote.php/dav/files/{username}/
+        base = f"{self.base_url}/remote.php/dav/files/{self.username}"
+        if path:
+            # Ensure path starts with /
+            if not path.startswith("/"):
+                path = "/" + path
+            return base + path
+        return base + "/"
+
+    def _get_auth(self) -> tuple:
+        """Get authentication tuple for requests."""
+        return (self.username, self.password)
+
+    def is_available(self) -> bool:
+        """Check if we can connect to Nextcloud."""
+        import requests as http_requests
+
+        if not self.base_url or not self.username or not self.password:
+            logger.warning("Nextcloud credentials not configured")
+            return False
+
+        try:
+            # Use PROPFIND with Depth: 0 to check access
+            response = http_requests.request(
+                "PROPFIND",
+                self._get_webdav_url(),
+                auth=self._get_auth(),
+                headers={"Depth": "0"},
+                timeout=10,
+            )
+            return response.status_code in (200, 207)
+        except Exception as e:
+            logger.warning(f"Nextcloud not available at {self.base_url}: {e}")
+            return False
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all supported documents from Nextcloud."""
+        import requests as http_requests
+        import xml.etree.ElementTree as ET
+
+        start_path = self.folder_path if self.folder_path else ""
+        logger.info(
+            f"Listing documents from Nextcloud at {self.base_url}"
+            + (f" (folder: /{start_path})" if start_path else " (all files)")
+        )
+
+        # Use recursive PROPFIND with Depth: infinity
+        # Note: Some servers limit this, so we may need to handle pagination
+        propfind_body = """<?xml version="1.0" encoding="UTF-8"?>
+<d:propfind xmlns:d="DAV:">
+    <d:prop>
+        <d:resourcetype/>
+        <d:getcontentlength/>
+        <d:getcontenttype/>
+        <d:getlastmodified/>
+    </d:prop>
+</d:propfind>"""
+
+        try:
+            response = http_requests.request(
+                "PROPFIND",
+                self._get_webdav_url(start_path),
+                auth=self._get_auth(),
+                headers={
+                    "Depth": "infinity",
+                    "Content-Type": "application/xml",
+                },
+                data=propfind_body,
+                timeout=60,
+            )
+
+            if response.status_code not in (200, 207):
+                logger.error(
+                    f"Nextcloud PROPFIND error: {response.status_code} - {response.text[:200]}"
+                )
+                return
+
+            # Parse XML response
+            root = ET.fromstring(response.content)
+
+            # Define namespaces
+            ns = {"d": "DAV:"}
+
+            total_files = 0
+            for response_elem in root.findall(".//d:response", ns):
+                href = response_elem.find("d:href", ns)
+                if href is None:
+                    continue
+
+                href_text = href.text or ""
+
+                # Check if it's a collection (folder)
+                resourcetype = response_elem.find(".//d:resourcetype", ns)
+                if resourcetype is not None:
+                    collection = resourcetype.find("d:collection", ns)
+                    if collection is not None:
+                        continue  # Skip folders
+
+                # Get file properties
+                propstat = response_elem.find("d:propstat", ns)
+                if propstat is None:
+                    continue
+
+                prop = propstat.find("d:prop", ns)
+                if prop is None:
+                    continue
+
+                # Extract file path from href
+                # href is typically: /remote.php/dav/files/username/path/to/file
+                file_path = href_text
+                dav_prefix = f"/remote.php/dav/files/{self.username}/"
+                if dav_prefix in file_path:
+                    file_path = file_path.split(dav_prefix, 1)[1]
+
+                # URL decode the path
+                from urllib.parse import unquote
+
+                file_path = unquote(file_path)
+
+                # Check if it's a supported file type
+                if not self._is_supported_file(file_path):
+                    continue
+
+                # Get content type
+                content_type_elem = prop.find("d:getcontenttype", ns)
+                content_type = (
+                    content_type_elem.text if content_type_elem is not None else None
+                )
+
+                # Get file size
+                content_length_elem = prop.find("d:getcontentlength", ns)
+                size = None
+                if content_length_elem is not None and content_length_elem.text:
+                    try:
+                        size = int(content_length_elem.text)
+                    except ValueError:
+                        pass
+
+                # Get last modified
+                lastmod_elem = prop.find("d:getlastmodified", ns)
+                modified_time = None
+                if lastmod_elem is not None and lastmod_elem.text:
+                    # Convert RFC 2822 date to ISO format
+                    try:
+                        from email.utils import parsedate_to_datetime
+
+                        dt = parsedate_to_datetime(lastmod_elem.text)
+                        modified_time = dt.isoformat()
+                    except Exception:
+                        modified_time = lastmod_elem.text
+
+                total_files += 1
+                yield DocumentInfo(
+                    uri=f"nextcloud://{file_path}",
+                    name=file_path,
+                    mime_type=content_type,
+                    size=size,
+                    modified_time=modified_time,
+                )
+
+            logger.info(f"Found {total_files} documents in Nextcloud")
+
+        except Exception as e:
+            logger.error(f"Failed to list Nextcloud documents: {e}")
+
+    def _is_supported_file(self, path: str) -> bool:
+        """Check if a file type is supported for indexing."""
+        path_lower = path.lower()
+
+        # Check against supported extensions
+        for ext in SUPPORTED_EXTENSIONS:
+            if path_lower.endswith(ext):
+                return True
+
+        return False
+
+    def _get_document_converter(self):
+        """Get or create a Docling DocumentConverter with vision support."""
+        if self._document_converter is None:
+            from rag.vision import get_document_converter
+
+            self._document_converter = get_document_converter(
+                vision_provider=self.vision_provider,
+                vision_model=self.vision_model,
+                vision_ollama_url=self.vision_ollama_url,
+            )
+        return self._document_converter
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a document from Nextcloud."""
+        import requests as http_requests
+
+        # Extract file path from URI (nextcloud://path/to/file)
+        if not uri.startswith("nextcloud://"):
+            logger.error(f"Invalid Nextcloud URI: {uri}")
+            return None
+
+        file_path = uri.replace("nextcloud://", "")
+
+        try:
+            # GET request to download the file
+            response = http_requests.get(
+                self._get_webdav_url(file_path),
+                auth=self._get_auth(),
+                timeout=120,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Failed to download {file_path}: {response.status_code}")
+                return None
+
+            # Determine file type and process accordingly
+            file_name = os.path.basename(file_path)
+            ext = os.path.splitext(file_name)[1].lower()
+
+            # Binary files - process through Docling
+            if ext in self.DOCLING_EXTENSIONS:
+                return self._process_with_docling(uri, file_name, ext, response.content)
+                )
+
+            # Text files - return directly
+            try:
+                text = response.content.decode("utf-8", errors="ignore")
+            except Exception:
+                text = response.text
+
+            return DocumentContent(
+                uri=uri,
+                name=file_name,
+                mime_type=self._get_mime_type(ext),
+                text=text,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to read Nextcloud document {file_path}: {e}")
+            return None
+
+    def _process_with_docling(
+        self, uri: str, name: str, ext: str, content: bytes
+    ) -> Optional[DocumentContent]:
+        """Process a binary file through Docling with vision support."""
+        import tempfile
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+
+            try:
+                converter = self._get_document_converter()
+                result = converter.convert(tmp_path)
+                text = result.document.export_to_markdown()
+
+                logger.debug(f"Processed {name} with Docling: {len(text)} chars")
+
+                return DocumentContent(
+                    uri=uri,
+                    name=name,
+                    mime_type="text/markdown",
+                    text=text,
+                )
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"Docling processing failed for {name}: {e}")
+            return None
+
+    def _get_mime_type(self, ext: str) -> str:
+        """Get MIME type from file extension."""
+        mime_types = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".html": "text/html",
+            ".htm": "text/html",
+            ".md": "text/markdown",
+            ".txt": "text/plain",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+        }
+        return mime_types.get(ext.lower(), "text/plain")
+
+
 def get_document_source(
     source_type: str,
     source_path: Optional[str] = None,
@@ -2726,6 +3075,7 @@ def get_document_source(
     github_path: Optional[str] = None,
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
+    nextcloud_folder: Optional[str] = None,
     vision_provider: str = "local",
     vision_model: Optional[str] = None,
     vision_ollama_url: Optional[str] = None,
@@ -2734,7 +3084,7 @@ def get_document_source(
     Factory function to create the appropriate document source.
 
     Args:
-        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", "notion", or "paperless"
+        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", "notion", "nextcloud", or "paperless"
         source_path: Path for local sources
         mcp_config: Configuration dict for MCP sources
         google_account_id: OAuth account ID for Google sources
@@ -2748,6 +3098,7 @@ def get_document_source(
         github_path: Path filter for GitHub sources
         notion_database_id: Optional Notion database ID to index
         notion_page_id: Optional Notion page ID (indexes children)
+        nextcloud_folder: Optional folder path to restrict Nextcloud indexing (e.g., "/Documents")
         vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
         vision_model: Vision model name (e.g., "granite3.2-vision:latest")
         vision_ollama_url: Ollama URL when using ollama provider
@@ -2779,6 +3130,24 @@ def get_document_source(
                 "PAPERLESS_URL and PAPERLESS_TOKEN environment variables required for paperless source"
             )
         logger.info(f"Creating Paperless source (url={source.base_url})")
+        return source
+
+    elif source_type == "nextcloud":
+        # Credentials from environment variables (NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASSWORD)
+        source = NextcloudDocumentSource(
+            folder_path=nextcloud_folder,
+            vision_provider=vision_provider,
+            vision_model=vision_model,
+            vision_ollama_url=vision_ollama_url,
+        )
+        if not source.base_url or not source.username or not source.password:
+            raise ValueError(
+                "NEXTCLOUD_URL, NEXTCLOUD_USER, and NEXTCLOUD_PASSWORD environment variables required for nextcloud source"
+            )
+        logger.info(
+            f"Creating Nextcloud source (url={source.base_url}, "
+            f"folder={nextcloud_folder or 'all'}, vision={vision_provider})"
+        )
         return source
 
     elif source_type == "mcp:github":

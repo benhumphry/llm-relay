@@ -494,6 +494,7 @@ block content %}
                         <optgroup label="Document Management">
                             <option value="paperless">Paperless-ngx</option>
                             <option value="notion">Notion</option>
+                            <option value="nextcloud">Nextcloud</option>
                         </optgroup>
                         <optgroup label="Other Integrations">
                             <option
@@ -710,6 +711,62 @@ block content %}
                                 <code class="font-mono">PAPERLESS_TOKEN</code>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Nextcloud Configuration -->
+                <div
+                    class="mt-4 space-y-4"
+                    x-show="form.source_type === 'nextcloud'"
+                >
+                    <div class="alert alert-info">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="stroke-current shrink-0 h-6 w-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <div>
+                            <h3 class="font-bold">Nextcloud Connection</h3>
+                            <div class="text-sm">
+                                Credentials are configured via environment
+                                variables:<br />
+                                <code class="font-mono">NEXTCLOUD_URL</code>,
+                                <code class="font-mono">NEXTCLOUD_USER</code>,
+                                and
+                                <code class="font-mono"
+                                    >NEXTCLOUD_PASSWORD</code
+                                >
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Folder Path (optional) -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >Folder Path (optional)</span
+                            >
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.nextcloud_folder"
+                            class="input input-bordered font-mono"
+                            placeholder="e.g., /Documents or /Shared/ProjectDocs"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Leave empty to index all files, or specify a
+                                folder path to restrict indexing</span
+                            >
+                        </label>
                     </div>
                 </div>
 
@@ -1768,6 +1825,7 @@ block content %}
                 github_path: "",
                 notion_database_id: "",
                 notion_page_id: "",
+                nextcloud_folder: "",
                 mcp_name: "",
                 mcp_transport: "stdio",
                 mcp_command: "",
@@ -2166,6 +2224,7 @@ block content %}
             getSourceBadgeClass(store) {
                 if (store.source_type === "local") return "badge-ghost";
                 if (store.source_type === "paperless") return "badge-success";
+                if (store.source_type === "nextcloud") return "badge-info";
                 if (store.source_type === "notion") return "badge-warning";
                 if (store.source_type === "mcp:gdrive") return "badge-primary";
                 if (store.source_type === "mcp:gmail") return "badge-secondary";
@@ -2185,6 +2244,7 @@ block content %}
             getSourceBadgeText(store) {
                 if (store.source_type === "local") return "Local";
                 if (store.source_type === "paperless") return "Paperless";
+                if (store.source_type === "nextcloud") return "Nextcloud";
                 if (store.source_type === "notion") return "Notion";
                 if (store.source_type === "mcp:gdrive") return "Drive";
                 if (store.source_type === "mcp:gmail") return "Gmail";
@@ -2205,6 +2265,8 @@ block content %}
                     return store.source_path || "";
                 if (store.source_type === "paperless")
                     return store.paperless_url || "";
+                if (store.source_type === "nextcloud")
+                    return store.nextcloud_folder || "All files";
                 if (store.source_type === "notion") {
                     if (store.notion_database_id)
                         return `Database: ${store.notion_database_id.substring(0, 8)}...`;
@@ -2384,6 +2446,7 @@ block content %}
                     github_path: store.github_path || "",
                     notion_database_id: store.notion_database_id || "",
                     notion_page_id: store.notion_page_id || "",
+                    nextcloud_folder: store.nextcloud_folder || "",
                     mcp_name: store.mcp_server_config?.name || "",
                     mcp_transport:
                         store.mcp_server_config?.transport || "stdio",
@@ -2454,6 +2517,11 @@ block content %}
                     } else if (this.form.source_type === "paperless") {
                         body.source_type = "paperless";
                         // Credentials come from PAPERLESS_URL and PAPERLESS_TOKEN env vars
+                    } else if (this.form.source_type === "nextcloud") {
+                        body.source_type = "nextcloud";
+                        body.nextcloud_folder =
+                            this.form.nextcloud_folder || null;
+                        // Credentials come from NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASSWORD env vars
                     } else if (this.form.source_type === "notion") {
                         body.source_type = "notion";
                         body.notion_database_id =

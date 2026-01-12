@@ -1048,7 +1048,6 @@ def chat():
         f"Chat request: provider={provider.name}, model={model_id}, "
         f"messages={len(messages)}, stream={stream}"
     )
-
     # Check for cache hit (if caching is enabled on the resolved entity)
     cache_engine = None
     if resolved.has_cache:
