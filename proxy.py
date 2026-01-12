@@ -36,7 +36,14 @@ from providers import register_all_providers, registry
 from routing import get_session_key
 
 # Import usage tracking
-from tracking import extract_tag, get_client_ip, resolve_hostname, tracker
+from tracking import (
+    extract_relay_commands_from_messages,
+    extract_tag,
+    get_client_ip,
+    normalize_tags,
+    resolve_hostname,
+    tracker,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -872,6 +879,21 @@ def chat():
     ollama_messages = data.get("messages", [])
     system_prompt, messages = convert_ollama_messages(ollama_messages)
 
+    # Extract @relay commands from messages and get cleaned messages
+    messages, relay_commands, relay_tags = extract_relay_commands_from_messages(
+        messages
+    )
+    if relay_commands:
+        logger.info(
+            f"Extracted @relay commands: {[c.command + ':' + c.raw_value for c in relay_commands]}"
+        )
+
+    # Merge relay tags with existing tags
+    if relay_tags:
+        all_tags = tag.split(",") if tag else []
+        all_tags.extend(relay_tags)
+        tag = normalize_tags(",".join(all_tags))
+
     # Generate session key for smart router caching
     from flask import g
 
@@ -1286,6 +1308,27 @@ def generate():
     # We build a simple message list first, then potentially add images after resolution
     messages_for_resolution = [{"role": "user", "content": prompt}]
 
+    # Extract @relay commands from messages and get cleaned messages
+    messages_for_resolution, relay_commands, relay_tags = (
+        extract_relay_commands_from_messages(messages_for_resolution)
+    )
+    if relay_commands:
+        logger.info(
+            f"Extracted @relay commands: {[c.command + ':' + c.raw_value for c in relay_commands]}"
+        )
+        # Update prompt with cleaned content
+        prompt = (
+            messages_for_resolution[0].get("content", prompt)
+            if messages_for_resolution
+            else prompt
+        )
+
+    # Merge relay tags with existing tags
+    if relay_tags:
+        all_tags = tag.split(",") if tag else []
+        all_tags.extend(relay_tags)
+        tag = normalize_tags(",".join(all_tags))
+
     # Generate session key for smart router caching
     from flask import g
 
@@ -1569,6 +1612,21 @@ def openai_chat_completions():
     # Convert messages for resolution (needed for smart routers)
     openai_messages = data.get("messages", [])
     system_prompt, messages = convert_openai_messages(openai_messages)
+
+    # Extract @relay commands from messages and get cleaned messages
+    messages, relay_commands, relay_tags = extract_relay_commands_from_messages(
+        messages
+    )
+    if relay_commands:
+        logger.info(
+            f"Extracted @relay commands: {[c.command + ':' + c.raw_value for c in relay_commands]}"
+        )
+
+    # Merge relay tags with existing tags
+    if relay_tags:
+        all_tags = tag.split(",") if tag else []
+        all_tags.extend(relay_tags)
+        tag = normalize_tags(",".join(all_tags))
 
     # Generate session key for smart router caching
     from flask import g
@@ -2035,6 +2093,23 @@ def openai_completions():
         prompt = prompt[0] if prompt else ""
 
     messages = [{"role": "user", "content": prompt}]
+
+    # Extract @relay commands from messages and get cleaned messages
+    messages, relay_commands, relay_tags = extract_relay_commands_from_messages(
+        messages
+    )
+    if relay_commands:
+        logger.info(
+            f"Extracted @relay commands: {[c.command + ':' + c.raw_value for c in relay_commands]}"
+        )
+        # Update prompt with cleaned content
+        prompt = messages[0].get("content", prompt) if messages else prompt
+
+    # Merge relay tags with existing tags
+    if relay_tags:
+        all_tags = tag.split(",") if tag else []
+        all_tags.extend(relay_tags)
+        tag = normalize_tags(",".join(all_tags))
 
     # Generate session key for smart router caching
     from flask import g
