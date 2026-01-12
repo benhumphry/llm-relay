@@ -5277,11 +5277,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         if not store:
             return jsonify({"error": "Document store not found"}), 404
 
-        if store.smart_enrichers:
-            enricher_names = [e.name for e in store.smart_enrichers]
+        if store.smart_aliases:
+            alias_names = [a.name for a in store.smart_aliases]
             return jsonify(
                 {
-                    "error": f"Cannot delete store - used by enrichers: {', '.join(enricher_names)}"
+                    "error": f"Cannot delete store - used by smart aliases: {', '.join(alias_names)}"
                 }
             ), 409
 
