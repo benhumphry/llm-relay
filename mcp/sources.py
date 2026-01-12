@@ -2825,8 +2825,9 @@ class NextcloudDocumentSource(DocumentSource):
 
     def list_documents(self) -> Iterator[DocumentInfo]:
         """List all supported documents from Nextcloud."""
-        import requests as http_requests
         import xml.etree.ElementTree as ET
+
+        import requests as http_requests
 
         start_path = self.folder_path if self.folder_path else ""
         logger.info(
@@ -3006,7 +3007,6 @@ class NextcloudDocumentSource(DocumentSource):
             # Binary files - process through Docling
             if ext in self.DOCLING_EXTENSIONS:
                 return self._process_with_docling(uri, file_name, ext, response.content)
-                )
 
             # Text files - return directly
             try:
