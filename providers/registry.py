@@ -163,22 +163,25 @@ class ProviderRegistry:
         messages: list[dict] | None = None,
         system: str | None = None,
         session_key: str | None = None,
+        tags: str | None = None,
     ) -> "ResolvedModel | EnricherResolvedModel":
         """
         Resolve a model name to a provider and model ID.
 
         Resolution order:
         1. Check for redirects - transparent model name mapping
-        2. Check if it's a smart alias - unified routing + enrichment + caching
-        3. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
-        4. Check each configured provider's models
-        5. Fall back to default provider/model
+        2. Check for smart tags - if request tags match an alias with is_smart_tag=True
+        3. Check if it's a smart alias by name - unified routing + enrichment + caching
+        4. Check for provider prefix (e.g., "openai-gpt-4o" -> openai provider)
+        5. Check each configured provider's models
+        6. Fall back to default provider/model
 
         Args:
             model_name: User-provided model name
             messages: Optional message list (required for smart alias routing/enrichment)
             system: Optional system prompt (for smart alias context)
             session_key: Optional session key (for per_session routing)
+            tags: Optional comma-separated tags from request (for smart tag matching)
 
         Returns:
             ResolvedModel with provider, model_id, and optional alias info
@@ -191,6 +194,7 @@ class ProviderRegistry:
         from db import (
             find_matching_redirect,
             get_smart_alias_by_name,
+            get_smart_tag_by_name,
             increment_redirect_count,
         )
         from routing import SmartAliasEngine
@@ -238,7 +242,71 @@ class ProviderRegistry:
                 result._cache_config = redirect
             return result
 
-        # Step 2: Check if it's a smart alias (unified routing + enrichment + caching)
+        # Step 2: Check for smart tags (tag-based alias triggering)
+        # If the request has tags that match an alias with is_smart_tag=True,
+        # process through that alias
+        smart_tag_alias = None
+        if tags:
+            tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+            for tag in tag_list:
+                smart_tag_alias = get_smart_tag_by_name(tag)
+                if smart_tag_alias:
+                    logger.debug(
+                        f"Smart tag match: tag '{tag}' -> alias '{smart_tag_alias.name}'"
+                    )
+                    break
+
+        if smart_tag_alias:
+            # Determine target model for smart tag
+            if smart_tag_alias.passthrough_model:
+                # Use the original request's model instead of alias target
+                target_model = name
+                logger.debug(f"Smart tag passthrough: using original model '{name}'")
+            else:
+                target_model = smart_tag_alias.target_model
+
+            # Check if smart tag alias needs ChromaDB (for RAG functionality)
+            needs_chroma = smart_tag_alias.use_rag
+            if not needs_chroma or is_chroma_available():
+                if messages is not None:
+                    logger.debug(f"Using smart tag alias '{smart_tag_alias.name}'")
+                    engine = SmartAliasEngine(
+                        smart_tag_alias,
+                        self,
+                        passthrough_model=target_model
+                        if smart_tag_alias.passthrough_model
+                        else None,
+                    )
+                    enrichment_result = engine.process(messages, system, session_key)
+
+                    result = EnricherResolvedModel(
+                        provider=enrichment_result.resolved.provider,
+                        model_id=enrichment_result.resolved.model_id,
+                        alias_name=smart_tag_alias.name,
+                        alias_tags=smart_tag_alias.tags or [],
+                        enrichment_result=enrichment_result,
+                    )
+                    if smart_tag_alias.cache_enabled:
+                        result._cache_config = smart_tag_alias
+                    return result
+                else:
+                    # No messages - just resolve to target model
+                    try:
+                        target_result = self._resolve_actual_model(target_model)
+                        return ResolvedModel(
+                            provider=target_result.provider,
+                            model_id=target_result.model_id,
+                            alias_name=smart_tag_alias.name,
+                            alias_tags=smart_tag_alias.tags or [],
+                        )
+                    except ValueError:
+                        pass  # Fall through to normal resolution
+            else:
+                logger.warning(
+                    f"Smart tag alias '{smart_tag_alias.name}' requires ChromaDB for RAG but it's not available"
+                )
+
+        # Step 3: Check if it's a smart alias by name (unified routing + enrichment + caching)
         smart_alias = get_smart_alias_by_name(name)
         if smart_alias and smart_alias.enabled:
             # Check if smart alias needs ChromaDB (for RAG functionality)

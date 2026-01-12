@@ -885,6 +885,7 @@ def chat():
             messages=messages,
             system=system_prompt,
             session_key=session_key,
+            tags=tag,
         )
         provider, model_id = resolved.provider, resolved.model_id
         alias_name = resolved.alias_name
@@ -1298,6 +1299,7 @@ def generate():
             messages=messages_for_resolution,
             system=system,
             session_key=session_key,
+            tags=tag,
         )
         provider, model_id = resolved.provider, resolved.model_id
         alias_name = resolved.alias_name
@@ -1581,6 +1583,7 @@ def openai_chat_completions():
             messages=messages,
             system=system_prompt,
             session_key=session_key,
+            tags=tag,
         )
         provider, model_id = resolved.provider, resolved.model_id
         alias_name = resolved.alias_name
@@ -2046,6 +2049,7 @@ def openai_completions():
             messages=messages,
             system=None,
             session_key=session_key,
+            tags=tag,
         )
         provider, model_id = resolved.provider, resolved.model_id
         alias_name = resolved.alias_name

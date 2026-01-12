@@ -1058,6 +1058,12 @@ class SmartAlias(Base):
     use_web: Mapped[bool] = mapped_column(Boolean, default=False)
     use_cache: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # ===== SMART TAG SETTINGS =====
+    # When enabled, requests tagged with this alias name trigger the alias
+    is_smart_tag: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When enabled with smart tag, use request's original model instead of target_model
+    passthrough_model: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # ===== TARGET CONFIGURATION =====
     # Always required - the default/fallback target model
     target_model: Mapped[str] = mapped_column(String(150), nullable=False)
@@ -1214,6 +1220,8 @@ class SmartAlias(Base):
             "use_rag": self.use_rag,
             "use_web": self.use_web,
             "use_cache": self.use_cache,
+            "is_smart_tag": self.is_smart_tag,
+            "passthrough_model": self.passthrough_model,
             "feature_type": self.feature_type,
             # Target
             "target_model": self.target_model,

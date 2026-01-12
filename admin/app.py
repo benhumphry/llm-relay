@@ -6067,6 +6067,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_rag=use_rag,
                 use_web=use_web,
                 use_cache=use_cache,
+                # Smart tag settings
+                is_smart_tag=data.get("is_smart_tag", False),
+                passthrough_model=data.get("passthrough_model", False),
                 # Routing settings
                 designator_model=data.get("designator_model"),
                 purpose=data.get("purpose"),
@@ -6132,6 +6135,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_rag=data.get("use_rag"),
                 use_web=data.get("use_web"),
                 use_cache=data.get("use_cache"),
+                # Smart tag settings
+                is_smart_tag=data.get("is_smart_tag"),
+                passthrough_model=data.get("passthrough_model"),
                 # Routing settings
                 designator_model=data.get("designator_model"),
                 purpose=data.get("purpose"),

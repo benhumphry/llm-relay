@@ -58,6 +58,40 @@ def get_smart_alias_by_name(
         return _alias_to_detached(alias) if alias else None
 
 
+def get_smart_tag_by_name(
+    tag_name: str, db: Optional[Session] = None
+) -> Optional[SmartAlias]:
+    """
+    Get a smart alias that is configured as a smart tag with the given name.
+
+    Only returns aliases where is_smart_tag=True and enabled=True.
+    """
+    if db:
+        return (
+            db.query(SmartAlias)
+            .options(joinedload(SmartAlias.document_stores))
+            .filter(
+                SmartAlias.name == tag_name,
+                SmartAlias.is_smart_tag == True,
+                SmartAlias.enabled == True,
+            )
+            .first()
+        )
+
+    with get_db_context() as session:
+        alias = (
+            session.query(SmartAlias)
+            .options(joinedload(SmartAlias.document_stores))
+            .filter(
+                SmartAlias.name == tag_name,
+                SmartAlias.is_smart_tag == True,
+                SmartAlias.enabled == True,
+            )
+            .first()
+        )
+        return _alias_to_detached(alias) if alias else None
+
+
 def get_smart_alias_by_id(
     alias_id: int, db: Optional[Session] = None
 ) -> Optional[SmartAlias]:
@@ -88,6 +122,9 @@ def create_smart_alias(
     use_rag: bool = False,
     use_web: bool = False,
     use_cache: bool = False,
+    # Smart tag settings
+    is_smart_tag: bool = False,
+    passthrough_model: bool = False,
     # Routing settings
     designator_model: str | None = None,
     purpose: str | None = None,
@@ -189,6 +226,9 @@ def create_smart_alias(
             use_rag=use_rag,
             use_web=use_web,
             use_cache=use_cache,
+            # Smart tag
+            is_smart_tag=is_smart_tag,
+            passthrough_model=passthrough_model,
             # Routing
             designator_model=designator_model,
             purpose=purpose,
@@ -262,6 +302,9 @@ def update_smart_alias(
     use_rag: bool | None = None,
     use_web: bool | None = None,
     use_cache: bool | None = None,
+    # Smart tag settings
+    is_smart_tag: bool | None = None,
+    passthrough_model: bool | None = None,
     # Routing settings
     designator_model: str | None = None,
     purpose: str | None = None,
@@ -345,6 +388,12 @@ def update_smart_alias(
             alias.use_web = use_web
         if use_cache is not None:
             alias.use_cache = use_cache
+
+        # Smart tag
+        if is_smart_tag is not None:
+            alias.is_smart_tag = is_smart_tag
+        if passthrough_model is not None:
+            alias.passthrough_model = passthrough_model
 
         # Routing
         if designator_model is not None:
@@ -689,6 +738,9 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         use_rag=alias.use_rag,
         use_web=alias.use_web,
         use_cache=alias.use_cache,
+        # Smart tag
+        is_smart_tag=alias.is_smart_tag,
+        passthrough_model=alias.passthrough_model,
         # Routing
         designator_model=alias.designator_model,
         purpose=alias.purpose,

@@ -1135,6 +1135,27 @@ def _run_migrations(engine) -> None:
                 )
                 conn.commit()
 
+        # v1.7 Smart Tags: Add is_smart_tag and passthrough_model columns
+        if "is_smart_tag" not in existing_columns:
+            logger.info("Adding is_smart_tag column to smart_aliases table (v1.7)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN is_smart_tag BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.commit()
+
+        if "passthrough_model" not in existing_columns:
+            logger.info("Adding passthrough_model column to smart_aliases table (v1.7)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN passthrough_model BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.commit()
+
     # Migration: Drop legacy tables (v1.8 - Smart Aliases unification)
     # These tables have been replaced by the unified smart_aliases table
     legacy_tables = [

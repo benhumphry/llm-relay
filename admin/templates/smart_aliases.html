@@ -144,7 +144,13 @@ content %}
                                             >Cache</span
                                         >
                                         <span
-                                            x-show="!alias.use_routing && !alias.use_rag && !alias.use_web && !alias.use_cache"
+                                            x-show="alias.is_smart_tag"
+                                            class="badge badge-sm badge-accent"
+                                            title="Smart Tag - triggered by tagged requests"
+                                            >Tag</span
+                                        >
+                                        <span
+                                            x-show="!alias.use_routing && !alias.use_rag && !alias.use_web && !alias.use_cache && !alias.is_smart_tag"
                                             class="badge badge-sm badge-ghost"
                                             >Simple</span
                                         >
@@ -1319,6 +1325,48 @@ content %}
                                 </label>
                             </div>
                         </div>
+
+                        <!-- Smart Tag Option -->
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                x-model="form.is_smart_tag"
+                                class="checkbox checkbox-accent mt-1"
+                            />
+                            <div>
+                                <div class="font-medium">Smart Tag</div>
+                                <div class="text-sm text-base-content/60">
+                                    Trigger this alias when requests are tagged
+                                    with its name
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- Passthrough Model (shown when Smart Tag is enabled) -->
+                        <div
+                            x-show="form.is_smart_tag"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-accent space-y-3"
+                        >
+                            <label
+                                class="flex items-start gap-3 cursor-pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.passthrough_model"
+                                    class="checkbox checkbox-accent checkbox-sm mt-1"
+                                />
+                                <div>
+                                    <div class="font-medium text-sm">
+                                        Passthrough Model
+                                    </div>
+                                    <div class="text-xs text-base-content/60">
+                                        Honor the request's original model
+                                        instead of this alias's target
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -1571,6 +1619,9 @@ content %}
                 cache_ttl_hours: 168,
                 cache_min_tokens: 50,
                 cache_max_tokens: 10000,
+                // Smart tag
+                is_smart_tag: false,
+                passthrough_model: false,
                 // Metadata
                 tags_input: "",
                 description: "",
@@ -1738,6 +1789,9 @@ content %}
                     cache_ttl_hours: 168,
                     cache_min_tokens: 50,
                     cache_max_tokens: 10000,
+                    // Smart tag
+                    is_smart_tag: false,
+                    passthrough_model: false,
                     // Metadata
                     tags_input: "",
                     description: "",
@@ -1796,6 +1850,9 @@ content %}
                     cache_ttl_hours: alias.cache_ttl_hours || 168,
                     cache_min_tokens: alias.cache_min_tokens || 50,
                     cache_max_tokens: alias.cache_max_tokens || 10000,
+                    // Smart tag
+                    is_smart_tag: alias.is_smart_tag || false,
+                    passthrough_model: alias.passthrough_model || false,
                     // Metadata
                     tags_input: (alias.tags || []).join(", "),
                     description: alias.description || "",
@@ -1925,6 +1982,9 @@ content %}
                     cache_ttl_hours: this.form.cache_ttl_hours,
                     cache_min_tokens: this.form.cache_min_tokens,
                     cache_max_tokens: this.form.cache_max_tokens,
+                    // Smart tag
+                    is_smart_tag: this.form.is_smart_tag,
+                    passthrough_model: this.form.passthrough_model,
                     // Metadata
                     tags: tags,
                     description: this.form.description || null,

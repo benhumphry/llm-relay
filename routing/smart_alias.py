@@ -71,16 +71,24 @@ class SmartAliasEngine:
     - SmartEnricherEngine handles RAG + Web enrichment + caching
     """
 
-    def __init__(self, alias: "SmartAlias", registry: "ProviderRegistry"):
+    def __init__(
+        self,
+        alias: "SmartAlias",
+        registry: "ProviderRegistry",
+        passthrough_model: str | None = None,
+    ):
         """
         Initialize the engine.
 
         Args:
             alias: SmartAlias configuration
             registry: Provider registry for model resolution
+            passthrough_model: If set, use this model instead of alias.target_model
+                               (used by smart tags with passthrough_model=True)
         """
         self.alias = alias
         self.registry = registry
+        self.passthrough_model = passthrough_model
 
     def process(
         self,
@@ -105,8 +113,13 @@ class SmartAliasEngine:
             else:
                 effective_system = self.alias.system_prompt
 
-        # Determine target model (may be modified by routing)
-        target_model = self.alias.target_model
+        # Determine target model (may be modified by routing or passthrough)
+        # If passthrough_model is set, use that instead of alias target
+        target_model = (
+            self.passthrough_model
+            if self.passthrough_model
+            else self.alias.target_model
+        )
 
         # ========================================
         # STEP 1: SMART ROUTING (delegate to SmartRouterEngine)
