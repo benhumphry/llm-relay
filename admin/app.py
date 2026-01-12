@@ -5160,6 +5160,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "error": "NOTION_TOKEN or NOTION_API_KEY environment variable is required"
                     }
                 ), 400
+        elif source_type == "nextcloud":
+            # Credentials come from NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASSWORD env vars
+            if (
+                not os.environ.get("NEXTCLOUD_URL")
+                or not os.environ.get("NEXTCLOUD_USER")
+                or not os.environ.get("NEXTCLOUD_PASSWORD")
+            ):
+                return jsonify(
+                    {
+                        "error": "NEXTCLOUD_URL, NEXTCLOUD_USER, and NEXTCLOUD_PASSWORD environment variables are required"
+                    }
+                ), 400
         else:
             return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
