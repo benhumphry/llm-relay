@@ -1119,6 +1119,22 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        if "paperless_tag_id" not in existing_columns:
+            migrations.append(
+                (
+                    "paperless_tag_id",
+                    "ALTER TABLE document_stores ADD COLUMN paperless_tag_id INTEGER",
+                )
+            )
+
+        if "paperless_tag_name" not in existing_columns:
+            migrations.append(
+                (
+                    "paperless_tag_name",
+                    "ALTER TABLE document_stores ADD COLUMN paperless_tag_name VARCHAR(255)",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for document_stores table"

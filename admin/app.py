@@ -5178,6 +5178,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
                 paperless_url=data.get("paperless_url"),
                 paperless_token=data.get("paperless_token"),
+                paperless_tag_id=data.get("paperless_tag_id"),
+                paperless_tag_name=data.get("paperless_tag_name"),
                 github_repo=data.get("github_repo"),
                 github_branch=data.get("github_branch"),
                 github_path=data.get("github_path"),
@@ -5226,6 +5228,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
                 paperless_url=data.get("paperless_url"),
                 paperless_token=data.get("paperless_token"),
+                paperless_tag_id=data.get("paperless_tag_id"),
+                paperless_tag_name=data.get("paperless_tag_name"),
                 github_repo=data.get("github_repo"),
                 github_branch=data.get("github_branch"),
                 github_path=data.get("github_path"),
@@ -5847,6 +5851,226 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "is_root": target_path == root,
             }
         )
+
+    @admin.route("/api/nextcloud-folders", methods=["GET"])
+    @require_auth_api
+    def list_nextcloud_folders():
+        """
+        List folders from Nextcloud using WebDAV API.
+
+        Query params:
+            path: The path to list folders from. Defaults to root.
+
+        Returns a list of folders the user can select for indexing.
+        """
+        import xml.etree.ElementTree as ET
+
+        import requests as http_requests
+
+        base_url = os.environ.get("NEXTCLOUD_URL", "").rstrip("/")
+        username = os.environ.get("NEXTCLOUD_USER", "")
+        password = os.environ.get("NEXTCLOUD_PASSWORD", "")
+
+        if not base_url or not username or not password:
+            return jsonify({"error": "Nextcloud credentials not configured"}), 400
+
+        # Get requested path, default to root
+        requested_path = request.args.get("path", "").strip("/")
+
+        # Build WebDAV URL
+        webdav_url = f"{base_url}/remote.php/dav/files/{username}"
+        if requested_path:
+            webdav_url = f"{webdav_url}/{requested_path}"
+
+        # PROPFIND request to list contents (Depth: 1 for immediate children only)
+        propfind_body = """<?xml version="1.0" encoding="UTF-8"?>
+<d:propfind xmlns:d="DAV:">
+    <d:prop>
+        <d:resourcetype/>
+        <d:displayname/>
+    </d:prop>
+</d:propfind>"""
+
+        try:
+            response = http_requests.request(
+                "PROPFIND",
+                webdav_url,
+                auth=(username, password),
+                headers={
+                    "Depth": "1",
+                    "Content-Type": "application/xml",
+                },
+                data=propfind_body,
+                timeout=15,
+            )
+
+            if response.status_code not in (200, 207):
+                return (
+                    jsonify({"error": f"Nextcloud error: {response.status_code}"}),
+                    response.status_code,
+                )
+
+            # Parse XML response
+            root = ET.fromstring(response.content)
+            ns = {"d": "DAV:"}
+
+            folders = []
+            base_path = f"/remote.php/dav/files/{username}/"
+
+            for response_elem in root.findall("d:response", ns):
+                href = response_elem.find("d:href", ns)
+                if href is None:
+                    continue
+
+                # Extract path from href
+                path = href.text
+                if path.startswith(base_path):
+                    path = path[len(base_path) :]
+                path = path.strip("/")
+
+                # Skip the current directory (first result is always the requested dir)
+                if path == requested_path:
+                    continue
+
+                # Check if it's a collection (folder)
+                propstat = response_elem.find("d:propstat", ns)
+                if propstat is None:
+                    continue
+
+                prop = propstat.find("d:prop", ns)
+                if prop is None:
+                    continue
+
+                resourcetype = prop.find("d:resourcetype", ns)
+                if resourcetype is None:
+                    continue
+
+                # Only include folders (collections)
+                collection = resourcetype.find("d:collection", ns)
+                if collection is None:
+                    continue
+
+                # Get display name or use path segment
+                name = (
+                    displayname.text
+                    if displayname is not None and displayname.text
+                    else path.split("/")[-1]
+                )
+
+                folders.append({"name": name, "path": f"/{path}"})
+
+            # Sort folders by name
+            folders.sort(key=lambda x: x["name"].lower())
+
+            # Build breadcrumb path
+            breadcrumbs = []
+            if requested_path:
+                parts = requested_path.split("/")
+                for i, part in enumerate(parts):
+                    crumb_path = "/" + "/".join(parts[: i + 1])
+                    breadcrumbs.append({"name": part, "path": crumb_path})
+
+            return jsonify(
+                {
+                    "folders": folders,
+                    "current_path": f"/{requested_path}" if requested_path else "/",
+                    "breadcrumbs": breadcrumbs,
+                    "is_root": not requested_path,
+                }
+            )
+
+        except http_requests.exceptions.Timeout:
+            return jsonify({"error": "Nextcloud request timed out"}), 504
+        except http_requests.exceptions.ConnectionError:
+            return jsonify({"error": "Could not connect to Nextcloud"}), 503
+        except ET.ParseError as e:
+            return jsonify({"error": f"Invalid XML response: {e}"}), 500
+        except Exception as e:
+            logger.error(f"Error listing Nextcloud folders: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/paperless-tags", methods=["GET"])
+    @require_auth_api
+    def list_paperless_tags():
+        """
+        List tags from Paperless-ngx.
+
+        Returns a list of tags the user can select to filter document indexing.
+        """
+        import requests as http_requests
+
+        base_url = os.environ.get("PAPERLESS_URL", "").rstrip("/")
+        api_token = os.environ.get("PAPERLESS_TOKEN", "")
+
+        if not base_url or not api_token:
+            return jsonify({"error": "Paperless credentials not configured"}), 400
+
+        try:
+            # Fetch all tags (handle pagination)
+            all_tags = []
+            url = f"{base_url}/api/tags/"
+
+            while url:
+                response = http_requests.get(
+                    url,
+                    headers={"Authorization": f"Token {api_token}"},
+                    timeout=15,
+                )
+
+                if response.status_code != 200:
+                    return (
+                        jsonify({"error": f"Paperless error: {response.status_code}"}),
+                        response.status_code,
+                    )
+
+                data = response.json()
+                results = data.get("results", [])
+
+                for tag in results:
+                    all_tags.append(
+                        {
+                            "id": tag.get("id"),
+                            "name": tag.get("name", ""),
+                            "color": tag.get("color", "#a6cee3"),
+                            "document_count": tag.get("document_count", 0),
+                        }
+                    )
+
+                # Get next page if exists
+                url = data.get("next")
+
+            # Sort by name
+            all_tags.sort(key=lambda x: x["name"].lower())
+
+            # Add "All documents" option at the start
+            all_tags.insert(
+                0,
+                {
+                    "id": None,
+                    "name": "All documents (no filter)",
+                    "color": None,
+                    "document_count": None,
+                },
+            )
+            all_tags.insert(
+                0,
+                {
+                    "id": None,
+                    "name": "All documents (no filter)",
+                    "color": None,
+                    "document_count": None,
+                },
+            )
+
+            return jsonify({"tags": all_tags})
+
+        except http_requests.exceptions.Timeout:
+            return jsonify({"error": "Paperless request timed out"}), 504
+        except http_requests.exceptions.ConnectionError:
+            return jsonify({"error": "Could not connect to Paperless"}), 503
+        except Exception as e:
+            logger.error(f"Error listing Paperless tags: {e}")
+            return jsonify({"error": str(e)}), 500
 
     @admin.route("/api/oauth/google/<int:account_id>/labels", methods=["GET"])
     @require_auth_api

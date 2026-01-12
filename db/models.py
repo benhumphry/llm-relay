@@ -888,10 +888,16 @@ class DocumentStore(Base):
     # Paperless-ngx configuration (for source_type="paperless")
     paperless_url: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
-    )  # Base URL (e.g., "http://paperless:8000")
+    )  # Base URL (e.g., "http://paperless:8000") - DEPRECATED, use env var
     paperless_token: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True
-    )  # API token
+    )  # API token - DEPRECATED, use env var
+    paperless_tag_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )  # Filter by tag ID (optional)
+    paperless_tag_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Tag name for display
 
     # GitHub configuration (for source_type="mcp:github")
     github_repo: Mapped[Optional[str]] = mapped_column(
@@ -984,6 +990,8 @@ class DocumentStore(Base):
             "gcalendar_calendar_name": self.gcalendar_calendar_name,
             "paperless_url": self.paperless_url,
             "paperless_token": self.paperless_token,
+            "paperless_tag_id": self.paperless_tag_id,
+            "paperless_tag_name": self.paperless_tag_name,
             "github_repo": self.github_repo,
             "github_branch": self.github_branch,
             "github_path": self.github_path,

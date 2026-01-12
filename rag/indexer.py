@@ -539,6 +539,7 @@ class RAGIndexer:
                 gcalendar_calendar_id=store.gcalendar_calendar_id,
                 paperless_url=store.paperless_url,
                 paperless_token=store.paperless_token,
+                paperless_tag_id=store.paperless_tag_id,
                 github_repo=store.github_repo,
                 github_branch=store.github_branch,
                 github_path=store.github_path,

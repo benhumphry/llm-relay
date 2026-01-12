@@ -701,29 +701,223 @@ block content %}
                     </label>
                 </div>
 
+                <!-- Paperless Configuration -->
+                <div
+                    class="mt-4 space-y-4"
+                    x-show="form.source_type === 'paperless'"
+                    x-effect="if (form.source_type === 'paperless' && paperlessTags.length === 0 && !loadingPaperlessTags) loadPaperlessTags()"
+                >
+                    <!-- Tag Filter -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >Filter by Tag (optional)</span
+                            >
+                        </label>
+                        <select
+                            x-model="form.paperless_tag_id"
+                            @change="onPaperlessTagChange()"
+                            class="select select-bordered w-full"
+                        >
+                            <option value="">
+                                <span x-show="loadingPaperlessTags"
+                                    >Loading tags...</span
+                                >
+                                <span x-show="!loadingPaperlessTags"
+                                    >All documents (no filter)</span
+                                >
+                            </option>
+                            <template
+                                x-for="tag in paperlessTags"
+                                :key="tag.id"
+                            >
+                                <option
+                                    :value="tag.id"
+                                    x-show="tag.id !== null"
+                                >
+                                    <span x-text="tag.name"></span>
+                                    <span
+                                        x-show="tag.document_count !== null"
+                                        x-text="' (' + tag.document_count + ')'"
+                                    ></span>
+                                </option>
+                            </template>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt">
+                                Only index documents with a specific tag, or
+                                leave empty for all documents
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- Nextcloud Configuration -->
                 <div
                     class="mt-4 space-y-4"
                     x-show="form.source_type === 'nextcloud'"
                 >
-                    <!-- Folder Path (optional) -->
+                    <!-- Folder Path with Browser -->
                     <div class="form-control">
                         <label class="label">
                             <span class="label-text"
                                 >Folder Path (optional)</span
                             >
                         </label>
-                        <input
-                            type="text"
-                            x-model="form.nextcloud_folder"
-                            class="input input-bordered font-mono"
-                            placeholder="e.g., /Documents or /Shared/ProjectDocs"
-                        />
-                        <label class="label">
-                            <span class="label-text-alt"
-                                >Leave empty to index all files, or specify a
-                                folder path to restrict indexing</span
+                        <div class="join w-full">
+                            <input
+                                type="text"
+                                x-model="form.nextcloud_folder"
+                                class="input input-bordered join-item flex-1 font-mono"
+                                placeholder="/ (all files)"
+                            />
+                            <button
+                                type="button"
+                                @click="toggleNextcloudFolderBrowser()"
+                                class="btn btn-outline btn-square join-item"
+                                title="Browse folders"
                             >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- Nextcloud folder browser -->
+                        <div
+                            x-show="showNextcloudFolderBrowser"
+                            x-transition
+                            class="mt-2 border rounded-lg p-3 bg-base-200"
+                        >
+                            <!-- Breadcrumb navigation -->
+                            <div
+                                class="text-sm flex items-center gap-1 mb-2 flex-wrap"
+                            >
+                                <a
+                                    href="#"
+                                    @click.prevent="navigateNextcloudFolder('/')"
+                                    class="link link-hover"
+                                >
+                                    /
+                                </a>
+                                <template
+                                    x-for="(crumb, index) in nextcloudFolderBreadcrumbs"
+                                    :key="crumb.path"
+                                >
+                                    <span class="flex items-center gap-1">
+                                        <span class="text-base-content/50"
+                                            >&gt;</span
+                                        >
+                                        <a
+                                            href="#"
+                                            @click.prevent="navigateNextcloudFolder(crumb.path)"
+                                            class="link link-hover"
+                                            x-text="crumb.name"
+                                        ></a>
+                                    </span>
+                                </template>
+                            </div>
+
+                            <!-- Folder list -->
+                            <div
+                                class="border rounded-lg max-h-48 overflow-y-auto bg-base-100"
+                            >
+                                <div
+                                    x-show="loadingNextcloudFolders"
+                                    class="flex justify-center py-4"
+                                >
+                                    <span
+                                        class="loading loading-spinner loading-sm"
+                                    ></span>
+                                </div>
+                                <ul
+                                    x-show="!loadingNextcloudFolders"
+                                    class="menu menu-sm p-1"
+                                >
+                                    <!-- "Select this folder" option -->
+                                    <li>
+                                        <a
+                                            href="#"
+                                            @click.prevent="selectNextcloudFolder(currentNextcloudPath)"
+                                            class="text-primary font-medium"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M5 13l4 4L19 7"
+                                                />
+                                            </svg>
+                                            Select this folder
+                                        </a>
+                                    </li>
+                                    <!-- Subfolders -->
+                                    <template
+                                        x-for="folder in nextcloudFolders"
+                                        :key="folder.path"
+                                    >
+                                        <li>
+                                            <a
+                                                href="#"
+                                                @click.prevent="navigateNextcloudFolder(folder.path)"
+                                                class="font-mono text-sm"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                                    />
+                                                </svg>
+                                                <span
+                                                    x-text="folder.name"
+                                                ></span>
+                                            </a>
+                                        </li>
+                                    </template>
+                                    <!-- Empty state -->
+                                    <li
+                                        x-show="nextcloudFolders.length === 0 && !loadingNextcloudFolders"
+                                    >
+                                        <span
+                                            class="text-base-content/50 italic"
+                                            >No subfolders</span
+                                        >
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <label class="label">
+                            <span class="label-text-alt">
+                                Leave empty to index all files, or select a
+                                folder to restrict indexing
+                            </span>
                         </label>
                     </div>
                 </div>
@@ -1773,12 +1967,25 @@ block content %}
             localFolderBreadcrumbs: [],
             currentLocalPath: "/",
 
+            // Nextcloud folder browser
+            showNextcloudFolderBrowser: false,
+            nextcloudFolders: [],
+            loadingNextcloudFolders: false,
+            nextcloudFolderBreadcrumbs: [],
+            currentNextcloudPath: "/",
+
+            // Paperless tags
+            paperlessTags: [],
+            loadingPaperlessTags: false,
+
             form: {
                 name: "",
                 source_type: "local",
                 source_path: "",
                 paperless_url: "",
                 paperless_token: "",
+                paperless_tag_id: "",
+                paperless_tag_name: "",
                 github_repo: "",
                 github_branch: "",
                 github_path: "",
@@ -2095,6 +2302,80 @@ block content %}
             selectLocalFolder(path) {
                 this.form.source_path = path;
                 this.showLocalFolderBrowser = false;
+            },
+
+            // Nextcloud folder browser functions
+            toggleNextcloudFolderBrowser() {
+                this.showNextcloudFolderBrowser =
+                    !this.showNextcloudFolderBrowser;
+                if (this.showNextcloudFolderBrowser) {
+                    this.loadNextcloudFolders("/");
+                }
+            },
+
+            async loadNextcloudFolders(path) {
+                this.loadingNextcloudFolders = true;
+                try {
+                    const response = await fetch(
+                        `/api/nextcloud-folders?path=${encodeURIComponent(path)}`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.nextcloudFolders = data.folders || [];
+                        this.nextcloudFolderBreadcrumbs =
+                            data.breadcrumbs || [];
+                        this.currentNextcloudPath = data.current_path || "/";
+                    } else {
+                        const error = await response.json();
+                        console.error(
+                            "Failed to load Nextcloud folders:",
+                            error.error,
+                        );
+                    }
+                } catch (error) {
+                    console.error("Failed to load Nextcloud folders:", error);
+                } finally {
+                    this.loadingNextcloudFolders = false;
+                }
+            },
+
+            navigateNextcloudFolder(path) {
+                this.loadNextcloudFolders(path);
+            },
+
+            selectNextcloudFolder(path) {
+                this.form.nextcloud_folder = path === "/" ? "" : path;
+                this.showNextcloudFolderBrowser = false;
+            },
+
+            // Paperless tag functions
+            async loadPaperlessTags() {
+                this.loadingPaperlessTags = true;
+                try {
+                    const response = await fetch("/api/paperless-tags");
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.paperlessTags = data.tags || [];
+                    } else {
+                        const error = await response.json();
+                        console.error(
+                            "Failed to load Paperless tags:",
+                            error.error,
+                        );
+                    }
+                } catch (error) {
+                    console.error("Failed to load Paperless tags:", error);
+                } finally {
+                    this.loadingPaperlessTags = false;
+                }
+            },
+
+            onPaperlessTagChange() {
+                // Update tag name when tag is selected
+                const tag = this.paperlessTags.find(
+                    (t) => t.id == this.form.paperless_tag_id,
+                );
+                this.form.paperless_tag_name = tag ? tag.name : "";
             },
 
             onFolderChange() {
@@ -2414,6 +2695,8 @@ block content %}
                     source_path: store.source_path || "",
                     paperless_url: store.paperless_url || "",
                     paperless_token: store.paperless_token || "",
+                    paperless_tag_id: store.paperless_tag_id || "",
+                    paperless_tag_name: store.paperless_tag_name || "",
                     github_repo: store.github_repo || "",
                     github_branch: store.github_branch || "",
                     github_path: store.github_path || "",
@@ -2489,6 +2772,11 @@ block content %}
                         body.source_path = this.form.source_path;
                     } else if (this.form.source_type === "paperless") {
                         body.source_type = "paperless";
+                        body.paperless_tag_id = this.form.paperless_tag_id
+                            ? parseInt(this.form.paperless_tag_id)
+                            : null;
+                        body.paperless_tag_name =
+                            this.form.paperless_tag_name || null;
                         // Credentials come from PAPERLESS_URL and PAPERLESS_TOKEN env vars
                     } else if (this.form.source_type === "nextcloud") {
                         body.source_type = "nextcloud";

@@ -1866,16 +1866,23 @@ class PaperlessDocumentSource(DocumentSource):
     - PAPERLESS_TOKEN: API token for authentication
     """
 
-    def __init__(self, base_url: Optional[str] = None, api_token: Optional[str] = None):
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        api_token: Optional[str] = None,
+        tag_id: Optional[int] = None,
+    ):
         """
         Initialize with Paperless-ngx connection details.
 
         Args:
             base_url: Base URL of the Paperless instance (defaults to PAPERLESS_URL env var)
             api_token: API token for authentication (defaults to PAPERLESS_TOKEN env var)
+            tag_id: Optional tag ID to filter documents (only index docs with this tag)
         """
         self.base_url = (base_url or os.environ.get("PAPERLESS_URL", "")).rstrip("/")
         self.api_token = api_token or os.environ.get("PAPERLESS_TOKEN", "")
+        self.tag_id = tag_id
 
     def _get_headers(self) -> dict:
         """Get headers for API requests."""
@@ -1902,20 +1909,30 @@ class PaperlessDocumentSource(DocumentSource):
             return False
 
     def list_documents(self) -> Iterator[DocumentInfo]:
-        """List all documents from Paperless."""
+        """List all documents from Paperless, optionally filtered by tag."""
         import requests as http_requests
 
-        logger.info(f"Listing documents from Paperless at {self.base_url}")
+        if self.tag_id:
+            logger.info(
+                f"Listing documents from Paperless at {self.base_url} (tag_id={self.tag_id})"
+            )
+        else:
+            logger.info(f"Listing documents from Paperless at {self.base_url}")
 
         page = 1
         total_docs = 0
 
         while True:
             try:
+                # Build params with optional tag filter
+                params = {"page": page, "page_size": 100}
+                if self.tag_id:
+                    params["tags__id"] = self.tag_id
+
                 response = http_requests.get(
                     f"{self.base_url}/api/documents/",
                     headers=self._get_headers(),
-                    params={"page": page, "page_size": 100},
+                    params=params,
                     timeout=30,
                 )
 
@@ -3070,6 +3087,7 @@ def get_document_source(
     gcalendar_calendar_id: Optional[str] = None,
     paperless_url: Optional[str] = None,  # Deprecated - use PAPERLESS_URL env var
     paperless_token: Optional[str] = None,  # Deprecated - use PAPERLESS_TOKEN env var
+    paperless_tag_id: Optional[int] = None,
     github_repo: Optional[str] = None,
     github_branch: Optional[str] = None,
     github_path: Optional[str] = None,
@@ -3124,12 +3142,13 @@ def get_document_source(
 
     elif source_type == "paperless":
         # Credentials from environment variables (PAPERLESS_URL, PAPERLESS_TOKEN)
-        source = PaperlessDocumentSource()
+        source = PaperlessDocumentSource(tag_id=paperless_tag_id)
         if not source.base_url or not source.api_token:
             raise ValueError(
                 "PAPERLESS_URL and PAPERLESS_TOKEN environment variables required for paperless source"
             )
-        logger.info(f"Creating Paperless source (url={source.base_url})")
+        tag_info = f", tag_id={paperless_tag_id}" if paperless_tag_id else ""
+        logger.info(f"Creating Paperless source (url={source.base_url}{tag_info})")
         return source
 
     elif source_type == "nextcloud":

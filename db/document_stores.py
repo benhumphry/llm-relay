@@ -76,6 +76,8 @@ def create_document_store(
     gcalendar_calendar_name: Optional[str] = None,
     paperless_url: Optional[str] = None,
     paperless_token: Optional[str] = None,
+    paperless_tag_id: Optional[int] = None,
+    paperless_tag_name: Optional[str] = None,
     github_repo: Optional[str] = None,
     github_branch: Optional[str] = None,
     github_path: Optional[str] = None,
@@ -118,6 +120,8 @@ def create_document_store(
             gcalendar_calendar_name=gcalendar_calendar_name,
             paperless_url=paperless_url,
             paperless_token=paperless_token,
+            paperless_tag_id=paperless_tag_id,
+            paperless_tag_name=paperless_tag_name,
             github_repo=github_repo,
             github_branch=github_branch,
             github_path=github_path,
@@ -168,6 +172,8 @@ def update_document_store(
     gcalendar_calendar_name: Optional[str] = None,
     paperless_url: Optional[str] = None,
     paperless_token: Optional[str] = None,
+    paperless_tag_id: Optional[int] = None,
+    paperless_tag_name: Optional[str] = None,
     github_repo: Optional[str] = None,
     github_branch: Optional[str] = None,
     github_path: Optional[str] = None,
@@ -227,6 +233,12 @@ def update_document_store(
             store.paperless_url = paperless_url if paperless_url else None
         if paperless_token is not None:
             store.paperless_token = paperless_token if paperless_token else None
+        if paperless_tag_id is not None:
+            store.paperless_tag_id = paperless_tag_id if paperless_tag_id else None
+        if paperless_tag_name is not None:
+            store.paperless_tag_name = (
+                paperless_tag_name if paperless_tag_name else None
+            )
         if github_repo is not None:
             store.github_repo = github_repo if github_repo else None
         if github_branch is not None:
@@ -436,6 +448,8 @@ def _store_to_detached(
         gcalendar_calendar_name=store.gcalendar_calendar_name,
         paperless_url=store.paperless_url,
         paperless_token=store.paperless_token,
+        paperless_tag_id=store.paperless_tag_id,
+        paperless_tag_name=store.paperless_tag_name,
         github_repo=store.github_repo,
         github_branch=store.github_branch,
         github_path=store.github_path,
