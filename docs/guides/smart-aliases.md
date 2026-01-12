@@ -112,6 +112,23 @@ Enable multiple features together:
 | `cached-docs` | RAG + Cache | Document Q&A with caching |
 | `smart-cached` | Routing + Cache | Best model with caching |
 
+### Context Priority (Hybrid RAG + Web)
+
+When both RAG and Web are enabled, use **Context Priority** to control how token budget is allocated and which source takes precedence:
+
+| Priority | RAG Tokens | Web Tokens | Best For |
+|----------|------------|------------|----------|
+| **Balanced** (default) | 50% | 50% | General hybrid queries |
+| **Prefer Documents** | 70% | 30% | Questions about your indexed docs with web backup |
+| **Prefer Web** | 30% | 70% | Current events with document context |
+
+**Behavior:**
+- Token allocation determines how much context each source can contribute
+- Prioritized source appears first in the injected context
+- LLM receives a hint about which source to prefer when answering
+- Setting is only shown when both RAG and Web are enabled
+- Ignored if either feature is later disabled
+
 ## Smart Tags
 
 Smart Tags let you trigger an alias by tagging the request instead of using the alias as the model name.
