@@ -23,7 +23,7 @@ A single self-hosted proxy that puts all your LLM providers behind one API:
 - **Accurate cost tracking** — Token-level tracking with cache and reasoning tokens
 - **Flexible attribution** — Tag requests by user, project, or team
 - **Works with any client** — Ollama and OpenAI API compatible
-- **Smart Features** — Intelligent routing, semantic caching, web search augmentation, and document RAG
+- **Smart Aliases** — Unified intelligent routing, semantic caching, web search, and document RAG
 
 ## Quick Start
 
@@ -88,10 +88,6 @@ Works with Open WebUI, Cursor, Continue, and any Ollama or OpenAI-compatible cli
 
 Plus: connect local Ollama instances and add custom OpenAI-compatible providers through the Admin UI.
 
-<p align="center">
-  <img src="screenshot-providers.png" alt="Providers and models management" width="800">
-</p>
-
 ### Cost Tracking
 
 Every request is logged with input tokens, output tokens, reasoning tokens, cache tokens, and calculated cost. View breakdowns by provider, model, tag, or client in the Admin UI.
@@ -111,21 +107,51 @@ curl -H "X-Proxy-Tag: alice,project-x" ...
 
 # Via model suffix
 curl -d '{"model": "claude-sonnet@alice"}' ...
+
+# Via in-content command (stripped before sending to LLM)
+curl -d '{"messages": [{"role": "user", "content": "@relay[tag:alice] Hello!"}]}' ...
 ```
 
-### Aliases
+### Smart Aliases
 
-Create friendly names for models:
+The unified feature for intelligent model handling. Create a Smart Alias and enable any combination:
 
-| Alias | Target |
-|-------|--------|
-| `claude` | `anthropic/claude-sonnet-4-20250514` |
-| `gpt` | `openai/gpt-4o` |
-| `fast` | `groq/llama-3.3-70b-versatile` |
+| Feature | Description |
+|---------|-------------|
+| **Routing** | Designator LLM picks the best model for each request |
+| **RAG** | Inject relevant context from your indexed documents |
+| **Web** | Real-time web search and scraping for current information |
+| **Cache** | Semantic response caching to reduce costs |
+| **Smart Tag** | Trigger by request tag instead of model name |
+
+**Example configurations:**
+
+| Alias Name | Features | Use Case |
+|------------|----------|----------|
+| `fast` | Simple alias | Quick access to `groq/llama-3.3-70b` |
+| `smart` | Routing | Let AI pick between Claude, GPT, Gemini |
+| `research` | RAG + Web | Answer questions with docs and current info |
+| `cached-claude` | Cache | Reduce costs for repeated queries |
+| `docs` | Smart Tag + RAG | Tag any request to add document context |
+
+### Smart Tags
+
+Create a Smart Alias with "Smart Tag" enabled, and any request tagged with that alias name will flow through it:
+
+```bash
+# Create alias "docs" with Smart Tag + RAG enabled
+# Then tag requests to trigger it:
+curl -H "X-Proxy-Tag: docs" -d '{"model": "gpt-4o", "messages": [...]}'
+
+# Or inline:
+curl -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "@relay[tag:docs] What does our policy say about..."}]}'
+```
+
+With **Passthrough** enabled, the original model is used (applying enrichment to any model).
 
 ### Redirects
 
-Transparent model name mappings with wildcard support. Unlike aliases, redirects are checked first in resolution and don't appear in logs:
+Transparent model name mappings with wildcard support:
 
 | Source Pattern | Target |
 |----------------|--------|
@@ -134,61 +160,23 @@ Transparent model name mappings with wildcard support. Unlike aliases, redirects
 
 Use cases: seamless model upgrades, provider switching without client changes.
 
-### Smart Routers
+### Document Stores
 
-Let an LLM pick the best model for each request. Configure candidate models, and a fast designator model routes requests based on query content.
+Index documents for RAG retrieval:
 
-**Model Intelligence** (optional): Enable web-gathered comparative assessments so the designator knows each model's relative strengths and weaknesses. The system searches for model reviews and direct comparisons, then summarizes into actionable routing guidance.
-
-<p align="center">
-  <img src="screenshot-routers.png" alt="Smart router configuration" width="800">
-</p>
-
-### Smart Caches
-
-Semantic response caching using ChromaDB. Returns cached responses for semantically similar queries, reducing token usage and costs.
-
-- Configurable similarity threshold (default 95%)
-- TTL-based expiration
-- Token length filters (skip caching short responses)
-- Option to match only last message (ignores conversation history)
-
-Requires ChromaDB (`CHROMA_URL` environment variable).
-
-### Smart Augmentors
-
-Context augmentation via web search and URL scraping. Every request is automatically augmented:
-
-1. A designator LLM generates an optimized search query
-2. Web search is performed (SearXNG, Perplexity, or Jina)
-3. URLs are reranked by relevance using cross-encoder
-4. Top results are scraped for full content (built-in or Jina Reader)
-5. Combined context is injected into the request
-
-Requires a search provider (SearXNG, Perplexity, or Jina).
-
-### Smart RAGs
-
-Document-based context augmentation using RAG (Retrieval-Augmented Generation). Index local document folders and automatically retrieve relevant context for each query.
-
-- **Multiple formats** — PDF, DOCX, PPTX, HTML, Markdown, images (via Docling)
-- **Flexible embeddings** — Local (bundled), Ollama, or any configured provider
-- **Vision model offloading** — Offload PDF parsing to Ollama or cloud vision models (e.g., granite3.2-vision)
-- **Semantic search** — ChromaDB vector storage with configurable similarity threshold
-- **Cross-encoder reranking** — Improves retrieval quality with always-on reranking
+- **Multiple formats** — PDF, DOCX, PPTX, HTML, Markdown, images
+- **Multiple sources** — Local files, Google Drive, Gmail, Calendar, Notion, GitHub, Paperless
+- **Flexible embeddings** — Local (bundled), Ollama, or cloud providers
 - **Scheduled indexing** — Cron-based re-indexing for updated documents
-
-Mount your document folders into the container, create a Smart RAG pointing to the path, and requests to that model name automatically include relevant document context.
-
-Requires ChromaDB (`CHROMA_URL` environment variable).
 
 ### Admin UI
 
 Clean web interface for:
 - Provider and model management
-- Ollama instance management (pull/delete models)
+- Smart Alias configuration
+- Document Store management
 - Usage analytics with charts and filters
-- Settings, pricing sync, data export
+- Settings and data export
 
 ## Installation
 
@@ -210,17 +198,16 @@ volumes:
   llm-relay-data:
 ```
 
-### Production & Advanced Setup
+### Production Setup
 
-For production deployments, PostgreSQL is recommended. For Smart Cache, Smart Augmentor, and Model Intelligence features, ChromaDB is required.
+For production deployments, PostgreSQL is recommended. For Smart Alias features (RAG, Cache, Model Intelligence), ChromaDB is required.
 
 See **[INSTALLATION.md](INSTALLATION.md)** for:
 - PostgreSQL setup
-- ChromaDB integration (vector storage for smart features)
-- SearXNG integration (web search for Smart Augmentor)
+- ChromaDB integration
+- SearXNG integration (web search)
 - Full environment variable reference
 - Docker Swarm deployment
-- Troubleshooting guide
 
 ### Quick Environment Variables
 
@@ -230,9 +217,9 @@ See **[INSTALLATION.md](INSTALLATION.md)** for:
 | `ADMIN_PORT` | 8080 | Admin UI port |
 | `ADMIN_PASSWORD` | (random) | Admin UI password |
 | `DATABASE_URL` | SQLite | PostgreSQL URL for production |
-| `CHROMA_URL` | (none) | ChromaDB URL (enables Smart Cache, Model Intelligence) |
-| `SEARXNG_URL` | (none) | SearXNG URL (enables Smart Augmentor search) |
-| `JINA_API_KEY` | (none) | Jina API key (enables Jina Search, Reranker) |
+| `CHROMA_URL` | (none) | ChromaDB URL (enables Cache, RAG) |
+| `SEARXNG_URL` | (none) | SearXNG URL (enables Web search) |
+| `JINA_API_KEY` | (none) | Jina API key (search, scraping, reranking) |
 
 ### Without Docker
 
@@ -252,14 +239,12 @@ python proxy.py
 ### OpenAI API
 - `GET /v1/models` — List models
 - `POST /v1/chat/completions` — Chat completion
+- `POST /v1/completions` — Text completion
 
 ## Documentation
 
 - [Getting Started](docs/guides/getting-started.md) - First-time setup walkthrough
-- [Smart Routers](docs/guides/smart-routers.md) - Intelligent model routing
-- [Smart Caches](docs/guides/smart-caches.md) - Semantic response caching
-- [Smart Augmentors](docs/guides/smart-augmentors.md) - Web search augmentation
-- [Smart RAGs](docs/guides/smart-rags.md) - Document RAG setup
+- [Smart Aliases](docs/guides/smart-aliases.md) - Unified routing, caching, and enrichment
 
 ## License
 
