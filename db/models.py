@@ -1099,6 +1099,9 @@ class SmartAlias(Base):
         String(150), default="cross-encoder/ms-marco-MiniLM-L-6-v2"
     )
     rerank_top_n: Mapped[int] = mapped_column(Integer, default=20)
+    # Context priority when both RAG and Web are enabled
+    # "balanced" = 50/50, "prefer_rag" = 70/30, "prefer_web" = 30/70
+    context_priority: Mapped[str] = mapped_column(String(20), default="balanced")
 
     # ===== CACHE SETTINGS (when use_cache=True) =====
     cache_similarity_threshold: Mapped[float] = mapped_column(Float, default=0.95)
@@ -1246,6 +1249,7 @@ class SmartAlias(Base):
             "rerank_provider": self.rerank_provider,
             "rerank_model": self.rerank_model,
             "rerank_top_n": self.rerank_top_n,
+            "context_priority": self.context_priority,
             # Cache settings
             "cache_enabled": self.cache_enabled,
             "cache_allowed": not self.use_web,

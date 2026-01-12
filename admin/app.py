@@ -6092,6 +6092,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 rerank_provider=data.get("rerank_provider", "local"),
                 rerank_model=data.get("rerank_model"),
                 rerank_top_n=data.get("rerank_top_n", 20),
+                context_priority=data.get("context_priority", "balanced"),
                 # Cache settings
                 cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
                 cache_match_system_prompt=data.get("cache_match_system_prompt", True),
@@ -6160,6 +6161,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 rerank_provider=data.get("rerank_provider"),
                 rerank_model=data.get("rerank_model"),
                 rerank_top_n=data.get("rerank_top_n"),
+                context_priority=data.get("context_priority"),
                 # Cache settings
                 cache_similarity_threshold=data.get("cache_similarity_threshold"),
                 cache_match_system_prompt=data.get("cache_match_system_prompt"),

@@ -263,12 +263,21 @@ class SmartEnricherEngine:
                 metadata["embedding_provider"] = result.embedding_provider
                 return "", metadata
 
-            # Format context
+            # Format context - allocate tokens based on priority when both RAG and Web enabled
+            if self.enricher.use_web:
+                priority = getattr(self.enricher, "context_priority", "balanced")
+                if priority == "prefer_rag":
+                    max_tokens = int(self.enricher.max_context_tokens * 0.7)
+                elif priority == "prefer_web":
+                    max_tokens = int(self.enricher.max_context_tokens * 0.3)
+                else:  # balanced
+                    max_tokens = self.enricher.max_context_tokens // 2
+            else:
+                max_tokens = self.enricher.max_context_tokens
+
             context = retriever.format_context(
                 result,
-                max_tokens=self.enricher.max_context_tokens // 2
-                if self.enricher.use_web
-                else self.enricher.max_context_tokens,
+                max_tokens=max_tokens,
                 include_sources=True,
                 include_store_names=len(linked_stores) > 1,
             )
@@ -318,12 +327,17 @@ class SmartEnricherEngine:
         if not search_results:
             return "", metadata
 
-        # Allocate tokens for web context
-        max_tokens = (
-            self.enricher.max_context_tokens // 2
-            if self.enricher.use_rag
-            else self.enricher.max_context_tokens
-        )
+        # Allocate tokens for web context based on priority when both RAG and Web enabled
+        if self.enricher.use_rag:
+            priority = getattr(self.enricher, "context_priority", "balanced")
+            if priority == "prefer_rag":
+                max_tokens = int(self.enricher.max_context_tokens * 0.3)
+            elif priority == "prefer_web":
+                max_tokens = int(self.enricher.max_context_tokens * 0.7)
+            else:  # balanced
+                max_tokens = self.enricher.max_context_tokens // 2
+        else:
+            max_tokens = self.enricher.max_context_tokens
 
         context_parts = [search_results]
 
@@ -483,6 +497,21 @@ SEARCH QUERY:"""
         if len(context_parts) == 1:
             return context_parts[0][1]
 
+        # Get priority setting (only relevant when both RAG and Web present)
+        priority = getattr(self.enricher, "context_priority", "balanced")
+
+        # Order context based on priority (prioritized source first)
+        if priority == "prefer_web":
+            # Put web first
+            context_parts = sorted(
+                context_parts, key=lambda x: 0 if x[0] == "web" else 1
+            )
+        else:
+            # Default: put RAG first (for balanced and prefer_rag)
+            context_parts = sorted(
+                context_parts, key=lambda x: 0 if x[0] == "rag" else 1
+            )
+
         # Build merged context with source labels
         merged = []
         for source_type, context in context_parts:
@@ -502,12 +531,29 @@ SEARCH QUERY:"""
 
         current_date = datetime.utcnow().strftime("%Y-%m-%d")
 
+        # Build priority-specific instruction when both sources are used
+        priority = getattr(self.enricher, "context_priority", "balanced")
+        has_both = self.enricher.use_rag and self.enricher.use_web
+
+        if has_both and priority == "prefer_rag":
+            priority_hint = "Prioritize information from Document Context over Web Context when answering."
+        elif has_both and priority == "prefer_web":
+            priority_hint = "Prioritize information from Web Context over Document Context when answering."
+        else:
+            priority_hint = ""
+
+        instruction = """IMPORTANT: The following information has been specifically retrieved to answer the user's question.
+You should strongly prefer information from this context over your general knowledge.
+If the context contains relevant details, reference them directly in your response."""
+
+        if priority_hint:
+            instruction = f"{instruction}\n{priority_hint}"
+
         context_block = f"""
 <enriched_context>
 Today's date: {current_date}
 
-The following information was retrieved to help answer the user's question.
-Use this information to provide an accurate, well-informed response.
+{instruction}
 
 {context.strip()}
 </enriched_context>

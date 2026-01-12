@@ -1156,6 +1156,17 @@ def _run_migrations(engine) -> None:
                 )
                 conn.commit()
 
+        # v1.8 Context Priority: Add context_priority column for hybrid RAG+Web
+        if "context_priority" not in existing_columns:
+            logger.info("Adding context_priority column to smart_aliases table (v1.8)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN context_priority VARCHAR(20) DEFAULT 'balanced'"
+                    )
+                )
+                conn.commit()
+
     # Migration: Drop legacy tables (v1.8 - Smart Aliases unification)
     # These tables have been replaced by the unified smart_aliases table
     legacy_tables = [

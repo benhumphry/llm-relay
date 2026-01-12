@@ -1456,6 +1456,34 @@ content %}
                                 />
                             </div>
                         </div>
+                        <!-- Context Priority (only when both RAG and Web enabled) -->
+                        <div
+                            x-show="form.use_rag && form.use_web"
+                            class="form-control mt-4"
+                        >
+                            <label class="label">
+                                <span class="label-text">Context Priority</span>
+                            </label>
+                            <select
+                                x-model="form.context_priority"
+                                class="select select-bordered"
+                            >
+                                <option value="balanced">
+                                    Balanced (50/50)
+                                </option>
+                                <option value="prefer_rag">
+                                    Prefer Documents (70/30)
+                                </option>
+                                <option value="prefer_web">
+                                    Prefer Web (30/70)
+                                </option>
+                            </select>
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >How to weight document vs web context</span
+                                >
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -1611,6 +1639,7 @@ content %}
                 max_context_tokens: 4000,
                 rerank_provider: "local",
                 rerank_top_n: 20,
+                context_priority: "balanced",
                 // Cache
                 use_cache: false,
                 cache_similarity_threshold: 0.95,
@@ -1781,6 +1810,7 @@ content %}
                     max_context_tokens: 4000,
                     rerank_provider: "local",
                     rerank_top_n: 20,
+                    context_priority: "balanced",
                     // Cache
                     use_cache: false,
                     cache_similarity_threshold: 0.95,
@@ -1839,6 +1869,7 @@ content %}
                     max_context_tokens: alias.max_context_tokens || 4000,
                     rerank_provider: alias.rerank_provider || "local",
                     rerank_top_n: alias.rerank_top_n || 20,
+                    context_priority: alias.context_priority || "balanced",
                     // Cache
                     use_cache: alias.use_cache || false,
                     cache_similarity_threshold:
@@ -1971,6 +2002,7 @@ content %}
                     max_context_tokens: this.form.max_context_tokens,
                     rerank_provider: this.form.rerank_provider,
                     rerank_top_n: this.form.rerank_top_n,
+                    context_priority: this.form.context_priority,
                     // Cache (only if web not enabled)
                     use_cache: this.form.use_web ? false : this.form.use_cache,
                     cache_similarity_threshold:

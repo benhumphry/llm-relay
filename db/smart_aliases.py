@@ -147,6 +147,7 @@ def create_smart_alias(
     rerank_provider: str = "local",
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
     rerank_top_n: int = 20,
+    context_priority: str = "balanced",
     # Cache settings
     cache_similarity_threshold: float = 0.95,
     cache_match_system_prompt: bool = True,
@@ -249,6 +250,7 @@ def create_smart_alias(
             rerank_provider=rerank_provider,
             rerank_model=rerank_model,
             rerank_top_n=rerank_top_n,
+            context_priority=context_priority,
             # Cache
             cache_similarity_threshold=cache_similarity_threshold,
             cache_match_system_prompt=cache_match_system_prompt,
@@ -327,6 +329,7 @@ def update_smart_alias(
     rerank_provider: str | None = None,
     rerank_model: str | None = None,
     rerank_top_n: int | None = None,
+    context_priority: str | None = None,
     # Cache settings
     cache_similarity_threshold: float | None = None,
     cache_match_system_prompt: bool | None = None,
@@ -444,6 +447,8 @@ def update_smart_alias(
             alias.rerank_model = rerank_model
         if rerank_top_n is not None:
             alias.rerank_top_n = rerank_top_n
+        if context_priority is not None:
+            alias.context_priority = context_priority
 
         # Cache
         if cache_similarity_threshold is not None:
@@ -762,6 +767,7 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         rerank_provider=alias.rerank_provider,
         rerank_model=alias.rerank_model,
         rerank_top_n=alias.rerank_top_n,
+        context_priority=alias.context_priority,
         # Cache
         cache_similarity_threshold=alias.cache_similarity_threshold,
         cache_match_system_prompt=alias.cache_match_system_prompt,
