@@ -150,6 +150,30 @@ When enabled, the Smart Tag uses the original requested model instead of the ali
 
 This is useful for applying enrichment (RAG, Web) to any model the user chooses.
 
+### Multiple Tags
+
+You can specify multiple tags in a single request:
+
+```
+@relay[tag:tracking,docs] What does our policy say?
+```
+
+Or via header/suffix:
+```
+model@tracking,docs
+```
+
+**Behavior:**
+- All tags are recorded in the request log for tracking/attribution
+- Tags are checked in order for Smart Tag matches
+- First matching Smart Tag wins and triggers that alias
+- Non-Smart-Tag values pass through harmlessly (just logged)
+
+Example: `@relay[tag:analytics,docs]` where only `docs` is a Smart Tag:
+1. `analytics` - not a Smart Tag, logged for tracking
+2. `docs` - is a Smart Tag, triggers the `docs` alias
+3. Both tags appear in the request log
+
 ## @relay Commands
 
 Add tags directly in your message content:
