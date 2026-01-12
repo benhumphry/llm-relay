@@ -728,17 +728,12 @@ block content %}
                                 >
                             </option>
                             <template
-                                x-for="tag in paperlessTags"
-                                :key="tag.id"
+                                x-for="(tag, index) in paperlessTags"
+                                :key="index"
                             >
-                                <option
-                                    :value="tag.id"
-                                    x-show="tag.id !== null"
-                                >
-                                    <span x-text="tag.name"></span>
+                                <option :value="tag.id">
                                     <span
-                                        x-show="tag.document_count !== null"
-                                        x-text="' (' + tag.document_count + ')'"
+                                        x-text="tag.name + (tag.document_count ? ' (' + tag.document_count + ')' : '')"
                                     ></span>
                                 </option>
                             </template>

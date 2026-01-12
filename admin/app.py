@@ -6067,26 +6067,6 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             # Sort by name
             all_tags.sort(key=lambda x: x["name"].lower())
 
-            # Add "All documents" option at the start
-            all_tags.insert(
-                0,
-                {
-                    "id": None,
-                    "name": "All documents (no filter)",
-                    "color": None,
-                    "document_count": None,
-                },
-            )
-            all_tags.insert(
-                0,
-                {
-                    "id": None,
-                    "name": "All documents (no filter)",
-                    "color": None,
-                    "document_count": None,
-                },
-            )
-
             return jsonify({"tags": all_tags})
 
         except http_requests.exceptions.Timeout:
