@@ -63,6 +63,15 @@ Direct API integrations (no Node.js required):
 | `tavily` | AI-focused search API | Planned |
 | `brave` | Privacy-focused search | Planned |
 
+### Document Store Providers
+
+Additional sources for RAG document stores (TBD):
+- Confluence
+- SharePoint
+- Dropbox
+- S3/MinIO
+- IMAP (email archives)
+
 ### Media Endpoints
 
 | Endpoint | Description | Providers |
@@ -158,6 +167,7 @@ Proxy detects actions and presents approval UI to user.
 
 ## Next Up (v1.8)
 - [ ] Additional search providers (Tavily, Brave)
+- [ ] Additional document store providers (TBD)
 - [ ] Image generation endpoint
 - [ ] Audio transcription endpoint
 
