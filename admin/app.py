@@ -5910,6 +5910,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     response.status_code,
                 )
 
+            # Check for XML content type - if HTML, the URL is probably wrong
+            content_type = response.headers.get("Content-Type", "")
+            if "text/html" in content_type:
+                return (
+                    jsonify(
+                        {
+                            "error": "Nextcloud returned HTML instead of XML. Check that NEXTCLOUD_URL points to a valid Nextcloud instance."
+                        }
+                    ),
+                    502,
+                )
+
             # Parse XML response
             root = ET.fromstring(response.content)
             ns = {"d": "DAV:"}
