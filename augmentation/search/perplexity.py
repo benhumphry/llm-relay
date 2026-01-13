@@ -36,7 +36,13 @@ class PerplexitySearchProvider(SearchProvider):
         """Check if Perplexity API key is configured."""
         return bool(self._api_key)
 
-    def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    def search(
+        self,
+        query: str,
+        max_results: int = 5,
+        time_range: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> list[SearchResult]:
         """
         Search using Perplexity.
 
@@ -47,10 +53,14 @@ class PerplexitySearchProvider(SearchProvider):
         Args:
             query: Search query string
             max_results: Maximum number of results to return
+            time_range: Optional time filter (not supported by Perplexity API)
+            category: Optional search category (not supported by Perplexity API)
 
         Returns:
             List of SearchResult objects (extracted from citations)
         """
+        # Note: Perplexity API doesn't support time_range or category filters
+        # These parameters are accepted for interface compatibility but ignored
         if not self._api_key:
             logger.error("Perplexity API key not configured")
             return []

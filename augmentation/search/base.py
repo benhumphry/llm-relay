@@ -40,13 +40,21 @@ class SearchProvider(ABC):
         self.url_override = url_override
 
     @abstractmethod
-    def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    def search(
+        self,
+        query: str,
+        max_results: int = 5,
+        time_range: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> list[SearchResult]:
         """
         Search for the given query.
 
         Args:
             query: Search query string
             max_results: Maximum number of results to return
+            time_range: Optional time filter (day, week, month, year)
+            category: Optional search category (news, images, videos, etc.)
 
         Returns:
             List of SearchResult objects

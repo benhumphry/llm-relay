@@ -38,17 +38,27 @@ class JinaSearchProviderBase(SearchProvider):
         super().__init__(url_override)
         self._api_key = api_key
 
-    def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    def search(
+        self,
+        query: str,
+        max_results: int = 5,
+        time_range: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> list[SearchResult]:
         """
         Search using Jina Search API.
 
         Args:
             query: Search query string
             max_results: Maximum number of results to return
+            time_range: Optional time filter (not supported by Jina API)
+            category: Optional search category (not supported by Jina API)
 
         Returns:
             List of SearchResult objects
         """
+        # Note: Jina API doesn't support time_range or category filters
+        # These parameters are accepted for interface compatibility but ignored
         try:
             headers = {
                 "Accept": "application/json",

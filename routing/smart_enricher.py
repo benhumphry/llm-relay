@@ -400,6 +400,7 @@ SEARCH QUERY:"""
     def _execute_search(self, query: str) -> tuple[str, list[dict]]:
         """Execute web search and return formatted results plus URL data."""
         from augmentation import get_configured_search_provider
+        from augmentation.query_intent import extract_query_intent
 
         provider = get_configured_search_provider()
         if not provider:
@@ -407,8 +408,20 @@ SEARCH QUERY:"""
             return "", []
 
         try:
+            # Extract temporal and category intent from query
+            intent = extract_query_intent(query)
+
+            if intent.time_range or intent.category:
+                logger.debug(
+                    f"Query intent detected: time_range={intent.time_range}, "
+                    f"category={intent.category}"
+                )
+
             results = provider.search(
-                query, max_results=self.enricher.max_search_results
+                query,
+                max_results=self.enricher.max_search_results,
+                time_range=intent.time_range,
+                category=intent.category,
             )
             formatted = provider.format_results(results)
 

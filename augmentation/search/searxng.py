@@ -35,13 +35,21 @@ class SearXNGProvider(SearchProvider):
         """Check if SearXNG URL is configured."""
         return bool(self._base_url)
 
-    def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+    def search(
+        self,
+        query: str,
+        max_results: int = 5,
+        time_range: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> list[SearchResult]:
         """
         Search using SearXNG.
 
         Args:
             query: Search query string
             max_results: Maximum number of results to return
+            time_range: Optional time filter (day, week, month, year)
+            category: Optional search category (news, images, videos, etc.)
 
         Returns:
             List of SearchResult objects
@@ -54,15 +62,20 @@ class SearXNGProvider(SearchProvider):
         base_url = self._base_url.rstrip("/")
 
         try:
+            # Build search parameters
+            params = {
+                "q": query,
+                "format": "json",
+                "categories": category or "general",
+            }
+
+            # Add time_range if specified (SearXNG accepts: day, week, month, year)
+            if time_range in ("day", "week", "month", "year"):
+                params["time_range"] = time_range
+                logger.debug(f"SearXNG search with time_range={time_range}")
+
             with httpx.Client(timeout=30.0) as client:
-                response = client.get(
-                    f"{base_url}/search",
-                    params={
-                        "q": query,
-                        "format": "json",
-                        "categories": "general",
-                    },
-                )
+                response = client.get(f"{base_url}/search", params=params)
                 response.raise_for_status()
                 data = response.json()
 
