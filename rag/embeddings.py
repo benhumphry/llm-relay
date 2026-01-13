@@ -9,11 +9,15 @@ Supports multiple embedding backends:
 
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Global lock to prevent concurrent model loading on GPU
+_model_load_lock = threading.Lock()
 
 
 @dataclass
@@ -90,25 +94,30 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         self._dimension = 384  # Default for bge-small
 
     def _get_model(self):
-        """Lazy-load the embedding model."""
+        """Lazy-load the embedding model with thread-safe locking."""
         if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
+            with _model_load_lock:
+                # Double-check after acquiring lock
+                if self._model is None:
+                    try:
+                        from sentence_transformers import SentenceTransformer
 
-                logger.info(f"Loading local embedding model: {self.model_name}")
-                self._model = SentenceTransformer(self.model_name)
-                self._dimension = self._model.get_sentence_embedding_dimension()
-            except ImportError:
-                raise ImportError(
-                    "sentence-transformers is required for local embeddings. "
-                    "Install with: pip install sentence-transformers"
-                )
+                        logger.info(f"Loading local embedding model: {self.model_name}")
+                        self._model = SentenceTransformer(self.model_name)
+                        self._dimension = self._model.get_sentence_embedding_dimension()
+                    except ImportError:
+                        raise ImportError(
+                            "sentence-transformers is required for local embeddings. "
+                            "Install with: pip install sentence-transformers"
+                        )
         return self._model
 
     def embed(self, texts: list[str]) -> EmbeddingResult:
         """Generate embeddings for documents."""
         model = self._get_model()
-        embeddings = model.encode(texts, convert_to_numpy=True)
+        # Lock during GPU inference to prevent concurrent access issues
+        with _model_load_lock:
+            embeddings = model.encode(texts, convert_to_numpy=True)
         # Estimate tokens (rough approximation: ~4 chars per token)
         total_chars = sum(len(t) for t in texts)
         estimated_tokens = total_chars // 4
@@ -129,7 +138,9 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         # BGE models use a query prefix for better retrieval
         if "bge" in self.model_name.lower():
             text = f"Represent this sentence for searching relevant passages: {text}"
-        embedding = model.encode(text, convert_to_numpy=True)
+        # Lock during GPU inference to prevent concurrent access issues
+        with _model_load_lock:
+            embedding = model.encode(text, convert_to_numpy=True)
         estimated_tokens = len(text) // 4
         return EmbeddingResult(
             embeddings=[embedding.tolist()],
