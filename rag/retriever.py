@@ -292,7 +292,11 @@ class RAGRetriever:
                 if date_range:
                     start_date, end_date = date_range
                     logger.debug(f"Date filter detected: {start_date} to {end_date}")
-                    # Filter by event_date (calendar) or email_date (email)
+                    # Filter by date fields from various sources:
+                    # - event_date: calendar events
+                    # - email_date: emails
+                    # - document_date: general docs (from modified_time)
+                    # - doc_date: Paperless documents (from created date)
                     # ChromaDB $gte/$lte only work with numbers, not strings
                     # So we generate list of dates and use $in operator
                     if start_date == end_date:
@@ -301,6 +305,8 @@ class RAGRetriever:
                             "$or": [
                                 {"event_date": start_date},
                                 {"email_date": start_date},
+                                {"document_date": start_date},
+                                {"doc_date": start_date},
                             ]
                         }
                     else:
@@ -319,6 +325,8 @@ class RAGRetriever:
                             "$or": [
                                 {"event_date": {"$in": date_list}},
                                 {"email_date": {"$in": date_list}},
+                                {"document_date": {"$in": date_list}},
+                                {"doc_date": {"$in": date_list}},
                             ]
                         }
 

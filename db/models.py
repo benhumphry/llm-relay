@@ -943,6 +943,11 @@ class DocumentStore(Base):
     index_status: Mapped[str] = mapped_column(String(20), default="pending")
     index_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Document limit (None/0 = no limit)
+    max_documents: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+
     # Statistics
     document_count: Mapped[int] = mapped_column(Integer, default=0)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -953,6 +958,10 @@ class DocumentStore(Base):
     # Metadata
     description: Mapped[Optional[str]] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Temporal filtering - when enabled, documents can be filtered by date
+    # Uses document_date metadata (derived from modified_time) for date-based queries
+    use_temporal_filtering: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -1012,11 +1021,13 @@ class DocumentStore(Base):
             else None,
             "index_status": self.index_status,
             "index_error": self.index_error,
+            "max_documents": self.max_documents,
             "document_count": self.document_count,
             "chunk_count": self.chunk_count,
             "collection_name": self.collection_name,
             "description": self.description,
             "enabled": self.enabled,
+            "use_temporal_filtering": self.use_temporal_filtering,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -1102,6 +1113,11 @@ class SmartAlias(Base):
     max_results: Mapped[int] = mapped_column(Integer, default=5)
     similarity_threshold: Mapped[float] = mapped_column(Float, default=0.7)
 
+    # ===== SMART SOURCE SELECTION =====
+    # When enabled, uses designator_model to decide which document stores
+    # and whether web search should be used for each query
+    use_smart_source_selection: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # ===== WEB SETTINGS (when use_web=True) =====
     max_search_results: Mapped[int] = mapped_column(Integer, default=5)
     max_scrape_urls: Mapped[int] = mapped_column(Integer, default=3)
@@ -1147,6 +1163,15 @@ class SmartAlias(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # ===== MEMORY =====
+    # Persistent memory maintained by the designator model
+    # Contains learned information about user preferences, context, etc.
+    use_memory: Mapped[bool] = mapped_column(Boolean, default=False)
+    memory: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    memory_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -1255,6 +1280,8 @@ class SmartAlias(Base):
             # RAG settings
             "max_results": self.max_results,
             "similarity_threshold": self.similarity_threshold,
+            # Smart source selection
+            "use_smart_source_selection": self.use_smart_source_selection,
             # Web settings
             "max_search_results": self.max_search_results,
             "max_scrape_urls": self.max_scrape_urls,
@@ -1289,6 +1316,12 @@ class SmartAlias(Base):
             "description": self.description,
             "enabled": self.enabled,
             "system_prompt": self.system_prompt,
+            # Memory
+            "use_memory": self.use_memory,
+            "memory": self.memory,
+            "memory_updated_at": self.memory_updated_at.isoformat()
+            if self.memory_updated_at
+            else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             # Document stores

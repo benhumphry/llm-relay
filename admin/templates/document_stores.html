@@ -1808,6 +1808,26 @@ block content %}
                                     >
                                 </label>
                             </div>
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Max Documents</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model="form.max_documents"
+                                    class="input input-bordered input-sm"
+                                    min="0"
+                                    placeholder="No limit"
+                                />
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Maximum documents to index (0 or empty
+                                        = no limit)</span
+                                    >
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1982,6 +2002,7 @@ block content %}
                 custom_schedule: "",
                 chunk_size: 512,
                 chunk_overlap: 50,
+                max_documents: null,
                 description: "",
                 enabled: true,
             },
@@ -2629,6 +2650,7 @@ block content %}
                     custom_schedule: "",
                     chunk_size: 512,
                     chunk_overlap: 50,
+                    max_documents: null,
                     description: "",
                     enabled: true,
                 };
@@ -2697,22 +2719,34 @@ block content %}
                     custom_schedule: "",
                     chunk_size: store.chunk_size || 512,
                     chunk_overlap: store.chunk_overlap || 50,
+                    max_documents: store.max_documents || null,
                     description: store.description || "",
                     enabled: store.enabled,
                 };
 
-                // Load folders if editing a Google Drive store with an account
+                // Load folders/labels/calendars if editing a Google source with an account
+                // Save the selected values before loading options (async load can reset them)
+                const savedLabelId = this.form.gmail_label_id;
+                const savedCalendarId = this.form.gcalendar_calendar_id;
+                const savedFolderId = this.form.gdrive_folder_id;
+
                 if (sourceType === "mcp:gdrive" && store.google_account_id) {
                     await this.loadGdriveFolders();
                 }
-                // Load labels if editing a Gmail store with an account
                 if (sourceType === "mcp:gmail" && store.google_account_id) {
                     await this.loadGmailLabels();
                 }
-                // Load calendars if editing a Google Calendar store with an account
                 if (sourceType === "mcp:gcalendar" && store.google_account_id) {
                     await this.loadGoogleCalendars();
                 }
+
+                // Restore selections after a tick to ensure options are rendered
+                this.$nextTick(() => {
+                    this.form.gdrive_folder_id = savedFolderId;
+                    this.form.gmail_label_id = savedLabelId;
+                    this.form.gcalendar_calendar_id = savedCalendarId;
+                });
+
                 this.formErrors = {};
                 this.showModal = true;
             },
@@ -2733,6 +2767,9 @@ block content %}
                         enabled: this.form.enabled,
                         chunk_size: parseInt(this.form.chunk_size),
                         chunk_overlap: parseInt(this.form.chunk_overlap),
+                        max_documents: this.form.max_documents
+                            ? parseInt(this.form.max_documents)
+                            : null,
                         description: this.form.description || null,
                         index_schedule:
                             this.form.index_schedule === "custom"

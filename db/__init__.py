@@ -73,6 +73,7 @@ from .smart_aliases import (
     reset_smart_alias_stats,
     smart_alias_name_available,
     update_smart_alias,
+    update_smart_alias_memory,
     update_smart_alias_stats,
 )
 from .sync_descriptions import (
@@ -149,6 +150,7 @@ __all__ = [
     "get_smart_tag_by_name",
     "create_smart_alias",
     "update_smart_alias",
+    "update_smart_alias_memory",
     "update_smart_alias_stats",
     "reset_smart_alias_stats",
     "delete_smart_alias",

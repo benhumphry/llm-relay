@@ -139,6 +139,8 @@ def create_smart_alias(
     store_ids: list[int] | None = None,
     max_results: int = 5,
     similarity_threshold: float = 0.7,
+    # Smart source selection
+    use_smart_source_selection: bool = False,
     # Web settings
     max_search_results: int = 5,
     max_scrape_urls: int = 3,
@@ -161,6 +163,8 @@ def create_smart_alias(
     description: str | None = None,
     system_prompt: str | None = None,
     enabled: bool = True,
+    # Memory
+    use_memory: bool = False,
     db: Optional[Session] = None,
 ) -> SmartAlias:
     """
@@ -242,6 +246,8 @@ def create_smart_alias(
             # RAG
             max_results=max_results,
             similarity_threshold=similarity_threshold,
+            # Smart source selection
+            use_smart_source_selection=use_smart_source_selection,
             # Web
             max_search_results=max_search_results,
             max_scrape_urls=max_scrape_urls,
@@ -263,6 +269,8 @@ def create_smart_alias(
             description=description,
             system_prompt=system_prompt,
             enabled=enabled,
+            # Memory
+            use_memory=use_memory,
         )
 
         if candidates:
@@ -321,6 +329,8 @@ def update_smart_alias(
     store_ids: list[int] | None = None,
     max_results: int | None = None,
     similarity_threshold: float | None = None,
+    # Smart source selection
+    use_smart_source_selection: bool | None = None,
     # Web settings
     max_search_results: int | None = None,
     max_scrape_urls: int | None = None,
@@ -343,6 +353,9 @@ def update_smart_alias(
     description: str | None = None,
     system_prompt: str | None = None,
     enabled: bool | None = None,
+    # Memory
+    use_memory: bool | None = None,
+    memory: str | None = None,
     db: Optional[Session] = None,
 ) -> Optional[SmartAlias]:
     """
@@ -432,6 +445,10 @@ def update_smart_alias(
         if similarity_threshold is not None:
             alias.similarity_threshold = similarity_threshold
 
+        # Smart source selection
+        if use_smart_source_selection is not None:
+            alias.use_smart_source_selection = use_smart_source_selection
+
         # Web
         if max_search_results is not None:
             alias.max_search_results = max_search_results
@@ -475,6 +492,12 @@ def update_smart_alias(
             alias.system_prompt = system_prompt
         if enabled is not None:
             alias.enabled = enabled
+
+        # Memory
+        if use_memory is not None:
+            alias.use_memory = use_memory
+        if memory is not None:
+            alias.memory = memory
 
         session.flush()
         logger.info(f"Updated smart alias: {alias.name}")
@@ -532,6 +555,44 @@ def update_smart_alias_stats(
 
     with get_db_context() as session:
         return _update_stats(session)
+
+
+def update_smart_alias_memory(
+    alias_id: int,
+    memory: str,
+    db: Optional[Session] = None,
+) -> bool:
+    """
+    Update the memory for a smart alias.
+
+    This is called by the smart enricher when the designator decides
+    to update the memory with significant new information.
+
+    Args:
+        alias_id: ID of the smart alias
+        memory: New memory content
+
+    Returns:
+        True if updated, False if alias not found
+    """
+    from datetime import datetime
+
+    def _update_memory(session: Session) -> bool:
+        alias = session.query(SmartAlias).filter(SmartAlias.id == alias_id).first()
+        if not alias:
+            return False
+
+        alias.memory = memory
+        alias.memory_updated_at = datetime.utcnow()
+        session.flush()
+        logger.info(f"Updated memory for smart alias: {alias.name}")
+        return True
+
+    if db:
+        return _update_memory(db)
+
+    with get_db_context() as session:
+        return _update_memory(session)
 
 
 def reset_smart_alias_stats(alias_id: int, db: Optional[Session] = None) -> bool:
@@ -759,6 +820,8 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         # RAG
         max_results=alias.max_results,
         similarity_threshold=alias.similarity_threshold,
+        # Smart source selection
+        use_smart_source_selection=alias.use_smart_source_selection,
         # Web
         max_search_results=alias.max_search_results,
         max_scrape_urls=alias.max_scrape_urls,
@@ -791,6 +854,10 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         enabled=alias.enabled,
         # System prompt
         system_prompt=alias.system_prompt,
+        # Memory
+        use_memory=alias.use_memory,
+        memory=alias.memory,
+        memory_updated_at=alias.memory_updated_at,
     )
     detached.id = alias.id
     detached.created_at = alias.created_at

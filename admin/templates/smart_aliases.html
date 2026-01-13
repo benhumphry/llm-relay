@@ -1102,6 +1102,40 @@ content %}
                             </div>
                         </div>
 
+                        <!-- Smart Source Selection (shown when RAG or Web could be used) -->
+                        <div
+                            x-show="form.use_rag || form.use_web"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-info space-y-3"
+                        >
+                            <label
+                                class="flex items-start gap-3 cursor-pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_smart_source_selection"
+                                    class="checkbox checkbox-sm checkbox-info mt-1"
+                                />
+                                <div>
+                                    <div class="font-medium text-sm">
+                                        Smart Source Selection
+                                    </div>
+                                    <div class="text-xs text-base-content/60">
+                                        Let the designator decide which document
+                                        stores and whether web search are useful
+                                        for each query
+                                    </div>
+                                </div>
+                            </label>
+                            <div
+                                x-show="form.use_smart_source_selection && !form.use_routing && !form.designator_model"
+                                class="text-xs text-warning"
+                            >
+                                Requires a designator model (set one in Smart
+                                Routing or Web Access settings)
+                            </div>
+                        </div>
+
                         <!-- Web Option -->
                         <label class="flex items-start gap-3 cursor-pointer">
                             <input
@@ -1367,6 +1401,54 @@ content %}
                                 </div>
                             </label>
                         </div>
+
+                        <!-- Memory Option -->
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                x-model="form.use_memory"
+                                class="checkbox checkbox-success mt-1"
+                            />
+                            <div>
+                                <div class="font-medium">Persistent Memory</div>
+                                <div class="text-sm text-base-content/60">
+                                    Maintain memory about user preferences
+                                    across conversations
+                                </div>
+                            </div>
+                        </label>
+
+                        <!-- Memory Settings (shown when enabled) -->
+                        <div
+                            x-show="form.use_memory"
+                            x-transition
+                            class="ml-7 pl-4 border-l-2 border-success space-y-3"
+                        >
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
+                                        >Memory Content</span
+                                    >
+                                    <span
+                                        x-show="form.memory_updated_at"
+                                        class="label-text-alt text-xs text-base-content/50"
+                                        x-text="'Updated: ' + formatDate(form.memory_updated_at)"
+                                    ></span>
+                                </label>
+                                <textarea
+                                    x-model="form.memory"
+                                    class="textarea textarea-bordered textarea-sm font-mono"
+                                    rows="4"
+                                    placeholder="Memory will be populated automatically, or seed it here..."
+                                ></textarea>
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs">
+                                        The designator updates this when
+                                        significant new information is learned
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1631,6 +1713,8 @@ content %}
                 store_ids: [],
                 max_results: 5,
                 similarity_threshold: 0.7,
+                // Smart source selection
+                use_smart_source_selection: false,
                 // Web
                 use_web: false,
                 max_search_results: 5,
@@ -1651,6 +1735,10 @@ content %}
                 // Smart tag
                 is_smart_tag: false,
                 passthrough_model: false,
+                // Memory
+                use_memory: false,
+                memory: "",
+                memory_updated_at: null,
                 // Metadata
                 tags_input: "",
                 description: "",
@@ -1779,6 +1867,14 @@ content %}
                 return ((hits / total) * 100).toFixed(0);
             },
 
+            formatDate(isoString) {
+                if (!isoString) return "";
+                const date = new Date(isoString);
+                return (
+                    date.toLocaleDateString() + " " + date.toLocaleTimeString()
+                );
+            },
+
             openAddModal() {
                 this.editingAlias = null;
                 this.formErrors = {};
@@ -1802,6 +1898,8 @@ content %}
                     store_ids: [],
                     max_results: 5,
                     similarity_threshold: 0.7,
+                    // Smart source selection
+                    use_smart_source_selection: false,
                     // Web
                     use_web: false,
                     max_search_results: 5,
@@ -1822,6 +1920,10 @@ content %}
                     // Smart tag
                     is_smart_tag: false,
                     passthrough_model: false,
+                    // Memory
+                    use_memory: false,
+                    memory: "",
+                    memory_updated_at: null,
                     // Metadata
                     tags_input: "",
                     description: "",
@@ -1861,6 +1963,9 @@ content %}
                     store_ids: alias.document_store_ids || [],
                     max_results: alias.max_results || 5,
                     similarity_threshold: alias.similarity_threshold || 0.7,
+                    // Smart source selection
+                    use_smart_source_selection:
+                        alias.use_smart_source_selection || false,
                     // Web
                     use_web: alias.use_web || false,
                     max_search_results: alias.max_search_results || 5,
@@ -1884,6 +1989,10 @@ content %}
                     // Smart tag
                     is_smart_tag: alias.is_smart_tag || false,
                     passthrough_model: alias.passthrough_model || false,
+                    // Memory
+                    use_memory: alias.use_memory || false,
+                    memory: alias.memory || "",
+                    memory_updated_at: alias.memory_updated_at || null,
                     // Metadata
                     tags_input: (alias.tags || []).join(", "),
                     description: alias.description || "",
@@ -1977,6 +2086,16 @@ content %}
                     return;
                 }
 
+                if (
+                    this.form.use_smart_source_selection &&
+                    !this.form.designator_model
+                ) {
+                    this.formErrors.designator_model =
+                        "Designator model required for smart source selection";
+                    this.saving = false;
+                    return;
+                }
+
                 const data = {
                     name: this.form.name.toLowerCase().trim(),
                     target_model: this.form.target_model,
@@ -1994,6 +2113,9 @@ content %}
                     document_store_ids: this.form.store_ids,
                     max_results: this.form.max_results,
                     similarity_threshold: this.form.similarity_threshold,
+                    // Smart source selection
+                    use_smart_source_selection:
+                        this.form.use_smart_source_selection,
                     // Web
                     use_web: this.form.use_web,
                     max_search_results: this.form.max_search_results,
@@ -2017,6 +2139,9 @@ content %}
                     // Smart tag
                     is_smart_tag: this.form.is_smart_tag,
                     passthrough_model: this.form.passthrough_model,
+                    // Memory
+                    use_memory: this.form.use_memory,
+                    memory: this.form.memory || null,
                     // Metadata
                     tags: tags,
                     description: this.form.description || null,

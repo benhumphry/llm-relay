@@ -1135,6 +1135,24 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        # v1.9: Temporal filtering for document stores
+        if "use_temporal_filtering" not in existing_columns:
+            migrations.append(
+                (
+                    "use_temporal_filtering",
+                    "ALTER TABLE document_stores ADD COLUMN use_temporal_filtering BOOLEAN DEFAULT FALSE",
+                )
+            )
+
+        # v1.9: max_documents limit for document stores
+        if "max_documents" not in existing_columns:
+            migrations.append(
+                (
+                    "max_documents",
+                    "ALTER TABLE document_stores ADD COLUMN max_documents INTEGER",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for document_stores table"
@@ -1187,6 +1205,36 @@ def _run_migrations(engine) -> None:
                 conn.execute(
                     text(
                         "ALTER TABLE smart_aliases ADD COLUMN context_priority VARCHAR(20) DEFAULT 'balanced'"
+                    )
+                )
+                conn.commit()
+
+        # v1.9 Smart Source Selection: Designator decides which stores/web to use
+        if "use_smart_source_selection" not in existing_columns:
+            logger.info(
+                "Adding use_smart_source_selection column to smart_aliases table (v1.9)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN use_smart_source_selection BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.commit()
+
+        # v1.9: Memory fields for smart aliases
+        if "use_memory" not in existing_columns:
+            logger.info("Adding memory columns to smart_aliases table (v1.9)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN use_memory BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.execute(text("ALTER TABLE smart_aliases ADD COLUMN memory TEXT"))
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN memory_updated_at TIMESTAMP"
                     )
                 )
                 conn.commit()

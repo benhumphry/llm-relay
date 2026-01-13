@@ -5205,10 +5205,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 vision_model=data.get("vision_model"),
                 vision_ollama_url=data.get("vision_ollama_url"),
                 index_schedule=data.get("index_schedule"),
+                max_documents=data.get("max_documents"),
                 chunk_size=data.get("chunk_size", 512),
                 chunk_overlap=data.get("chunk_overlap", 50),
                 description=data.get("description"),
                 enabled=data.get("enabled", True),
+                use_temporal_filtering=data.get("use_temporal_filtering", False),
             )
             return jsonify(store.to_dict()), 201
         except ValueError as e:
@@ -5255,10 +5257,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 vision_model=data.get("vision_model"),
                 vision_ollama_url=data.get("vision_ollama_url"),
                 index_schedule=data.get("index_schedule"),
+                max_documents=data.get("max_documents"),
                 chunk_size=data.get("chunk_size"),
                 chunk_overlap=data.get("chunk_overlap"),
                 description=data.get("description"),
                 enabled=data.get("enabled"),
+                use_temporal_filtering=data.get("use_temporal_filtering"),
             )
             if not store:
                 return jsonify({"error": "Document store not found"}), 404
@@ -6291,6 +6295,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         use_rag = data.get("use_rag", False)
         use_web = data.get("use_web", False)
         use_cache = data.get("use_cache", False)
+        use_smart_source_selection = data.get("use_smart_source_selection", False)
 
         # Validate: can't have cache + web
         if use_cache and use_web:
@@ -6309,6 +6314,13 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     {"error": "Candidate models are required for routing"}
                 ), 400
 
+        # Validate smart source selection requirements
+        if use_smart_source_selection:
+            if not data.get("designator_model"):
+                return jsonify(
+                    {"error": "Designator model is required for smart source selection"}
+                ), 400
+
         # Validate RAG requirements
         store_ids = data.get("document_store_ids") or data.get("store_ids")
         if use_rag and not store_ids:
@@ -6325,6 +6337,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_rag=use_rag,
                 use_web=use_web,
                 use_cache=use_cache,
+                use_smart_source_selection=use_smart_source_selection,
                 # Smart tag settings
                 is_smart_tag=data.get("is_smart_tag", False),
                 passthrough_model=data.get("passthrough_model", False),
@@ -6366,6 +6379,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 description=data.get("description"),
                 system_prompt=data.get("system_prompt"),
                 enabled=data.get("enabled", True),
+                # Memory
+                use_memory=data.get("use_memory", False),
             )
             return jsonify(alias.to_dict()), 201
         except ValueError as e:
@@ -6394,6 +6409,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_rag=data.get("use_rag"),
                 use_web=data.get("use_web"),
                 use_cache=data.get("use_cache"),
+                use_smart_source_selection=data.get("use_smart_source_selection"),
                 # Smart tag settings
                 is_smart_tag=data.get("is_smart_tag"),
                 passthrough_model=data.get("passthrough_model"),
@@ -6433,6 +6449,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 description=data.get("description"),
                 system_prompt=data.get("system_prompt"),
                 enabled=data.get("enabled"),
+                # Memory
+                use_memory=data.get("use_memory"),
+                memory=data.get("memory"),
             )
             if not alias:
                 return jsonify({"error": "Smart alias not found"}), 404

@@ -166,6 +166,19 @@ class SmartAliasEngine:
         # ========================================
         # NO ENRICHMENT - Simple alias/routing only
         # ========================================
+        # Even without RAG/Web, we may still have memory enabled
+        if getattr(self.alias, "use_memory", False):
+            adapter = AliasAsEnricher(self.alias, target_model)
+            enricher_engine = SmartEnricherEngine(adapter, self.registry)
+            # Call enrich which will inject memory even without RAG/web context
+            result = enricher_engine.enrich(messages, effective_system)
+
+            if routing_designator_usage and not result.designator_usage:
+                result.designator_usage = routing_designator_usage
+                result.designator_model = routing_designator_model
+
+            return result
+
         try:
             resolved = self.registry._resolve_actual_model(target_model)
             from providers.registry import ResolvedModel

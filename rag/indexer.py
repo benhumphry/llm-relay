@@ -590,6 +590,15 @@ class RAGIndexer:
             total_files = len(all_docs)
             logger.info(f"Found {total_files} documents in source")
 
+            # Apply max_documents limit if configured
+            if store.max_documents and store.max_documents > 0:
+                if total_files > store.max_documents:
+                    logger.info(
+                        f"Limiting to {store.max_documents} documents (found {total_files})"
+                    )
+                    all_docs = all_docs[: store.max_documents]
+                    total_files = len(all_docs)
+
             # Track which URIs we see in source (for deletion detection)
             source_uris = {doc_info.uri for doc_info in all_docs}
 
@@ -754,6 +763,14 @@ class RAGIndexer:
                     # Add modified_time for incremental indexing
                     if doc.get("modified_time"):
                         meta["modified_time"] = doc["modified_time"]
+                        # Add document_date (YYYY-MM-DD) for temporal filtering
+                        # This enables date-based queries like "news from last week"
+                        try:
+                            # Parse ISO datetime and extract date
+                            doc_date = doc["modified_time"][:10]  # YYYY-MM-DD
+                            meta["document_date"] = doc_date
+                        except (TypeError, IndexError):
+                            pass
                     # Add document-level metadata (dates, location, etc.)
                     if doc.get("metadata"):
                         for key, value in doc["metadata"].items():

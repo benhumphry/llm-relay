@@ -93,8 +93,10 @@ def create_document_store(
     chunk_size: int = 512,
     chunk_overlap: int = 50,
     index_schedule: Optional[str] = None,
+    max_documents: Optional[int] = None,
     description: Optional[str] = None,
     enabled: bool = True,
+    use_temporal_filtering: bool = False,
     db: Optional[Session] = None,
 ) -> DocumentStore:
     """
@@ -137,8 +139,10 @@ def create_document_store(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             index_schedule=index_schedule,
+            max_documents=max_documents,
             description=description,
             enabled=enabled,
+            use_temporal_filtering=use_temporal_filtering,
         )
         session.add(store)
         session.flush()  # Get the ID
@@ -189,8 +193,10 @@ def update_document_store(
     chunk_size: Optional[int] = None,
     chunk_overlap: Optional[int] = None,
     index_schedule: Optional[str] = None,
+    max_documents: Optional[int] = None,
     description: Optional[str] = None,
     enabled: Optional[bool] = None,
+    use_temporal_filtering: Optional[bool] = None,
     db: Optional[Session] = None,
 ) -> Optional[DocumentStore]:
     """Update a document store."""
@@ -271,10 +277,15 @@ def update_document_store(
             store.chunk_overlap = chunk_overlap
         if index_schedule is not None:
             store.index_schedule = index_schedule
+        if max_documents is not None:
+            # 0 or None means no limit
+            store.max_documents = max_documents if max_documents > 0 else None
         if description is not None:
             store.description = description
         if enabled is not None:
             store.enabled = enabled
+        if use_temporal_filtering is not None:
+            store.use_temporal_filtering = use_temporal_filtering
 
         store.updated_at = datetime.utcnow()
         session.commit()
@@ -465,6 +476,7 @@ def _store_to_detached(
         chunk_size=store.chunk_size,
         chunk_overlap=store.chunk_overlap,
         index_schedule=store.index_schedule,
+        max_documents=store.max_documents,
         last_indexed=store.last_indexed,
         index_status=store.index_status,
         index_error=store.index_error,
@@ -473,6 +485,7 @@ def _store_to_detached(
         collection_name=store.collection_name,
         description=store.description,
         enabled=store.enabled,
+        use_temporal_filtering=store.use_temporal_filtering,
         created_at=store.created_at,
         updated_at=store.updated_at,
     )

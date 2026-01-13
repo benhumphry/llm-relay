@@ -1409,11 +1409,6 @@ class GmailDocumentSource(DocumentSource):
             if not page_token:
                 break
 
-            # Safety limit
-            if total_emails >= 1000:
-                logger.warning("Reached 1000 email limit")
-                break
-
         logger.info(f"Found {total_emails} emails to index")
 
     def read_document(self, uri: str) -> Optional[DocumentContent]:

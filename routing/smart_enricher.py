@@ -48,6 +48,10 @@ class EnrichmentResult:
     designator_usage: dict | None = None
     designator_model: str | None = None
 
+    # Memory metadata
+    memory_included: bool = False
+    memory_update_pending: bool = False  # Flag to trigger memory update after response
+
 
 class SmartEnricherEngine:
     """
@@ -153,9 +157,27 @@ class SmartEnricherEngine:
             augmented_messages=messages,
         )
 
+        # Smart source selection - let designator choose which sources to use
+        use_rag = self.enricher.use_rag
+        use_web = self.enricher.use_web
+        selected_stores = None  # None means use all stores
+
+        if getattr(self.enricher, "use_smart_source_selection", False):
+            selection = self._select_sources(query)
+            if selection:
+                use_rag = selection.get("use_rag", use_rag)
+                use_web = selection.get("use_web", use_web)
+                selected_stores = selection.get("store_ids")  # List of store IDs to use
+                logger.info(
+                    f"Smart source selection: use_rag={use_rag}, use_web={use_web}, "
+                    f"stores={selected_stores or 'all'}"
+                )
+
         # RAG retrieval (if enabled)
-        if self.enricher.use_rag:
-            rag_context, rag_metadata = self._retrieve_rag_context(query)
+        if use_rag:
+            rag_context, rag_metadata = self._retrieve_rag_context(
+                query, selected_store_ids=selected_stores
+            )
             if rag_context:
                 context_parts.append(("rag", rag_context))
             # Copy RAG metadata
@@ -167,7 +189,7 @@ class SmartEnricherEngine:
             result_metadata.embedding_provider = rag_metadata.get("embedding_provider")
 
         # Web search and scrape (if enabled)
-        if self.enricher.use_web:
+        if use_web:
             web_context, web_metadata = self._retrieve_web_context(query)
             if web_context:
                 context_parts.append(("web", web_context))
@@ -204,6 +226,18 @@ class SmartEnricherEngine:
             result_metadata.context_injected = False
             logger.debug(f"Enricher '{self.enricher.name}': No context to inject")
 
+        # Inject memory if enabled (added before other context)
+        memory = self._get_memory_context()
+        if memory:
+            result_metadata.augmented_system = self._inject_memory(
+                result_metadata.augmented_system, memory
+            )
+            result_metadata.memory_included = True
+            result_metadata.memory_update_pending = (
+                True  # Flag for post-response update
+            )
+            logger.debug(f"Enricher '{self.enricher.name}': Injected memory context")
+
         return result_metadata
 
     def _get_query(self, messages: list[dict], max_chars: int = 2000) -> str:
@@ -221,9 +255,144 @@ class SmartEnricherEngine:
                     return " ".join(texts)[:max_chars]
         return ""
 
-    def _retrieve_rag_context(self, query: str) -> tuple[str, dict]:
+    def _select_sources(self, query: str) -> dict | None:
+        """
+        Use the designator model to select which sources to use for a query.
+
+        Returns:
+            Dict with 'use_rag', 'use_web', and 'store_ids' keys, or None if selection fails
+        """
+        if not self.enricher.designator_model:
+            logger.warning(
+                "Smart source selection enabled but no designator model configured"
+            )
+            return None
+
+        # Build list of available sources with descriptions
+        linked_stores = self._get_linked_stores()
+        store_info = []
+        for store in linked_stores:
+            enabled = getattr(store, "enabled", True)
+            status = getattr(store, "index_status", None)
+            if enabled and status == "ready":
+                store_id = getattr(store, "id", None)
+                store_name = getattr(store, "name", "unknown")
+                description = (
+                    getattr(store, "description", None)
+                    or f"Document store: {store_name}"
+                )
+                store_info.append(
+                    {
+                        "id": store_id,
+                        "name": store_name,
+                        "description": description,
+                    }
+                )
+
+        if not store_info and not self.enricher.use_web:
+            logger.debug("No ready stores and web disabled - nothing to select from")
+            return None
+
+        # Build the prompt for the designator
+        sources_text = ""
+        if store_info:
+            sources_text = "DOCUMENT STORES:\n"
+            for s in store_info:
+                sources_text += f"- ID: {s['id']}, Name: {s['name']}\n  Description: {s['description']}\n"
+
+        web_available = (
+            "Web search is AVAILABLE."
+            if self.enricher.use_web
+            else "Web search is NOT available."
+        )
+
+        prompt = f"""You are a source selection assistant. Based on the user's query, decide which document stores (if any) would be helpful, and whether web search would help.
+
+{sources_text}
+{web_available}
+
+USER QUERY:
+{query}
+
+Respond with a JSON object containing:
+- "use_rag": true/false (whether to search document stores)
+- "use_web": true/false (whether to use web search)
+- "store_ids": [list of store IDs to search] (empty list if use_rag is false, or include ALL relevant store IDs)
+
+Consider:
+- Use document stores for internal/archived content that matches their descriptions
+- Use web search for current events, recent news, or information not likely in the document stores
+- You can use both if the query benefits from multiple perspectives
+- Only include stores whose descriptions suggest relevant content
+
+Respond with ONLY the JSON object, no other text."""
+
+        try:
+            designator_resolved = self.registry._resolve_actual_model(
+                self.enricher.designator_model
+            )
+            provider = designator_resolved.provider
+
+            result = provider.chat_completion(
+                model=designator_resolved.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                system=None,
+                options={"max_tokens": 200, "temperature": 0},
+            )
+
+            response_text = result.get("content", "").strip()
+
+            # Parse JSON response
+            import json
+            import re
+
+            # Try to extract JSON from the response
+            json_match = re.search(r"\{[^}]+\}", response_text, re.DOTALL)
+            if json_match:
+                selection = json.loads(json_match.group())
+
+                # Validate and normalize the response
+                use_rag = selection.get("use_rag", False)
+                use_web = selection.get("use_web", False) and self.enricher.use_web
+                store_ids = selection.get("store_ids", [])
+
+                # Validate store_ids are from our available stores
+                valid_store_ids = {s["id"] for s in store_info}
+                store_ids = [sid for sid in store_ids if sid in valid_store_ids]
+
+                # If use_rag is true but no valid store_ids, use all stores
+                if use_rag and not store_ids:
+                    store_ids = list(valid_store_ids)
+
+                logger.debug(
+                    f"Source selection result: use_rag={use_rag}, use_web={use_web}, "
+                    f"store_ids={store_ids}"
+                )
+
+                return {
+                    "use_rag": use_rag and bool(store_ids),
+                    "use_web": use_web,
+                    "store_ids": store_ids if store_ids else None,
+                }
+
+            logger.warning(
+                f"Could not parse source selection response: {response_text}"
+            )
+            return None
+
+        except Exception as e:
+            logger.error(f"Source selection failed: {e}")
+            return None
+
+    def _retrieve_rag_context(
+        self, query: str, selected_store_ids: list[int] | None = None
+    ) -> tuple[str, dict]:
         """
         Retrieve context from linked document stores.
+
+        Args:
+            query: The user's query
+            selected_store_ids: If provided, only use stores with these IDs
 
         Returns:
             Tuple of (context string, metadata dict)
@@ -238,6 +407,13 @@ class SmartEnricherEngine:
         }
 
         linked_stores = self._get_linked_stores()
+
+        # Filter to selected stores if specified
+        if selected_store_ids is not None:
+            linked_stores = [
+                s for s in linked_stores if getattr(s, "id", None) in selected_store_ids
+            ]
+
         if not linked_stores or not self._has_ready_stores(linked_stores):
             logger.debug(f"Enricher '{self.enricher.name}': No ready document stores")
             return "", metadata
@@ -576,3 +752,131 @@ Today's date: {current_date}
             return original_system + "\n\n" + context_block
         else:
             return context_block.strip()
+
+    def _get_memory_context(self) -> str | None:
+        """Get the current memory content if memory is enabled."""
+        if not getattr(self.enricher, "use_memory", False):
+            return None
+
+        memory = getattr(self.enricher, "memory", None)
+        if not memory:
+            return None
+
+        return memory
+
+    def _inject_memory(self, system: str | None, memory: str) -> str:
+        """Inject memory into the system prompt."""
+        memory_block = f"""
+<user_memory>
+The following is your persistent memory about this user's preferences and context.
+Use this information to personalize your responses.
+
+{memory.strip()}
+</user_memory>
+"""
+
+        if system:
+            return memory_block + "\n" + system
+        else:
+            return memory_block.strip()
+
+    def update_memory_after_response(
+        self,
+        messages: list[dict],
+        assistant_response: str,
+    ) -> bool:
+        """
+        Check if memory should be updated after a response and update if needed.
+
+        This is called after the target model generates a response. The designator
+        decides whether significant new information was learned that should be
+        persisted to memory.
+
+        Args:
+            messages: The conversation messages (including user query)
+            assistant_response: The response from the target model
+
+        Returns:
+            True if memory was updated, False otherwise
+        """
+        if not getattr(self.enricher, "use_memory", False):
+            return False
+
+        if not self.enricher.designator_model:
+            logger.warning("Memory enabled but no designator model configured")
+            return False
+
+        current_memory = getattr(self.enricher, "memory", None) or ""
+
+        # Get the user's query
+        query = self._get_query(messages)
+        if not query:
+            return False
+
+        # Build the prompt for memory update decision
+        prompt = f"""You are a memory management assistant. Your task is to decide whether the conversation contains significant new information that should be remembered about this user.
+
+CURRENT MEMORY:
+{current_memory if current_memory else "(empty)"}
+
+USER'S MESSAGE:
+{query[:1000]}
+
+ASSISTANT'S RESPONSE:
+{assistant_response[:2000]}
+
+Analyze the conversation and decide:
+1. Does this conversation reveal important NEW information about the user's preferences, context, or needs?
+2. This could include: preferences, working patterns, project context, technical environment, communication style, or other persistent facts.
+3. Only update memory for SIGNIFICANT information that would be useful in future conversations.
+4. Do NOT include transient information like specific questions asked or temporary tasks.
+
+If the memory should be updated, respond with:
+UPDATE: <new complete memory content>
+
+If no update is needed, respond with:
+NO_UPDATE
+
+The new memory should be concise (under 500 words) and merge any new information with relevant existing memory."""
+
+        try:
+            designator_resolved = self.registry._resolve_actual_model(
+                self.enricher.designator_model
+            )
+            provider = designator_resolved.provider
+
+            result = provider.chat_completion(
+                model=designator_resolved.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                system=None,
+                options={"max_tokens": 800, "temperature": 0},
+            )
+
+            response_text = result.get("content", "").strip()
+
+            if response_text.startswith("UPDATE:"):
+                new_memory = response_text[7:].strip()
+                if new_memory:
+                    from db import update_smart_alias_memory
+
+                    success = update_smart_alias_memory(self.enricher.id, new_memory)
+                    if success:
+                        logger.info(
+                            f"Updated memory for smart alias '{self.enricher.name}'"
+                        )
+                        return True
+                    else:
+                        logger.error(
+                            f"Failed to save memory for smart alias '{self.enricher.name}'"
+                        )
+
+            elif response_text.startswith("NO_UPDATE"):
+                logger.debug(
+                    f"No memory update needed for smart alias '{self.enricher.name}'"
+                )
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Memory update check failed: {e}")
+            return False
