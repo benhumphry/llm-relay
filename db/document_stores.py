@@ -84,6 +84,11 @@ def create_document_store(
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
     nextcloud_folder: Optional[str] = None,
+    website_url: Optional[str] = None,
+    website_crawl_depth: int = 1,
+    website_max_pages: int = 50,
+    website_include_pattern: Optional[str] = None,
+    website_exclude_pattern: Optional[str] = None,
     embedding_provider: str = "local",
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -130,6 +135,11 @@ def create_document_store(
             notion_database_id=notion_database_id,
             notion_page_id=notion_page_id,
             nextcloud_folder=nextcloud_folder,
+            website_url=website_url,
+            website_crawl_depth=website_crawl_depth,
+            website_max_pages=website_max_pages,
+            website_include_pattern=website_include_pattern,
+            website_exclude_pattern=website_exclude_pattern,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             ollama_url=ollama_url,
@@ -184,6 +194,11 @@ def update_document_store(
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
     nextcloud_folder: Optional[str] = None,
+    website_url: Optional[str] = None,
+    website_crawl_depth: Optional[int] = None,
+    website_max_pages: Optional[int] = None,
+    website_include_pattern: Optional[str] = None,
+    website_exclude_pattern: Optional[str] = None,
     embedding_provider: Optional[str] = None,
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -259,6 +274,20 @@ def update_document_store(
             store.notion_page_id = notion_page_id if notion_page_id else None
         if nextcloud_folder is not None:
             store.nextcloud_folder = nextcloud_folder if nextcloud_folder else None
+        if website_url is not None:
+            store.website_url = website_url if website_url else None
+        if website_crawl_depth is not None:
+            store.website_crawl_depth = website_crawl_depth
+        if website_max_pages is not None:
+            store.website_max_pages = website_max_pages
+        if website_include_pattern is not None:
+            store.website_include_pattern = (
+                website_include_pattern if website_include_pattern else None
+            )
+        if website_exclude_pattern is not None:
+            store.website_exclude_pattern = (
+                website_exclude_pattern if website_exclude_pattern else None
+            )
         if embedding_provider is not None:
             store.embedding_provider = embedding_provider
         if embedding_model is not None:
@@ -467,6 +496,11 @@ def _store_to_detached(
         notion_database_id=store.notion_database_id,
         notion_page_id=store.notion_page_id,
         nextcloud_folder=store.nextcloud_folder,
+        website_url=store.website_url,
+        website_crawl_depth=store.website_crawl_depth,
+        website_max_pages=store.website_max_pages,
+        website_include_pattern=store.website_include_pattern,
+        website_exclude_pattern=store.website_exclude_pattern,
         embedding_provider=store.embedding_provider,
         embedding_model=store.embedding_model,
         ollama_url=store.ollama_url,
@@ -483,6 +517,12 @@ def _store_to_detached(
         document_count=store.document_count,
         chunk_count=store.chunk_count,
         collection_name=store.collection_name,
+        # Intelligence fields
+        themes_json=store.themes_json,
+        best_for=store.best_for,
+        content_summary=store.content_summary,
+        intelligence_updated_at=store.intelligence_updated_at,
+        # Metadata
         description=store.description,
         enabled=store.enabled,
         use_temporal_filtering=store.use_temporal_filtering,

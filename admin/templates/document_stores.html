@@ -6,8 +6,16 @@ block content %}
         class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
     >
         <div>
-            <h1 class="text-2xl font-bold">Document Stores</h1>
-            <p class="text-base-content/60">
+            <h1
+                class="text-2xl font-bold"
+                x-text="filterMode === 'website' ? 'Websites' : 'Document Stores'"
+            >
+                Document Stores
+            </h1>
+            <p
+                class="text-base-content/60"
+                x-text="filterMode === 'website' ? 'Crawled and indexed websites for Smart RAGs' : 'Configure and index document sources for Smart RAGs'"
+            >
                 Configure and index document sources for Smart RAGs
             </p>
         </div>
@@ -26,7 +34,10 @@ block content %}
                     d="M12 4v16m8-8H4"
                 />
             </svg>
-            Add Store
+            <span
+                x-text="filterMode === 'website' ? 'Add Website' : 'Add Store'"
+                >Add Store</span
+            >
         </button>
     </div>
 
@@ -55,16 +66,25 @@ block content %}
                         d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
                     />
                 </svg>
-                <h3 class="mt-4 text-lg font-medium">
+                <h3
+                    class="mt-4 text-lg font-medium"
+                    x-text="filterMode === 'website' ? 'No Websites Configured' : 'No Document Stores Configured'"
+                >
                     No Document Stores Configured
                 </h3>
-                <p class="mt-2 text-base-content/60 max-w-md mx-auto">
+                <p
+                    class="mt-2 text-base-content/60 max-w-md mx-auto"
+                    x-text="filterMode === 'website' ? 'Websites are crawled and indexed for semantic search. Add a website to enable RAG-based Q&A over web content.' : 'Document stores index documents from local folders or MCP sources. They can be shared across multiple Smart RAGs for multi-source search.'"
+                >
                     Document stores index documents from local folders or MCP
                     sources. They can be shared across multiple Smart RAGs for
                     multi-source search.
                 </p>
                 <button @click="openAddModal()" class="btn btn-primary mt-4">
-                    Create Your First Store
+                    <span
+                        x-text="filterMode === 'website' ? 'Add Your First Website' : 'Create Your First Store'"
+                        >Create Your First Store</span
+                    >
                 </button>
             </div>
         </div>
@@ -81,7 +101,12 @@ block content %}
                             <th>Name</th>
                             <th>Source</th>
                             <th>Index</th>
-                            <th class="text-right">Docs</th>
+                            <th
+                                class="text-right"
+                                x-text="filterMode === 'website' ? 'Pages' : 'Docs'"
+                            >
+                                Docs
+                            </th>
                             <th class="text-right">Chunks</th>
                             <th>Status</th>
                             <th class="text-right">Actions</th>
@@ -434,6 +459,139 @@ block content %}
                                             ></div>
                                         </div>
                                     </div>
+
+                                    <!-- Intelligence Section -->
+                                    <div
+                                        x-show="store.themes?.length || store.best_for || store.content_summary"
+                                        class="border-t border-base-300 p-4"
+                                    >
+                                        <div
+                                            class="flex items-center justify-between mb-3"
+                                        >
+                                            <div
+                                                class="text-xs text-base-content/50 uppercase font-medium"
+                                            >
+                                                Document Intelligence
+                                            </div>
+                                            <div
+                                                class="flex items-center gap-2"
+                                            >
+                                                <span
+                                                    x-show="store.intelligence_updated_at"
+                                                    class="text-xs text-base-content/40"
+                                                    x-text="'Updated: ' + new Date(store.intelligence_updated_at).toLocaleDateString()"
+                                                ></span>
+                                                <button
+                                                    @click="refreshIntelligence(store)"
+                                                    class="btn btn-ghost btn-xs"
+                                                    :class="{ 'loading': refreshingIntelligence === store.id }"
+                                                    :disabled="refreshingIntelligence === store.id"
+                                                    title="Regenerate intelligence"
+                                                >
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        class="h-3 w-3"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            stroke-linecap="round"
+                                                            stroke-linejoin="round"
+                                                            stroke-width="2"
+                                                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                                        />
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div
+                                            class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm"
+                                        >
+                                            <!-- Themes -->
+                                            <div x-show="store.themes?.length">
+                                                <div
+                                                    class="text-xs text-base-content/50 mb-1"
+                                                >
+                                                    Themes
+                                                </div>
+                                                <div
+                                                    class="flex flex-wrap gap-1"
+                                                >
+                                                    <template
+                                                        x-for="theme in store.themes"
+                                                        :key="theme"
+                                                    >
+                                                        <span
+                                                            class="badge badge-sm badge-outline"
+                                                            x-text="theme"
+                                                        ></span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                            <!-- Best For -->
+                                            <div x-show="store.best_for">
+                                                <div
+                                                    class="text-xs text-base-content/50 mb-1"
+                                                >
+                                                    Best For
+                                                </div>
+                                                <div
+                                                    class="text-xs"
+                                                    x-text="store.best_for"
+                                                ></div>
+                                            </div>
+                                            <!-- Summary -->
+                                            <div x-show="store.content_summary">
+                                                <div
+                                                    class="text-xs text-base-content/50 mb-1"
+                                                >
+                                                    Summary
+                                                </div>
+                                                <div
+                                                    class="text-xs"
+                                                    x-text="store.content_summary"
+                                                ></div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- No Intelligence - offer to generate -->
+                                    <div
+                                        x-show="!store.themes?.length && !store.best_for && !store.content_summary && store.index_status === 'ready' && store.chunk_count > 0"
+                                        class="border-t border-base-300 p-4"
+                                    >
+                                        <div
+                                            class="flex items-center justify-between"
+                                        >
+                                            <span
+                                                class="text-xs text-base-content/50"
+                                                >No intelligence generated</span
+                                            >
+                                            <button
+                                                @click="refreshIntelligence(store)"
+                                                class="btn btn-ghost btn-xs"
+                                                :class="{ 'loading': refreshingIntelligence === store.id }"
+                                                :disabled="refreshingIntelligence === store.id"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-3 w-3 mr-1"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                                                    />
+                                                </svg>
+                                                Generate Intelligence
+                                            </button>
+                                        </div>
+                                    </div>
                                 </td>
                             </tr>
                         </tbody>
@@ -510,6 +668,9 @@ block content %}
                             >
                                 Nextcloud
                             </option>
+                        </optgroup>
+                        <optgroup label="Web">
+                            <option value="website">Website (crawled)</option>
                         </optgroup>
                         <optgroup label="Other Integrations">
                             <option
@@ -1085,6 +1246,124 @@ block content %}
                             Authentication via
                             <code class="font-mono">GITHUB_TOKEN</code>
                             environment variable.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Website Configuration -->
+                <div
+                    class="mt-4 space-y-4"
+                    x-show="form.source_type === 'website'"
+                >
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Website URL</span>
+                        </label>
+                        <input
+                            type="url"
+                            x-model="form.website_url"
+                            class="input input-bordered font-mono"
+                            placeholder="https://docs.example.com"
+                            :required="form.source_type === 'website'"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Starting URL for the crawler</span
+                            >
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Crawl Depth</span>
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.website_crawl_depth"
+                                class="input input-bordered"
+                                min="0"
+                                max="5"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >0 = start page only, 1 = follow links
+                                    once</span
+                                >
+                            </label>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Max Pages</span>
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.website_max_pages"
+                                class="input input-bordered"
+                                min="1"
+                                max="500"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Maximum pages to crawl</span
+                                >
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >Include Pattern (optional)</span
+                            >
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.website_include_pattern"
+                            class="input input-bordered font-mono"
+                            placeholder="e.g., /docs/.*"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Regex pattern - only crawl URLs matching
+                                this</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text"
+                                >Exclude Pattern (optional)</span
+                            >
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.website_exclude_pattern"
+                            class="input input-bordered font-mono"
+                            placeholder="e.g., /blog/.*|/archive/.*"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Regex pattern - skip URLs matching this</span
+                            >
+                        </label>
+                    </div>
+                    <div class="alert alert-info">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="stroke-current shrink-0 h-6 w-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <div class="text-sm">
+                            Crawls the website using trafilatura for content
+                            extraction. Only follows links within the same
+                            domain.
                         </div>
                     </div>
                 </div>
@@ -1808,7 +2087,11 @@ block content %}
                                     >
                                 </label>
                             </div>
-                            <div class="form-control">
+                            <!-- Max Documents (hidden for website sources - use max_pages instead) -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type !== 'website'"
+                            >
                                 <label class="label">
                                     <span class="label-text"
                                         >Max Documents</span
@@ -1905,6 +2188,10 @@ block content %}
         return {
             loading: true,
             stores: [],
+            allStores: [], // Unfiltered stores
+            filterMode:
+                new URLSearchParams(window.location.search).get("filter") ||
+                null,
             expandedRows: [],
             showModal: false,
             showDeleteModal: false,
@@ -1915,6 +2202,7 @@ block content %}
             indexingStores: [],
             cancellingStores: [],
             clearingStores: [],
+            refreshingIntelligence: null,
             formErrors: {},
 
             // MCP integration availability status
@@ -1985,6 +2273,11 @@ block content %}
                 notion_database_id: "",
                 notion_page_id: "",
                 nextcloud_folder: "",
+                website_url: "",
+                website_crawl_depth: 1,
+                website_max_pages: 50,
+                website_include_pattern: "",
+                website_exclude_pattern: "",
                 mcp_name: "",
                 mcp_transport: "stdio",
                 mcp_command: "",
@@ -2458,6 +2751,7 @@ block content %}
             // Source display helpers for the table
             getSourceBadgeClass(store) {
                 if (store.source_type === "local") return "badge-ghost";
+                if (store.source_type === "website") return "badge-info";
                 if (store.source_type === "paperless") return "badge-success";
                 if (store.source_type === "nextcloud") return "badge-info";
                 if (store.source_type === "notion") return "badge-warning";
@@ -2478,6 +2772,7 @@ block content %}
 
             getSourceBadgeText(store) {
                 if (store.source_type === "local") return "Local";
+                if (store.source_type === "website") return "Website";
                 if (store.source_type === "paperless") return "Paperless";
                 if (store.source_type === "nextcloud") return "Nextcloud";
                 if (store.source_type === "notion") return "Notion";
@@ -2498,6 +2793,8 @@ block content %}
             getSourceDetail(store) {
                 if (store.source_type === "local")
                     return store.source_path || "";
+                if (store.source_type === "website")
+                    return store.website_url || "";
                 if (store.source_type === "paperless")
                     return store.paperless_url || "";
                 if (store.source_type === "nextcloud")
@@ -2577,7 +2874,19 @@ block content %}
                 try {
                     const response = await fetch("/api/document-stores");
                     if (response.ok) {
-                        this.stores = await response.json();
+                        this.allStores = await response.json();
+                        // Apply filter based on mode
+                        if (this.filterMode === "website") {
+                            // Websites page: show only websites
+                            this.stores = this.allStores.filter(
+                                (s) => s.source_type === "website",
+                            );
+                        } else {
+                            // Document Stores page: exclude websites (they have their own nav item)
+                            this.stores = this.allStores.filter(
+                                (s) => s.source_type !== "website",
+                            );
+                        }
                     }
                 } catch (error) {
                     console.error("Failed to load stores:", error);
@@ -2626,7 +2935,8 @@ block content %}
                 this.googleCalendars = [];
                 this.form = {
                     name: "",
-                    source_type: "local",
+                    source_type:
+                        this.filterMode === "website" ? "website" : "local",
                     source_path: "",
                     paperless_url: "",
                     paperless_token: "",
@@ -2698,6 +3008,13 @@ block content %}
                     notion_database_id: store.notion_database_id || "",
                     notion_page_id: store.notion_page_id || "",
                     nextcloud_folder: store.nextcloud_folder || "",
+                    website_url: store.website_url || "",
+                    website_crawl_depth: store.website_crawl_depth || 1,
+                    website_max_pages: store.website_max_pages || 50,
+                    website_include_pattern:
+                        store.website_include_pattern || "",
+                    website_exclude_pattern:
+                        store.website_exclude_pattern || "",
                     mcp_name: store.mcp_server_config?.name || "",
                     mcp_transport:
                         store.mcp_server_config?.transport || "stdio",
@@ -2803,6 +3120,17 @@ block content %}
                         body.github_repo = this.form.github_repo;
                         body.github_branch = this.form.github_branch || null;
                         body.github_path = this.form.github_path || null;
+                    } else if (this.form.source_type === "website") {
+                        body.source_type = "website";
+                        body.website_url = this.form.website_url;
+                        body.website_crawl_depth =
+                            parseInt(this.form.website_crawl_depth) || 1;
+                        body.website_max_pages =
+                            parseInt(this.form.website_max_pages) || 50;
+                        body.website_include_pattern =
+                            this.form.website_include_pattern || null;
+                        body.website_exclude_pattern =
+                            this.form.website_exclude_pattern || null;
                     } else if (
                         ["mcp:gdrive", "mcp:gmail", "mcp:gcalendar"].includes(
                             this.form.source_type,
@@ -3020,6 +3348,34 @@ block content %}
                     this.clearingStores = this.clearingStores.filter(
                         (id) => id !== store.id,
                     );
+                }
+            },
+
+            async refreshIntelligence(store) {
+                this.refreshingIntelligence = store.id;
+
+                try {
+                    const response = await fetch(
+                        `/api/document-stores/${store.id}/refresh-intelligence`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                        },
+                    );
+
+                    if (!response.ok) {
+                        const result = await response.json();
+                        alert(
+                            result.error || "Failed to generate intelligence",
+                        );
+                    }
+
+                    await this.loadStores();
+                } catch (error) {
+                    console.error("Intelligence refresh error:", error);
+                    alert("Failed to generate intelligence");
+                } finally {
+                    this.refreshingIntelligence = null;
                 }
             },
         };

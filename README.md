@@ -5,8 +5,8 @@
 <h1 align="center">LLM Relay</h1>
 
 <p align="center">
-<strong>A lightweight, self-hosted LLM Proxy with Smart Features</strong><br>
-Unified API for cloud and local LLMs with cost tracking, intelligent routing, semantic caching, web augmentation, and document RAG.
+<strong>Intelligent LLM Gateway with Smart Routing and Context Enrichment</strong><br>
+A self-hosted proxy that unifies all your LLM providers behind one API, with AI-powered routing, document RAG, real-time web search, and semantic caching.
 </p>
 
 <p align="center">
@@ -17,13 +17,15 @@ Unified API for cloud and local LLMs with cost tracking, intelligent routing, se
 
 ## What is LLM Relay?
 
-A single self-hosted proxy that puts all your LLM providers behind one API:
+An intelligent gateway that makes your LLMs smarter and easier to use:
 
-- **One endpoint, all models** — Claude, GPT, Gemini, Llama, and 700+ others
+- **Smart Routing** — Let AI pick the best model for each request from your available providers
+- **Document RAG** — Automatically inject relevant context from your indexed documents
+- **Real-time Web Search** — Enrich requests with current information from the web
+- **Semantic Caching** — Cache and reuse responses for similar queries to reduce costs
+- **One endpoint, all models** — Claude, GPT, Gemini, Llama, and 700+ others through one API
 - **Accurate cost tracking** — Token-level tracking with cache and reasoning tokens
-- **Flexible attribution** — Tag requests by user, project, or team
 - **Works with any client** — Ollama and OpenAI API compatible
-- **Smart Aliases** — Unified intelligent routing, semantic caching, web search, and document RAG
 
 ## Quick Start
 
@@ -63,6 +65,29 @@ curl http://localhost:11434/api/chat \
 Works with Open WebUI, Cursor, Continue, and any Ollama or OpenAI-compatible client.
 
 ## Features
+
+### Smart Aliases
+
+The core feature for intelligent model handling. Create a Smart Alias and enable any combination of capabilities:
+
+| Feature | Description |
+|---------|-------------|
+| **Routing** | Designator LLM analyzes each request and picks the best model |
+| **RAG** | Inject relevant context from your indexed documents |
+| **Web** | Real-time web search and scraping for current information |
+| **Cache** | Semantic response caching to reduce costs |
+| **Memory** | Persistent conversation memory across sessions |
+| **Smart Tag** | Trigger by request tag instead of model name |
+
+**Example configurations:**
+
+| Alias Name | Features | Use Case |
+|------------|----------|----------|
+| `smart` | Routing | Let AI pick between Claude, GPT, Gemini per request |
+| `research` | RAG + Web | Answer questions with docs and current info |
+| `docs` | Smart Tag + RAG | Tag any request to add document context |
+| `cached-claude` | Cache | Reduce costs for repeated queries |
+| `assistant` | Memory | Maintain context across conversation sessions |
 
 ### Providers
 
@@ -112,43 +137,6 @@ curl -d '{"model": "claude-sonnet@alice"}' ...
 curl -d '{"messages": [{"role": "user", "content": "@relay[tag:alice] Hello!"}]}' ...
 ```
 
-### Smart Aliases
-
-The unified feature for intelligent model handling. Create a Smart Alias and enable any combination:
-
-| Feature | Description |
-|---------|-------------|
-| **Routing** | Designator LLM picks the best model for each request |
-| **RAG** | Inject relevant context from your indexed documents |
-| **Web** | Real-time web search and scraping for current information |
-| **Cache** | Semantic response caching to reduce costs |
-| **Smart Tag** | Trigger by request tag instead of model name |
-
-**Example configurations:**
-
-| Alias Name | Features | Use Case |
-|------------|----------|----------|
-| `fast` | Simple alias | Quick access to `groq/llama-3.3-70b` |
-| `smart` | Routing | Let AI pick between Claude, GPT, Gemini |
-| `research` | RAG + Web | Answer questions with docs and current info |
-| `cached-claude` | Cache | Reduce costs for repeated queries |
-| `docs` | Smart Tag + RAG | Tag any request to add document context |
-
-### Smart Tags
-
-Create a Smart Alias with "Smart Tag" enabled, and any request tagged with that alias name will flow through it:
-
-```bash
-# Create alias "docs" with Smart Tag + RAG enabled
-# Then tag requests to trigger it:
-curl -H "X-Proxy-Tag: docs" -d '{"model": "gpt-4o", "messages": [...]}'
-
-# Or inline:
-curl -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "@relay[tag:docs] What does our policy say about..."}]}'
-```
-
-With **Passthrough** enabled, the original model is used (applying enrichment to any model).
-
 ### Redirects
 
 Transparent model name mappings with wildcard support:
@@ -160,14 +148,20 @@ Transparent model name mappings with wildcard support:
 
 Use cases: seamless model upgrades, provider switching without client changes.
 
-### Document Stores
+### Data Sources
 
-Index documents for RAG retrieval:
+Index documents and websites for RAG retrieval:
 
-- **Multiple formats** — PDF, DOCX, PPTX, HTML, Markdown, images
-- **Multiple sources** — Local files, Google Drive, Gmail, Calendar, Notion, GitHub, Paperless
+**Document Stores:**
+- **Multiple formats** — PDF, DOCX, PPTX, HTML, Markdown, images (with OCR)
+- **Multiple sources** — Local files, Google Drive, Gmail, Calendar, Notion, GitHub, Paperless, Nextcloud
 - **Flexible embeddings** — Local (bundled), Ollama, or cloud providers
 - **Scheduled indexing** — Cron-based re-indexing for updated documents
+
+**Websites:**
+- **Crawl and index** — Automatically crawl websites and extract content
+- **Configurable depth** — Control how many levels of links to follow
+- **URL patterns** — Include/exclude URLs matching specific patterns
 
 ### Admin UI
 

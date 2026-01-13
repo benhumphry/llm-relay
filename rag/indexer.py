@@ -112,6 +112,189 @@ class RAGIndexer:
             logger.warning(f"Failed to delete chunks for {source_uri}: {e}")
         return 0
 
+    def generate_store_intelligence(
+        self, store_id: int, intelligence_model: str | None = None
+    ) -> bool:
+        """
+        Generate intelligence (themes, best_for, summary) for a document store.
+
+        Samples chunks from the store and uses an LLM to analyze the content,
+        generating themes, use cases, and a summary that helps routing decisions.
+
+        Args:
+            store_id: ID of the document store
+            intelligence_model: Model to use for analysis (defaults to global setting)
+
+        Returns:
+            True if intelligence was generated successfully
+        """
+        from db import get_db_context, get_document_store_by_id
+        from db.models import DocumentStore, Setting
+
+        try:
+            store = get_document_store_by_id(store_id)
+            if not store:
+                logger.warning(
+                    f"Store {store_id} not found for intelligence generation"
+                )
+                return False
+
+            if not store.collection_name or store.chunk_count == 0:
+                logger.info(
+                    f"Store '{store.name}' has no indexed content, skipping intelligence"
+                )
+                return False
+
+            # Get the intelligence model from settings if not provided
+            if not intelligence_model:
+                with get_db_context() as db:
+                    setting = (
+                        db.query(Setting)
+                        .filter(Setting.key == Setting.KEY_DOCSTORE_INTELLIGENCE_MODEL)
+                        .first()
+                    )
+                    intelligence_model = setting.value if setting else None
+
+            if not intelligence_model:
+                logger.debug(
+                    f"No intelligence model configured, skipping for store '{store.name}'"
+                )
+                return False
+
+            # Sample chunks from the collection
+            collection = self._chroma_client.get_collection(store.collection_name)
+
+            # Get a diverse sample of chunks (up to 20)
+            sample_size = min(20, store.chunk_count)
+            results = collection.get(
+                limit=sample_size, include=["documents", "metadatas"]
+            )
+
+            if not results or not results.get("documents"):
+                logger.warning(
+                    f"No documents found in collection for store '{store.name}'"
+                )
+                return False
+
+            # Build content sample for analysis
+            content_samples = []
+            seen_sources = set()
+            for i, (doc, meta) in enumerate(
+                zip(results["documents"], results["metadatas"])
+            ):
+                source = meta.get("source_uri", f"chunk_{i}")
+                # Avoid too many chunks from same source
+                source_base = source.rsplit("/", 1)[-1] if "/" in source else source
+                if source_base not in seen_sources or len(seen_sources) < 5:
+                    seen_sources.add(source_base)
+                    # Truncate long chunks
+                    content_samples.append(doc[:1500] if len(doc) > 1500 else doc)
+
+            combined_content = "\n\n---\n\n".join(content_samples[:15])
+
+            # Build the analysis prompt
+            prompt = f"""Analyze the following document samples from a document store and generate intelligence to help with routing decisions.
+
+DOCUMENT STORE: {store.name}
+DESCRIPTION: {store.description or "(none provided)"}
+SOURCE TYPE: {store.source_type}
+DOCUMENT COUNT: {store.document_count}
+
+CONTENT SAMPLES:
+{combined_content[:12000]}
+
+Based on these samples, provide:
+
+1. THEMES: List 3-7 broad, general topic categories covered (as a JSON array of strings). Use high-level domain categories like "Marketing", "Technology", "Finance", "Legal", "Healthcare", "Engineering", "Research" rather than specific topics or details from the documents. Think of these as simple tags for categorization.
+2. BEST_FOR: Describe in general terms what types of questions this store can answer (1 sentence). Focus on the category of information, not specific details. Example: "Questions about marketing industry trends and news" not "Questions about specific CMO appointments at Puma".
+3. SUMMARY: A brief, general description of the content type (1 sentence). Example: "Industry news articles and reports" not detailed descriptions of specific content.
+
+Keep all responses general and categorical - avoid mentioning specific companies, people, dates, or events from the documents.
+
+Respond in this exact format:
+THEMES: ["Category1", "Category2"]
+BEST_FOR: <general use case description>
+SUMMARY: <general content type description>"""
+
+            # Call the LLM
+            from providers import registry
+
+            logger.info(
+                f"Generating intelligence for store '{store.name}' using model: {intelligence_model}"
+            )
+            resolved = registry._resolve_actual_model(intelligence_model)
+            logger.info(
+                f"Resolved to provider: {resolved.provider.name}, model_id: {resolved.model_id}"
+            )
+
+            try:
+                result = resolved.provider.chat_completion(
+                    model=resolved.model_id,
+                    messages=[{"role": "user", "content": prompt}],
+                    system=None,
+                    options={"max_tokens": 600, "temperature": 0.3},
+                )
+            except Exception as llm_error:
+                logger.error(
+                    f"LLM call failed for intelligence generation: {llm_error}"
+                )
+                raise
+
+            response_text = result.get("content", "").strip()
+
+            # Parse the response
+            themes = []
+            best_for = None
+            content_summary = None
+
+            import json
+            import re
+
+            # Extract THEMES
+            themes_match = re.search(r"THEMES:\s*(\[.*?\])", response_text, re.DOTALL)
+            if themes_match:
+                try:
+                    themes = json.loads(themes_match.group(1))
+                except json.JSONDecodeError:
+                    # Try to extract as comma-separated
+                    themes_str = themes_match.group(1).strip("[]")
+                    themes = [t.strip().strip("\"'") for t in themes_str.split(",")]
+
+            # Extract BEST_FOR
+            best_for_match = re.search(
+                r"BEST_FOR:\s*(.+?)(?=\nSUMMARY:|$)", response_text, re.DOTALL
+            )
+            if best_for_match:
+                best_for = best_for_match.group(1).strip()
+
+            # Extract SUMMARY
+            summary_match = re.search(r"SUMMARY:\s*(.+?)$", response_text, re.DOTALL)
+            if summary_match:
+                content_summary = summary_match.group(1).strip()
+
+            # Save to database
+            with get_db_context() as db:
+                db_store = (
+                    db.query(DocumentStore).filter(DocumentStore.id == store_id).first()
+                )
+                if db_store:
+                    db_store.themes = themes if themes else None
+                    db_store.best_for = best_for
+                    db_store.content_summary = content_summary
+                    db_store.intelligence_updated_at = datetime.utcnow()
+                    db.flush()
+
+            logger.info(
+                f"Generated intelligence for store '{store.name}': "
+                f"{len(themes)} themes, best_for={'yes' if best_for else 'no'}, "
+                f"summary={'yes' if content_summary else 'no'}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to generate intelligence for store {store_id}: {e}")
+            return False
+
     def start(self):
         """Start the indexer service and scheduler."""
         if self._running:
@@ -506,6 +689,8 @@ class RAGIndexer:
             source_desc = f"Paperless:{os.environ.get('PAPERLESS_URL', 'unknown')}"
         elif store.source_type == "mcp:github":
             source_desc = f"GitHub:{store.github_repo or 'unknown'}"
+        elif store.source_type == "website":
+            source_desc = f"Website:{store.website_url or 'unknown'}"
         else:
             source_desc = f"MCP:{store.mcp_server_config.get('name', 'unknown') if store.mcp_server_config else 'unknown'}"
         logger.info(f"Starting indexing for store '{store.name}' from {source_desc}")
@@ -546,6 +731,11 @@ class RAGIndexer:
                 notion_database_id=store.notion_database_id,
                 notion_page_id=store.notion_page_id,
                 nextcloud_folder=store.nextcloud_folder,
+                website_url=store.website_url,
+                website_crawl_depth=store.website_crawl_depth,
+                website_max_pages=store.website_max_pages,
+                website_include_pattern=store.website_include_pattern,
+                website_exclude_pattern=store.website_exclude_pattern,
                 vision_provider=vision_provider,
                 vision_model=vision_model,
                 vision_ollama_url=vision_ollama_url,
@@ -805,6 +995,15 @@ class RAGIndexer:
                 f"{total_doc_count} documents ({doc_count} new/modified, {skipped_count} unchanged), "
                 f"{final_chunk_count} total chunks"
             )
+
+            # Generate intelligence for the store (themes, best_for, summary)
+            # This runs after indexing to analyze the content
+            try:
+                self.generate_store_intelligence(store_id)
+            except Exception as e:
+                logger.warning(
+                    f"Intelligence generation failed for store '{store.name}': {e}"
+                )
             return True
 
         except Exception as e:

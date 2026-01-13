@@ -223,6 +223,9 @@ class Setting(Base):
     KEY_WEB_PDF_PARSER = "web_pdf_parser"  # "docling", "pypdf", "jina" for web scraping
     KEY_RAG_PDF_PARSER = "rag_pdf_parser"  # "docling", "pypdf" for RAG indexing
     KEY_WEB_RERANK_PROVIDER = "web_rerank_provider"  # "local" or "jina"
+    KEY_WEB_CRAWL_PROVIDER = (
+        "web_crawl_provider"  # "builtin" or "jina" for website crawling
+    )
     # Note: Jina API key is configured via JINA_API_KEY env var
 
     # Embedding settings for Smart RAGs (v1.6)
@@ -238,6 +241,8 @@ class Setting(Base):
     )
     KEY_VISION_MODEL = "vision_model"  # Model name (e.g., "granite3.2-vision:latest")
     KEY_VISION_OLLAMA_URL = "vision_ollama_url"  # Ollama URL when using ollama provider
+    # Document store intelligence (auto-generated themes/summary)
+    KEY_DOCSTORE_INTELLIGENCE_MODEL = "docstore_intelligence_model"
     # Usage tracking settings (v2.1)
     KEY_TRACKING_ENABLED = "tracking_enabled"
     KEY_DNS_RESOLUTION_ENABLED = "dns_resolution_enabled"
@@ -923,6 +928,23 @@ class DocumentStore(Base):
         String(500), nullable=True
     )  # Folder path to restrict indexing (e.g., "/Documents")
 
+    # Website configuration (for source_type="website")
+    website_url: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )  # Starting URL to crawl
+    website_crawl_depth: Mapped[int] = mapped_column(
+        Integer, default=1
+    )  # How many links deep to follow (0 = single page only)
+    website_max_pages: Mapped[int] = mapped_column(
+        Integer, default=50
+    )  # Maximum pages to crawl
+    website_include_pattern: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Regex pattern - only crawl URLs matching this
+    website_exclude_pattern: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Regex pattern - skip URLs matching this
+
     # Embedding configuration
     embedding_provider: Mapped[str] = mapped_column(String(100), default="local")
     embedding_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
@@ -955,6 +977,21 @@ class DocumentStore(Base):
     # ChromaDB collection name (auto-generated as "docstore_{id}")
     collection_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
+    # Intelligence - auto-generated analysis of indexed content
+    # Helps routing decisions when multiple RAG sources are available
+    themes_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # JSON array of topic themes
+    best_for: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # Types of questions this store answers
+    content_summary: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # Brief description of content
+    intelligence_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+
     # Metadata
     description: Mapped[Optional[str]] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -982,6 +1019,18 @@ class DocumentStore(Base):
         """Set MCP server config from a dict."""
         self.mcp_server_config_json = json.dumps(value) if value else None
 
+    @property
+    def themes(self) -> list[str]:
+        """Get themes as a list."""
+        if not self.themes_json:
+            return []
+        return json.loads(self.themes_json)
+
+    @themes.setter
+    def themes(self, value: list[str] | None):
+        """Set themes from a list."""
+        self.themes_json = json.dumps(value) if value else None
+
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -1007,6 +1056,11 @@ class DocumentStore(Base):
             "notion_database_id": self.notion_database_id,
             "notion_page_id": self.notion_page_id,
             "nextcloud_folder": self.nextcloud_folder,
+            "website_url": self.website_url,
+            "website_crawl_depth": self.website_crawl_depth,
+            "website_max_pages": self.website_max_pages,
+            "website_include_pattern": self.website_include_pattern,
+            "website_exclude_pattern": self.website_exclude_pattern,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "ollama_url": self.ollama_url,
@@ -1025,6 +1079,14 @@ class DocumentStore(Base):
             "document_count": self.document_count,
             "chunk_count": self.chunk_count,
             "collection_name": self.collection_name,
+            # Intelligence
+            "themes": self.themes,
+            "best_for": self.best_for,
+            "content_summary": self.content_summary,
+            "intelligence_updated_at": self.intelligence_updated_at.isoformat()
+            if self.intelligence_updated_at
+            else None,
+            # Metadata
             "description": self.description,
             "enabled": self.enabled,
             "use_temporal_filtering": self.use_temporal_filtering,
@@ -1131,7 +1193,11 @@ class SmartAlias(Base):
     rerank_top_n: Mapped[int] = mapped_column(Integer, default=20)
     # Context priority when both RAG and Web are enabled
     # "balanced" = 50/50, "prefer_rag" = 70/30, "prefer_web" = 30/70
+    # Note: This is ignored when use_smart_source_selection=True (dynamic allocation)
     context_priority: Mapped[str] = mapped_column(String(20), default="balanced")
+
+    # Show sources attribution at end of response (for debugging/transparency)
+    show_sources: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # ===== CACHE SETTINGS (when use_cache=True) =====
     cache_similarity_threshold: Mapped[float] = mapped_column(Float, default=0.95)
@@ -1169,6 +1235,7 @@ class SmartAlias(Base):
     # Contains learned information about user preferences, context, etc.
     use_memory: Mapped[bool] = mapped_column(Boolean, default=False)
     memory: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    memory_max_tokens: Mapped[int] = mapped_column(Integer, default=500)
     memory_updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
@@ -1291,6 +1358,7 @@ class SmartAlias(Base):
             "rerank_model": self.rerank_model,
             "rerank_top_n": self.rerank_top_n,
             "context_priority": self.context_priority,
+            "show_sources": self.show_sources,
             # Cache settings
             "cache_enabled": self.cache_enabled,
             "cache_allowed": not self.use_web,
@@ -1319,6 +1387,7 @@ class SmartAlias(Base):
             # Memory
             "use_memory": self.use_memory,
             "memory": self.memory,
+            "memory_max_tokens": self.memory_max_tokens,
             "memory_updated_at": self.memory_updated_at.isoformat()
             if self.memory_updated_at
             else None,

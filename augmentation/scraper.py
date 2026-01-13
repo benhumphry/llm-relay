@@ -61,19 +61,23 @@ class JinaScraper:
 
     def __init__(
         self,
-        api_key: str | None = None,
+        api_key: str | None = "USE_ENV",
         timeout: float = 30.0,
     ):
         """
         Initialize the Jina scraper.
 
         Args:
-            api_key: Jina API key (optional, for higher rate limits)
+            api_key: Jina API key. Use "USE_ENV" (default) to read from JINA_API_KEY env var,
+                     None for free tier (no API key), or a specific key string.
             timeout: Request timeout in seconds
         """
         import os
 
-        self.api_key = api_key or os.environ.get("JINA_API_KEY")
+        if api_key == "USE_ENV":
+            self.api_key = os.environ.get("JINA_API_KEY")
+        else:
+            self.api_key = api_key
         self.timeout = timeout
 
     def scrape(self, url: str) -> ScrapeResult:

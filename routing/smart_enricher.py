@@ -48,6 +48,13 @@ class EnrichmentResult:
     designator_usage: dict | None = None
     designator_model: str | None = None
 
+    # Budget allocations (from smart source selection)
+    store_budgets: dict[int, int] | None = None  # {store_id: tokens}
+    store_id_to_name: dict[int, str] | None = None  # {store_id: name} for display
+    web_budget: int | None = None
+    total_budget: int | None = None  # Total context budget for percentage calc
+    show_sources: bool = False  # Whether to append sources to response
+
     # Memory metadata
     memory_included: bool = False
     memory_update_pending: bool = False  # Flag to trigger memory update after response
@@ -161,6 +168,9 @@ class SmartEnricherEngine:
         use_rag = self.enricher.use_rag
         use_web = self.enricher.use_web
         selected_stores = None  # None means use all stores
+        store_budgets = None  # Token budgets per store (from smart selection)
+        store_id_to_name = None  # Mapping for display
+        web_budget = None  # Token budget for web search
 
         if getattr(self.enricher, "use_smart_source_selection", False):
             selection = self._select_sources(query)
@@ -168,15 +178,20 @@ class SmartEnricherEngine:
                 use_rag = selection.get("use_rag", use_rag)
                 use_web = selection.get("use_web", use_web)
                 selected_stores = selection.get("store_ids")  # List of store IDs to use
+                store_budgets = selection.get(
+                    "store_budgets"
+                )  # Token budgets per store
+                store_id_to_name = selection.get("store_id_to_name")  # ID -> name
+                web_budget = selection.get("web_budget")  # Token budget for web
                 logger.info(
                     f"Smart source selection: use_rag={use_rag}, use_web={use_web}, "
-                    f"stores={selected_stores or 'all'}"
+                    f"store_budgets={store_budgets or 'default'}, web_budget={web_budget or 'default'}"
                 )
 
         # RAG retrieval (if enabled)
         if use_rag:
             rag_context, rag_metadata = self._retrieve_rag_context(
-                query, selected_store_ids=selected_stores
+                query, selected_store_ids=selected_stores, store_budgets=store_budgets
             )
             if rag_context:
                 context_parts.append(("rag", rag_context))
@@ -190,7 +205,9 @@ class SmartEnricherEngine:
 
         # Web search and scrape (if enabled)
         if use_web:
-            web_context, web_metadata = self._retrieve_web_context(query)
+            web_context, web_metadata = self._retrieve_web_context(
+                query, max_tokens=web_budget
+            )
             if web_context:
                 context_parts.append(("web", web_context))
             # Copy web metadata
@@ -217,6 +234,15 @@ class SmartEnricherEngine:
             result_metadata.augmented_system = augmented_system
             result_metadata.context_injected = True
 
+            # Store budget allocations for source attribution
+            result_metadata.store_budgets = store_budgets
+            result_metadata.store_id_to_name = store_id_to_name
+            result_metadata.web_budget = web_budget
+            result_metadata.total_budget = getattr(
+                self.enricher, "max_context_tokens", 4000
+            )
+            result_metadata.show_sources = getattr(self.enricher, "show_sources", False)
+
             logger.info(
                 f"Enricher '{self.enricher.name}': Injected {result_metadata.enrichment_type} context "
                 f"(RAG: {result_metadata.chunks_retrieved} chunks, Web: {len(result_metadata.scraped_urls)} URLs)"
@@ -226,17 +252,22 @@ class SmartEnricherEngine:
             result_metadata.context_injected = False
             logger.debug(f"Enricher '{self.enricher.name}': No context to inject")
 
-        # Inject memory if enabled (added before other context)
-        memory = self._get_memory_context()
-        if memory:
-            result_metadata.augmented_system = self._inject_memory(
-                result_metadata.augmented_system, memory
-            )
-            result_metadata.memory_included = True
-            result_metadata.memory_update_pending = (
-                True  # Flag for post-response update
-            )
-            logger.debug(f"Enricher '{self.enricher.name}': Injected memory context")
+        # Handle memory if enabled
+        if getattr(self.enricher, "use_memory", False):
+            memory = self._get_memory_context()
+            if memory:
+                # Inject existing memory into system prompt
+                result_metadata.augmented_system = self._inject_memory(
+                    result_metadata.augmented_system, memory
+                )
+                result_metadata.memory_included = True
+                logger.debug(
+                    f"Enricher '{self.enricher.name}': Injected memory context"
+                )
+
+            # Always flag for memory update when memory is enabled
+            # This allows building initial memory even when starting from empty
+            result_metadata.memory_update_pending = True
 
         return result_metadata
 
@@ -268,7 +299,7 @@ class SmartEnricherEngine:
             )
             return None
 
-        # Build list of available sources with descriptions
+        # Build list of available sources with descriptions and intelligence
         linked_stores = self._get_linked_stores()
         store_info = []
         for store in linked_stores:
@@ -281,11 +312,19 @@ class SmartEnricherEngine:
                     getattr(store, "description", None)
                     or f"Document store: {store_name}"
                 )
+                # Get intelligence fields if available
+                themes = getattr(store, "themes", None) or []
+                best_for = getattr(store, "best_for", None)
+                content_summary = getattr(store, "content_summary", None)
+
                 store_info.append(
                     {
                         "id": store_id,
                         "name": store_name,
                         "description": description,
+                        "themes": themes,
+                        "best_for": best_for,
+                        "content_summary": content_summary,
                     }
                 )
 
@@ -298,7 +337,15 @@ class SmartEnricherEngine:
         if store_info:
             sources_text = "DOCUMENT STORES:\n"
             for s in store_info:
-                sources_text += f"- ID: {s['id']}, Name: {s['name']}\n  Description: {s['description']}\n"
+                sources_text += f"- ID: {s['id']}, Name: {s['name']}\n"
+                sources_text += f"  Description: {s['description']}\n"
+                # Add intelligence info if available
+                if s.get("themes"):
+                    sources_text += f"  Themes: {', '.join(s['themes'])}\n"
+                if s.get("best_for"):
+                    sources_text += f"  Best for: {s['best_for']}\n"
+                if s.get("content_summary"):
+                    sources_text += f"  Content: {s['content_summary']}\n"
 
         web_available = (
             "Web search is AVAILABLE."
@@ -306,7 +353,18 @@ class SmartEnricherEngine:
             else "Web search is NOT available."
         )
 
-        prompt = f"""You are a source selection assistant. Based on the user's query, decide which document stores (if any) would be helpful, and whether web search would help.
+        # Get total context budget
+        max_context = getattr(self.enricher, "max_context_tokens", 4000)
+
+        # Split budget: 50% for priority allocation, 50% baseline for all sources
+        priority_budget = max_context // 2
+        num_sources = len(store_info) + (1 if self.enricher.use_web else 0)
+        baseline_per_source = (max_context - priority_budget) // max(num_sources, 1)
+
+        prompt = f"""You are a source selection assistant. Allocate a PRIORITY context token budget across sources most relevant to the user's query.
+
+PRIORITY BUDGET TO ALLOCATE: {priority_budget} tokens (50% of total)
+Note: All sources will receive a baseline of {baseline_per_source} tokens each regardless of your allocation. Your allocation adds EXTRA budget to prioritized sources.
 
 {sources_text}
 {web_available}
@@ -314,16 +372,19 @@ class SmartEnricherEngine:
 USER QUERY:
 {query}
 
-Respond with a JSON object containing:
-- "use_rag": true/false (whether to search document stores)
-- "use_web": true/false (whether to use web search)
-- "store_ids": [list of store IDs to search] (empty list if use_rag is false, or include ALL relevant store IDs)
+Respond with a JSON object allocating the PRIORITY budget to the most relevant sources:
+- "allocations": object mapping source to EXTRA token budget, e.g. {{"store_1": 1500, "web": 500}}
+- Use store IDs as keys (e.g. "store_5" for store ID 5)
+- Use "web" as the key for web search budget
+- Allocations should sum to at most {priority_budget} tokens
+- Only include sources that are particularly relevant - others will still get baseline tokens
 
-Consider:
-- Use document stores for internal/archived content that matches their descriptions
-- Use web search for current events, recent news, or information not likely in the document stores
-- You can use both if the query benefits from multiple perspectives
-- Only include stores whose descriptions suggest relevant content
+Guidelines:
+- Use the themes, best_for, and content fields to match stores to the query topic
+- Allocate more tokens to sources most likely to have relevant information
+- Use document stores for internal/archived content matching their descriptions
+- Use web search for current events, recent news, or information unlikely to be in document stores
+- Focus priority budget on 1-3 most relevant sources
 
 Respond with ONLY the JSON object, no other text."""
 
@@ -337,7 +398,7 @@ Respond with ONLY the JSON object, no other text."""
                 model=designator_resolved.model_id,
                 messages=[{"role": "user", "content": prompt}],
                 system=None,
-                options={"max_tokens": 200, "temperature": 0},
+                options={"max_tokens": 300, "temperature": 0},
             )
 
             response_text = result.get("content", "").strip()
@@ -347,32 +408,72 @@ Respond with ONLY the JSON object, no other text."""
             import re
 
             # Try to extract JSON from the response
-            json_match = re.search(r"\{[^}]+\}", response_text, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
             if json_match:
                 selection = json.loads(json_match.group())
+                allocations = selection.get("allocations", selection)
 
-                # Validate and normalize the response
-                use_rag = selection.get("use_rag", False)
-                use_web = selection.get("use_web", False) and self.enricher.use_web
-                store_ids = selection.get("store_ids", [])
-
-                # Validate store_ids are from our available stores
+                # Parse priority allocations from designator
                 valid_store_ids = {s["id"] for s in store_info}
-                store_ids = [sid for sid in store_ids if sid in valid_store_ids]
+                priority_budgets = {}
+                web_priority = 0
 
-                # If use_rag is true but no valid store_ids, use all stores
-                if use_rag and not store_ids:
-                    store_ids = list(valid_store_ids)
+                for key, budget in allocations.items():
+                    if not isinstance(budget, (int, float)) or budget <= 0:
+                        continue
+                    budget = int(budget)
 
-                logger.debug(
-                    f"Source selection result: use_rag={use_rag}, use_web={use_web}, "
-                    f"store_ids={store_ids}"
+                    if key == "web":
+                        web_priority = budget if self.enricher.use_web else 0
+                    elif key.startswith("store_"):
+                        try:
+                            store_id = int(key.replace("store_", ""))
+                            if store_id in valid_store_ids:
+                                priority_budgets[store_id] = budget
+                        except ValueError:
+                            pass
+                    else:
+                        # Try parsing as plain store ID
+                        try:
+                            store_id = int(key)
+                            if store_id in valid_store_ids:
+                                priority_budgets[store_id] = budget
+                        except ValueError:
+                            pass
+
+                # Build final budgets: baseline + priority for ALL stores
+                store_budgets = {}
+                for store_id in valid_store_ids:
+                    store_budgets[store_id] = (
+                        baseline_per_source + priority_budgets.get(store_id, 0)
+                    )
+
+                # Web budget: baseline + priority (if web is enabled)
+                web_budget = 0
+                if self.enricher.use_web:
+                    web_budget = baseline_per_source + web_priority
+
+                # Always use RAG if we have stores (they all get baseline)
+                use_rag = bool(store_budgets)
+                use_web = web_budget > 0
+                # Return ALL store IDs since they all get queried now
+                store_ids = list(store_budgets.keys()) if store_budgets else None
+
+                # Build store_id -> name mapping for display
+                store_id_to_name = {s["id"]: s["name"] for s in store_info}
+
+                logger.info(
+                    f"Source selection: priority={priority_budgets}, baseline={baseline_per_source}/source, "
+                    f"final budgets: stores={store_budgets}, web={web_budget}"
                 )
 
                 return {
-                    "use_rag": use_rag and bool(store_ids),
+                    "use_rag": use_rag,
                     "use_web": use_web,
-                    "store_ids": store_ids if store_ids else None,
+                    "store_ids": store_ids,
+                    "store_budgets": store_budgets if store_budgets else None,
+                    "store_id_to_name": store_id_to_name,
+                    "web_budget": web_budget if web_budget > 0 else None,
                 }
 
             logger.warning(
@@ -385,7 +486,10 @@ Respond with ONLY the JSON object, no other text."""
             return None
 
     def _retrieve_rag_context(
-        self, query: str, selected_store_ids: list[int] | None = None
+        self,
+        query: str,
+        selected_store_ids: list[int] | None = None,
+        store_budgets: dict[int, int] | None = None,
     ) -> tuple[str, dict]:
         """
         Retrieve context from linked document stores.
@@ -393,6 +497,7 @@ Respond with ONLY the JSON object, no other text."""
         Args:
             query: The user's query
             selected_store_ids: If provided, only use stores with these IDs
+            store_budgets: If provided, token budget per store ID (from smart selection)
 
         Returns:
             Tuple of (context string, metadata dict)
@@ -439,8 +544,12 @@ Respond with ONLY the JSON object, no other text."""
                 metadata["embedding_provider"] = result.embedding_provider
                 return "", metadata
 
-            # Format context - allocate tokens based on priority when both RAG and Web enabled
-            if self.enricher.use_web:
+            # Calculate max tokens for RAG context
+            if store_budgets:
+                # Use sum of allocated store budgets
+                max_tokens = sum(store_budgets.values())
+            elif self.enricher.use_web:
+                # Legacy: allocate tokens based on priority when both RAG and Web enabled
                 priority = getattr(self.enricher, "context_priority", "balanced")
                 if priority == "prefer_rag":
                     max_tokens = int(self.enricher.max_context_tokens * 0.7)
@@ -473,9 +582,15 @@ Respond with ONLY the JSON object, no other text."""
             logger.error(f"RAG retrieval failed: {e}")
             return "", metadata
 
-    def _retrieve_web_context(self, query: str) -> tuple[str, dict]:
+    def _retrieve_web_context(
+        self, query: str, max_tokens: int | None = None
+    ) -> tuple[str, dict]:
         """
         Retrieve context from web search and scraping.
+
+        Args:
+            query: The user's query
+            max_tokens: If provided, override the default token budget for web context
 
         Returns:
             Tuple of (context string, metadata dict)
@@ -503,17 +618,19 @@ Respond with ONLY the JSON object, no other text."""
         if not search_results:
             return "", metadata
 
-        # Allocate tokens for web context based on priority when both RAG and Web enabled
-        if self.enricher.use_rag:
-            priority = getattr(self.enricher, "context_priority", "balanced")
-            if priority == "prefer_rag":
-                max_tokens = int(self.enricher.max_context_tokens * 0.3)
-            elif priority == "prefer_web":
-                max_tokens = int(self.enricher.max_context_tokens * 0.7)
-            else:  # balanced
-                max_tokens = self.enricher.max_context_tokens // 2
-        else:
-            max_tokens = self.enricher.max_context_tokens
+        # Calculate max tokens for web context
+        if max_tokens is None:
+            # Legacy: allocate tokens based on priority when both RAG and Web enabled
+            if self.enricher.use_rag:
+                priority = getattr(self.enricher, "context_priority", "balanced")
+                if priority == "prefer_rag":
+                    max_tokens = int(self.enricher.max_context_tokens * 0.3)
+                elif priority == "prefer_web":
+                    max_tokens = int(self.enricher.max_context_tokens * 0.7)
+                else:  # balanced
+                    max_tokens = self.enricher.max_context_tokens // 2
+            else:
+                max_tokens = self.enricher.max_context_tokens
 
         context_parts = [search_results]
 
@@ -622,6 +739,12 @@ SEARCH QUERY:"""
         if scraper_provider == "jina":
             from augmentation.scraper import JinaScraper
 
+            # Free tier - no API key
+            scraper = JinaScraper(api_key=None)
+        elif scraper_provider == "jina-api":
+            from augmentation.scraper import JinaScraper
+
+            # Use API key from environment
             scraper = JinaScraper()
         else:
             from augmentation import WebScraper
@@ -807,6 +930,12 @@ Use this information to personalize your responses.
             return False
 
         current_memory = getattr(self.enricher, "memory", None) or ""
+        memory_is_empty = not current_memory.strip()
+        max_tokens = getattr(self.enricher, "memory_max_tokens", 500) or 500
+
+        # Estimate current token usage (rough: 4 chars per token)
+        current_tokens = len(current_memory) // 4 if current_memory else 0
+        at_capacity = current_tokens >= max_tokens * 0.9  # 90% threshold
 
         # Get the user's query
         query = self._get_query(messages)
@@ -814,30 +943,56 @@ Use this information to personalize your responses.
             return False
 
         # Build the prompt for memory update decision
-        prompt = f"""You are a memory management assistant. Your task is to decide whether the conversation contains significant new information that should be remembered about this user.
+        # Guidance varies based on current memory state
+        if memory_is_empty:
+            capacity_guidance = f"""3. Since memory is currently EMPTY, be more permissive about what to save.
+   Any useful information about the user is valuable when starting from nothing.
+   Look for: name, role, projects they're working on, preferences, technical stack, goals.
+
+TOKEN LIMIT: {max_tokens} tokens maximum. Current usage: 0 tokens."""
+        elif at_capacity:
+            capacity_guidance = f"""3. Memory is near capacity ({current_tokens}/{max_tokens} tokens).
+   Only add new information if it's MORE IMPORTANT than existing information.
+   If adding new info, you may need to REMOVE or CONDENSE less important existing info.
+   Prioritize: core identity > active projects > preferences > historical context.
+
+TOKEN LIMIT: {max_tokens} tokens maximum. You MUST stay within this limit."""
+        else:
+            capacity_guidance = f"""3. Only update memory for SIGNIFICANT new information that adds to what's already known.
+   Don't repeat or rephrase existing information.
+
+TOKEN LIMIT: {max_tokens} tokens maximum. Current usage: ~{current_tokens} tokens."""
+
+        prompt = f"""You are a memory management assistant. Your task is to decide whether the USER'S MESSAGE contains explicit information about themselves that should be remembered.
 
 CURRENT MEMORY:
-{current_memory if current_memory else "(empty)"}
+{current_memory if current_memory else "(empty - no information stored yet)"}
 
 USER'S MESSAGE:
 {query[:1000]}
 
-ASSISTANT'S RESPONSE:
-{assistant_response[:2000]}
+IMPORTANT: Only extract information the user EXPLICITLY STATED about themselves. Do NOT infer or assume anything.
 
-Analyze the conversation and decide:
-1. Does this conversation reveal important NEW information about the user's preferences, context, or needs?
-2. This could include: preferences, working patterns, project context, technical environment, communication style, or other persistent facts.
-3. Only update memory for SIGNIFICANT information that would be useful in future conversations.
-4. Do NOT include transient information like specific questions asked or temporary tasks.
+Good examples of what to remember:
+- "I'm a software engineer at Acme Corp" → Remember: role and company
+- "I prefer Python over JavaScript" → Remember: language preference
+- "I'm working on a mobile app project" → Remember: current project
+- "My name is Ben" → Remember: name
 
-If the memory should be updated, respond with:
+Do NOT remember:
+- Topics they asked questions about (asking about X doesn't mean they're interested in X)
+- Inferences from what information they requested
+- Anything from the assistant's response - only the user's own statements
+
+{capacity_guidance}
+
+If the user explicitly stated new facts about themselves, respond with:
 UPDATE: <new complete memory content>
 
-If no update is needed, respond with:
+If the user didn't explicitly share information about themselves, respond with:
 NO_UPDATE
 
-The new memory should be concise (under 500 words) and merge any new information with relevant existing memory."""
+The memory must be concise and stay within the token limit. Merge new information with relevant existing memory."""
 
         try:
             designator_resolved = self.registry._resolve_actual_model(

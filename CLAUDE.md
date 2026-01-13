@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LLM Relay - A self-hosted proxy that unifies multiple LLM providers (Anthropic, OpenAI, Google, DeepSeek, Groq, xAI, and more) behind Ollama and OpenAI-compatible APIs with usage tracking, cost attribution, and intelligent features.
+LLM Relay - An intelligent LLM gateway with smart routing and context enrichment. Unifies multiple LLM providers (Anthropic, OpenAI, Google, DeepSeek, Groq, xAI, and more) behind Ollama and OpenAI-compatible APIs with AI-powered model routing, document RAG, real-time web search, semantic caching, and usage tracking.
 
 ## Tech Stack
 
@@ -63,19 +63,20 @@ docs/                 # Documentation
 
 ```
 Dashboard
+Routing                         # Core features - first priority
+├── Smart Aliases               # Unified routing + enrichment + caching
+└── Redirects                   # Transparent model mappings
+Data Sources
+├── Document Stores             # Indexed documents for RAG
+├── Websites                    # Crawled websites for RAG
+├── RAG Config                  # Global embedding/vision settings
+└── Web Config                  # Search and scraping settings
 Model Management
 ├── Providers & Models
-└── Local Servers (Ollama instances)
-Data Sources
-├── Document Stores (indexed documents for RAG)
-└── RAG Config / Web Config (global settings)
-Routing
-├── Smart Aliases (unified routing + enrichment + caching)
-└── Redirects (transparent model mappings)
-Usage
-├── Statistics
-└── Request Log
+├── Local Servers               # Ollama instances
+└── Statistics                  # Usage analytics
 System
+├── Request Log
 ├── Alerts
 └── Settings
 ```
@@ -168,11 +169,13 @@ Indexed document collections for RAG. Documents are parsed, chunked, and embedde
 
 **Document sources (mcp/sources.py):**
 - `local` - Docker-mounted folder
+- `website` - Crawled websites (trafilatura-based crawler)
 - `mcp:gdrive` - Google Drive via OAuth
 - `mcp:gmail` - Gmail via OAuth  
 - `mcp:gcalendar` - Google Calendar via OAuth
 - `paperless` - Paperless-ngx via REST API
 - `notion` - Notion via direct REST API
+- `nextcloud` - Nextcloud via WebDAV
 - `mcp:github` - GitHub via REST API
 
 **Key settings:**

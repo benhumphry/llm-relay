@@ -1,11 +1,12 @@
-{% extends "base.html" %} {% block title %}RAG Configuration{% endblock %} {% block
-content %}
+{% extends "base.html" %} {% block title %}RAG Configuration{% endblock %} {%
+block content %}
 <div x-data="ragConfigPage()" x-init="loadSettings()">
     <!-- Header -->
     <div class="mb-6">
         <h1 class="text-2xl font-bold">RAG Configuration</h1>
         <p class="text-base-content/60">
-            Configure embeddings, reranking, and document vision for RAG pipelines
+            Configure embeddings, reranking, and document vision for RAG
+            pipelines
         </p>
     </div>
 
@@ -249,7 +250,7 @@ content %}
         </div>
 
         <!-- Vision Settings -->
-        <div class="card bg-base-100 shadow-lg lg:col-span-2">
+        <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
                 <h2 class="card-title text-lg">Document Vision</h2>
                 <p class="text-sm text-base-content/60 mb-4">
@@ -327,7 +328,9 @@ content %}
                                 </div>
                                 <div class="form-control">
                                     <label class="label">
-                                        <span class="label-text">Vision Model</span>
+                                        <span class="label-text"
+                                            >Vision Model</span
+                                        >
                                     </label>
                                     <select
                                         x-model="settings.vision_model"
@@ -377,8 +380,8 @@ content %}
                             <div
                                 class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
                             >
-                                Uses bundled Docling models for document parsing.
-                                Runs on CPU/GPU.
+                                Uses bundled Docling models for document
+                                parsing. Runs on CPU/GPU.
                             </div>
                         </template>
                     </div>
@@ -401,7 +404,9 @@ content %}
                                 </option>
                             </select>
                             <label class="label">
-                                <span class="label-text-alt text-base-content/60">
+                                <span
+                                    class="label-text-alt text-base-content/60"
+                                >
                                     <template
                                         x-if="settings.rag_pdf_parser === 'docling'"
                                     >
@@ -421,6 +426,64 @@ content %}
                                 </span>
                             </label>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Document Store Intelligence -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Document Intelligence</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Auto-generate themes and summaries for document stores after
+                    indexing
+                </p>
+
+                <div class="space-y-4">
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Intelligence Model</span>
+                        </label>
+                        <select
+                            x-model="settings.docstore_intelligence_model"
+                            class="select select-bordered"
+                        >
+                            <option value="">
+                                Disabled (no auto-intelligence)
+                            </option>
+                            <template
+                                x-for="model in availableModels"
+                                :key="model.id"
+                            >
+                                <option
+                                    :value="model.id"
+                                    x-text="model.id"
+                                ></option>
+                            </template>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt text-base-content/60">
+                                Model used to analyze indexed content and
+                                generate themes
+                            </span>
+                        </label>
+                    </div>
+
+                    <div
+                        class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                    >
+                        When enabled, after indexing completes, the system
+                        samples document chunks and generates:<br />
+                        <span class="font-medium">Themes</span> - Main topics
+                        covered<br />
+                        <span class="font-medium">Best For</span> - Ideal
+                        question types<br />
+                        <span class="font-medium">Summary</span> - Content
+                        overview<br />
+                        <br />
+                        This helps Smart Aliases choose the right document
+                        stores for queries.
                     </div>
                 </div>
             </div>
@@ -463,9 +526,11 @@ content %}
                 vision_model: "",
                 vision_ollama_instance: "",
                 rag_pdf_parser: "docling",
+                docstore_intelligence_model: "",
             },
             embeddingModels: {},
             visionModels: {},
+            availableModels: [],
             currentOllamaEmbeddingModels: [],
             currentProviderEmbeddingModels: [],
             currentOllamaVisionModels: [],
@@ -510,8 +575,25 @@ content %}
                             webData.vision_ollama_url || "";
                         this._embedding_ollama_url =
                             webData.embedding_ollama_url || "";
+                        this.settings.docstore_intelligence_model =
+                            webData.docstore_intelligence_model || "";
                     }
 
+                    // Load available models for intelligence
+                    const savedIntelligenceModel =
+                        this.settings.docstore_intelligence_model;
+                    const modelsRes = await fetch("/api/models");
+                    if (modelsRes.ok) {
+                        const modelsData = await modelsRes.json();
+                        // API returns array with {id, provider_id, ...} - transform to {id: "provider/model"} format
+                        this.availableModels = (
+                            Array.isArray(modelsData) ? modelsData : []
+                        )
+                            .filter((m) => m.enabled !== false)
+                            .map((m) => ({
+                                id: `${m.provider_id}/${m.id}`,
+                            }));
+                    }
                     // Load embedding models
                     const embedRes = await fetch(
                         "/api/settings/embedding-models",
@@ -547,6 +629,20 @@ content %}
                         }
                         this.updateVisionModelLists();
                     }
+
+                    // Restore saved intelligence model after all data is loaded
+                    // Must wait for Alpine to render template options, then set via DOM
+                    this.$nextTick(() => {
+                        if (savedIntelligenceModel) {
+                            const select = document.querySelector(
+                                'select[x-model="settings.docstore_intelligence_model"]',
+                            );
+                            if (select) {
+                                select.value = savedIntelligenceModel;
+                                select.dispatchEvent(new Event("change"));
+                            }
+                        }
+                    });
                 } catch (error) {
                     console.error("Error loading settings:", error);
                     this.showToast("Failed to load settings", "error");
@@ -692,6 +788,9 @@ content %}
                                 this.visionModels,
                             ),
                             rag_pdf_parser: this.settings.rag_pdf_parser,
+                            docstore_intelligence_model:
+                                this.settings.docstore_intelligence_model ||
+                                null,
                         }),
                     });
 

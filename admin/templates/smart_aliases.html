@@ -1049,7 +1049,12 @@ content %}
                                                         x-text="store.name"
                                                     ></span>
                                                     <span
-                                                        class="badge badge-xs ml-2"
+                                                        class="badge badge-xs ml-1"
+                                                        :class="store.source_type === 'website' ? 'badge-info' : 'badge-ghost'"
+                                                        x-text="store.source_type === 'website' ? 'Web' : store.source_type === 'local' ? 'Local' : store.source_type.replace('mcp:', '')"
+                                                    ></span>
+                                                    <span
+                                                        class="badge badge-xs ml-1"
                                                         :class="store.index_status === 'ready' ? 'badge-success' : 'badge-ghost'"
                                                         x-text="store.index_status"
                                                     ></span>
@@ -1427,6 +1432,26 @@ content %}
                             <div class="form-control">
                                 <label class="label py-1">
                                     <span class="label-text text-sm"
+                                        >Max Tokens</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.memory_max_tokens"
+                                    class="input input-bordered input-sm w-32"
+                                    min="100"
+                                    max="2000"
+                                />
+                                <label class="label py-0">
+                                    <span class="label-text-alt text-xs">
+                                        Maximum memory size. When full, new info
+                                        displaces less important items.
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="form-control">
+                                <label class="label py-1">
+                                    <span class="label-text text-sm"
                                         >Memory Content</span
                                     >
                                     <span
@@ -1443,9 +1468,13 @@ content %}
                                 ></textarea>
                                 <label class="label py-0">
                                     <span class="label-text-alt text-xs">
-                                        The designator updates this when
-                                        significant new information is learned
+                                        The designator updates this when new
+                                        information is learned
                                     </span>
+                                    <span
+                                        class="label-text-alt text-xs"
+                                        x-text="'~' + Math.round((form.memory?.length || 0) / 4) + '/' + form.memory_max_tokens + ' tokens'"
+                                    ></span>
                                 </label>
                             </div>
                         </div>
@@ -1538,9 +1567,9 @@ content %}
                                 />
                             </div>
                         </div>
-                        <!-- Context Priority (only when both RAG and Web enabled) -->
+                        <!-- Context Priority (only when both RAG and Web enabled, and smart source selection is OFF) -->
                         <div
-                            x-show="form.use_rag && form.use_web"
+                            x-show="form.use_rag && form.use_web && !form.use_smart_source_selection"
                             class="form-control mt-4"
                         >
                             <label class="label">
@@ -1562,8 +1591,34 @@ content %}
                             </select>
                             <label class="label">
                                 <span class="label-text-alt"
-                                    >How to weight document vs web context</span
+                                    >How to weight document vs web context
+                                    (Smart Source Selection allocates
+                                    dynamically)</span
                                 >
+                            </label>
+                        </div>
+                        <!-- Show Sources Attribution -->
+                        <div
+                            x-show="form.use_rag || form.use_web"
+                            class="form-control mt-4"
+                        >
+                            <label
+                                class="flex items-center gap-3 cursor-pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.show_sources"
+                                    class="checkbox checkbox-sm"
+                                />
+                                <div>
+                                    <span class="label-text"
+                                        >Show Sources in Response</span
+                                    >
+                                    <div class="text-xs text-base-content/60">
+                                        Append a "Sources:" line to responses
+                                        showing which stores/URLs were used
+                                    </div>
+                                </div>
                             </label>
                         </div>
                     </div>
@@ -1724,6 +1779,7 @@ content %}
                 rerank_provider: "local",
                 rerank_top_n: 20,
                 context_priority: "balanced",
+                show_sources: false,
                 // Cache
                 use_cache: false,
                 cache_similarity_threshold: 0.95,
@@ -1738,6 +1794,7 @@ content %}
                 // Memory
                 use_memory: false,
                 memory: "",
+                memory_max_tokens: 500,
                 memory_updated_at: null,
                 // Metadata
                 tags_input: "",
@@ -1909,6 +1966,7 @@ content %}
                     rerank_provider: "local",
                     rerank_top_n: 20,
                     context_priority: "balanced",
+                    show_sources: false,
                     // Cache
                     use_cache: false,
                     cache_similarity_threshold: 0.95,
@@ -1975,6 +2033,7 @@ content %}
                     rerank_provider: alias.rerank_provider || "local",
                     rerank_top_n: alias.rerank_top_n || 20,
                     context_priority: alias.context_priority || "balanced",
+                    show_sources: alias.show_sources || false,
                     // Cache
                     use_cache: alias.use_cache || false,
                     cache_similarity_threshold:
@@ -1992,6 +2051,7 @@ content %}
                     // Memory
                     use_memory: alias.use_memory || false,
                     memory: alias.memory || "",
+                    memory_max_tokens: alias.memory_max_tokens || 500,
                     memory_updated_at: alias.memory_updated_at || null,
                     // Metadata
                     tags_input: (alias.tags || []).join(", "),
@@ -2125,6 +2185,7 @@ content %}
                     rerank_provider: this.form.rerank_provider,
                     rerank_top_n: this.form.rerank_top_n,
                     context_priority: this.form.context_priority,
+                    show_sources: this.form.show_sources,
                     // Cache (only if web not enabled)
                     use_cache: this.form.use_web ? false : this.form.use_cache,
                     cache_similarity_threshold:
@@ -2142,6 +2203,7 @@ content %}
                     // Memory
                     use_memory: this.form.use_memory,
                     memory: this.form.memory || null,
+                    memory_max_tokens: this.form.memory_max_tokens,
                     // Metadata
                     tags: tags,
                     description: this.form.description || null,

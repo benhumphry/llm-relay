@@ -1153,6 +1153,43 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        # v1.10: Website crawling fields for document stores
+        if "website_url" not in existing_columns:
+            migrations.append(
+                (
+                    "website_url",
+                    "ALTER TABLE document_stores ADD COLUMN website_url VARCHAR(1000)",
+                )
+            )
+        if "website_crawl_depth" not in existing_columns:
+            migrations.append(
+                (
+                    "website_crawl_depth",
+                    "ALTER TABLE document_stores ADD COLUMN website_crawl_depth INTEGER DEFAULT 1",
+                )
+            )
+        if "website_max_pages" not in existing_columns:
+            migrations.append(
+                (
+                    "website_max_pages",
+                    "ALTER TABLE document_stores ADD COLUMN website_max_pages INTEGER DEFAULT 50",
+                )
+            )
+        if "website_include_pattern" not in existing_columns:
+            migrations.append(
+                (
+                    "website_include_pattern",
+                    "ALTER TABLE document_stores ADD COLUMN website_include_pattern VARCHAR(500)",
+                )
+            )
+        if "website_exclude_pattern" not in existing_columns:
+            migrations.append(
+                (
+                    "website_exclude_pattern",
+                    "ALTER TABLE document_stores ADD COLUMN website_exclude_pattern VARCHAR(500)",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for document_stores table"
@@ -1235,6 +1272,49 @@ def _run_migrations(engine) -> None:
                 conn.execute(
                     text(
                         "ALTER TABLE smart_aliases ADD COLUMN memory_updated_at TIMESTAMP"
+                    )
+                )
+                conn.commit()
+
+        # v1.9.1: Memory max tokens field
+        if "memory_max_tokens" not in existing_columns:
+            logger.info("Adding memory_max_tokens to smart_aliases table (v1.9.1)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN memory_max_tokens INTEGER DEFAULT 500"
+                    )
+                )
+                conn.commit()
+
+        # v1.9.2: Document store intelligence fields
+        ds_columns = {col["name"] for col in inspector.get_columns("document_stores")}
+        if "themes_json" not in ds_columns:
+            logger.info("Adding intelligence columns to document_stores table (v1.9.2)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE document_stores ADD COLUMN themes_json TEXT")
+                )
+                conn.execute(
+                    text("ALTER TABLE document_stores ADD COLUMN best_for TEXT")
+                )
+                conn.execute(
+                    text("ALTER TABLE document_stores ADD COLUMN content_summary TEXT")
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN intelligence_updated_at TIMESTAMP"
+                    )
+                )
+                conn.commit()
+
+        # v1.9.3: Show sources attribution setting
+        if "show_sources" not in existing_columns:
+            logger.info("Adding show_sources to smart_aliases table (v1.9.3)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN show_sources BOOLEAN DEFAULT FALSE"
                     )
                 )
                 conn.commit()

@@ -577,6 +577,53 @@ def estimate_input_chars(messages: list, system: str | None = None) -> int:
     return total
 
 
+def build_source_attribution(enrichment_result) -> str | None:
+    """
+    Build a source attribution string showing budget percentages.
+
+    Returns something like:
+    "\n\n---\nSources: my-docs (50%), company-wiki (30%), web (20%)"
+    """
+    if not enrichment_result or not enrichment_result.show_sources:
+        return None
+
+    if not enrichment_result.context_injected:
+        return None
+
+    parts = []
+    total_budget = enrichment_result.total_budget or 4000
+
+    # Get store names for the budget display
+    store_budgets = enrichment_result.store_budgets
+    store_id_to_name = enrichment_result.store_id_to_name or {}
+    stores_queried = enrichment_result.stores_queried or []
+    web_budget = enrichment_result.web_budget
+
+    if store_budgets and store_id_to_name:
+        # Smart source selection with budgets - show percentages using ID->name mapping
+        # Sort by budget descending so highest priority sources appear first
+        sorted_stores = sorted(store_budgets.items(), key=lambda x: x[1], reverse=True)
+        for store_id, store_budget in sorted_stores:
+            store_name = store_id_to_name.get(store_id, f"store_{store_id}")
+            pct = int((store_budget / total_budget) * 100) if total_budget > 0 else 0
+            parts.append(f"{store_name} ({pct}%)")
+    elif stores_queried:
+        # No budgets (legacy mode) - just list stores
+        parts.extend(stores_queried)
+
+    if web_budget and web_budget > 0:
+        pct = int((web_budget / total_budget) * 100) if total_budget > 0 else 0
+        parts.append(f"web ({pct}%)")
+    elif enrichment_result.scraped_urls:
+        # Web was used but no budget info
+        parts.append("web")
+
+    if not parts:
+        return None
+
+    return f"\n\n---\nSources: {', '.join(parts)}"
+
+
 def _stream_response_base(
     provider,
     model: str,
@@ -589,6 +636,7 @@ def _stream_response_base(
     debug_endpoint: str,
     on_complete: callable = None,
     input_char_count: int = 0,
+    source_attribution: str | None = None,
 ) -> Generator[str, None, None]:
     """
     Base streaming function with shared logic.
@@ -598,6 +646,7 @@ def _stream_response_base(
         format_final: (output_chars, input_char_count) -> list[str] - Format final chunk(s)
         format_error: (error_msg) -> str - Format error response
         debug_endpoint: Endpoint name for debug logging
+        source_attribution: Optional text to append at end of response (e.g., "Sources: doc1, doc2")
     """
     output_chars = 0
     llm_chunks = []
@@ -609,6 +658,12 @@ def _stream_response_base(
             llm_chunks.append(text)
             client_chunks.append(text)
             yield format_chunk(text)
+
+        # Append source attribution if provided
+        if source_attribution:
+            output_chars += len(source_attribution)
+            client_chunks.append(source_attribution)
+            yield format_chunk(source_attribution)
 
         # Yield final chunk(s)
         for final_str in format_final(output_chars, input_char_count):
@@ -660,6 +715,7 @@ def stream_ollama_response(
     options: dict,
     on_complete: callable = None,
     input_char_count: int = 0,
+    source_attribution: str | None = None,
 ) -> Generator[str, None, None]:
     """Stream response in Ollama NDJSON format."""
 
@@ -709,6 +765,7 @@ def stream_ollama_response(
         "/api/chat (stream)",
         on_complete,
         input_char_count,
+        source_attribution,
     )
 
 
@@ -721,6 +778,7 @@ def stream_openai_response(
     request_model: str,
     on_complete: callable = None,
     input_char_count: int = 0,
+    source_attribution: str | None = None,
 ) -> Generator[str, None, None]:
     """Stream response in OpenAI SSE format."""
     response_id = generate_openai_id()
@@ -765,6 +823,7 @@ def stream_openai_response(
         "/v1/chat/completions (stream)",
         on_complete,
         input_char_count,
+        source_attribution,
     )
 
 
@@ -922,6 +981,8 @@ def chat():
     enricher_type = None
     enricher_query = None
     enricher_urls = None
+    enrichment_result = None  # For source attribution
+    original_messages = messages.copy()  # Save for memory update
     if getattr(resolved, "has_enrichment", False):
         enrichment_result = resolved.enrichment_result
         enricher_name = enrichment_result.enricher_name
@@ -1142,6 +1203,8 @@ def chat():
             captured_cache_engine = cache_engine
             captured_messages = messages
             captured_system = system_prompt
+            captured_enrichment_result = enrichment_result
+            captured_original_messages = original_messages  # Pre-augmentation messages
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -1203,6 +1266,33 @@ def chat():
                             f"Failed to store streaming response in cache: {cache_err}"
                         )
 
+                # Update memory if enabled
+                if (
+                    captured_enrichment_result
+                    and getattr(
+                        captured_enrichment_result, "memory_update_pending", False
+                    )
+                    and full_content
+                    and not error
+                ):
+                    try:
+                        from db import get_smart_alias_by_name
+                        from routing.smart_enricher import SmartEnricherEngine
+
+                        alias = get_smart_alias_by_name(
+                            captured_enrichment_result.enricher_name
+                        )
+                        if alias:
+                            engine = SmartEnricherEngine(alias, registry)
+                            engine.update_memory_after_response(
+                                captured_original_messages, full_content
+                            )
+                    except Exception as mem_err:
+                        logger.warning(f"Failed to update memory: {mem_err}")
+
+            # Build source attribution if enabled
+            source_attribution = build_source_attribution(enrichment_result)
+
             return Response(
                 stream_ollama_response(
                     provider,
@@ -1212,6 +1302,7 @@ def chat():
                     options,
                     on_complete=on_stream_complete,
                     input_char_count=input_chars,
+                    source_attribution=source_attribution,
                 ),
                 mimetype="application/x-ndjson",
             )
@@ -1268,6 +1359,25 @@ def chat():
                     )
                 except Exception as cache_err:
                     logger.warning(f"Failed to store response in cache: {cache_err}")
+
+            # Update memory if enabled (non-streaming)
+            if (
+                enrichment_result
+                and getattr(enrichment_result, "memory_update_pending", False)
+                and llm_content
+            ):
+                try:
+                    from db import get_smart_alias_by_name
+                    from routing.smart_enricher import SmartEnricherEngine
+
+                    alias = get_smart_alias_by_name(enrichment_result.enricher_name)
+                    if alias:
+                        engine = SmartEnricherEngine(alias, registry)
+                        engine.update_memory_after_response(
+                            original_messages, llm_content
+                        )
+                except Exception as mem_err:
+                    logger.warning(f"Failed to update memory: {mem_err}")
 
             return jsonify(response_obj)
 
@@ -1663,6 +1773,8 @@ def openai_chat_completions():
     enricher_type = None
     enricher_query = None
     enricher_urls = None
+    enrichment_result = None  # For source attribution
+    original_messages = messages.copy()  # Save for memory update
     if getattr(resolved, "has_enrichment", False):
         enrichment_result = resolved.enrichment_result
         enricher_name = enrichment_result.enricher_name
@@ -1904,6 +2016,8 @@ def openai_chat_completions():
             captured_cache_engine = cache_engine
             captured_messages = messages
             captured_system = system_prompt
+            captured_enrichment_result = enrichment_result
+            captured_original_messages = original_messages  # Pre-augmentation messages
 
             # Create callback to track after stream completes
             def on_stream_complete(
@@ -1965,6 +2079,33 @@ def openai_chat_completions():
                             f"Failed to store streaming response in cache: {cache_err}"
                         )
 
+                # Update memory if enabled
+                if (
+                    captured_enrichment_result
+                    and getattr(
+                        captured_enrichment_result, "memory_update_pending", False
+                    )
+                    and full_content
+                    and not error
+                ):
+                    try:
+                        from db import get_smart_alias_by_name
+                        from routing.smart_enricher import SmartEnricherEngine
+
+                        alias = get_smart_alias_by_name(
+                            captured_enrichment_result.enricher_name
+                        )
+                        if alias:
+                            engine = SmartEnricherEngine(alias, registry)
+                            engine.update_memory_after_response(
+                                captured_original_messages, full_content
+                            )
+                    except Exception as mem_err:
+                        logger.warning(f"Failed to update memory: {mem_err}")
+
+            # Build source attribution if enabled
+            source_attribution = build_source_attribution(enrichment_result)
+
             return Response(
                 stream_openai_response(
                     provider,
@@ -1975,6 +2116,7 @@ def openai_chat_completions():
                     model_name,
                     on_complete=on_stream_complete,
                     input_char_count=input_chars,
+                    source_attribution=source_attribution,
                 ),
                 mimetype="text/event-stream",
                 headers={
@@ -2047,6 +2189,25 @@ def openai_chat_completions():
                     )
                 except Exception as cache_err:
                     logger.warning(f"Failed to store response in cache: {cache_err}")
+
+            # Update memory if enabled (non-streaming)
+            if (
+                enrichment_result
+                and getattr(enrichment_result, "memory_update_pending", False)
+                and llm_content
+            ):
+                try:
+                    from db import get_smart_alias_by_name
+                    from routing.smart_enricher import SmartEnricherEngine
+
+                    alias = get_smart_alias_by_name(enrichment_result.enricher_name)
+                    if alias:
+                        engine = SmartEnricherEngine(alias, registry)
+                        engine.update_memory_after_response(
+                            original_messages, llm_content
+                        )
+                except Exception as mem_err:
+                    logger.warning(f"Failed to update memory: {mem_err}")
 
             return jsonify(response_obj)
 

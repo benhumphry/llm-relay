@@ -150,6 +150,7 @@ def create_smart_alias(
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
     rerank_top_n: int = 20,
     context_priority: str = "balanced",
+    show_sources: bool = False,
     # Cache settings
     cache_similarity_threshold: float = 0.95,
     cache_match_system_prompt: bool = True,
@@ -165,6 +166,7 @@ def create_smart_alias(
     enabled: bool = True,
     # Memory
     use_memory: bool = False,
+    memory_max_tokens: int = 500,
     db: Optional[Session] = None,
 ) -> SmartAlias:
     """
@@ -257,6 +259,7 @@ def create_smart_alias(
             rerank_model=rerank_model,
             rerank_top_n=rerank_top_n,
             context_priority=context_priority,
+            show_sources=show_sources,
             # Cache
             cache_similarity_threshold=cache_similarity_threshold,
             cache_match_system_prompt=cache_match_system_prompt,
@@ -271,6 +274,7 @@ def create_smart_alias(
             enabled=enabled,
             # Memory
             use_memory=use_memory,
+            memory_max_tokens=memory_max_tokens,
         )
 
         if candidates:
@@ -340,6 +344,7 @@ def update_smart_alias(
     rerank_model: str | None = None,
     rerank_top_n: int | None = None,
     context_priority: str | None = None,
+    show_sources: bool | None = None,
     # Cache settings
     cache_similarity_threshold: float | None = None,
     cache_match_system_prompt: bool | None = None,
@@ -356,6 +361,7 @@ def update_smart_alias(
     # Memory
     use_memory: bool | None = None,
     memory: str | None = None,
+    memory_max_tokens: int | None = None,
     db: Optional[Session] = None,
 ) -> Optional[SmartAlias]:
     """
@@ -466,6 +472,8 @@ def update_smart_alias(
             alias.rerank_top_n = rerank_top_n
         if context_priority is not None:
             alias.context_priority = context_priority
+        if show_sources is not None:
+            alias.show_sources = show_sources
 
         # Cache
         if cache_similarity_threshold is not None:
@@ -498,6 +506,8 @@ def update_smart_alias(
             alias.use_memory = use_memory
         if memory is not None:
             alias.memory = memory
+        if memory_max_tokens is not None:
+            alias.memory_max_tokens = memory_max_tokens
 
         session.flush()
         logger.info(f"Updated smart alias: {alias.name}")
@@ -737,6 +747,12 @@ def _store_to_dict(store: DocumentStore) -> dict:
         "document_count": store.document_count,
         "chunk_count": store.chunk_count,
         "collection_name": store.collection_name,
+        # Intelligence fields
+        "themes": store.themes,
+        "best_for": store.best_for,
+        "content_summary": store.content_summary,
+        "intelligence_updated_at": store.intelligence_updated_at,
+        # Metadata
         "description": store.description,
         "enabled": store.enabled,
     }
@@ -773,6 +789,12 @@ class DetachedDocumentStore:
         self.document_count = data["document_count"]
         self.chunk_count = data["chunk_count"]
         self.collection_name = data["collection_name"]
+        # Intelligence fields
+        self.themes = data.get("themes")
+        self.best_for = data.get("best_for")
+        self.content_summary = data.get("content_summary")
+        self.intelligence_updated_at = data.get("intelligence_updated_at")
+        # Metadata
         self.description = data["description"]
         self.enabled = data["enabled"]
 
@@ -831,6 +853,7 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         rerank_model=alias.rerank_model,
         rerank_top_n=alias.rerank_top_n,
         context_priority=alias.context_priority,
+        show_sources=alias.show_sources,
         # Cache
         cache_similarity_threshold=alias.cache_similarity_threshold,
         cache_match_system_prompt=alias.cache_match_system_prompt,
@@ -857,6 +880,7 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         # Memory
         use_memory=alias.use_memory,
         memory=alias.memory,
+        memory_max_tokens=alias.memory_max_tokens,
         memory_updated_at=alias.memory_updated_at,
     )
     detached.id = alias.id

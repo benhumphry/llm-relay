@@ -113,8 +113,12 @@ block content %}
                             <option value="builtin">
                                 Built-in (httpx + trafilatura)
                             </option>
-                            <option value="jina">
-                                Jina Reader (handles JS-heavy sites)
+                            <option value="jina">Jina Reader (Free)</option>
+                            <option
+                                value="jina-api"
+                                x-show="settings.jina_api_configured"
+                            >
+                                Jina Reader (API)
                             </option>
                         </select>
                         <label class="label">
@@ -125,53 +129,29 @@ block content %}
                         </label>
                     </div>
 
-                    <!-- Jina API Key Status -->
-                    <template x-if="settings.scraper_provider === 'jina'">
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Jina API Key</span>
-                            </label>
-                            <div
-                                class="flex items-center gap-2 h-12 px-4 bg-base-200 rounded-lg"
-                            >
-                                <template x-if="settings.jina_api_configured">
-                                    <span
-                                        class="text-success flex items-center gap-2"
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            class="h-4 w-4"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
-                                        >
-                                            <path
-                                                stroke-linecap="round"
-                                                stroke-linejoin="round"
-                                                stroke-width="2"
-                                                d="M5 13l4 4L19 7"
-                                            />
-                                        </svg>
-                                        Configured via JINA_API_KEY
-                                    </span>
-                                </template>
-                                <template x-if="!settings.jina_api_configured">
-                                    <span class="text-base-content/50">
-                                        Optional - set JINA_API_KEY env var for
-                                        higher rate limits
-                                    </span>
-                                </template>
-                            </div>
-                        </div>
-                    </template>
-
-                    <!-- Built-in Scraper Info -->
+                    <!-- Provider Info -->
                     <template x-if="settings.scraper_provider === 'builtin'">
                         <div
                             class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
                         >
                             Uses httpx for fetching and trafilatura for content
                             extraction. Works well for most static websites.
+                        </div>
+                    </template>
+                    <template x-if="settings.scraper_provider === 'jina'">
+                        <div
+                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                        >
+                            Handles JavaScript-heavy sites. Free tier with rate
+                            limits.
+                        </div>
+                    </template>
+                    <template x-if="settings.scraper_provider === 'jina-api'">
+                        <div
+                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                        >
+                            Handles JavaScript-heavy sites. Uses your API key
+                            for higher rate limits.
                         </div>
                     </template>
 
@@ -228,8 +208,76 @@ block content %}
             </div>
         </div>
 
+        <!-- Website Crawler -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Website Crawler</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Crawl and index websites for Document Stores
+                </p>
+
+                <div class="space-y-4">
+                    <!-- Crawler Provider -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Crawler Provider</span>
+                        </label>
+                        <select
+                            x-model="settings.crawl_provider"
+                            class="select select-bordered"
+                        >
+                            <option value="builtin">
+                                Built-in (trafilatura)
+                            </option>
+                            <option value="jina">Jina Reader (Free)</option>
+                            <option
+                                value="jina-api"
+                                x-show="settings.jina_api_configured"
+                            >
+                                Jina Reader (API)
+                            </option>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt">
+                                Used when indexing website document sources
+                            </span>
+                        </label>
+                    </div>
+
+                    <!-- Provider Info -->
+                    <template x-if="settings.crawl_provider === 'builtin'">
+                        <div
+                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                        >
+                            Free, runs locally. Uses browser-like headers and
+                            random delays. May be blocked by aggressive bot
+                            protection (Cloudflare, MalCare, etc.).
+                        </div>
+                    </template>
+                    <template x-if="settings.crawl_provider === 'jina'">
+                        <div
+                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                        >
+                            Requests from Jina's servers (different IP). Handles
+                            JS and bypasses most bot protection. Free tier with
+                            rate limits.
+                        </div>
+                    </template>
+                    <template x-if="settings.crawl_provider === 'jina-api'">
+                        <div
+                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                        >
+                            Requests from Jina's servers (different IP). Handles
+                            JS and bypasses most bot protection. Uses your API
+                            key for higher rate limits.
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+
         <!-- Reranking Info Card -->
-        <div class="card bg-base-100 shadow-lg lg:col-span-2">
+        <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
                 <div class="flex items-center justify-between">
                     <div>
@@ -318,6 +366,7 @@ block content %}
             settings: {
                 search_provider: "",
                 scraper_provider: "builtin",
+                crawl_provider: "builtin",
                 pdf_parser: "pypdf",
                 jina_api_configured: false,
                 rerank_provider: "local",
@@ -343,26 +392,27 @@ block content %}
 
             async loadSettings() {
                 try {
-                    // Load feature status for search providers
-                    const featureRes = await fetch("/api/feature-status");
-                    if (featureRes.ok) {
-                        const featureData = await featureRes.json();
-                        this.availableSearchProviders =
-                            featureData.dependencies?.search_providers || [];
-                        this.hasAnySearchProvider =
-                            this.availableSearchProviders.length > 0;
-                    }
+                    // Load both in parallel
+                    const [featureRes, webRes] = await Promise.all([
+                        fetch("/api/feature-status"),
+                        fetch("/api/settings/web"),
+                    ]);
 
-                    // Load web settings
-                    const webRes = await fetch("/api/settings/web");
+                    // Store settings values temporarily
+                    let savedSearchProvider = "";
+                    let savedScraperProvider = "builtin";
+                    let savedCrawlProvider = "builtin";
+                    let savedPdfParser = "pypdf";
+
+                    // Load web settings first to capture saved values
                     if (webRes.ok) {
                         const webData = await webRes.json();
-                        this.settings.search_provider =
-                            webData.search_provider || "";
-                        this.settings.scraper_provider =
+                        savedSearchProvider = webData.search_provider || "";
+                        savedScraperProvider =
                             webData.scraper_provider || "builtin";
-                        this.settings.pdf_parser =
-                            webData.pdf_parser || "pypdf";
+                        savedCrawlProvider =
+                            webData.crawl_provider || "builtin";
+                        savedPdfParser = webData.pdf_parser || "pypdf";
                         this.settings.jina_api_configured =
                             webData.jina_api_configured || false;
                         this.settings.rerank_provider =
@@ -371,6 +421,44 @@ block content %}
                             webData.rerank_model ||
                             "cross-encoder/ms-marco-MiniLM-L-6-v2";
                     }
+
+                    // Load feature status for search providers
+                    if (featureRes.ok) {
+                        const featureData = await featureRes.json();
+                        this.availableSearchProviders =
+                            featureData.dependencies?.search_providers || [];
+                        this.hasAnySearchProvider =
+                            this.availableSearchProviders.length > 0;
+                    }
+
+                    // Restore saved values after Alpine renders template options
+                    // Must set via DOM and dispatch change event for x-model to sync
+                    this.$nextTick(() => {
+                        const setSelect = (selector, value) => {
+                            if (!value) return;
+                            const select = document.querySelector(selector);
+                            if (select) {
+                                select.value = value;
+                                select.dispatchEvent(new Event("change"));
+                            }
+                        };
+                        setSelect(
+                            'select[x-model="settings.search_provider"]',
+                            savedSearchProvider,
+                        );
+                        setSelect(
+                            'select[x-model="settings.scraper_provider"]',
+                            savedScraperProvider,
+                        );
+                        setSelect(
+                            'select[x-model="settings.crawl_provider"]',
+                            savedCrawlProvider,
+                        );
+                        setSelect(
+                            'select[x-model="settings.pdf_parser"]',
+                            savedPdfParser,
+                        );
+                    });
                 } catch (error) {
                     console.error("Error loading settings:", error);
                     this.showToast("Failed to load settings", "error");
@@ -386,6 +474,7 @@ block content %}
                         body: JSON.stringify({
                             search_provider: this.settings.search_provider,
                             scraper_provider: this.settings.scraper_provider,
+                            crawl_provider: this.settings.crawl_provider,
                             pdf_parser: this.settings.pdf_parser,
                         }),
                     });

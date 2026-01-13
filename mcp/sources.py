@@ -3072,6 +3072,150 @@ class NextcloudDocumentSource(DocumentSource):
         return mime_types.get(ext.lower(), "text/plain")
 
 
+class WebsiteDocumentSource(DocumentSource):
+    """
+    Document source for crawled websites.
+
+    Uses either builtin trafilatura crawler or Jina Reader API
+    (configured globally in Web Config settings).
+    """
+
+    def __init__(
+        self,
+        url: str,
+        crawl_depth: int = 1,
+        max_pages: int = 50,
+        include_pattern: Optional[str] = None,
+        exclude_pattern: Optional[str] = None,
+    ):
+        """
+        Initialize with website URL and crawl settings.
+
+        Args:
+            url: Starting URL for the crawl
+            crawl_depth: Maximum depth of links to follow (0 = start page only)
+            max_pages: Maximum number of pages to crawl
+            include_pattern: Regex pattern - only crawl URLs matching this
+            exclude_pattern: Regex pattern - skip URLs matching this
+        """
+        self.url = url
+        self.crawl_depth = crawl_depth
+        self.max_pages = max_pages
+        self.include_pattern = include_pattern
+        self.exclude_pattern = exclude_pattern
+        self._crawled_pages: Optional[list] = None
+        self._crawl_result = None
+
+    def is_available(self) -> bool:
+        """Check if the website is reachable.
+
+        When using Jina crawler, skip local reachability check since Jina
+        will handle it from their servers (different IP, bypasses bot protection).
+        """
+        provider = self._get_crawl_provider()
+
+        # When using Jina, assume available - Jina will handle from their servers
+        if provider in ("jina", "jina-api"):
+            logger.debug(
+                f"Skipping local reachability check for {self.url} (using Jina)"
+            )
+            return True
+
+        # For builtin crawler, check reachability from our server
+        import random
+
+        import httpx
+
+        from rag.crawler import BROWSER_HEADERS, USER_AGENTS
+
+        try:
+            headers = BROWSER_HEADERS.copy()
+            headers["User-Agent"] = random.choice(USER_AGENTS)
+            with httpx.Client(
+                timeout=10, follow_redirects=True, headers=headers
+            ) as client:
+                response = client.head(self.url)
+                return response.status_code < 400
+        except Exception as e:
+            logger.warning(f"Website not reachable: {self.url} - {e}")
+            return False
+
+    def _get_crawl_provider(self) -> str:
+        """Get the configured crawl provider from settings."""
+        try:
+            from db.connection import get_db_context
+            from db.models import Setting
+
+            with get_db_context() as db:
+                setting = (
+                    db.query(Setting)
+                    .filter(Setting.key == Setting.KEY_WEB_CRAWL_PROVIDER)
+                    .first()
+                )
+                return setting.value if setting else "builtin"
+        except Exception:
+            return "builtin"
+
+    def _crawl_if_needed(self):
+        """Crawl the website if not already done."""
+        if self._crawled_pages is not None:
+            return
+
+        from rag.crawler import get_crawler
+
+        provider = self._get_crawl_provider()
+        crawler = get_crawler(provider)
+
+        logger.info(f"Using {provider} crawler for {self.url}")
+
+        result = crawler.crawl(
+            start_url=self.url,
+            max_depth=self.crawl_depth,
+            max_pages=self.max_pages,
+            include_pattern=self.include_pattern,
+            exclude_pattern=self.exclude_pattern,
+            same_domain_only=True,
+        )
+
+        self._crawl_result = result
+        self._crawled_pages = result.pages
+        logger.info(
+            f"Crawled {result.pages_crawled} pages from {self.url} "
+            f"(depth={self.crawl_depth}, max={self.max_pages}, provider={provider})"
+        )
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all crawled pages as documents."""
+        self._crawl_if_needed()
+
+        for page in self._crawled_pages:
+            if not page.success or not page.content:
+                continue
+
+            yield DocumentInfo(
+                uri=page.url,
+                name=page.title or page.url,
+                mime_type="text/html",
+            )
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read content from a crawled page."""
+        self._crawl_if_needed()
+
+        # Find the page by URI
+        for page in self._crawled_pages:
+            if page.url == uri and page.success:
+                return DocumentContent(
+                    uri=uri,
+                    name=page.title or uri,
+                    mime_type="text/plain",
+                    text=page.content,
+                )
+
+        logger.warning(f"Page not found in crawl results: {uri}")
+        return None
+
+
 def get_document_source(
     source_type: str,
     source_path: Optional[str] = None,
@@ -3089,6 +3233,11 @@ def get_document_source(
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
     nextcloud_folder: Optional[str] = None,
+    website_url: Optional[str] = None,
+    website_crawl_depth: int = 1,
+    website_max_pages: int = 50,
+    website_include_pattern: Optional[str] = None,
+    website_exclude_pattern: Optional[str] = None,
     vision_provider: str = "local",
     vision_model: Optional[str] = None,
     vision_ollama_url: Optional[str] = None,
@@ -3097,7 +3246,7 @@ def get_document_source(
     Factory function to create the appropriate document source.
 
     Args:
-        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", "notion", "nextcloud", or "paperless"
+        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", "notion", "nextcloud", "paperless", or "website"
         source_path: Path for local sources
         mcp_config: Configuration dict for MCP sources
         google_account_id: OAuth account ID for Google sources
@@ -3112,6 +3261,11 @@ def get_document_source(
         notion_database_id: Optional Notion database ID to index
         notion_page_id: Optional Notion page ID (indexes children)
         nextcloud_folder: Optional folder path to restrict Nextcloud indexing (e.g., "/Documents")
+        website_url: Starting URL for website crawling
+        website_crawl_depth: How many levels of links to follow (0 = start page only)
+        website_max_pages: Maximum number of pages to crawl
+        website_include_pattern: Regex pattern - only crawl matching URLs
+        website_exclude_pattern: Regex pattern - skip matching URLs
         vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
         vision_model: Vision model name (e.g., "granite3.2-vision:latest")
         vision_ollama_url: Ollama URL when using ollama provider
@@ -3180,6 +3334,21 @@ def get_document_source(
         if not source_path:
             raise ValueError("source_path required for local document source")
         return LocalDocumentSource(source_path)
+
+    elif source_type == "website":
+        if not website_url:
+            raise ValueError("website_url required for website document source")
+        logger.info(
+            f"Creating Website source (url={website_url}, "
+            f"depth={website_crawl_depth}, max_pages={website_max_pages})"
+        )
+        return WebsiteDocumentSource(
+            url=website_url,
+            crawl_depth=website_crawl_depth,
+            max_pages=website_max_pages,
+            include_pattern=website_include_pattern,
+            exclude_pattern=website_exclude_pattern,
+        )
 
     elif source_type == "mcp:gdrive":
         # Google Drive - use direct API for better performance and proper folder filtering

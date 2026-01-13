@@ -916,6 +916,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_WEB_SEARCH_PROVIDER,
             Setting.KEY_WEB_SEARCH_URL,
             Setting.KEY_WEB_SCRAPER_PROVIDER,
+            Setting.KEY_WEB_CRAWL_PROVIDER,
             Setting.KEY_WEB_PDF_PARSER,
             Setting.KEY_RAG_PDF_PARSER,
             Setting.KEY_EMBEDDING_PROVIDER,
@@ -925,6 +926,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             Setting.KEY_VISION_PROVIDER,
             Setting.KEY_VISION_MODEL,
             Setting.KEY_VISION_OLLAMA_URL,
+            Setting.KEY_DOCSTORE_INTELLIGENCE_MODEL,
         ]
 
         with get_db_context() as db:
@@ -940,6 +942,8 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 or "",
                 "search_url": settings_dict.get(Setting.KEY_WEB_SEARCH_URL) or "",
                 "scraper_provider": settings_dict.get(Setting.KEY_WEB_SCRAPER_PROVIDER)
+                or "builtin",
+                "crawl_provider": settings_dict.get(Setting.KEY_WEB_CRAWL_PROVIDER)
                 or "builtin",
                 "pdf_parser": settings_dict.get(Setting.KEY_WEB_PDF_PARSER) or "pypdf",
                 "rag_pdf_parser": settings_dict.get(Setting.KEY_RAG_PDF_PARSER)
@@ -959,6 +963,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 "vision_model": settings_dict.get(Setting.KEY_VISION_MODEL) or "",
                 "vision_ollama_url": settings_dict.get(Setting.KEY_VISION_OLLAMA_URL)
                 or "",
+                "docstore_intelligence_model": settings_dict.get(
+                    Setting.KEY_DOCSTORE_INTELLIGENCE_MODEL
+                )
+                or "",
                 "gpu_available": gpu_available,
                 "gpu_name": gpu_name,
             }
@@ -976,9 +984,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"error": "Invalid search provider"}), 400
 
         # Validate scraper provider
+        # "jina" = free tier, "jina-api" = with API key
         scraper_provider = data.get("scraper_provider", "builtin")
-        if scraper_provider not in ("builtin", "jina"):
+        if scraper_provider not in ("builtin", "jina", "jina-api"):
             return jsonify({"error": "Invalid scraper provider"}), 400
+
+        # Validate crawl provider (for website indexing)
+        # "jina" = free tier, "jina-api" = with API key
+        crawl_provider = data.get("crawl_provider", "builtin")
+        if crawl_provider not in ("builtin", "jina", "jina-api"):
+            return jsonify({"error": "Invalid crawl provider"}), 400
 
         # Validate PDF parser (for web scraping)
         pdf_parser = data.get("pdf_parser", "pypdf")
@@ -1006,20 +1021,39 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         vision_ollama_url = data.get("vision_ollama_url", "")
 
         # Save settings (jina_api_key is now via env var JINA_API_KEY)
-        settings_to_save = {
-            Setting.KEY_WEB_SEARCH_PROVIDER: search_provider,
-            Setting.KEY_WEB_SEARCH_URL: data.get("search_url", ""),
-            Setting.KEY_WEB_SCRAPER_PROVIDER: scraper_provider,
-            Setting.KEY_WEB_PDF_PARSER: pdf_parser,
-            Setting.KEY_RAG_PDF_PARSER: rag_pdf_parser,
-            Setting.KEY_EMBEDDING_PROVIDER: embedding_provider,
-            Setting.KEY_EMBEDDING_MODEL: embedding_model,
-            Setting.KEY_EMBEDDING_OLLAMA_URL: embedding_ollama_url,
-            Setting.KEY_WEB_RERANK_PROVIDER: rerank_provider,
-            Setting.KEY_VISION_PROVIDER: vision_provider,
-            Setting.KEY_VISION_MODEL: vision_model,
-            Setting.KEY_VISION_OLLAMA_URL: vision_ollama_url,
-        }
+        # Only save fields that are explicitly provided in the request
+        settings_to_save = {}
+
+        if "search_provider" in data:
+            settings_to_save[Setting.KEY_WEB_SEARCH_PROVIDER] = search_provider
+        if "search_url" in data:
+            settings_to_save[Setting.KEY_WEB_SEARCH_URL] = data.get("search_url", "")
+        if "scraper_provider" in data:
+            settings_to_save[Setting.KEY_WEB_SCRAPER_PROVIDER] = scraper_provider
+        if "crawl_provider" in data:
+            settings_to_save[Setting.KEY_WEB_CRAWL_PROVIDER] = crawl_provider
+        if "pdf_parser" in data:
+            settings_to_save[Setting.KEY_WEB_PDF_PARSER] = pdf_parser
+        if "rag_pdf_parser" in data:
+            settings_to_save[Setting.KEY_RAG_PDF_PARSER] = rag_pdf_parser
+        if "embedding_provider" in data:
+            settings_to_save[Setting.KEY_EMBEDDING_PROVIDER] = embedding_provider
+        if "embedding_model" in data:
+            settings_to_save[Setting.KEY_EMBEDDING_MODEL] = embedding_model
+        if "embedding_ollama_url" in data:
+            settings_to_save[Setting.KEY_EMBEDDING_OLLAMA_URL] = embedding_ollama_url
+        if "rerank_provider" in data:
+            settings_to_save[Setting.KEY_WEB_RERANK_PROVIDER] = rerank_provider
+        if "vision_provider" in data:
+            settings_to_save[Setting.KEY_VISION_PROVIDER] = vision_provider
+        if "vision_model" in data:
+            settings_to_save[Setting.KEY_VISION_MODEL] = vision_model
+        if "vision_ollama_url" in data:
+            settings_to_save[Setting.KEY_VISION_OLLAMA_URL] = vision_ollama_url
+        if "docstore_intelligence_model" in data:
+            settings_to_save[Setting.KEY_DOCSTORE_INTELLIGENCE_MODEL] = data.get(
+                "docstore_intelligence_model", ""
+            )
 
         with get_db_context() as db:
             for key, value in settings_to_save.items():
@@ -5172,6 +5206,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "error": "NEXTCLOUD_URL, NEXTCLOUD_USER, and NEXTCLOUD_PASSWORD environment variables are required"
                     }
                 ), 400
+        elif source_type == "website":
+            # Website crawler - requires URL
+            if not data.get("website_url"):
+                return jsonify(
+                    {"error": "Website URL is required for website sources"}
+                ), 400
         else:
             return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
@@ -5198,6 +5238,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 notion_database_id=data.get("notion_database_id"),
                 notion_page_id=data.get("notion_page_id"),
                 nextcloud_folder=data.get("nextcloud_folder"),
+                website_url=data.get("website_url"),
+                website_crawl_depth=data.get("website_crawl_depth", 1),
+                website_max_pages=data.get("website_max_pages", 50),
+                website_include_pattern=data.get("website_include_pattern"),
+                website_exclude_pattern=data.get("website_exclude_pattern"),
                 embedding_provider=data.get("embedding_provider", "local"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5250,6 +5295,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 notion_database_id=data.get("notion_database_id"),
                 notion_page_id=data.get("notion_page_id"),
                 nextcloud_folder=data.get("nextcloud_folder"),
+                website_url=data.get("website_url"),
+                website_crawl_depth=data.get("website_crawl_depth"),
+                website_max_pages=data.get("website_max_pages"),
+                website_include_pattern=data.get("website_include_pattern"),
+                website_exclude_pattern=data.get("website_exclude_pattern"),
                 embedding_provider=data.get("embedding_provider"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5367,6 +5417,52 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"success": True, "message": "Store contents cleared"})
         except Exception as e:
             logger.error(f"Failed to clear store contents: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route(
+        "/api/document-stores/<int:store_id>/refresh-intelligence", methods=["POST"]
+    )
+    @require_auth_api
+    def refresh_store_intelligence(store_id: int):
+        """Regenerate intelligence (themes, best_for, summary) for a document store."""
+        from db import get_document_store_by_id
+        from rag import get_indexer
+
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        if store.index_status != "ready" or store.chunk_count == 0:
+            return jsonify(
+                {"error": "Store must be indexed before generating intelligence"}
+            ), 400
+
+        try:
+            indexer = get_indexer()
+            # Get model from request or use default
+            data = request.get_json(silent=True) or {}
+            model = data.get("model")
+
+            success = indexer.generate_store_intelligence(store_id, model)
+            if success:
+                # Reload store to get updated data
+                store = get_document_store_by_id(store_id)
+                return jsonify(
+                    {
+                        "success": True,
+                        "themes": store.themes,
+                        "best_for": store.best_for,
+                        "content_summary": store.content_summary,
+                    }
+                )
+            else:
+                return jsonify(
+                    {
+                        "error": "Intelligence generation failed - check if model is configured"
+                    }
+                ), 500
+        except Exception as e:
+            logger.error(f"Failed to generate intelligence: {e}")
             return jsonify({"error": str(e)}), 500
 
     # -------------------------------------------------------------------------
@@ -6364,6 +6460,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 rerank_model=data.get("rerank_model"),
                 rerank_top_n=data.get("rerank_top_n", 20),
                 context_priority=data.get("context_priority", "balanced"),
+                show_sources=data.get("show_sources", False),
                 # Cache settings
                 cache_similarity_threshold=data.get("cache_similarity_threshold", 0.95),
                 cache_match_system_prompt=data.get("cache_match_system_prompt", True),
@@ -6381,6 +6478,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 enabled=data.get("enabled", True),
                 # Memory
                 use_memory=data.get("use_memory", False),
+                memory_max_tokens=data.get("memory_max_tokens", 500),
             )
             return jsonify(alias.to_dict()), 201
         except ValueError as e:
@@ -6436,6 +6534,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 rerank_model=data.get("rerank_model"),
                 rerank_top_n=data.get("rerank_top_n"),
                 context_priority=data.get("context_priority"),
+                show_sources=data.get("show_sources"),
                 # Cache settings
                 cache_similarity_threshold=data.get("cache_similarity_threshold"),
                 cache_match_system_prompt=data.get("cache_match_system_prompt"),
@@ -6452,6 +6551,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 # Memory
                 use_memory=data.get("use_memory"),
                 memory=data.get("memory"),
+                memory_max_tokens=data.get("memory_max_tokens"),
             )
             if not alias:
                 return jsonify({"error": "Smart alias not found"}), 404
