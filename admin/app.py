@@ -50,6 +50,7 @@ from .auth import (
     logout_user,
     require_auth,
     require_auth_api,
+    require_widget_api_key,
     set_admin_password,
 )
 
@@ -2815,6 +2816,14 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             else None
         )
 
+        # Request type filter (v3.11)
+        request_types_param = request.args.get("request_types")
+        request_types = (
+            [rt.strip() for rt in request_types_param.split(",") if rt.strip()]
+            if request_types_param
+            else None
+        )
+
         return {
             "start_date": start_date,
             "end_date": end_date,
@@ -2823,6 +2832,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "models": models,
             "clients": clients,
             "aliases": aliases,
+            "request_types": request_types,
         }
 
     @admin.route("/api/usage/filters", methods=["GET"])
@@ -2885,6 +2895,15 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 .all()
             ]
 
+            # Get distinct request types (v3.11)
+            request_types = [
+                r[0]
+                for r in db.query(distinct(RequestLog.request_type))
+                .filter(RequestLog.request_type.isnot(None))
+                .order_by(RequestLog.request_type)
+                .all()
+            ]
+
             return jsonify(
                 {
                     "tags": tags,
@@ -2892,6 +2911,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "models": models,
                     "clients": clients,
                     "aliases": aliases,
+                    "request_types": request_types,
                 }
             )
 
@@ -2912,6 +2932,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 or filters["models"]
                 or filters["clients"]
                 or filters["aliases"]
+                or filters["request_types"]
             )
             if has_filters:
                 # Query from RequestLog for filtered results
@@ -2965,6 +2986,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 if filters["aliases"]:
                     query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
+                if filters["request_types"]:
+                    query = query.filter(
+                        RequestLog.request_type.in_(filters["request_types"])
+                    )
 
                 stats = query.first()
 
@@ -3051,6 +3077,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 or filters["models"]
                 or filters["clients"]
                 or filters["aliases"]
+                or filters["request_types"]
             )
             if has_filters:
                 # Query from RequestLog when filtering
@@ -3091,6 +3118,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 if filters["aliases"]:
                     query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
+                if filters["request_types"]:
+                    query = query.filter(
+                        RequestLog.request_type.in_(filters["request_types"])
+                    )
 
                 rows = query.all()
 
@@ -3192,6 +3224,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 or filters["models"]
                 or filters["clients"]
                 or filters["aliases"]
+                or filters["request_types"]
             )
             if has_filters:
                 # Query from RequestLog when filtering
@@ -3235,6 +3268,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 if filters["aliases"]:
                     query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
+                if filters["request_types"]:
+                    query = query.filter(
+                        RequestLog.request_type.in_(filters["request_types"])
+                    )
 
                 # If provider filter is provided, filter to those providers
                 if filters["providers"]:
@@ -3317,7 +3355,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         with get_db_context() as db:
             # Use RequestLog for filtered queries, DailyStats for unfiltered
-            has_filters = filters["tags"] or filters["clients"] or filters["aliases"]
+            has_filters = (
+                filters["tags"]
+                or filters["clients"]
+                or filters["aliases"]
+                or filters["request_types"]
+            )
             if has_filters:
                 # Query from RequestLog when filtering
                 query = db.query(
@@ -3367,6 +3410,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     )
                     if model_conditions:
                         query = query.filter(or_(*model_conditions))
+
+                if filters["request_types"]:
+                    query = query.filter(
+                        RequestLog.request_type.in_(filters["request_types"])
+                    )
 
                 results = (
                     query.group_by(RequestLog.provider_id, RequestLog.model_id)
@@ -3495,6 +3543,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             if filters["aliases"]:
                 query = query.filter(RequestLog.alias.in_(filters["aliases"]))
 
+            if filters["request_types"]:
+                query = query.filter(
+                    RequestLog.request_type.in_(filters["request_types"])
+                )
+
             results = (
                 query.group_by(client_col)
                 .order_by(func.count(RequestLog.id).desc())
@@ -3530,6 +3583,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 or filters["providers"]
                 or filters["models"]
                 or filters["clients"]
+                or filters["request_types"]
             )
             if has_filters:
                 # Query from RequestLog when filtering
@@ -3577,6 +3631,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 if filters["aliases"]:
                     query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
+                if filters["request_types"]:
+                    query = query.filter(
+                        RequestLog.request_type.in_(filters["request_types"])
+                    )
 
                 results = (
                     query.group_by(RequestLog.alias)
@@ -3657,6 +3716,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 or filters["models"]
                 or filters["clients"]
                 or filters["aliases"]
+                or filters["request_types"]
             )
             if has_filters:
                 # Query from RequestLog when filtering
@@ -3704,6 +3764,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
                 if filters["aliases"]:
                     query = query.filter(RequestLog.alias.in_(filters["aliases"]))
+
+                if filters["request_types"]:
+                    query = query.filter(
+                        RequestLog.request_type.in_(filters["request_types"])
+                    )
 
                 results = query.group_by(date_expr).order_by(date_expr).all()
 
@@ -3940,6 +4005,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         clients = request.args.getlist("client")
         aliases = request.args.getlist("alias")
         status_filter = request.args.get("status")
+        request_types = request.args.getlist("request_type")
 
         with get_db_context() as db:
             from sqlalchemy import or_
@@ -3977,6 +4043,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
             if aliases:
                 query = query.filter(RequestLog.alias.in_(aliases))
+
+            if request_types:
+                query = query.filter(RequestLog.request_type.in_(request_types))
 
             if status_filter == "success":
                 query = query.filter(RequestLog.status_code < 400)
@@ -9377,5 +9446,154 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 for s in sources
             ]
         )
+
+    # -------------------------------------------------------------------------
+    # Widget API - External Dashboard Integration (Homepage, etc.)
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/widget", methods=["GET"])
+    @require_widget_api_key
+    def get_widget_data():
+        """
+        Get statistics for external dashboard widgets.
+
+        Authenticates via X-API-Key header (set WIDGET_API_KEY env var).
+
+        Query parameters:
+        - days: Number of days to include (default: 1 for today, options: 1, 7, 30, 90)
+        - tag: Optional tag filter to show stats for specific tag only
+
+        Returns compact JSON suitable for Homepage widgets:
+        {
+            "requests": 123,
+            "tokens": 50000,
+            "cost": 1.23,
+            "cache_hits": 10,
+            "cache_saved": 0.45,
+            "errors": 2,
+            "period": "today"
+        }
+        """
+        from datetime import datetime, timedelta
+
+        from sqlalchemy import func
+
+        from db.models import DailyStats, RequestLog
+
+        # Parse parameters
+        days = request.args.get("days", "1")
+        try:
+            days = int(days)
+            if days not in (1, 7, 30, 90):
+                days = 1
+        except ValueError:
+            days = 1
+
+        tag_filter = request.args.get("tag")
+
+        # Calculate date range
+        start_date = datetime.utcnow() - timedelta(days=days)
+
+        # Period label for response
+        period_labels = {1: "today", 7: "7d", 30: "30d", 90: "90d"}
+        period = period_labels.get(days, f"{days}d")
+
+        with get_db_context() as db:
+            if tag_filter:
+                # Query RequestLog for tag-filtered stats
+                # Note: RequestLog.tag may contain comma-separated tags
+                stats = (
+                    db.query(
+                        func.count(RequestLog.id),
+                        func.sum(RequestLog.input_tokens),
+                        func.sum(RequestLog.output_tokens),
+                        func.coalesce(func.sum(RequestLog.cost), 0),
+                        func.count(RequestLog.id).filter(
+                            RequestLog.is_cache_hit == True
+                        ),
+                        func.coalesce(func.sum(RequestLog.cache_cost_saved), 0),
+                        func.count(RequestLog.id).filter(RequestLog.status_code >= 400),
+                        # Inbound requests (client requests received)
+                        func.count(RequestLog.id).filter(
+                            RequestLog.request_type == "inbound"
+                        ),
+                        # Outbound requests (main LLM calls made)
+                        func.count(RequestLog.id).filter(
+                            RequestLog.request_type == "main"
+                        ),
+                    )
+                    .filter(
+                        RequestLog.timestamp >= start_date,
+                        RequestLog.tag.contains(tag_filter),
+                    )
+                    .first()
+                )
+
+                return jsonify(
+                    {
+                        "requests": stats[0] or 0,
+                        "requests_in": stats[7] or 0,
+                        "requests_out": stats[8] or 0,
+                        "tokens": (stats[1] or 0) + (stats[2] or 0),
+                        "cost": round(float(stats[3] or 0), 2),
+                        "cache_hits": stats[4] or 0,
+                        "cache_saved": round(float(stats[5] or 0), 2),
+                        "errors": stats[6] or 0,
+                        "period": period,
+                        "tag": tag_filter,
+                    }
+                )
+            else:
+                # Use pre-aggregated DailyStats for better performance
+                stats = (
+                    db.query(
+                        func.sum(DailyStats.request_count),
+                        func.sum(DailyStats.input_tokens),
+                        func.sum(DailyStats.output_tokens),
+                        func.sum(DailyStats.estimated_cost),
+                        func.sum(DailyStats.error_count),
+                    )
+                    .filter(
+                        DailyStats.date >= start_date,
+                        DailyStats.tag.is_(None),
+                        DailyStats.provider_id.is_(None),
+                        DailyStats.model_id.is_(None),
+                    )
+                    .first()
+                )
+
+                # Get cache stats and request type counts from RequestLog
+                extra_stats = (
+                    db.query(
+                        func.count(RequestLog.id).filter(
+                            RequestLog.is_cache_hit == True
+                        ),
+                        func.sum(RequestLog.cache_cost_saved),
+                        # Inbound requests (client requests received)
+                        func.count(RequestLog.id).filter(
+                            RequestLog.request_type == "inbound"
+                        ),
+                        # Outbound requests (main LLM calls made)
+                        func.count(RequestLog.id).filter(
+                            RequestLog.request_type == "main"
+                        ),
+                    )
+                    .filter(RequestLog.timestamp >= start_date)
+                    .first()
+                )
+
+                return jsonify(
+                    {
+                        "requests": stats[0] or 0,
+                        "requests_in": extra_stats[2] or 0,
+                        "requests_out": extra_stats[3] or 0,
+                        "tokens": (stats[1] or 0) + (stats[2] or 0),
+                        "cost": round(stats[3] or 0, 2),
+                        "cache_hits": extra_stats[0] or 0,
+                        "cache_saved": round(extra_stats[1] or 0, 2),
+                        "errors": stats[4] or 0,
+                        "period": period,
+                    }
+                )
 
     return admin

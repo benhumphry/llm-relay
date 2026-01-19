@@ -234,6 +234,34 @@
                 ></span>
             </button>
 
+            <!-- Request Type Filter Button -->
+            <button
+                @click="expandedFilter = expandedFilter === 'request_types' ? null : 'request_types'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'request_types' ? 'btn-neutral' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                    />
+                </svg>
+                Type
+                <span
+                    x-show="filters.request_types.length > 0"
+                    class="badge badge-neutral badge-xs"
+                    x-text="filters.request_types.length"
+                ></span>
+            </button>
+
             <!-- Clear Filters -->
             <button
                 x-show="hasActiveFilters()"
@@ -391,6 +419,34 @@
                     >
                 </div>
             </div>
+
+            <!-- Request Types Panel -->
+            <div x-show="expandedFilter === 'request_types'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="rt in filterOptions.request_types"
+                        :key="rt"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.request_types.includes(rt)"
+                                @change="toggleFilter('request_types', rt)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-neutral peer-checked:text-neutral-content hover:opacity-80 transition-opacity"
+                                x-text="rt"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.request_types.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No request types available</span
+                    >
+                </div>
+            </div>
         </div>
 
         <!-- Active Filters Display -->
@@ -453,6 +509,17 @@
                     <span x-text="alias"></span>
                     <button
                         @click="removeFilter('aliases', alias)"
+                        class="hover:text-error"
+                    >
+                        ×
+                    </button>
+                </span>
+            </template>
+            <template x-for="rt in filters.request_types" :key="'rt-' + rt">
+                <span class="badge badge-neutral gap-1">
+                    <span x-text="rt"></span>
+                    <button
+                        @click="removeFilter('request_types', rt)"
                         class="hover:text-error"
                     >
                         ×
@@ -1189,6 +1256,7 @@
                 models: [],
                 clients: [],
                 aliases: [],
+                request_types: [],
             },
             filterOptions: {
                 tags: [],
@@ -1196,6 +1264,7 @@
                 models: [],
                 clients: [],
                 aliases: [],
+                request_types: [],
             },
             expandedFilter: null, // 'tags', 'providers', 'models', 'clients', or null
 
@@ -1289,6 +1358,12 @@
                 if (this.filters.aliases.length > 0) {
                     params.set("aliases", this.filters.aliases.join(","));
                 }
+                if (this.filters.request_types.length > 0) {
+                    params.set(
+                        "request_types",
+                        this.filters.request_types.join(","),
+                    );
+                }
 
                 return params.toString();
             },
@@ -1338,6 +1413,7 @@
                 this.filters.models = [];
                 this.filters.clients = [];
                 this.filters.aliases = [];
+                this.filters.request_types = [];
                 this.loadData();
             },
 
@@ -1347,7 +1423,8 @@
                     this.filters.providers.length > 0 ||
                     this.filters.models.length > 0 ||
                     this.filters.clients.length > 0 ||
-                    this.filters.aliases.length > 0
+                    this.filters.aliases.length > 0 ||
+                    this.filters.request_types.length > 0
                 );
             },
 

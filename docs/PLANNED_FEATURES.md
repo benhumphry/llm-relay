@@ -399,6 +399,7 @@ class ActionHandler(ABC):
 - [x] Smart Actions - Scheduled Prompts (calendar-triggered prompt execution)
 - [x] Live Data Sources (real-time API queries for Gmail, Calendar, Stocks, Weather, Transport, etc.)
 - [x] OAuth write scopes for Google (gmail.modify, calendar full access)
+- [x] Smart Routes Provider (journey planning with geocoding, arrival/departure times, transit support)
 
 ## Next Up (v1.9)
 - [x] Slack integration (Document Store)

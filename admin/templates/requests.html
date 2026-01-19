@@ -224,6 +224,34 @@ content %}
                 ></span>
             </button>
 
+            <!-- Request Type Filter -->
+            <button
+                @click="expandedFilter = expandedFilter === 'request_types' ? null : 'request_types'"
+                class="btn btn-sm gap-1"
+                :class="expandedFilter === 'request_types' ? 'btn-accent' : 'btn-outline'"
+            >
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                    />
+                </svg>
+                Type
+                <span
+                    x-show="filters.request_types.length > 0"
+                    class="badge badge-accent badge-xs"
+                    x-text="filters.request_types.length"
+                ></span>
+            </button>
+
             <!-- Status Filter -->
             <div class="join">
                 <button
@@ -378,6 +406,34 @@ content %}
                     >
                 </div>
             </div>
+
+            <!-- Request Types Panel -->
+            <div x-show="expandedFilter === 'request_types'">
+                <div class="flex flex-wrap gap-2">
+                    <template
+                        x-for="rt in filterOptions.request_types"
+                        :key="rt"
+                    >
+                        <label class="cursor-pointer">
+                            <input
+                                type="checkbox"
+                                :checked="filters.request_types.includes(rt)"
+                                @change="toggleFilter('request_types', rt)"
+                                class="hidden peer"
+                            />
+                            <span
+                                class="badge badge-lg peer-checked:badge-accent peer-checked:text-accent-content hover:opacity-80"
+                                x-text="rt"
+                            ></span>
+                        </label>
+                    </template>
+                    <span
+                        x-show="filterOptions.request_types.length === 0"
+                        class="text-sm text-base-content/60"
+                        >No request types available</span
+                    >
+                </div>
+            </div>
         </div>
 
         <!-- Active Filters Display -->
@@ -429,6 +485,17 @@ content %}
                     <span x-text="client"></span>
                     <button
                         @click="removeFilter('clients', client)"
+                        class="hover:text-error"
+                    >
+                        x
+                    </button>
+                </span>
+            </template>
+            <template x-for="rt in filters.request_types" :key="'rt-' + rt">
+                <span class="badge badge-accent gap-1">
+                    <span x-text="rt"></span>
+                    <button
+                        @click="removeFilter('request_types', rt)"
                         class="hover:text-error"
                     >
                         x
@@ -516,6 +583,7 @@ content %}
                                     x-text="sortDirection === 'asc' ? ' ^' : ' v'"
                                 ></span>
                             </th>
+                            <th>Type</th>
                             <th>Status</th>
                         </tr>
                     </thead>
@@ -608,6 +676,18 @@ content %}
                                 </td>
                                 <td>
                                     <span
+                                        class="badge badge-xs"
+                                        :class="{
+                                            'badge-primary': log.request_type === 'main',
+                                            'badge-secondary': log.request_type === 'designator',
+                                            'badge-info': log.request_type === 'embedding',
+                                            'badge-ghost': !log.request_type || log.request_type === 'inbound'
+                                        }"
+                                        x-text="log.request_type || 'main'"
+                                    ></span>
+                                </td>
+                                <td>
+                                    <span
                                         x-show="log.is_cache_hit"
                                         class="badge badge-success badge-xs mr-1"
                                         title="Cache hit"
@@ -629,7 +709,7 @@ content %}
                                 x-show="expandedRows.includes(log.id)"
                                 x-transition
                             >
-                                <td colspan="9" class="bg-base-200 p-0">
+                                <td colspan="10" class="bg-base-200 p-0">
                                     <div
                                         class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
                                     >
@@ -884,7 +964,7 @@ content %}
                     <tbody x-show="requests.length === 0 && !loading">
                         <tr>
                             <td
-                                colspan="9"
+                                colspan="10"
                                 class="text-center text-base-content/60 py-8"
                             >
                                 No requests found for the selected filters
@@ -893,7 +973,7 @@ content %}
                     </tbody>
                     <tbody x-show="loading">
                         <tr>
-                            <td colspan="9" class="text-center py-8">
+                            <td colspan="10" class="text-center py-8">
                                 <span
                                     class="loading loading-spinner loading-md"
                                 ></span>
@@ -988,6 +1068,7 @@ content %}
                 providers: [],
                 models: [],
                 clients: [],
+                request_types: [],
                 status: null,
             },
             filterOptions: {
@@ -995,6 +1076,7 @@ content %}
                 providers: [],
                 models: [],
                 clients: [],
+                request_types: [],
             },
             expandedFilter: null,
 
@@ -1046,6 +1128,11 @@ content %}
                 urlParams.getAll("client").forEach((c) => {
                     if (c && !this.filters.clients.includes(c)) {
                         this.filters.clients.push(c);
+                    }
+                });
+                urlParams.getAll("request_type").forEach((rt) => {
+                    if (rt && !this.filters.request_types.includes(rt)) {
+                        this.filters.request_types.push(rt);
                     }
                 });
                 const status = urlParams.get("status");
@@ -1110,6 +1197,9 @@ content %}
                 );
                 this.filters.models.forEach((m) => params.append("model", m));
                 this.filters.clients.forEach((c) => params.append("client", c));
+                this.filters.request_types.forEach((rt) =>
+                    params.append("request_type", rt),
+                );
                 if (this.filters.status)
                     params.set("status", this.filters.status);
 
@@ -1181,6 +1271,7 @@ content %}
                 this.filters.providers = [];
                 this.filters.models = [];
                 this.filters.clients = [];
+                this.filters.request_types = [];
                 this.filters.status = null;
                 this.expandedFilter = null;
                 this.currentPage = 1;
@@ -1193,6 +1284,7 @@ content %}
                     this.filters.providers.length > 0 ||
                     this.filters.models.length > 0 ||
                     this.filters.clients.length > 0 ||
+                    this.filters.request_types.length > 0 ||
                     this.filters.status !== null
                 );
             },

@@ -687,6 +687,50 @@ content %}
                     </label>
                 </div>
 
+                <!-- Designator Model (shown when any feature needs it) -->
+                <div
+                    class="form-control mt-4"
+                    x-show="form.use_routing || form.use_smart_source_selection || form.use_web || form.use_live_data"
+                    x-transition
+                >
+                    <label class="label">
+                        <span class="label-text">Designator Model</span>
+                        <span
+                            class="label-text-alt text-warning"
+                            x-show="!form.designator_model"
+                            >Required</span
+                        >
+                    </label>
+                    <select
+                        x-model="form.designator_model"
+                        class="select select-bordered"
+                        :class="{ 'select-error': formErrors.designator_model }"
+                    >
+                        <option value="">Select model...</option>
+                        <template
+                            x-for="model in availableModels"
+                            :key="model.id"
+                        >
+                            <option
+                                :value="model.id"
+                                x-text="model.id"
+                            ></option>
+                        </template>
+                    </select>
+                    <label class="label" x-show="formErrors.designator_model">
+                        <span
+                            class="label-text-alt text-error"
+                            x-text="formErrors.designator_model"
+                        ></span>
+                    </label>
+                    <label class="label" x-show="!formErrors.designator_model">
+                        <span class="label-text-alt"
+                            >Fast model for routing decisions, source selection,
+                            and search query optimization</span
+                        >
+                    </label>
+                </div>
+
                 <!-- Feature Toggles -->
                 <div class="form-control mt-6">
                     <label class="label">
@@ -738,42 +782,6 @@ content %}
                                 x-transition
                                 class="p-3 pt-0 border-t border-base-300 space-y-3"
                             >
-                                <!-- Designator Model -->
-                                <div class="form-control">
-                                    <label class="label py-1">
-                                        <span class="label-text text-sm"
-                                            >Designator Model</span
-                                        >
-                                    </label>
-                                    <select
-                                        x-model="form.designator_model"
-                                        class="select select-bordered select-sm"
-                                        :class="{ 'select-error': formErrors.designator_model }"
-                                    >
-                                        <option value="">
-                                            Select model...
-                                        </option>
-                                        <template
-                                            x-for="model in availableModels"
-                                            :key="model.id"
-                                        >
-                                            <option
-                                                :value="model.id"
-                                                x-text="model.id"
-                                            ></option>
-                                        </template>
-                                    </select>
-                                    <label
-                                        class="label py-0"
-                                        x-show="formErrors.designator_model"
-                                    >
-                                        <span
-                                            class="label-text-alt text-error"
-                                            x-text="formErrors.designator_model"
-                                        ></span>
-                                    </label>
-                                </div>
-
                                 <!-- Purpose -->
                                 <div class="form-control">
                                     <label class="label py-1">
@@ -1267,48 +1275,6 @@ content %}
                                 x-transition
                                 class="p-3 pt-0 border-t border-base-300 space-y-3"
                             >
-                                <!-- Web Designator Model (uses designator_model if routing, otherwise separate) -->
-                                <div
-                                    class="form-control"
-                                    x-show="!form.use_routing"
-                                >
-                                    <label class="label py-1">
-                                        <span class="label-text text-sm"
-                                            >Query Optimizer Model
-                                            (optional)</span
-                                        >
-                                    </label>
-                                    <select
-                                        x-model="form.designator_model"
-                                        class="select select-bordered select-sm"
-                                    >
-                                        <option value="">
-                                            Use query as-is
-                                        </option>
-                                        <template
-                                            x-for="model in availableModels"
-                                            :key="model.id"
-                                        >
-                                            <option
-                                                :value="model.id"
-                                                x-text="model.id"
-                                            ></option>
-                                        </template>
-                                    </select>
-                                    <label class="label py-0">
-                                        <span class="label-text-alt text-xs"
-                                            >Fast model to optimize search
-                                            queries</span
-                                        >
-                                    </label>
-                                </div>
-                                <div
-                                    x-show="form.use_routing"
-                                    class="text-xs text-base-content/60"
-                                >
-                                    Uses the routing designator model for query
-                                    optimization
-                                </div>
                                 <!-- Web Parameters -->
                                 <div class="grid grid-cols-2 gap-3">
                                     <div class="form-control">

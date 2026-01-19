@@ -560,10 +560,342 @@ class MCPProvider(LiveDataProvider):
                             display_name=display_name,
                         )
 
+            # Sports entity resolution (team, player, event, tournament, league)
+            self._extract_sports_entities(
+                source_type,
+                tool_lower,
+                arguments,
+                result_data,
+                result_text,
+                cache_entity,
+            )
+
         except ImportError:
             pass  # Caching not available
         except Exception as e:
             logger.warning(f"Entity extraction failed: {e}")
+
+    def _extract_sports_entities(
+        self,
+        source_type: str,
+        tool_lower: str,
+        arguments: dict,
+        result_data: dict | list | None,
+        result_text: str,
+        cache_entity,
+    ) -> None:
+        """
+        Extract sports-related entity resolutions from API results.
+
+        Caches team_id, player_id, event_id, tournament_id, league_id mappings
+        so future queries can resolve names to IDs without API lookups.
+        """
+        # Check if this is a sports-related source
+        sports_keywords = [
+            "sport",
+            "football",
+            "soccer",
+            "basketball",
+            "tennis",
+            "hockey",
+            "baseball",
+            "cricket",
+            "rugby",
+        ]
+        is_sports_source = any(
+            kw in source_type.lower() for kw in sports_keywords
+        ) or any(kw in self.name.lower() for kw in sports_keywords)
+
+        if not is_sports_source:
+            return
+
+        # Get query text from arguments
+        query = (
+            arguments.get("query")
+            or arguments.get("search")
+            or arguments.get("name")
+            or arguments.get("team")
+            or arguments.get("player")
+            or arguments.get("keyword")
+            or arguments.get("keywords")
+            or ""
+        )
+
+        # Helper to extract entities from a dict
+        def extract_from_dict(data: dict, query_text: str):
+            if not isinstance(data, dict):
+                return
+
+            # Team entity
+            team_id = data.get("team_id") or data.get("teamId") or data.get("id")
+            team_name = (
+                data.get("team_name")
+                or data.get("teamName")
+                or data.get("name")
+                or data.get("short_name")
+                or data.get("shortName")
+            )
+            if team_id and team_name:
+                # Cache by team name
+                cache_entity(
+                    source_type=source_type,
+                    entity_type="team",
+                    query_text=team_name,
+                    resolved_value=str(team_id),
+                    display_name=team_name,
+                )
+                # Also cache by query if it matches
+                if query_text and query_text.lower() != team_name.lower():
+                    cache_entity(
+                        source_type=source_type,
+                        entity_type="team",
+                        query_text=query_text,
+                        resolved_value=str(team_id),
+                        display_name=team_name,
+                    )
+                logger.debug(f"Cached sports entity: team '{team_name}' -> {team_id}")
+
+            # Player entity
+            player_id = data.get("player_id") or data.get("playerId")
+            player_name = (
+                data.get("player_name") or data.get("playerName") or data.get("name")
+            )
+            if (
+                player_id and player_name and not team_id
+            ):  # Avoid confusion with team entries
+                cache_entity(
+                    source_type=source_type,
+                    entity_type="player",
+                    query_text=player_name,
+                    resolved_value=str(player_id),
+                    display_name=player_name,
+                )
+                if query_text and query_text.lower() != player_name.lower():
+                    cache_entity(
+                        source_type=source_type,
+                        entity_type="player",
+                        query_text=query_text,
+                        resolved_value=str(player_id),
+                        display_name=player_name,
+                    )
+                logger.debug(
+                    f"Cached sports entity: player '{player_name}' -> {player_id}"
+                )
+
+            # Event/Match entity
+            event_id = (
+                data.get("event_id")
+                or data.get("eventId")
+                or data.get("match_id")
+                or data.get("matchId")
+            )
+            if event_id:
+                # Try to build a descriptive event name
+                home_team = (
+                    data.get("home_team")
+                    or data.get("homeTeam")
+                    or data.get("home", {})
+                )
+                away_team = (
+                    data.get("away_team")
+                    or data.get("awayTeam")
+                    or data.get("away", {})
+                )
+                if isinstance(home_team, dict):
+                    home_team = home_team.get("name", "")
+                if isinstance(away_team, dict):
+                    away_team = away_team.get("name", "")
+                if home_team and away_team:
+                    event_name = f"{home_team} vs {away_team}"
+                    cache_entity(
+                        source_type=source_type,
+                        entity_type="event",
+                        query_text=event_name,
+                        resolved_value=str(event_id),
+                        display_name=event_name,
+                    )
+                    logger.debug(
+                        f"Cached sports entity: event '{event_name}' -> {event_id}"
+                    )
+
+            # Tournament/Competition entity
+            tournament_id = (
+                data.get("tournament_id")
+                or data.get("tournamentId")
+                or data.get("competition_id")
+                or data.get("competitionId")
+                or data.get("league_id")
+                or data.get("leagueId")
+            )
+            tournament_name = (
+                data.get("tournament_name")
+                or data.get("tournamentName")
+                or data.get("competition_name")
+                or data.get("competitionName")
+                or data.get("league_name")
+                or data.get("leagueName")
+            )
+            if tournament_id and tournament_name:
+                cache_entity(
+                    source_type=source_type,
+                    entity_type="tournament",
+                    query_text=tournament_name,
+                    resolved_value=str(tournament_id),
+                    display_name=tournament_name,
+                )
+                logger.debug(
+                    f"Cached sports entity: tournament '{tournament_name}' -> {tournament_id}"
+                )
+
+            # Also check nested team objects (common in match data)
+            for team_key in [
+                "home",
+                "away",
+                "homeTeam",
+                "awayTeam",
+                "home_team",
+                "away_team",
+                "team",
+            ]:
+                nested_team = data.get(team_key)
+                if isinstance(nested_team, dict):
+                    nested_id = (
+                        nested_team.get("id")
+                        or nested_team.get("team_id")
+                        or nested_team.get("teamId")
+                    )
+                    nested_name = (
+                        nested_team.get("name")
+                        or nested_team.get("short_name")
+                        or nested_team.get("shortName")
+                    )
+                    if nested_id and nested_name:
+                        cache_entity(
+                            source_type=source_type,
+                            entity_type="team",
+                            query_text=nested_name,
+                            resolved_value=str(nested_id),
+                            display_name=nested_name,
+                        )
+                        logger.debug(
+                            f"Cached sports entity: team '{nested_name}' -> {nested_id}"
+                        )
+
+        # Process result data
+        if result_data:
+            if isinstance(result_data, dict):
+                # Single result
+                extract_from_dict(result_data, query)
+                # Check for nested data arrays
+                for key in [
+                    "data",
+                    "results",
+                    "teams",
+                    "players",
+                    "events",
+                    "matches",
+                    "items",
+                ]:
+                    nested = result_data.get(key)
+                    if isinstance(nested, list):
+                        for item in nested[
+                            :20
+                        ]:  # Limit to first 20 to avoid excessive caching
+                            if isinstance(item, dict):
+                                extract_from_dict(item, query)
+            elif isinstance(result_data, list):
+                # Array of results
+                for item in result_data[:20]:
+                    if isinstance(item, dict):
+                        extract_from_dict(item, query)
+
+        # Also try to parse result_text if we haven't found structured data
+        if not result_data and result_text:
+            # Try parsing as JSON array
+            if result_text.strip().startswith("["):
+                try:
+                    parsed = json.loads(result_text)
+                    if isinstance(parsed, list):
+                        for item in parsed[:20]:
+                            if isinstance(item, dict):
+                                extract_from_dict(item, query)
+                except json.JSONDecodeError:
+                    pass
+
+    def _lookup_cached_entities(self, query: str) -> list[dict]:
+        """
+        Look up any cached entity resolutions that might be relevant to the query.
+
+        Searches for team names, player names, locations, symbols, etc. that
+        match words in the query.
+
+        Returns:
+            List of dicts with entity_type, query_text, resolved_value, display_name
+        """
+        try:
+            from db.live_cache import lookup_entity_with_metadata
+
+            source_type = self._get_source_type()
+            results = []
+
+            # Extract potential entity names from query (words > 2 chars, capitalized phrases)
+            words = query.split()
+            candidates = set()
+
+            # Add individual words
+            for word in words:
+                clean_word = word.strip(".,!?'\"()[]")
+                if len(clean_word) > 2:
+                    candidates.add(clean_word)
+
+            # Add multi-word phrases (for team names like "Manchester United")
+            for i in range(len(words)):
+                for j in range(i + 1, min(i + 4, len(words) + 1)):
+                    phrase = " ".join(words[i:j])
+                    clean_phrase = phrase.strip(".,!?'\"()[]")
+                    if len(clean_phrase) > 2:
+                        candidates.add(clean_phrase)
+
+            # Also add the full query
+            candidates.add(query)
+
+            # Entity types to search
+            entity_types = [
+                "team",
+                "player",
+                "tournament",
+                "event",
+                "symbol",
+                "location",
+            ]
+
+            for candidate in candidates:
+                for entity_type in entity_types:
+                    result = lookup_entity_with_metadata(
+                        source_type=source_type,
+                        entity_type=entity_type,
+                        query_text=candidate,
+                    )
+                    if result:
+                        results.append(
+                            {
+                                "entity_type": entity_type,
+                                "query_text": candidate,
+                                "resolved_value": result["resolved_value"],
+                                "display_name": result.get("display_name"),
+                            }
+                        )
+                        logger.debug(
+                            f"Found cached entity: {candidate} ({entity_type}) -> {result['resolved_value']}"
+                        )
+
+            return results
+
+        except ImportError:
+            return []
+        except Exception as e:
+            logger.warning(f"Entity lookup failed: {e}")
+            return []
 
     def _call_direct_rest(self, endpoint: str, method: str, params: dict) -> dict:
         """
@@ -822,6 +1154,24 @@ class MCPProvider(LiveDataProvider):
         # Build tools description for the LLM
         tools_desc = self._build_tools_description(tools)
 
+        # Look up any cached entity resolutions that might help
+        cached_entities = self._lookup_cached_entities(goal)
+        cached_entities_text = ""
+        if cached_entities:
+            entity_lines = []
+            for ent in cached_entities:
+                display = ent.get("display_name") or ent["query_text"]
+                entity_lines.append(
+                    f'  - {ent["entity_type"]}: "{ent["query_text"]}" = {ent["resolved_value"]} ({display})'
+                )
+            cached_entities_text = (
+                "\n\nKNOWN ENTITY IDS (use these directly, no lookup needed):\n"
+                + "\n".join(entity_lines)
+            )
+            logger.info(
+                f"MCP {self.name} agent: Found {len(cached_entities)} cached entities for query"
+            )
+
         # Track conversation history for the agent
         messages = []
         tool_results = []
@@ -833,12 +1183,14 @@ Your goal is to fetch the requested data by calling the appropriate API tools.
 
 AVAILABLE TOOLS:
 {tools_desc}
+{cached_entities_text}
 
 INSTRUCTIONS:
 1. Analyze the user's goal and determine which tool(s) to call
-2. Some queries require multiple steps (e.g., search for an ID first, then fetch details)
-3. After each tool call, you'll see the result. Decide if you need more calls or have enough data.
-4. When you have the final answer, respond with: FINAL_ANSWER: <your formatted answer>
+2. If you have a KNOWN ENTITY ID above, use it directly instead of searching
+3. Some queries require multiple steps (e.g., search for an ID first, then fetch details)
+4. After each tool call, you'll see the result. Decide if you need more calls or have enough data.
+5. When you have the final answer, respond with: FINAL_ANSWER: <your formatted answer>
 
 RESPONSE FORMAT:
 - To call a tool: TOOL_CALL: {{"tool": "tool_name", "args": {{"param": "value"}}}}
@@ -6176,6 +6528,640 @@ class GoogleMapsProvider(LiveDataProvider):
         return False, result.error or "Unknown error"
 
 
+class RoutesSmartProvider(LiveDataProvider):
+    """
+    Smart Routes Provider - high-level route/directions interface.
+
+    Unlike GoogleMapsProvider which requires structured parameters,
+    this provider accepts natural language inputs and handles:
+    - Geocoding location names to coordinates (with caching)
+    - Parsing natural time expressions ("tomorrow 9am", "Monday 3pm")
+    - Computing routes with traffic-aware timing
+
+    The designator can simply provide:
+    - origin: "London" or "10 Downing Street"
+    - destination: "Manchester Airport"
+    - departure_time: "tomorrow 9am" or "2024-01-20T09:00:00" (optional)
+    - mode: "drive", "walk", "bicycle", "transit" (optional, default: drive)
+    """
+
+    ROUTES_BASE_URL = "https://routes.googleapis.com/directions/v2"
+    GEOCODING_BASE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+
+    # Cache TTLs
+    GEOCODE_CACHE_TTL = 86400 * 30  # 30 days for geocoding (addresses rarely change)
+    ROUTE_CACHE_TTL = 300  # 5 minutes for routes (traffic changes)
+
+    def __init__(self, source: Any = None):
+        self.source = source
+        self.api_key = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+        self.name = source.name if source else "routes"
+        self.cache_ttl = source.cache_ttl_seconds if source else self.ROUTE_CACHE_TTL
+
+    def fetch(self, query: str, context: dict | None = None) -> LiveDataResult:
+        """
+        Fetch route information between two locations.
+
+        Context should contain:
+        - origin: Starting location (natural language, e.g., "London")
+        - destination: Ending location (natural language)
+        - arrival_time: Optional time to arrive BY (for transit/events)
+        - departure_time: Optional time to leave AT (for driving)
+        - mode: Optional travel mode (drive, walk, bicycle, transit)
+
+        If context is not provided, attempts to parse from query string.
+        """
+        start_time = time.time()
+
+        if not self.api_key:
+            return LiveDataResult(
+                source_name=self.name,
+                success=False,
+                error="GOOGLE_MAPS_API_KEY not configured",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Extract parameters from context or parse from query
+        if context:
+            origin = context.get("origin", "")
+            destination = context.get("destination", "")
+            arrival_time_str = context.get("arrival_time", "")
+            departure_time_str = context.get("departure_time", "")
+            mode = context.get("mode", "drive").lower()
+        else:
+            # Try to parse from query like "route from London to Manchester"
+            parsed = self._parse_route_query(query)
+            origin = parsed.get("origin", "")
+            destination = parsed.get("destination", "")
+            arrival_time_str = parsed.get("arrival_time", "")
+            departure_time_str = parsed.get("departure_time", "")
+            mode = parsed.get("mode", "drive")
+
+        if not origin or not destination:
+            return LiveDataResult(
+                source_name=self.name,
+                success=False,
+                error="Both origin and destination are required",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Normalize travel mode
+        mode_map = {
+            "drive": "DRIVE",
+            "driving": "DRIVE",
+            "car": "DRIVE",
+            "walk": "WALK",
+            "walking": "WALK",
+            "bicycle": "BICYCLE",
+            "bike": "BICYCLE",
+            "cycling": "BICYCLE",
+            "transit": "TRANSIT",
+            "public": "TRANSIT",
+            "bus": "TRANSIT",
+            "train": "TRANSIT",
+        }
+        travel_mode = mode_map.get(mode.lower(), "DRIVE")
+
+        # Parse arrival and departure times
+        arrival_time = None
+        departure_time = None
+        if arrival_time_str:
+            arrival_time = self._parse_departure_time(arrival_time_str)
+        if departure_time_str:
+            departure_time = self._parse_departure_time(departure_time_str)
+
+        try:
+            # Geocode origin and destination (with caching)
+            origin_coords = self._geocode_location(origin)
+            if not origin_coords:
+                return LiveDataResult(
+                    source_name=self.name,
+                    success=False,
+                    error=f"Could not geocode origin: {origin}",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            dest_coords = self._geocode_location(destination)
+            if not dest_coords:
+                return LiveDataResult(
+                    source_name=self.name,
+                    success=False,
+                    error=f"Could not geocode destination: {destination}",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            # Build cache key - include both arrival and departure time
+            cache_key = f"smart_route:{origin_coords}:{dest_coords}:{travel_mode}"
+            time_for_display = arrival_time or departure_time
+            if arrival_time:
+                rounded_time = (arrival_time // 900) * 900
+                cache_key += f":arr{rounded_time}"
+            if departure_time:
+                rounded_time = (departure_time // 900) * 900
+                cache_key += f":dep{rounded_time}"
+
+            # Check cache
+            if self.cache_ttl > 0:
+                cached = self.get_cached(cache_key, self.cache_ttl)
+                if cached is not None:
+                    return LiveDataResult(
+                        source_name=self.name,
+                        success=True,
+                        data=cached,
+                        formatted=self._format_route(
+                            cached,
+                            origin,
+                            destination,
+                            travel_mode,
+                            arrival_time,
+                            departure_time,
+                        ),
+                        cache_hit=True,
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
+
+            # Call Routes API
+            route_data = self._compute_route(
+                origin_coords, dest_coords, travel_mode, arrival_time, departure_time
+            )
+
+            # Cache the result
+            if self.cache_ttl > 0:
+                self.set_cached(cache_key, route_data)
+
+            return LiveDataResult(
+                source_name=self.name,
+                success=True,
+                data=route_data,
+                formatted=self._format_route(
+                    route_data,
+                    origin,
+                    destination,
+                    travel_mode,
+                    arrival_time,
+                    departure_time,
+                ),
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        except Exception as e:
+            logger.error(f"Routes API error: {e}")
+            return LiveDataResult(
+                source_name=self.name,
+                success=False,
+                error=str(e),
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+    def _geocode_location(self, location: str) -> str | None:
+        """
+        Geocode a location name to "lat,lng" string.
+
+        Uses caching to avoid repeated geocoding of the same location.
+        """
+        # Check if already coordinates
+        if self._is_coordinates(location):
+            return location
+
+        # Check cache first
+        cache_key = f"geocode:{location.lower().strip()}"
+        cached = self.get_cached(cache_key, self.GEOCODE_CACHE_TTL)
+        if cached is not None:
+            return cached
+
+        # Call Geocoding API
+        try:
+            with httpx.Client(timeout=10) as client:
+                response = client.get(
+                    self.GEOCODING_BASE_URL,
+                    params={
+                        "address": location,
+                        "key": self.api_key,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            results = data.get("results", [])
+            if not results:
+                logger.warning(f"No geocoding results for: {location}")
+                return None
+
+            # Get first result's coordinates
+            loc = results[0]["geometry"]["location"]
+            coords = f"{loc['lat']},{loc['lng']}"
+
+            # Cache the result (30 days)
+            self.set_cached(cache_key, coords)
+
+            logger.info(f"Geocoded '{location}' -> {coords}")
+            return coords
+
+        except Exception as e:
+            logger.error(f"Geocoding error for '{location}': {e}")
+            return None
+
+    def _is_coordinates(self, location: str) -> bool:
+        """Check if location string is already in lat,lng format."""
+        parts = location.replace(" ", "").split(",")
+        if len(parts) != 2:
+            return False
+        try:
+            lat = float(parts[0])
+            lng = float(parts[1])
+            return -90 <= lat <= 90 and -180 <= lng <= 180
+        except ValueError:
+            return False
+
+    def _parse_departure_time(self, time_str: str) -> int | None:
+        """
+        Parse natural language departure time to Unix timestamp.
+
+        Supports:
+        - ISO format: "2024-01-20T09:00:00"
+        - Natural: "tomorrow 9am", "Monday 3pm", "in 2 hours"
+        - Time only: "9:30", "14:00" (assumes today)
+        """
+        from datetime import timedelta
+
+        time_str = time_str.strip().lower()
+
+        # Try ISO format first
+        try:
+            dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+            return int(dt.timestamp())
+        except ValueError:
+            pass
+
+        now = datetime.now()
+
+        # Parse "in X hours/minutes"
+        in_match = re.match(r"in\s+(\d+)\s*(hour|hr|minute|min)s?", time_str)
+        if in_match:
+            amount = int(in_match.group(1))
+            unit = in_match.group(2)
+            if unit.startswith("hour") or unit.startswith("hr"):
+                return int((now + timedelta(hours=amount)).timestamp())
+            else:
+                return int((now + timedelta(minutes=amount)).timestamp())
+
+        # Parse day references
+        target_date = now
+        if "tomorrow" in time_str:
+            target_date = now + timedelta(days=1)
+            time_str = time_str.replace("tomorrow", "").strip()
+        elif "today" in time_str:
+            time_str = time_str.replace("today", "").strip()
+        else:
+            # Check for day names
+            days = [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+            ]
+            for i, day in enumerate(days):
+                if day in time_str:
+                    days_ahead = i - now.weekday()
+                    if days_ahead <= 0:
+                        days_ahead += 7
+                    target_date = now + timedelta(days=days_ahead)
+                    time_str = time_str.replace(day, "").strip()
+                    break
+
+        # Parse time component
+        time_str = time_str.strip()
+        if time_str:
+            # Handle "9am", "3pm", "14:00", "9:30am"
+            time_match = re.match(
+                r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", time_str, re.IGNORECASE
+            )
+            if time_match:
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2) or 0)
+                period = time_match.group(3)
+
+                if period:
+                    period = period.lower()
+                    if period == "pm" and hour != 12:
+                        hour += 12
+                    elif period == "am" and hour == 12:
+                        hour = 0
+
+                target_date = target_date.replace(
+                    hour=hour, minute=minute, second=0, microsecond=0
+                )
+            else:
+                # Default to 9am if no time specified
+                target_date = target_date.replace(
+                    hour=9, minute=0, second=0, microsecond=0
+                )
+        else:
+            # No time specified, use 9am
+            target_date = target_date.replace(hour=9, minute=0, second=0, microsecond=0)
+
+        return int(target_date.timestamp())
+
+    def _parse_route_query(self, query: str) -> dict:
+        """
+        Parse natural language route query into components.
+
+        Examples:
+        - "route from London to Manchester"
+        - "directions from Heathrow to Birmingham tomorrow at 9am"
+        - "how to get from Paris to Lyon by train"
+        """
+        result = {
+            "origin": "",
+            "destination": "",
+            "departure_time": "",
+            "mode": "drive",
+        }
+
+        query_lower = query.lower()
+
+        # Extract mode
+        if any(word in query_lower for word in ["train", "transit", "public", "bus"]):
+            result["mode"] = "transit"
+        elif any(word in query_lower for word in ["walk", "walking", "foot"]):
+            result["mode"] = "walk"
+        elif any(word in query_lower for word in ["bike", "bicycle", "cycling"]):
+            result["mode"] = "bicycle"
+
+        # Try to extract origin and destination
+        # Pattern: "from X to Y"
+        from_to_match = re.search(
+            r"from\s+(.+?)\s+to\s+(.+?)(?:\s+(?:by|at|on|tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)|\s*$)",
+            query,
+            re.IGNORECASE,
+        )
+        if from_to_match:
+            result["origin"] = from_to_match.group(1).strip()
+            result["destination"] = from_to_match.group(2).strip()
+
+        # Extract time references
+        time_patterns = [
+            r"(tomorrow\s+(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?))",
+            r"(today\s+(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?))",
+            r"((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+(?:at\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?))",
+            r"(at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)",
+            r"(in\s+\d+\s*(?:hour|hr|minute|min)s?)",
+        ]
+        for pattern in time_patterns:
+            time_match = re.search(pattern, query, re.IGNORECASE)
+            if time_match:
+                result["departure_time"] = time_match.group(1).strip()
+                break
+
+        return result
+
+    def _compute_route(
+        self,
+        origin_coords: str,
+        dest_coords: str,
+        travel_mode: str,
+        arrival_time: int | None,
+        departure_time: int | None,
+    ) -> dict:
+        """Call Google Routes API to compute the route."""
+        # Parse coordinates
+        origin_lat, origin_lng = map(float, origin_coords.split(","))
+        dest_lat, dest_lng = map(float, dest_coords.split(","))
+
+        request_body = {
+            "origin": {
+                "location": {
+                    "latLng": {"latitude": origin_lat, "longitude": origin_lng}
+                }
+            },
+            "destination": {
+                "location": {"latLng": {"latitude": dest_lat, "longitude": dest_lng}}
+            },
+            "travelMode": travel_mode,
+            "computeAlternativeRoutes": True,
+            "languageCode": "en",
+            "units": "METRIC",
+        }
+
+        # routingPreference is only valid for DRIVE and TWO_WHEELER modes
+        if travel_mode in ["DRIVE", "TWO_WHEELER"]:
+            request_body["routingPreference"] = "TRAFFIC_AWARE"
+
+        # Add arrival or departure time (arrival takes precedence for transit)
+        # Note: Google Routes API only allows one of arrivalTime or departureTime
+        if arrival_time:
+            time_str = datetime.utcfromtimestamp(arrival_time).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            request_body["arrivalTime"] = time_str
+        elif departure_time:
+            time_str = datetime.utcfromtimestamp(departure_time).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            request_body["departureTime"] = time_str
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": self.api_key,
+            "X-Goog-FieldMask": "routes.duration,routes.staticDuration,routes.distanceMeters,routes.polyline,routes.legs,routes.travelAdvisory,routes.description,routes.routeLabels",
+        }
+
+        with httpx.Client(timeout=15) as client:
+            response = client.post(
+                f"{self.ROUTES_BASE_URL}:computeRoutes",
+                headers=headers,
+                json=request_body,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    def _format_route(
+        self,
+        data: dict,
+        origin: str,
+        destination: str,
+        travel_mode: str,
+        arrival_time: int | None,
+        departure_time: int | None,
+    ) -> str:
+        """Format route data for context injection."""
+        routes = data.get("routes", [])
+        if not routes:
+            return f"### Route: {origin} → {destination}\nNo route found."
+
+        mode_names = {
+            "DRIVE": "Driving",
+            "WALK": "Walking",
+            "BICYCLE": "Cycling",
+            "TRANSIT": "Transit",
+        }
+        mode_name = mode_names.get(travel_mode, travel_mode.title())
+
+        lines = [f"### {mode_name} Route: {origin} → {destination}"]
+
+        # Add arrival or departure time if specified
+        if arrival_time:
+            dt = datetime.fromtimestamp(arrival_time)
+            lines.append(f"**Arrive by:** {dt.strftime('%A, %B %d at %I:%M %p')}")
+            lines.append("")
+        elif departure_time:
+            dt = datetime.fromtimestamp(departure_time)
+            lines.append(f"**Depart at:** {dt.strftime('%A, %B %d at %I:%M %p')}")
+            lines.append("")
+
+        # Show primary route
+        route = routes[0]
+        lines.extend(self._format_single_route(route, is_primary=True))
+
+        # Show alternatives if available
+        if len(routes) > 1:
+            lines.append("\n---")
+            lines.append(f"**Alternative Routes ({len(routes) - 1} available):**")
+            for i, alt_route in enumerate(routes[1:3], 1):  # Show up to 2 alternatives
+                lines.append(f"\n**Option {i + 1}:**")
+                lines.extend(self._format_single_route(alt_route, is_primary=False))
+
+        return "\n".join(lines)
+
+    def _format_single_route(self, route: dict, is_primary: bool) -> list[str]:
+        """Format a single route."""
+        lines = []
+
+        # Duration (with traffic)
+        duration = route.get("duration", "")
+        static_duration = route.get("staticDuration", "")
+
+        if duration:
+            duration_str = self._format_duration(duration)
+            if static_duration and static_duration != duration:
+                static_str = self._format_duration(static_duration)
+                # Calculate delay due to traffic
+                traffic_delay = self._get_seconds(duration) - self._get_seconds(
+                    static_duration
+                )
+                if traffic_delay > 60:  # Only show if more than 1 minute delay
+                    delay_str = self._format_duration(f"{traffic_delay}s")
+                    lines.append(
+                        f"**Duration:** {duration_str} (normally {static_str}, +{delay_str} due to traffic)"
+                    )
+                else:
+                    lines.append(f"**Duration:** {duration_str}")
+            else:
+                lines.append(f"**Duration:** {duration_str}")
+
+        # Distance
+        distance = route.get("distanceMeters", 0)
+        if distance:
+            if distance >= 1000:
+                lines.append(
+                    f"**Distance:** {distance / 1000:.1f} km ({distance / 1609.34:.1f} miles)"
+                )
+            else:
+                lines.append(f"**Distance:** {distance} m")
+
+        # Route description (via road)
+        description = route.get("description")
+        if description:
+            lines.append(f"**Via:** {description}")
+
+        # Route labels (e.g., "FUEL_EFFICIENT")
+        labels = route.get("routeLabels", [])
+        if labels:
+            label_map = {
+                "FUEL_EFFICIENT": "🌿 Most fuel efficient",
+                "DEFAULT_ROUTE": "⭐ Recommended",
+                "DEFAULT_ROUTE_ALTERNATE": "Alternative",
+            }
+            label_strs = [label_map.get(l, l) for l in labels]
+            lines.append(f"**Type:** {', '.join(label_strs)}")
+
+        # Traffic/travel advisory
+        advisory = route.get("travelAdvisory", {})
+        if advisory.get("tollInfo"):
+            lines.append("⚠️ **Note:** Route includes tolls")
+
+        # Step-by-step directions for primary route
+        if is_primary:
+            legs = route.get("legs", [])
+            if legs:
+                lines.append("\n**Turn-by-turn directions:**")
+                step_num = 1
+                for leg in legs:
+                    steps = leg.get("steps", [])
+                    for step in steps[:15]:  # Limit to 15 steps
+                        instruction = step.get("navigationInstruction", {})
+                        instructions_text = instruction.get("instructions", "")
+
+                        step_distance = step.get("distanceMeters", 0)
+                        if step_distance >= 1000:
+                            dist_str = f"{step_distance / 1000:.1f} km"
+                        elif step_distance > 0:
+                            dist_str = f"{step_distance} m"
+                        else:
+                            dist_str = ""
+
+                        if instructions_text:
+                            if dist_str:
+                                lines.append(
+                                    f"  {step_num}. {instructions_text} ({dist_str})"
+                                )
+                            else:
+                                lines.append(f"  {step_num}. {instructions_text}")
+                            step_num += 1
+
+                    total_steps = sum(len(leg.get("steps", [])) for leg in legs)
+                    if total_steps > 15:
+                        lines.append(f"  ... and {total_steps - 15} more steps")
+
+        return lines
+
+    def _format_duration(self, duration_str: str) -> str:
+        """Format duration string (e.g., '3600s') to human readable."""
+        seconds = self._get_seconds(duration_str)
+        hours, remainder = divmod(seconds, 3600)
+        minutes = remainder // 60
+
+        if hours > 0:
+            if minutes > 0:
+                return f"{hours}h {minutes}min"
+            return f"{hours}h"
+        return f"{minutes} min"
+
+    def _get_seconds(self, duration_str: str) -> int:
+        """Extract seconds from duration string like '3600s'."""
+        if isinstance(duration_str, str):
+            return int(duration_str.rstrip("s"))
+        return int(duration_str)
+
+    def get_cached(self, key: str, ttl: int) -> Any:
+        """Get value from cache if not expired."""
+        if key in _cache:
+            value, timestamp = _cache[key]
+            if time.time() - timestamp < ttl:
+                return value
+        return None
+
+    def set_cached(self, key: str, value: Any) -> None:
+        """Set value in cache."""
+        _cache[key] = (value, time.time())
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+    def test_connection(self) -> tuple[bool, str]:
+        if not self.api_key:
+            return False, "GOOGLE_MAPS_API_KEY not set"
+
+        # Test geocoding
+        coords = self._geocode_location("London, UK")
+        if coords:
+            return True, f"Connected. Geocoded 'London, UK' -> {coords}"
+        return False, "Failed to geocode test location"
+
+
 def get_provider_for_source(source: Any) -> LiveDataProvider:
     """
     Get the appropriate provider for a LiveDataSource.
@@ -6200,6 +7186,8 @@ def get_provider_for_source(source: Any) -> LiveDataProvider:
         return TransportProvider(source)
     elif source_type == "builtin_google_maps":
         return GoogleMapsProvider(source)
+    elif source_type == "builtin_routes":
+        return RoutesSmartProvider(source)
     elif source_type == "google_calendar_live":
         return GoogleCalendarLiveProvider(source)
     elif source_type == "google_tasks_live":

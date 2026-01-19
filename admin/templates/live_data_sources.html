@@ -694,7 +694,7 @@ block content %}
                     <label class="label"
                         ><span
                             class="label-text-alt"
-                            x-text="form.source_type.startsWith('google_') ? 'Requires connected Google account' : (form.source_type === 'oura_live' ? 'Requires connected Oura account' : (form.source_type === 'withings_live' ? 'Requires connected Withings account' : 'MCP sources auto-discover API endpoints'))"
+                            x-text="form.source_type.startsWith('google_') ? 'Requires connected Google account' : (form.source_type === 'oura_live' ? 'Requires connected Oura account' : (form.source_type === 'withings_live' ? 'Requires connected Withings account' : (form.source_type.startsWith('builtin_') ? 'Requires GOOGLE_MAPS_API_KEY environment variable' : 'MCP sources auto-discover API endpoints')))"
                         ></span
                     ></label>
                 </div>
@@ -2111,6 +2111,7 @@ block content %}
                     builtin_weather: "Weather",
                     builtin_transport: "Transport",
                     builtin_google_maps: "Google Maps",
+                    builtin_routes: "Routes (Smart)",
                     google_calendar_live: "Google Calendar",
                     google_tasks_live: "Google Tasks",
                     google_gmail_live: "Gmail",

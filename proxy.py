@@ -238,6 +238,8 @@ def track_completion(
     cache_name: str | None = None,
     cache_tokens_saved: int = 0,
     cache_cost_saved: float = 0.0,
+    # Request type tracking (v3.11)
+    request_type: str = "main",
 ):
     """
     Track a completed request.
@@ -265,6 +267,7 @@ def track_completion(
         cache_name: Name of cache entity if cache hit
         cache_tokens_saved: Output tokens saved by cache hit
         cache_cost_saved: Estimated cost saved by cache hit
+        request_type: Type of request (v3.11): "inbound", "main", "designator", "embedding"
     """
     from flask import g
 
@@ -313,6 +316,7 @@ def track_completion(
         cache_name=cache_name,
         cache_tokens_saved=cache_tokens_saved,
         cache_cost_saved=cache_cost_saved,
+        request_type=request_type,
     )
 
 
@@ -375,6 +379,50 @@ def log_designator_usage(resolved, endpoint: str, tag: str = ""):
         cost=usage.get("cost"),
         is_designator=True,
         router_name=resolved.router_name,
+        request_type="designator",
+    )
+
+
+def log_inbound_request(
+    model_name: str,
+    endpoint: str,
+    tag: str | None = None,
+):
+    """
+    Log an inbound client request before processing.
+
+    This creates a request_type="inbound" entry to track what clients
+    are requesting, separate from the actual LLM calls made.
+
+    Args:
+        model_name: The model name requested by the client (before resolution)
+        endpoint: The API endpoint being called
+        tag: Request tag (if already extracted)
+    """
+    from flask import g
+
+    client_ip = getattr(g, "client_ip", "unknown")
+    hostname = resolve_hostname(client_ip)
+
+    # Extract tag if not provided
+    if tag is None:
+        tag, _ = extract_tag(request, model_name)
+
+    tracker.log_request(
+        timestamp=datetime.now(timezone.utc),
+        client_ip=client_ip,
+        hostname=hostname,
+        tag=tag,
+        provider_id="client",  # Special provider for inbound
+        model_id=model_name,  # The requested model (before resolution)
+        endpoint=endpoint,
+        input_tokens=0,
+        output_tokens=0,
+        response_time_ms=0,
+        status_code=0,  # Not yet known
+        error_message=None,
+        is_streaming=False,
+        request_type="inbound",
     )
 
 
@@ -1043,6 +1091,9 @@ def chat():
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
 
+    # Log inbound request (before resolution/processing)
+    log_inbound_request(model_name, "/api/chat", tag)
+
     # Convert messages for resolution (needed for smart routers)
     ollama_messages = data.get("messages", [])
     system_prompt, messages = convert_ollama_messages(ollama_messages)
@@ -1133,12 +1184,40 @@ def chat():
                 increment_scrape=1 if enrichment_result.scraped_urls else 0,
             )
 
-        # Log designator usage for enricher (if web search was used)
-        if enrichment_result.designator_usage:
+        # Log designator usage for enricher - log each call separately
+        designator_calls = getattr(enrichment_result, "designator_calls", [])
+        if designator_calls:
+            designator_model = enrichment_result.designator_model or "unknown"
+
+            # Merge enricher tags with request tags for designator logging
+            designator_tag = tag
+            if enricher_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + enricher_tags))
+                designator_tag = ",".join(all_tags)
+
+            for call in designator_calls:
+                track_completion(
+                    provider_id=designator_model.split("/")[0]
+                    if "/" in designator_model
+                    else "unknown",
+                    model_id=designator_model.split("/")[1]
+                    if "/" in designator_model
+                    else designator_model,
+                    model_name=designator_model,
+                    endpoint="/api/chat",
+                    input_tokens=call.get("prompt_tokens", 0),
+                    output_tokens=call.get("completion_tokens", 0),
+                    status_code=200,
+                    tag=designator_tag,
+                    is_designator=True,
+                    request_type="designator",
+                )
+        # Fallback for legacy single designator_usage (shouldn't happen with new code)
+        elif enrichment_result.designator_usage:
             designator_model = enrichment_result.designator_model or "unknown"
             designator_usage = enrichment_result.designator_usage
 
-            # Merge enricher tags with request tags for designator logging
             designator_tag = tag
             if enricher_tags:
                 existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
@@ -1159,6 +1238,7 @@ def chat():
                 status_code=200,
                 tag=designator_tag,
                 is_designator=True,
+                request_type="designator",
             )
 
         # Log embedding usage for paid providers (OpenAI)
@@ -1185,6 +1265,7 @@ def chat():
                 output_tokens=0,
                 status_code=200,
                 tag=embed_tag,
+                request_type="embedding",
             )
 
     # Log designator usage for smart routers (v3.2)
@@ -1643,6 +1724,9 @@ def generate():
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
 
+    # Log inbound request (before resolution/processing)
+    log_inbound_request(model_name, "/api/generate", tag)
+
     prompt = data.get("prompt", "")
     system = data.get("system", None)
 
@@ -1951,6 +2035,9 @@ def openai_chat_completions():
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
 
+    # Log inbound request (before resolution/processing)
+    log_inbound_request(model_name, "/v1/chat/completions", tag)
+
     # Convert messages for resolution (needed for smart routers)
     openai_messages = data.get("messages", [])
     system_prompt, messages = convert_openai_messages(openai_messages)
@@ -2049,12 +2136,40 @@ def openai_chat_completions():
                 increment_scrape=1 if enrichment_result.scraped_urls else 0,
             )
 
-        # Log designator usage for enricher (if web search was used)
-        if enrichment_result.designator_usage:
+        # Log designator usage for enricher - log each call separately
+        designator_calls = getattr(enrichment_result, "designator_calls", [])
+        if designator_calls:
+            designator_model = enrichment_result.designator_model or "unknown"
+
+            # Merge enricher tags with request tags for designator logging
+            designator_tag = tag
+            if enricher_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + enricher_tags))
+                designator_tag = ",".join(all_tags)
+
+            for call in designator_calls:
+                track_completion(
+                    provider_id=designator_model.split("/")[0]
+                    if "/" in designator_model
+                    else "unknown",
+                    model_id=designator_model.split("/")[1]
+                    if "/" in designator_model
+                    else designator_model,
+                    model_name=designator_model,
+                    endpoint="/v1/chat/completions",
+                    input_tokens=call.get("prompt_tokens", 0),
+                    output_tokens=call.get("completion_tokens", 0),
+                    status_code=200,
+                    tag=designator_tag,
+                    is_designator=True,
+                    request_type="designator",
+                )
+        # Fallback for legacy single designator_usage
+        elif enrichment_result.designator_usage:
             designator_model = enrichment_result.designator_model or "unknown"
             designator_usage = enrichment_result.designator_usage
 
-            # Merge enricher tags with request tags for designator logging
             designator_tag = tag
             if enricher_tags:
                 existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
@@ -2075,6 +2190,7 @@ def openai_chat_completions():
                 status_code=200,
                 tag=designator_tag,
                 is_designator=True,
+                request_type="designator",
             )
 
         # Log embedding usage for paid providers (OpenAI)
@@ -2101,6 +2217,7 @@ def openai_chat_completions():
                 output_tokens=0,
                 status_code=200,
                 tag=embed_tag,
+                request_type="embedding",
             )
 
     # Log designator usage for smart routers (v3.2)
@@ -2604,6 +2721,9 @@ def openai_completions():
 
     # Extract tag early so we use clean model name for resolution
     tag, clean_model_name = extract_tag(request, model_name)
+
+    # Log inbound request (before resolution/processing)
+    log_inbound_request(model_name, "/v1/completions", tag)
 
     prompt = data.get("prompt", "")
     if isinstance(prompt, list):

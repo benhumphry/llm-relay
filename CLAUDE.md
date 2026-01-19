@@ -562,3 +562,61 @@ GOOGLE_SCOPES = {
 
 ### Known Issues
 - Users need to re-authenticate Google accounts to get `gmail.modify` and `calendar` scopes
+
+---
+
+## Development Session (2026-01-19) - Smart Routes Provider
+
+### Routes Smart Provider (`live/sources.py`)
+
+New high-level `RoutesSmartProvider` class that simplifies journey planning:
+
+**Features:**
+- Accepts natural language locations ("London", "Loftus Road Stadium")
+- Automatic geocoding with 30-day caching
+- Natural time parsing ("tomorrow 9am", "Saturday 3pm", "in 2 hours")
+- Supports both `arrival_time` (arrive BY) and `departure_time` (leave AT)
+- Multiple travel modes: drive, walk, bicycle, transit
+- Transit mode uses Google Routes API with full public transport connections
+- Traffic-aware routing for driving
+- Alternative routes returned
+- Turn-by-turn directions formatted for context injection
+
+**Parameters:**
+```python
+{
+    "origin": "Harpenden",
+    "destination": "Loftus Road Stadium",
+    "arrival_time": "Saturday 3pm",  # OR departure_time, OR neither
+    "mode": "transit"  # drive|walk|bicycle|transit
+}
+```
+
+**Auto-creation:**
+- Source auto-created when `GOOGLE_MAPS_API_KEY` is set
+- Registered as `builtin_routes` source type
+- Designator hint guides usage: arrival_time for events, departure_time for leaving
+
+**Key fixes during development:**
+1. `routingPreference: "TRAFFIC_AWARE"` only valid for DRIVE mode (caused 400 error for transit)
+2. Transit routes should use `arrivalTime` not `departureTime` for event-based queries
+3. Separated arrival_time and departure_time as distinct parameters
+
+### Files Modified
+- `live/sources.py` - Added `RoutesSmartProvider` class (~600 lines)
+- `db/live_data_sources.py` - Auto-create `routes` source when API key present
+- `routing/smart_enricher.py` - Added param hints for routes and transport providers
+- `admin/templates/live_data_sources.html` - Updated type labels
+
+### Designator Guidance Updates
+
+Updated param hints to guide the designator:
+- **routes**: "PREFER THIS for all journey planning" with arrival_time/departure_time options
+- **transport**: "UK train departures ONLY - for full journey planning use routes with mode=transit"
+- **google-maps**: "For directions/routes, use routes source instead"
+
+### Current State
+- Dev container has all changes deployed
+- Routes provider tested with driving and transit modes
+- Geocoding caching working (30-day TTL)
+- Arrival time correctly used for transit (calculates backwards from event time)

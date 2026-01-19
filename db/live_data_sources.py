@@ -470,6 +470,21 @@ def seed_builtin_sources() -> list[str]:
             created.append("google-maps")
             logger.info("Created built-in 'google-maps' live data source")
 
+        # Routes (Smart) - higher-level interface with geocoding
+        existing = get_live_data_source_by_name("routes")
+        if not existing:
+            create_live_data_source(
+                name="routes",
+                source_type="builtin_routes",
+                description="Smart route planning with automatic geocoding and natural time parsing",
+                data_type="location",
+                best_for="Driving directions, travel time between cities, route planning, commute estimates",
+                cache_ttl_seconds=300,  # 5 minutes for routes (traffic changes)
+                enabled=True,
+            )
+            created.append("routes")
+            logger.info("Created built-in 'routes' live data source")
+
     # Open-Meteo (always available - no API key required)
     existing = get_live_data_source_by_name("open-meteo")
     if not existing:

@@ -550,6 +550,13 @@ def _run_migrations(engine) -> None:
                     "ALTER TABLE request_logs ADD COLUMN cache_cost_saved REAL DEFAULT 0.0",
                 )
             )
+        if "request_type" not in existing_columns:
+            migrations.append(
+                (
+                    "request_type",
+                    "ALTER TABLE request_logs ADD COLUMN request_type VARCHAR(20) DEFAULT 'main'",
+                )
+            )
 
         if migrations:
             logger.info(

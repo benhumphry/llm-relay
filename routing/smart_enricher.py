@@ -45,8 +45,13 @@ class EnrichmentResult:
     # Web-specific metadata
     search_query: str | None = None
     scraped_urls: list[str] = field(default_factory=list)
-    designator_usage: dict | None = None
+    designator_usage: dict | None = (
+        None  # Aggregated usage (prompt_tokens, completion_tokens)
+    )
     designator_model: str | None = None
+    designator_calls: list[dict] = field(
+        default_factory=list
+    )  # Individual call records
 
     # Live data metadata
     live_sources_queried: list[str] = field(default_factory=list)
@@ -209,6 +214,8 @@ class SmartEnricherEngine:
             augmented_system=system,
             augmented_messages=messages,
             session_key=session_key,
+            # Set designator model upfront if configured
+            designator_model=self.enricher.designator_model,
         )
 
         # Smart source selection - let designator choose which sources to use
@@ -243,6 +250,13 @@ class SmartEnricherEngine:
                 )  # Pre-computed search query
                 live_params = selection.get("live_params")  # Live data params
                 selected_model = selection.get("selected_model")  # Routed model
+
+                # Capture source selection designator usage
+                if selection.get("designator_usage"):
+                    result_metadata.designator_calls.append(
+                        selection["designator_usage"]
+                    )
+                # Note: designator_model already set in constructor from self.enricher.designator_model
 
                 # If routing selected a model, update the resolved target
                 if selected_model:
@@ -338,8 +352,12 @@ class SmartEnricherEngine:
             # Copy web metadata
             result_metadata.search_query = web_metadata.get("search_query")
             result_metadata.scraped_urls = web_metadata.get("scraped_urls", [])
-            result_metadata.designator_usage = web_metadata.get("designator_usage")
-            result_metadata.designator_model = web_metadata.get("designator_model")
+            # Capture web search designator usage
+            if web_metadata.get("designator_usage"):
+                web_usage = web_metadata["designator_usage"].copy()
+                web_usage["purpose"] = "web_search_query"
+                result_metadata.designator_calls.append(web_usage)
+            # Note: designator_model already set in constructor from self.enricher.designator_model
 
         # Process Live data results
         if use_live_data:
@@ -477,6 +495,19 @@ class SmartEnricherEngine:
                         )
                 except Exception as e:
                     logger.warning(f"Failed to inject action instructions: {e}")
+
+        # Aggregate designator calls into total usage
+        if result_metadata.designator_calls:
+            total_prompt = sum(
+                c.get("prompt_tokens", 0) for c in result_metadata.designator_calls
+            )
+            total_completion = sum(
+                c.get("completion_tokens", 0) for c in result_metadata.designator_calls
+            )
+            result_metadata.designator_usage = {
+                "prompt_tokens": total_prompt,
+                "completion_tokens": total_completion,
+            }
 
         return result_metadata
 
@@ -687,6 +718,9 @@ class SmartEnricherEngine:
                                 mcp_tool_info.append(
                                     {
                                         "source_name": name,
+                                        "source_description": description,
+                                        "source_data_type": data_type,
+                                        "source_best_for": best_for,
                                         "tool_name": tool_name,
                                         "description": tool_desc,
                                         "params": param_parts,
@@ -707,9 +741,13 @@ class SmartEnricherEngine:
                 elif source_type == "builtin_alpha_vantage":
                     param_hints = "Parameters: symbol (UK stock ticker like LGEN.LON, TSCO.LON, or fund name like 'L&G Global Technology'), period (optional: 1W, 1M, 3M, 6M, 1Y for historical data)"
                 elif source_type == "builtin_transport":
-                    param_hints = "Parameters: station (DEPARTURE station - use user's home location from context), destination (optional), type (departures|arrivals)"
+                    param_hints = "Parameters: station (DEPARTURE station - use user's home location from context), destination (optional), type (departures|arrivals). UK train departures ONLY - for full journey planning with connections, use 'routes' with mode=transit instead."
                 elif source_type == "gmail":
                     param_hints = "Parameters: action (today|unread|recent|search). Use action='today' for today's emails, action='unread' for unread, action='search' with query for specific searches (e.g. from:sender subject:topic)"
+                elif source_type == "builtin_routes":
+                    param_hints = "Parameters: origin, destination, mode (drive|walk|bicycle|transit). Optional: arrival_time (ARRIVE BY - for events like '3pm kick off') OR departure_time (LEAVE AT) - use one, the other, or neither. PREFER THIS for all journey planning."
+                elif source_type == "builtin_google_maps":
+                    param_hints = "Parameters: action (search|details|nearby|directions), query (search term), location (lat,lng or address), place_id (for details). Use for places search, business info, nearby POIs. For directions between cities, prefer 'routes' source instead."
 
                 live_source_info.append(
                     {
@@ -805,25 +843,44 @@ class SmartEnricherEngine:
         if mcp_tool_info:
             # Group tools by source
             mcp_by_source: dict[str, list] = {}
+            mcp_source_meta: dict[str, dict] = {}  # Store source-level metadata
             for tool in mcp_tool_info:
                 src = tool["source_name"]
                 if src not in mcp_by_source:
                     mcp_by_source[src] = []
+                    mcp_source_meta[src] = {
+                        "description": tool.get("source_description", ""),
+                        "data_type": tool.get("source_data_type", ""),
+                        "best_for": tool.get("source_best_for", ""),
+                    }
                 mcp_by_source[src].append(tool)
 
             sources_text += "MCP API TOOLS (call specific API endpoints):\n"
+            sources_text += "IMPORTANT: Most MCP APIs require ID lookups. Use agentic mode for multi-step queries:\n"
+            sources_text += '  {"source_name": [{"agentic": true, "goal": "describe what you need"}]}\n'
             sources_text += (
-                '(Use source_name in live_params with "tool_name" and "tool_args")\n'
+                "Or call specific tools directly if you know the parameters:\n"
             )
+            sources_text += '  {"source_name": [{"tool_name": "ToolName", "tool_args": {"param": "value"}}]}\n\n'
+
             for src_name, tools in mcp_by_source.items():
-                sources_text += f"\n{src_name} API:\n"
-                for tool in tools[:10]:  # Limit to 10 tools per source
-                    sources_text += f"  - {tool['tool_name']}: {tool['description']}\n"
+                meta = mcp_source_meta.get(src_name, {})
+                sources_text += f"{src_name} API"
+                if meta.get("data_type"):
+                    sources_text += f" [{meta['data_type']}]"
+                sources_text += f" ({len(tools)} tools):\n"
+                if meta.get("description"):
+                    sources_text += f"  Description: {meta['description']}\n"
+                if meta.get("best_for"):
+                    sources_text += f"  Best for: {meta['best_for']}\n"
+                sources_text += "  Tools:\n"
+                for tool in tools:  # Show ALL tools - designator has large context
+                    sources_text += (
+                        f"    - {tool['tool_name']}: {tool['description']}\n"
+                    )
                     if tool.get("params"):
-                        sources_text += f"    Required: {', '.join(tool['params'])}\n"
-                if len(tools) > 10:
-                    sources_text += f"  ... and {len(tools) - 10} more tools\n"
-            sources_text += "\n"
+                        sources_text += f"      Required: {', '.join(tool['params'])}\n"
+                sources_text += "\n"
 
         # Get total context budget - designator allocates the full budget
         max_context = getattr(self.enricher, "max_context_tokens", 4000)
@@ -907,12 +964,14 @@ Rules:
   - Multiple stocks (portfolio): {{"stocks": [{{"symbol": "NVDA"}}, {{"symbol": "U"}}, {{"symbol": "AAPL"}}]}}
   - Multi-city weather: {{"weather": [{{"location": "London"}}, {{"location": "Paris"}}]}}
   - Multi-leg train journey: {{"transport": [{{"station": "KGX"}}, {{"station": "EDB"}}]}}
-  Examples for MCP API tools:
-  - MCP tool call: {{"rapidapi-news": [{{"tool_name": "search", "tool_args": {{"query": "technology"}}}}]}}
-  - Multiple MCP calls: {{"rapidapi-finance": [{{"tool_name": "getQuote", "tool_args": {{"symbol": "AAPL"}}}}, {{"tool_name": "getQuote", "tool_args": {{"symbol": "MSFT"}}}}]}}
-  - Multi-step lookup (when API requires ID lookup first): {{"rapidapi-weather": [{{"agentic": true, "goal": "get weather for Paris"}}]}}
+  Examples for MCP API tools (PREFER agentic mode - most APIs require ID lookups):
+  - Sports data (needs team/event lookup): {{"sofasport": [{{"agentic": true, "goal": "get latest QPR match results and upcoming fixtures"}}]}}
+  - News search: {{"google-news-mcp": [{{"tool_name": "Search", "tool_args": {{"keyword": "technology"}}}}]}}
+  - Finance data: {{"yahoo-finance15": [{{"agentic": true, "goal": "get Apple stock price and recent performance"}}]}}
+  - Direct tool call (when you know exact params): {{"source": [{{"tool_name": "ToolName", "tool_args": {{"id": "123"}}}}]}}
 - If no live data needed, use empty object: "live_params": {{}}{routing_rules}
-- Live data sources provide real-time API data. PREFER live data sources over web search when a matching source exists (e.g., use MCP tools for news queries, stocks for stock prices, weather for weather)
+- Live data sources provide real-time API data. PREFER live data sources over web search when a matching source exists.
+- For MCP APIs, PREFER agentic mode when the query involves entities that need ID lookups (teams, players, companies, locations).
 - TIP: It's better to allocate the full budget across multiple sources than to leave budget unused
 
 Respond with ONLY the JSON object."""
@@ -1063,6 +1122,13 @@ Respond with ONLY the JSON object."""
                     f"selected_model={selected_model}"
                 )
 
+                # Capture designator usage
+                designator_usage = {
+                    "prompt_tokens": result.get("input_tokens", 0),
+                    "completion_tokens": result.get("output_tokens", 0),
+                    "purpose": "source_selection",
+                }
+
                 return {
                     "use_rag": use_rag,
                     "use_web": use_web,
@@ -1073,6 +1139,8 @@ Respond with ONLY the JSON object."""
                     "search_query": search_query,
                     "live_params": final_live_params if final_live_params else None,
                     "selected_model": selected_model,
+                    "designator_usage": designator_usage,
+                    "designator_model": self.enricher.designator_model,
                 }
 
             logger.warning(
@@ -1203,7 +1271,6 @@ Respond with ONLY the JSON object."""
             "search_query": None,
             "scraped_urls": [],
             "designator_usage": None,
-            "designator_model": None,
         }
 
         # Use pre-computed search query if provided, otherwise generate one
@@ -1218,7 +1285,6 @@ Respond with ONLY the JSON object."""
             else:
                 search_query = query
             metadata["designator_usage"] = designator_usage
-            metadata["designator_model"] = self.enricher.designator_model
         else:
             search_query = query
 

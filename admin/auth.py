@@ -207,3 +207,36 @@ def require_auth_api(f):
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+def require_widget_api_key(f):
+    """
+    Decorator to require widget API key authentication.
+
+    Checks for X-API-Key header against WIDGET_API_KEY environment variable.
+    Used for external dashboard widgets (Homepage, etc.) that need read-only
+    access to statistics without full admin authentication.
+
+    If WIDGET_API_KEY is not set, the endpoint is disabled and returns 503.
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        expected_key = os.environ.get("WIDGET_API_KEY")
+
+        if not expected_key:
+            return {
+                "error": "Widget API not configured. Set WIDGET_API_KEY environment variable."
+            }, 503
+
+        provided_key = request.headers.get("X-API-Key")
+
+        if not provided_key:
+            return {"error": "X-API-Key header required"}, 401
+
+        if not secrets.compare_digest(provided_key, expected_key):
+            return {"error": "Invalid API key"}, 401
+
+        return f(*args, **kwargs)
+
+    return decorated_function

@@ -553,6 +553,13 @@ class RequestLog(Base):
         String(100), nullable=True, index=True
     )
 
+    # Request type tracking (v3.11)
+    # "inbound" = client request received, "main" = primary LLM call,
+    # "designator" = routing/source selection call, "embedding" = embedding call
+    request_type: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, index=True, default="main"
+    )
+
     # Smart augmentor tracking (v3.5)
     augmentor_name: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
@@ -631,6 +638,7 @@ class RequestLog(Base):
             "tag": self.tag,
             "alias": self.alias,
             "is_designator": self.is_designator,
+            "request_type": self.request_type,
             "router_name": self.router_name,
             "provider_id": self.provider_id,
             "model_id": self.model_id,

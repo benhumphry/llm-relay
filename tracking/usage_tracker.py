@@ -82,6 +82,8 @@ class UsageTracker:
         cache_name: Optional[str] = None,
         cache_tokens_saved: int = 0,
         cache_cost_saved: float = 0.0,
+        # Request type tracking (v3.11)
+        request_type: str = "main",  # "inbound", "main", "designator", "embedding"
     ):
         """
         Queue a request log entry.
@@ -112,6 +114,7 @@ class UsageTracker:
             cache_name: Name of cache entity (alias/router/etc) if cache hit
             cache_tokens_saved: Output tokens saved by cache hit
             cache_cost_saved: Estimated cost saved by cache hit
+            request_type: Type of request (v3.11): "inbound", "main", "designator", "embedding"
         """
         if not self._is_tracking_enabled():
             return
@@ -143,6 +146,7 @@ class UsageTracker:
                 "cache_name": cache_name,
                 "cache_tokens_saved": cache_tokens_saved,
                 "cache_cost_saved": cache_cost_saved,
+                "request_type": request_type,
             }
         )
 
@@ -218,6 +222,7 @@ class UsageTracker:
                     cost=cost,
                     is_designator=entry.get("is_designator", False),  # v3.2
                     router_name=entry.get("router_name"),  # v3.2
+                    request_type=entry.get("request_type", "main"),  # v3.11
                     # Cache tracking (v1.6)
                     is_cache_hit=entry.get("is_cache_hit", False),
                     cache_name=entry.get("cache_name"),
