@@ -184,6 +184,7 @@ Indexed document collections for RAG. Documents are parsed, chunked, and embedde
 - `notion` - Notion via direct REST API
 - `nextcloud` - Nextcloud via WebDAV
 - `mcp:github` - GitHub via REST API
+- `slack` - Slack via Bot OAuth
 
 **Key settings:**
 - `embedding_provider` / `embedding_model` - How to embed chunks
@@ -437,3 +438,127 @@ This ensures the original refresh_token is preserved when Google doesn't return 
 - Dev container (`llm-relay-dev`) has all changes deployed
 - 4 new database migrations ran successfully for gtasks/gcontacts columns
 - OAuth fix deployed - existing accounts should now maintain their refresh tokens
+
+---
+
+## Development Session (2026-01-19) - Smart Actions, Scheduled Prompts, Bug Fixes
+
+### Smart Actions Completed
+
+Full implementation of the Smart Actions system with multiple action handlers:
+
+**Email Actions (`actions/handlers/email.py`):**
+- `draft_new`, `draft_reply`, `draft_forward` - Create drafts
+- `send_new`, `send_reply`, `send_forward` - Send immediately
+- `mark_read`, `mark_unread` - Toggle read status
+- `archive` - Archive messages
+- `label` - Add/remove labels
+
+**Calendar Actions (`actions/handlers/calendar.py`):**
+- `create` - Create calendar events
+- `update` - Modify existing events
+- `delete` - Delete events
+
+**Notification Actions (`actions/handlers/notification.py`):**
+- `push` - Send push notifications via configured webhook URLs
+
+**Schedule Actions (`actions/handlers/schedule.py`):**
+- `prompt` - Schedule recurring or one-time prompts
+- `cancel` - Cancel scheduled prompts
+- Supports natural time parsing: "06:30", "tomorrow at 9am", "in 30 minutes"
+- Supports recurrence: "daily", "weekly", "weekdays", "monthly"
+
+### Scheduled Prompts System
+
+Calendar-triggered prompt execution system:
+
+**New files:**
+- `db/scheduled_prompts.py` - CRUD operations for scheduled prompt executions
+- `scheduling/prompt_scheduler.py` - Background scheduler that:
+  - Polls calendars every 5 minutes for events matching scheduled prompts
+  - Executes due prompts every 30 seconds
+  - Creates execution records for calendar events
+  - Executes prompts through the Smart Alias pipeline
+
+**Smart Alias fields added:**
+- `use_scheduled_prompts` - Enable scheduled prompts feature
+- `scheduled_prompts_account_id` - Google account for calendar access
+- `scheduled_prompts_calendar_id` - Calendar to monitor for prompt events
+- `scheduled_prompts_lookahead_minutes` - How far ahead to look for events (default: 15)
+- `scheduled_prompts_store_response` - Store LLM responses in event description
+
+### Bug Fixes This Session
+
+1. **Designator tracking not logging costs to tags/clients**
+   - Problem: `log_designator_usage()` was called with empty tag string
+   - Fix: Pass `tag` parameter to all 4 call sites in proxy.py
+   - Files: `proxy.py` lines 319, 1190, 1696, 2106, 2661
+
+2. **Gmail live source `account_email` undefined**
+   - Problem: Variable `account_email` used but never defined
+   - Fix: Changed to `self._get_account_email()`
+   - File: `live/sources.py` line 3729
+
+3. **Gmail mark_read action returning 403**
+   - Problem: OAuth tokens missing `gmail.modify` scope
+   - Fix: Added `gmail.modify` scope to both `gmail` and `workspace` scope sets
+   - File: `admin/app.py` GOOGLE_SCOPES
+
+4. **Calendar actions need full access**
+   - Added `calendar` full scope for delete operations
+   - File: `admin/app.py` GOOGLE_SCOPES
+
+5. **OAuth token credentials being wiped on refresh**
+   - Problem: `update_oauth_token_data()` was overwriting entire token data
+   - Fix: Merge with existing data to preserve client_id, client_secret, refresh_token
+   - File: `db/oauth_tokens.py`
+
+6. **Withings token refresh "Expired nonce" error**
+   - Problem: OAuth refresh was incorrectly including signature/nonce
+   - Fix: Removed signature/nonce from token refresh (only needed for API calls)
+   - File: `live/sources.py`
+
+### OAuth Scopes Updated
+
+Added write permissions to Google OAuth scopes:
+
+```python
+GOOGLE_SCOPES = {
+    "gmail": [
+        # ... existing ...
+        "https://www.googleapis.com/auth/gmail.modify",  # Mark read/unread, archive, label
+    ],
+    "calendar": [
+        # ... existing ...
+        "https://www.googleapis.com/auth/calendar",  # Full access including delete
+    ],
+    "workspace": [
+        # ... includes all above ...
+    ],
+}
+```
+
+**Note:** Users must re-authenticate Google accounts in admin UI to get new scopes.
+
+### Key Files Created This Session
+- `actions/` - Entire Smart Actions module
+  - `base.py` - ActionHandler abstract base class
+  - `executor.py` - Action execution engine
+  - `parser.py` - Smart action block parser
+  - `registry.py` - Handler registration
+  - `loader.py` - Handler discovery and loading
+  - `handlers/email.py` - Email actions
+  - `handlers/calendar.py` - Calendar actions
+  - `handlers/notification.py` - Notification actions
+  - `handlers/schedule.py` - Scheduled prompt actions
+- `db/scheduled_prompts.py` - Scheduled prompts CRUD
+- `scheduling/prompt_scheduler.py` - Background prompt scheduler
+
+### Current State
+- Dev container (`llm-relay-dev`) has all changes deployed
+- Branch: `beta-calendar-picker`
+- All Smart Actions working (email, calendar, notifications, scheduled prompts)
+- Gmail modify actions require re-authentication to get new scopes
+
+### Known Issues
+- Users need to re-authenticate Google accounts to get `gmail.modify` and `calendar` scopes

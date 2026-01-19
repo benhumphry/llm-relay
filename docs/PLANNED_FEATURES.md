@@ -216,7 +216,32 @@ The proxy:
 | `email:draft_new` | Create new email draft | ✅ Implemented |
 | `email:draft_reply` | Create reply draft | ✅ Implemented |
 | `email:draft_forward` | Create forward draft | ✅ Implemented |
-| `email:send` | Send email immediately | 🔜 Planned |
+| `email:send_new` | Send new email immediately | ✅ Implemented |
+| `email:send_reply` | Send reply immediately | ✅ Implemented |
+| `email:send_forward` | Send forward immediately | ✅ Implemented |
+| `email:mark_read` | Mark email as read | ✅ Implemented |
+| `email:mark_unread` | Mark email as unread | ✅ Implemented |
+| `email:archive` | Archive email | ✅ Implemented |
+| `email:label` | Add/remove labels | ✅ Implemented |
+
+#### Notification Actions (Implemented)
+| Action | Description | Status |
+|--------|-------------|--------|
+| `notification:push` | Send push notification via configured URLs | ✅ Implemented |
+
+#### Calendar Actions (Implemented)
+| Action | Description | Status |
+|--------|-------------|--------|
+| `calendar:create` | Create calendar event | ✅ Implemented |
+| `calendar:update` | Modify existing event | ✅ Implemented |
+| `calendar:delete` | Cancel/delete event | ✅ Implemented |
+| `calendar:rsvp` | Respond to invitation | 🔜 Planned |
+
+#### Scheduled Prompts (Implemented)
+| Action | Description | Status |
+|--------|-------------|--------|
+| `schedule:prompt` | Schedule recurring or one-time prompts | ✅ Implemented |
+| `schedule:cancel` | Cancel scheduled prompt | ✅ Implemented |
 
 **Action Schemas:**
 
@@ -257,43 +282,6 @@ The proxy:
 ```
 
 ### Planned Actions
-
-#### Calendar Actions
-| Action | Description |
-|--------|-------------|
-| `calendar:create` | Create event |
-| `calendar:update` | Modify existing event |
-| `calendar:delete` | Cancel/delete event |
-| `calendar:rsvp` | Respond to invitation |
-
-#### Scheduled Prompts (Proactive Agent)
-| Action | Description |
-|--------|-------------|
-| `schedule:once` | Run prompt at specific time |
-| `schedule:recurring` | Run prompt on cron schedule |
-| `schedule:cancel` | Cancel scheduled prompt |
-
-**Examples:**
-```xml
-<!-- Daily news digest email -->
-<smart_action type="schedule" action="recurring">
-{
-  "cron": "0 8 * * *",
-  "prompt": "Search for today's top AI news and email me a summary",
-  "alias": "personal-assistant",
-  "name": "morning-news-digest"
-}
-</smart_action>
-
-<!-- One-time reminder -->
-<smart_action type="schedule" action="once">
-{
-  "at": "2026-01-20T09:00:00",
-  "prompt": "Remind me to follow up with John about the proposal",
-  "alias": "personal-assistant"
-}
-</smart_action>
-```
 
 #### Document Actions
 | Action | Description |
@@ -405,11 +393,15 @@ class ActionHandler(ABC):
 - [x] Smart Source Selection (designator-controlled budget allocation)
 - [x] Document Store Intelligence (themes, best_for, summary)
 - [x] Smart Actions framework (detection, parsing, execution, action block stripping)
-- [x] Smart Actions - Email drafts (Gmail: draft_new, draft_reply, draft_forward)
-- [x] OAuth write scopes for Google and Microsoft (gmail.compose, calendar.events, etc.)
+- [x] Smart Actions - Email (Gmail: draft, send, mark read/unread, archive, label)
+- [x] Smart Actions - Calendar (Google: create, update, delete events)
+- [x] Smart Actions - Notifications (push via configured URLs)
+- [x] Smart Actions - Scheduled Prompts (calendar-triggered prompt execution)
+- [x] Live Data Sources (real-time API queries for Gmail, Calendar, Stocks, Weather, Transport, etc.)
+- [x] OAuth write scopes for Google (gmail.modify, calendar full access)
 
 ## Next Up (v1.9)
-- [ ] Slack integration
+- [x] Slack integration (Document Store)
 - [ ] Microsoft Graph integrations (Teams, OneDrive, OneNote, Outlook)
 - [ ] Dropbox integration
 - [ ] Jira / Linear integration
