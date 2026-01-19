@@ -1141,6 +1141,339 @@ content %}
             </div>
         </div>
 
+        <!-- Live Data Cache -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Live Data Cache</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    Cache API responses from live data sources to reduce costs
+                    and latency
+                </p>
+
+                <div class="space-y-4">
+                    <!-- Enable/disable toggle -->
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="cacheSettings.enabled"
+                                @change="cacheSettings.enabled = $event.target.checked ? 'true' : 'false'"
+                                :checked="cacheSettings.enabled === 'true'"
+                                class="toggle toggle-primary"
+                            />
+                            <div>
+                                <span class="label-text">Enable Caching</span>
+                                <p class="text-xs text-base-content/60">
+                                    Cache API responses to reduce costs and
+                                    improve latency
+                                </p>
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- Cache Statistics -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="text-sm font-medium mb-2">
+                            Cache Statistics
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Data entries:</span
+                                >
+                                <span
+                                    x-text="cacheStats.data_cache?.total_entries || 0"
+                                ></span>
+                            </div>
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Entity entries:</span
+                                >
+                                <span
+                                    x-text="cacheStats.entity_cache?.total_entries || 0"
+                                ></span>
+                            </div>
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Data hits:</span
+                                >
+                                <span
+                                    x-text="cacheStats.data_cache?.total_hits || 0"
+                                ></span>
+                            </div>
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Entity hits:</span
+                                >
+                                <span
+                                    x-text="cacheStats.entity_cache?.total_hits || 0"
+                                ></span>
+                            </div>
+                        </div>
+                        <div class="mt-2 flex gap-2">
+                            <button
+                                @click="refreshCacheStats()"
+                                class="btn btn-xs btn-ghost"
+                            >
+                                Refresh
+                            </button>
+                            <button
+                                @click="clearExpiredCache()"
+                                class="btn btn-xs btn-ghost"
+                                :class="{ 'loading': clearingCache }"
+                            >
+                                Clear Expired
+                            </button>
+                            <button
+                                @click="clearAllCache()"
+                                class="btn btn-xs btn-warning"
+                                :class="{ 'loading': clearingCache }"
+                            >
+                                Clear All
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- TTL Settings -->
+                    <div class="collapse collapse-arrow bg-base-200">
+                        <input type="checkbox" />
+                        <div class="collapse-title text-sm font-medium">
+                            TTL Settings (Time-To-Live)
+                        </div>
+                        <div class="collapse-content">
+                            <div class="space-y-3 pt-2">
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-xs"
+                                            >Stock Prices (seconds)</span
+                                        >
+                                        <span
+                                            class="label-text-alt text-xs"
+                                            x-text="'Default: ' + cacheSettings.defaults?.ttl_price"
+                                        ></span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model="cacheSettings.ttl_price"
+                                        class="input input-bordered input-sm w-full"
+                                        min="0"
+                                        placeholder="900"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-xs"
+                                            >Weather Current (seconds)</span
+                                        >
+                                        <span
+                                            class="label-text-alt text-xs"
+                                            x-text="'Default: ' + cacheSettings.defaults?.ttl_weather_current"
+                                        ></span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model="cacheSettings.ttl_weather_current"
+                                        class="input input-bordered input-sm w-full"
+                                        min="0"
+                                        placeholder="3600"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-xs"
+                                            >Weather Forecast (seconds)</span
+                                        >
+                                        <span
+                                            class="label-text-alt text-xs"
+                                            x-text="'Default: ' + cacheSettings.defaults?.ttl_weather_forecast"
+                                        ></span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model="cacheSettings.ttl_weather_forecast"
+                                        class="input input-bordered input-sm w-full"
+                                        min="0"
+                                        placeholder="21600"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-xs"
+                                            >Live Sports Scores (seconds)</span
+                                        >
+                                        <span
+                                            class="label-text-alt text-xs"
+                                            x-text="'Default: ' + cacheSettings.defaults?.ttl_score_live"
+                                        ></span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model="cacheSettings.ttl_score_live"
+                                        class="input input-bordered input-sm w-full"
+                                        min="0"
+                                        placeholder="120"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-xs"
+                                            >Default TTL (seconds)</span
+                                        >
+                                        <span
+                                            class="label-text-alt text-xs"
+                                            x-text="'Default: ' + cacheSettings.defaults?.ttl_default"
+                                        ></span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model="cacheSettings.ttl_default"
+                                        class="input input-bordered input-sm w-full"
+                                        min="0"
+                                        placeholder="3600"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-xs"
+                                            >Entity Cache TTL (days)</span
+                                        >
+                                        <span
+                                            class="label-text-alt text-xs"
+                                            x-text="'Default: ' + cacheSettings.defaults?.entity_ttl_days"
+                                        ></span>
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model="cacheSettings.entity_ttl_days"
+                                        class="input input-bordered input-sm w-full"
+                                        min="0"
+                                        placeholder="90"
+                                    />
+                                    <p
+                                        class="text-xs text-base-content/60 mt-1"
+                                    >
+                                        For entity resolution (e.g., "Apple" →
+                                        "AAPL")
+                                    </p>
+                                </div>
+                                <p class="text-xs text-base-content/60">
+                                    Set to 0 for data that never expires (e.g.,
+                                    historical data)
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button
+                        @click="saveCacheSettings()"
+                        class="btn btn-primary btn-sm"
+                        :class="{ 'loading': savingCacheSettings }"
+                    >
+                        Save Cache Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Session Cache (In-Memory) -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+                <h2 class="card-title text-lg">Session Cache</h2>
+                <p class="text-sm text-base-content/60 mb-4">
+                    In-memory cache for session-scoped data (email lookups, live
+                    data context)
+                </p>
+
+                <div class="space-y-4">
+                    <!-- Session Cache Statistics -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="text-sm font-medium mb-2">
+                            Cache Statistics
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div
+                                class="col-span-2 font-medium text-base-content/80 mt-1"
+                            >
+                                Live Context (prior data injection)
+                            </div>
+                            <div>
+                                <span class="text-base-content/60">Hits:</span>
+                                <span
+                                    class="text-success"
+                                    x-text="sessionCacheStats.live_context_hits || 0"
+                                ></span>
+                            </div>
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Misses:</span
+                                >
+                                <span
+                                    x-text="sessionCacheStats.live_context_misses || 0"
+                                ></span>
+                            </div>
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Active sessions:</span
+                                >
+                                <span
+                                    x-text="sessionCacheStats.live_context_sessions || 0"
+                                ></span>
+                            </div>
+                            <div></div>
+
+                            <div
+                                class="col-span-2 font-medium text-base-content/80 mt-2"
+                            >
+                                Email ID Lookup (fallback)
+                            </div>
+                            <div>
+                                <span class="text-base-content/60">Hits:</span>
+                                <span
+                                    class="text-success"
+                                    x-text="sessionCacheStats.email_cache_hits || 0"
+                                ></span>
+                            </div>
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Misses:</span
+                                >
+                                <span
+                                    x-text="sessionCacheStats.email_cache_misses || 0"
+                                ></span>
+                            </div>
+                            <div>
+                                <span class="text-base-content/60"
+                                    >Cached entries:</span
+                                >
+                                <span
+                                    x-text="sessionCacheStats.email_cache_entries || 0"
+                                ></span>
+                            </div>
+                            <div></div>
+                        </div>
+                        <div class="mt-3 flex gap-2">
+                            <button
+                                @click="refreshSessionCacheStats()"
+                                class="btn btn-xs btn-ghost"
+                            >
+                                Refresh
+                            </button>
+                            <button
+                                @click="resetSessionCacheStats()"
+                                class="btn btn-xs btn-warning"
+                            >
+                                Reset Stats
+                            </button>
+                        </div>
+                        <p class="text-xs text-base-content/60 mt-2">
+                            If email cache hits remain 0, the fallback lookup
+                            isn't being used and could be removed.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Usage Tracking -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body">
@@ -1462,6 +1795,33 @@ content %}
             embeddingModels: {},
             visionModels: {},
 
+            // Live data cache settings
+            cacheSettings: {
+                enabled: "true",
+                ttl_price: "900",
+                ttl_weather_current: "3600",
+                ttl_weather_forecast: "21600",
+                ttl_score_live: "120",
+                ttl_default: "3600",
+                entity_ttl_days: "90",
+                max_size_mb: "100",
+                defaults: {},
+            },
+            cacheStats: {
+                data_cache: {},
+                entity_cache: {},
+            },
+            sessionCacheStats: {
+                email_cache_hits: 0,
+                email_cache_misses: 0,
+                live_context_hits: 0,
+                live_context_misses: 0,
+                email_cache_entries: 0,
+                live_context_sessions: 0,
+            },
+            savingCacheSettings: false,
+            clearingCache: false,
+
             // Computed property for filtered logs
             get filteredDebugLogs() {
                 return this.debugLogs.filter((log) => {
@@ -1743,6 +2103,12 @@ content %}
 
                     // Load web settings
                     await this.loadWebSettings();
+
+                    // Load cache settings
+                    await this.loadCacheSettings();
+
+                    // Load session cache stats
+                    await this.refreshSessionCacheStats();
                 } catch (err) {
                     this.showToast("Failed to load settings", "error");
                 }
@@ -1842,7 +2208,7 @@ content %}
 
             async loadVisionModels() {
                 try {
-                    const res = await fetch("/api/rags/vision-models");
+                    const res = await fetch("/api/settings/vision-models");
                     if (res.ok) {
                         this.visionModels = await res.json();
                     }
@@ -1853,7 +2219,7 @@ content %}
 
             async loadEmbeddingModels() {
                 try {
-                    const res = await fetch("/api/rags/embedding-models");
+                    const res = await fetch("/api/settings/embedding-models");
                     if (res.ok) {
                         this.embeddingModels = await res.json();
                     }
@@ -2066,9 +2432,15 @@ content %}
 
                         // Restore model selection after options are rendered
                         if (savedModel) {
-                            this.$nextTick(() => {
-                                this.settings.default_model = savedModel;
-                            });
+                            setTimeout(() => {
+                                const el = document.querySelector(
+                                    'select[x-model="settings.default_model"]',
+                                );
+                                if (el) {
+                                    el.value = savedModel;
+                                    el.dispatchEvent(new Event("change"));
+                                }
+                            }, 100);
                         }
                     }
                 } catch (err) {
@@ -2118,6 +2490,165 @@ content %}
                     this.showToast("Failed to save tracking settings", "error");
                 } finally {
                     this.savingTracking = false;
+                }
+            },
+
+            // Live Data Cache methods
+            async loadCacheSettings() {
+                try {
+                    const [settingsRes, statsRes] = await Promise.all([
+                        fetch("/api/live-cache/settings"),
+                        fetch("/api/live-cache"),
+                    ]);
+
+                    if (settingsRes.ok) {
+                        const loaded = await settingsRes.json();
+                        this.cacheSettings = {
+                            ...this.cacheSettings,
+                            ...loaded,
+                        };
+                    }
+
+                    if (statsRes.ok) {
+                        this.cacheStats = await statsRes.json();
+                    }
+                } catch (err) {
+                    console.error("Failed to load cache settings:", err);
+                }
+            },
+
+            async saveCacheSettings() {
+                this.savingCacheSettings = true;
+                try {
+                    const res = await fetch("/api/live-cache/settings", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            enabled: this.cacheSettings.enabled,
+                            ttl_price: this.cacheSettings.ttl_price,
+                            ttl_weather_current:
+                                this.cacheSettings.ttl_weather_current,
+                            ttl_weather_forecast:
+                                this.cacheSettings.ttl_weather_forecast,
+                            ttl_score_live: this.cacheSettings.ttl_score_live,
+                            ttl_default: this.cacheSettings.ttl_default,
+                            entity_ttl_days: this.cacheSettings.entity_ttl_days,
+                            max_size_mb: this.cacheSettings.max_size_mb,
+                        }),
+                    });
+
+                    if (res.ok) {
+                        this.showToast("Cache settings saved");
+                    } else {
+                        this.showToast(
+                            "Failed to save cache settings",
+                            "error",
+                        );
+                    }
+                } catch (err) {
+                    this.showToast("Failed to save cache settings", "error");
+                } finally {
+                    this.savingCacheSettings = false;
+                }
+            },
+
+            async refreshCacheStats() {
+                try {
+                    const res = await fetch("/api/live-cache");
+                    if (res.ok) {
+                        this.cacheStats = await res.json();
+                    }
+                } catch (err) {
+                    console.error("Failed to refresh cache stats:", err);
+                }
+            },
+
+            async clearExpiredCache() {
+                this.clearingCache = true;
+                try {
+                    const res = await fetch("/api/live-cache/clear", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ expired_only: true }),
+                    });
+
+                    if (res.ok) {
+                        const result = await res.json();
+                        const total =
+                            (result.data_cache_cleared || 0) +
+                            (result.entity_cache_cleared || 0);
+                        this.showToast(
+                            `Cleared ${total} expired cache entries`,
+                        );
+                        await this.refreshCacheStats();
+                    } else {
+                        this.showToast("Failed to clear cache", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to clear cache", "error");
+                } finally {
+                    this.clearingCache = false;
+                }
+            },
+
+            async clearAllCache() {
+                if (!confirm("Clear all cached data? This cannot be undone.")) {
+                    return;
+                }
+
+                this.clearingCache = true;
+                try {
+                    const res = await fetch("/api/live-cache/clear", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ expired_only: false }),
+                    });
+
+                    if (res.ok) {
+                        const result = await res.json();
+                        const total =
+                            (result.data_cache_cleared || 0) +
+                            (result.entity_cache_cleared || 0);
+                        this.showToast(`Cleared ${total} cache entries`);
+                        await this.refreshCacheStats();
+                    } else {
+                        this.showToast("Failed to clear cache", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to clear cache", "error");
+                } finally {
+                    this.clearingCache = false;
+                }
+            },
+
+            // Session Cache methods
+            async refreshSessionCacheStats() {
+                try {
+                    const res = await fetch("/api/session-cache");
+                    if (res.ok) {
+                        this.sessionCacheStats = await res.json();
+                    }
+                } catch (err) {
+                    console.error(
+                        "Failed to refresh session cache stats:",
+                        err,
+                    );
+                }
+            },
+
+            async resetSessionCacheStats() {
+                try {
+                    const res = await fetch("/api/session-cache/reset-stats", {
+                        method: "POST",
+                    });
+                    if (res.ok) {
+                        this.showToast("Session cache stats reset");
+                        await this.refreshSessionCacheStats();
+                    } else {
+                        this.showToast("Failed to reset stats", "error");
+                    }
+                } catch (err) {
+                    this.showToast("Failed to reset stats", "error");
                 }
             },
 

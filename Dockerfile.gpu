@@ -45,6 +45,8 @@ COPY rag/ ./rag/
 COPY context/ ./context/
 COPY augmentation/ ./augmentation/
 COPY mcp/ ./mcp/
+COPY actions/ ./actions/
+COPY live/ ./live/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
 

@@ -44,78 +44,8 @@ content %}
         </div>
     </div>
 
-    <!-- Stats Cards -->
+    <!-- Primary Stats Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <!-- Providers Card -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body py-4">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-base-content/60 text-sm">Providers</p>
-                        <p
-                            class="text-2xl font-bold"
-                            x-text="stats.providers?.total || '-'"
-                        ></p>
-                    </div>
-                    <div class="bg-primary/10 p-2 rounded-lg">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="h-6 w-6 text-primary"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                            />
-                        </svg>
-                    </div>
-                </div>
-                <div class="text-xs text-base-content/60 mt-1">
-                    <span x-text="stats.providers?.configured || 0"></span>
-                    configured
-                </div>
-            </div>
-        </div>
-
-        <!-- Models Card -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body py-4">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-base-content/60 text-sm">Models</p>
-                        <p
-                            class="text-2xl font-bold"
-                            x-text="stats.models?.active || '-'"
-                        ></p>
-                    </div>
-                    <div class="bg-secondary/10 p-2 rounded-lg">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="h-6 w-6 text-secondary"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                            />
-                        </svg>
-                    </div>
-                </div>
-                <div class="text-xs text-base-content/60 mt-1">
-                    <span x-text="stats.models?.available || 0"></span>
-                    available
-                </div>
-            </div>
-        </div>
-
         <!-- Requests Card -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
@@ -129,10 +59,10 @@ content %}
                             x-text="periodStats?.requests || '0'"
                         ></p>
                     </div>
-                    <div class="bg-accent/10 p-2 rounded-lg">
+                    <div class="bg-primary/10 p-2 rounded-lg">
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
-                            class="h-6 w-6 text-accent"
+                            class="h-6 w-6 text-primary"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -194,64 +124,24 @@ content %}
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Top Usage Section -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <!-- Top Providers -->
+        <!-- Smart Aliases Card -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <div class="flex items-center justify-between mb-2">
-                    <p class="text-base-content/60 text-sm">Top Providers</p>
-                    <div class="bg-primary/10 p-2 rounded-lg">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="h-4 w-4 text-primary"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                            />
-                        </svg>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-base-content/60 text-sm">
+                            Smart Aliases
+                        </p>
+                        <p
+                            class="text-2xl font-bold"
+                            x-text="smartStats?.smart_aliases?.total || '0'"
+                        ></p>
                     </div>
-                </div>
-                <template x-if="topProviders.length === 0">
-                    <p class="text-xs text-base-content/50">No data yet</p>
-                </template>
-                <ul class="space-y-1">
-                    <template
-                        x-for="item in topProviders.slice(0, 5)"
-                        :key="item.provider_id"
-                    >
-                        <li class="flex justify-between text-sm">
-                            <span
-                                class="truncate"
-                                x-text="item.provider_id"
-                            ></span>
-                            <span
-                                class="text-base-content/60 ml-2"
-                                x-text="item.requests"
-                            ></span>
-                        </li>
-                    </template>
-                </ul>
-            </div>
-        </div>
-
-        <!-- Top Models -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body py-4">
-                <div class="flex items-center justify-between mb-2">
-                    <p class="text-base-content/60 text-sm">Top Models</p>
                     <div class="bg-secondary/10 p-2 rounded-lg">
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
-                            class="h-4 w-4 text-secondary"
+                            class="h-6 w-6 text-secondary"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -260,43 +150,37 @@ content %}
                                 stroke-linecap="round"
                                 stroke-linejoin="round"
                                 stroke-width="2"
-                                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                                d="M13 10V3L4 14h7v7l9-11h-7z"
                             />
                         </svg>
                     </div>
                 </div>
-                <template x-if="topModels.length === 0">
-                    <p class="text-xs text-base-content/50">No data yet</p>
-                </template>
-                <ul class="space-y-1">
-                    <template
-                        x-for="item in topModels.slice(0, 5)"
-                        :key="item.model_id"
-                    >
-                        <li class="flex justify-between text-sm">
-                            <span
-                                class="truncate"
-                                x-text="item.model_id"
-                            ></span>
-                            <span
-                                class="text-base-content/60 ml-2"
-                                x-text="item.requests"
-                            ></span>
-                        </li>
-                    </template>
-                </ul>
+                <div class="text-xs text-base-content/60 mt-1">
+                    <span
+                        x-text="formatNumber(smartStats?.smart_aliases?.stats?.total_requests || 0)"
+                    ></span>
+                    total requests
+                </div>
             </div>
         </div>
 
-        <!-- Top Clients -->
+        <!-- Document Stores Card -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <div class="flex items-center justify-between mb-2">
-                    <p class="text-base-content/60 text-sm">Top Clients</p>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-base-content/60 text-sm">
+                            Document Stores
+                        </p>
+                        <p
+                            class="text-2xl font-bold"
+                            x-text="smartStats?.document_stores?.total || '0'"
+                        ></p>
+                    </div>
                     <div class="bg-accent/10 p-2 rounded-lg">
                         <svg
                             xmlns="http://www.w3.org/2000/svg"
-                            class="h-4 w-4 text-accent"
+                            class="h-6 w-6 text-accent"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -305,156 +189,675 @@ content %}
                                 stroke-linecap="round"
                                 stroke-linejoin="round"
                                 stroke-width="2"
-                                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
                             />
                         </svg>
                     </div>
                 </div>
-                <template x-if="topClients.length === 0">
-                    <p class="text-xs text-base-content/50">No data yet</p>
-                </template>
-                <ul class="space-y-1">
-                    <template
-                        x-for="item in topClients.slice(0, 5)"
-                        :key="item.client"
-                    >
-                        <li class="flex justify-between text-sm">
-                            <span
-                                class="truncate"
-                                x-text="item.client || 'unknown'"
-                            ></span>
-                            <span
-                                class="text-base-content/60 ml-2"
-                                x-text="item.requests"
-                            ></span>
-                        </li>
-                    </template>
-                </ul>
-            </div>
-        </div>
-
-        <!-- Top Tags -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body py-4">
-                <div class="flex items-center justify-between mb-2">
-                    <p class="text-base-content/60 text-sm">Top Tags</p>
-                    <div class="bg-success/10 p-2 rounded-lg">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            class="h-4 w-4 text-success"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="2"
-                                d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
-                            />
-                        </svg>
-                    </div>
+                <div class="text-xs text-base-content/60 mt-1">
+                    <span
+                        x-text="formatNumber(smartStats?.document_stores?.total_documents || 0)"
+                    ></span>
+                    docs,
+                    <span
+                        x-text="formatNumber(smartStats?.document_stores?.total_chunks || 0)"
+                    ></span>
+                    chunks
                 </div>
-                <template x-if="topTags.length === 0">
-                    <p class="text-xs text-base-content/50">No data yet</p>
-                </template>
-                <ul class="space-y-1">
-                    <template
-                        x-for="item in topTags.slice(0, 5)"
-                        :key="item.tag"
-                    >
-                        <li class="flex justify-between text-sm">
-                            <span
-                                class="truncate"
-                                x-text="item.tag || 'untagged'"
-                            ></span>
-                            <span
-                                class="text-base-content/60 ml-2"
-                                x-text="item.requests"
-                            ></span>
-                        </li>
-                    </template>
-                </ul>
             </div>
         </div>
     </div>
 
-    <!-- Quick Links -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <!-- Model Management -->
+    <!-- Smart Features Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        <!-- Smart Alias Activity -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <h2
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Smart Alias Activity</h2>
+                    <a
+                        href="{{ url_for('admin.smart_aliases_page') }}"
+                        class="btn btn-xs btn-ghost"
+                        >View all</a
+                    >
+                </div>
+
+                <!-- Feature Usage Stats -->
+                <div class="grid grid-cols-5 gap-2 mb-4">
+                    <div class="text-center p-2 bg-base-200 rounded-lg">
+                        <div
+                            class="text-lg font-bold"
+                            x-text="smartStats?.smart_aliases?.by_feature?.routing || 0"
+                        ></div>
+                        <div class="text-xs text-base-content/60">Routing</div>
+                    </div>
+                    <div class="text-center p-2 bg-base-200 rounded-lg">
+                        <div
+                            class="text-lg font-bold"
+                            x-text="smartStats?.smart_aliases?.by_feature?.rag || 0"
+                        ></div>
+                        <div class="text-xs text-base-content/60">RAG</div>
+                    </div>
+                    <div class="text-center p-2 bg-base-200 rounded-lg">
+                        <div
+                            class="text-lg font-bold"
+                            x-text="smartStats?.smart_aliases?.by_feature?.web || 0"
+                        ></div>
+                        <div class="text-xs text-base-content/60">Web</div>
+                    </div>
+                    <div class="text-center p-2 bg-base-200 rounded-lg">
+                        <div
+                            class="text-lg font-bold"
+                            x-text="smartStats?.smart_aliases?.by_feature?.cache || 0"
+                        ></div>
+                        <div class="text-xs text-base-content/60">Cache</div>
+                    </div>
+                    <div class="text-center p-2 bg-base-200 rounded-lg">
+                        <div
+                            class="text-lg font-bold"
+                            x-text="smartStats?.smart_aliases?.by_feature?.memory || 0"
+                        ></div>
+                        <div class="text-xs text-base-content/60">Memory</div>
+                    </div>
+                </div>
+
+                <!-- Top Aliases -->
+                <h3
                     class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
                 >
-                    Model Management
-                </h2>
+                    Top Aliases
+                </h3>
+                <template
+                    x-if="!smartStats?.smart_aliases?.top_aliases?.length"
+                >
+                    <p class="text-xs text-base-content/50">
+                        No alias activity yet
+                    </p>
+                </template>
                 <ul class="space-y-2">
-                    <li>
-                        <a
-                            href="{{ url_for('admin.models_page') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                                />
-                            </svg>
-                            <span class="text-sm">Providers & Models</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a
-                            href="{{ url_for('admin.ollama_page') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"
-                                />
-                            </svg>
-                            <span class="text-sm">Local Servers</span>
-                        </a>
-                    </li>
+                    <template
+                        x-for="alias in smartStats?.smart_aliases?.top_aliases || []"
+                        :key="alias.name"
+                    >
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <a
+                                    :href="'/smart-aliases?expand=' + alias.id"
+                                    class="font-medium text-sm hover:underline hover:text-primary"
+                                    x-text="alias.name"
+                                ></a>
+                                <div class="flex gap-1">
+                                    <span
+                                        x-show="alias.features.routing"
+                                        class="badge badge-xs badge-primary"
+                                        >Route</span
+                                    >
+                                    <span
+                                        x-show="alias.features.rag"
+                                        class="badge badge-xs badge-info"
+                                        >RAG</span
+                                    >
+                                    <span
+                                        x-show="alias.features.web"
+                                        class="badge badge-xs badge-warning"
+                                        >Web</span
+                                    >
+                                    <span
+                                        x-show="alias.features.cache"
+                                        class="badge badge-xs badge-secondary"
+                                        >Cache</span
+                                    >
+                                    <span
+                                        x-show="alias.features.memory"
+                                        class="badge badge-xs badge-success"
+                                        >Mem</span
+                                    >
+                                </div>
+                            </div>
+                            <span
+                                class="text-sm text-base-content/60"
+                                x-text="formatNumber(alias.requests) + ' requests'"
+                            ></span>
+                        </li>
+                    </template>
                 </ul>
             </div>
         </div>
 
-        <!-- Routing -->
+        <!-- Context Enrichment Stats -->
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body py-4">
-                <h2
-                    class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
-                >
-                    Routing
-                </h2>
-                <ul class="space-y-2">
-                    <li>
-                        <a
-                            href="{{ url_for('admin.smart_aliases_page') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                        >
+                <h2 class="text-lg font-semibold mb-4">Context Enrichment</h2>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <!-- RAG Stats -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
+                                class="h-4 w-4 text-secondary"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                                />
+                            </svg>
+                            <span class="text-sm font-medium"
+                                >RAG Retrievals</span
+                            >
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            x-text="formatNumber(smartStats?.smart_aliases?.stats?.context_injections || 0)"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            context injections
+                        </div>
+                    </div>
+
+                    <!-- Web Stats -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-accent"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+                                />
+                            </svg>
+                            <span class="text-sm font-medium"
+                                >Web Searches</span
+                            >
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            x-text="formatNumber(smartStats?.smart_aliases?.stats?.search_requests || 0)"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            <span
+                                x-text="formatNumber(smartStats?.smart_aliases?.stats?.scrape_requests || 0)"
+                            ></span>
+                            pages scraped
+                        </div>
+                    </div>
+
+                    <!-- Cache Stats -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-success"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+                                />
+                            </svg>
+                            <span class="text-sm font-medium">Cache Hits</span>
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            x-text="formatNumber(smartStats?.smart_aliases?.stats?.cache_hits || 0)"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            $<span
+                                x-text="(smartStats?.smart_aliases?.stats?.cache_cost_saved || 0).toFixed(2)"
+                            ></span>
+                            saved
+                        </div>
+                    </div>
+
+                    <!-- Routing Stats -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-primary"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                                />
+                            </svg>
+                            <span class="text-sm font-medium"
+                                >Routing Decisions</span
+                            >
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            x-text="formatNumber(smartStats?.smart_aliases?.stats?.routing_decisions || 0)"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            model selections
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Sources & Usage Section -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        <!-- Data Sources Health -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body py-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Data Sources</h2>
+                    <a
+                        href="{{ url_for('admin.document_stores_page') }}"
+                        class="btn btn-xs btn-ghost"
+                        >Manage</a
+                    >
+                </div>
+
+                <!-- Status Overview -->
+                <div class="flex gap-2 mb-4">
+                    <div
+                        class="flex items-center gap-1 px-2 py-1 bg-success/10 rounded text-success text-xs"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M5 13l4 4L19 7"
+                            />
+                        </svg>
+                        <span
+                            x-text="smartStats?.document_stores?.by_status?.ready || 0"
+                        ></span>
+                        ready
+                    </div>
+                    <div
+                        x-show="smartStats?.document_stores?.by_status?.indexing > 0"
+                        class="flex items-center gap-1 px-2 py-1 bg-info/10 rounded text-info text-xs"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-3 w-3 animate-spin"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                        </svg>
+                        <span
+                            x-text="smartStats?.document_stores?.by_status?.indexing || 0"
+                        ></span>
+                        indexing
+                    </div>
+                    <div
+                        x-show="smartStats?.document_stores?.by_status?.error > 0"
+                        class="flex items-center gap-1 px-2 py-1 bg-error/10 rounded text-error text-xs"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <span
+                            x-text="smartStats?.document_stores?.by_status?.error || 0"
+                        ></span>
+                        error
+                    </div>
+                    <div
+                        x-show="smartStats?.document_stores?.by_status?.pending > 0"
+                        class="flex items-center gap-1 px-2 py-1 bg-warning/10 rounded text-warning text-xs"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="h-3 w-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <span
+                            x-text="smartStats?.document_stores?.by_status?.pending || 0"
+                        ></span>
+                        pending
+                    </div>
+                </div>
+
+                <!-- Issues List -->
+                <template
+                    x-if="smartStats?.document_stores?.issues?.length > 0"
+                >
+                    <div>
+                        <h3
+                            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                        >
+                            Issues
+                        </h3>
+                        <ul class="space-y-2">
+                            <template
+                                x-for="store in smartStats?.document_stores?.issues || []"
+                                :key="store.name"
+                            >
+                                <li
+                                    class="flex items-center justify-between text-sm"
+                                >
+                                    <a
+                                        :href="'/document-stores?expand=' + store.id"
+                                        class="flex items-center gap-2 hover:underline"
+                                        :class="store.status === 'error' ? 'text-error' : 'text-warning'"
+                                    >
+                                        <span x-text="store.name"></span>
+                                    </a>
+                                    <span
+                                        class="text-xs text-base-content/50"
+                                        x-text="store.status === 'error' ? 'Error' : 'Stale'"
+                                    ></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+                </template>
+                <template x-if="!smartStats?.document_stores?.issues?.length">
+                    <p class="text-xs text-base-content/50">
+                        All data sources healthy
+                    </p>
+                </template>
+
+                <!-- Totals -->
+                <div class="mt-4 pt-4 border-t border-base-200">
+                    <div class="grid grid-cols-2 gap-4 text-center">
+                        <div>
+                            <div
+                                class="text-xl font-bold"
+                                x-text="formatNumber(smartStats?.document_stores?.total_documents || 0)"
+                            ></div>
+                            <div class="text-xs text-base-content/60">
+                                documents
+                            </div>
+                        </div>
+                        <div>
+                            <div
+                                class="text-xl font-bold"
+                                x-text="formatNumber(smartStats?.document_stores?.total_chunks || 0)"
+                            ></div>
+                            <div class="text-xs text-base-content/60">
+                                chunks indexed
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Usage -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body py-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Usage Breakdown</h2>
+                    <a
+                        href="{{ url_for('admin.usage') }}"
+                        class="btn btn-xs btn-ghost"
+                        >Details</a
+                    >
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <!-- Top Models -->
+                    <div>
+                        <h3
+                            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                        >
+                            Top Models
+                        </h3>
+                        <template x-if="topModels.length === 0">
+                            <p class="text-xs text-base-content/50">
+                                No data yet
+                            </p>
+                        </template>
+                        <ul class="space-y-1">
+                            <template
+                                x-for="item in topModels.slice(0, 4)"
+                                :key="item.model_id"
+                            >
+                                <li class="flex justify-between text-sm">
+                                    <span
+                                        class="truncate text-xs"
+                                        x-text="item.model_id"
+                                    ></span>
+                                    <span
+                                        class="text-base-content/60 ml-2 text-xs"
+                                        x-text="item.requests"
+                                    ></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+
+                    <!-- Top Tags -->
+                    <div>
+                        <h3
+                            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                        >
+                            Top Tags
+                        </h3>
+                        <template x-if="topTags.length === 0">
+                            <p class="text-xs text-base-content/50">
+                                No data yet
+                            </p>
+                        </template>
+                        <ul class="space-y-1">
+                            <template
+                                x-for="item in topTags.slice(0, 4)"
+                                :key="item.tag"
+                            >
+                                <li class="flex justify-between text-sm">
+                                    <span
+                                        class="truncate text-xs"
+                                        x-text="item.tag || 'untagged'"
+                                    ></span>
+                                    <span
+                                        class="text-base-content/60 ml-2 text-xs"
+                                        x-text="item.requests"
+                                    ></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+
+                    <!-- Top Providers -->
+                    <div>
+                        <h3
+                            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                        >
+                            Top Providers
+                        </h3>
+                        <template x-if="topProviders.length === 0">
+                            <p class="text-xs text-base-content/50">
+                                No data yet
+                            </p>
+                        </template>
+                        <ul class="space-y-1">
+                            <template
+                                x-for="item in topProviders.slice(0, 4)"
+                                :key="item.provider_id"
+                            >
+                                <li class="flex justify-between text-sm">
+                                    <span
+                                        class="truncate text-xs"
+                                        x-text="item.provider_id"
+                                    ></span>
+                                    <span
+                                        class="text-base-content/60 ml-2 text-xs"
+                                        x-text="item.requests"
+                                    ></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+
+                    <!-- Top Clients -->
+                    <div>
+                        <h3
+                            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
+                        >
+                            Top Clients
+                        </h3>
+                        <template x-if="topClients.length === 0">
+                            <p class="text-xs text-base-content/50">
+                                No data yet
+                            </p>
+                        </template>
+                        <ul class="space-y-1">
+                            <template
+                                x-for="item in topClients.slice(0, 4)"
+                                :key="item.client"
+                            >
+                                <li class="flex justify-between text-sm">
+                                    <span
+                                        class="truncate text-xs"
+                                        x-text="item.client || 'unknown'"
+                                    ></span>
+                                    <span
+                                        class="text-base-content/60 ml-2 text-xs"
+                                        x-text="item.requests"
+                                    ></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Data Sources Section -->
+    <div
+        class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8"
+        x-show="topLiveDataSources.length > 0"
+    >
+        <!-- Top Live Data Sources -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body py-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Top Live Data Sources</h2>
+                    <a
+                        href="{{ url_for('admin.live_data_sources_page') }}"
+                        class="btn btn-xs btn-ghost"
+                        >Manage</a
+                    >
+                </div>
+
+                <template x-if="topLiveDataSources.length === 0">
+                    <p class="text-xs text-base-content/50">
+                        No API calls recorded yet
+                    </p>
+                </template>
+
+                <div class="overflow-x-auto">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr class="text-xs">
+                                <th>Source</th>
+                                <th class="text-right">Calls</th>
+                                <th class="text-right">Success</th>
+                                <th class="text-right">Avg Latency</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template
+                                x-for="source in topLiveDataSources"
+                                :key="source.id"
+                            >
+                                <tr>
+                                    <td>
+                                        <a
+                                            :href="'/live-data-sources'"
+                                            class="font-medium text-sm hover:underline hover:text-primary"
+                                            x-text="source.name"
+                                        ></a>
+                                        <div
+                                            class="text-xs text-base-content/50"
+                                            x-text="source.source_type"
+                                        ></div>
+                                    </td>
+                                    <td
+                                        class="text-right"
+                                        x-text="formatNumber(source.total_calls)"
+                                    ></td>
+                                    <td class="text-right">
+                                        <span
+                                            :class="source.success_rate >= 90 ? 'text-success' : (source.success_rate < 50 ? 'text-error' : '')"
+                                            x-text="source.success_rate + '%'"
+                                        ></span>
+                                    </td>
+                                    <td
+                                        class="text-right text-base-content/60"
+                                        x-text="source.avg_latency_ms + 'ms'"
+                                    ></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Data Summary (placeholder for second card if needed) -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body py-4">
+                <h2 class="text-lg font-semibold mb-4">Live Data Summary</h2>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <!-- Total Calls -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 text-primary"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -466,52 +869,25 @@ content %}
                                     d="M13 10V3L4 14h7v7l9-11h-7z"
                                 />
                             </svg>
-                            <span class="text-sm">Smart Aliases</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a
-                            href="{{ url_for('admin.redirects_page') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
+                            <span class="text-sm font-medium"
+                                >Total API Calls</span
                             >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 7l5 5m0 0l-5 5m5-5H6"
-                                />
-                            </svg>
-                            <span class="text-sm">Redirects</span>
-                        </a>
-                    </li>
-                </ul>
-            </div>
-        </div>
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            x-text="formatNumber(liveDataSummary.total_calls || 0)"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            across all sources
+                        </div>
+                    </div>
 
-        <!-- Usage -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body py-4">
-                <h2
-                    class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
-                >
-                    Usage
-                </h2>
-                <ul class="space-y-2">
-                    <li>
-                        <a
-                            href="{{ url_for('admin.usage') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                        >
+                    <!-- Success Rate -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
+                                class="h-4 w-4 text-success"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -520,57 +896,32 @@ content %}
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
                                     stroke-width="2"
-                                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                                 />
                             </svg>
-                            <span class="text-sm">Statistics</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a
-                            href="{{ url_for('admin.requests_page') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
+                            <span class="text-sm font-medium"
+                                >Success Rate</span
                             >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-                                />
-                            </svg>
-                            <span class="text-sm">Request Log</span>
-                        </a>
-                    </li>
-                </ul>
-            </div>
-        </div>
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            :class="liveDataSummary.success_rate >= 90 ? 'text-success' : (liveDataSummary.success_rate < 50 ? 'text-error' : '')"
+                            x-text="(liveDataSummary.success_rate || 0) + '%'"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            <span
+                                x-text="formatNumber(liveDataSummary.successful_calls || 0)"
+                            ></span>
+                            successful
+                        </div>
+                    </div>
 
-        <!-- System -->
-        <div class="card bg-base-100 shadow-lg">
-            <div class="card-body py-4">
-                <h2
-                    class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-2"
-                >
-                    System
-                </h2>
-                <ul class="space-y-2">
-                    <li>
-                        <a
-                            href="{{ url_for('admin.alerts_page') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                            x-data="alertsBadge()"
-                            x-init="init()"
-                        >
+                    <!-- Active Sources -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
+                                class="h-4 w-4 text-info"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -579,30 +930,28 @@ content %}
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
                                     stroke-width="2"
-                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                    d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"
                                 />
                             </svg>
-                            <span class="text-sm">Alerts</span>
-                            <span
-                                x-show="critical > 0"
-                                x-text="critical"
-                                class="badge badge-error badge-xs"
-                            ></span>
-                            <span
-                                x-show="critical === 0 && warning > 0"
-                                x-text="warning"
-                                class="badge badge-warning badge-xs"
-                            ></span>
-                        </a>
-                    </li>
-                    <li>
-                        <a
-                            href="{{ url_for('admin.settings_page') }}"
-                            class="flex items-center gap-2 hover:text-primary transition-colors"
-                        >
+                            <span class="text-sm font-medium"
+                                >Active Sources</span
+                            >
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            x-text="topLiveDataSources.length"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            with recorded calls
+                        </div>
+                    </div>
+
+                    <!-- Avg Latency -->
+                    <div class="bg-base-200 rounded-lg p-3">
+                        <div class="flex items-center gap-2 mb-2">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4 text-base-content/50"
+                                class="h-4 w-4 text-warning"
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
@@ -611,188 +960,65 @@ content %}
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
                                     stroke-width="2"
-                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                                />
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                                 />
                             </svg>
-                            <span class="text-sm">Settings</span>
-                        </a>
-                    </li>
-                </ul>
+                            <span class="text-sm font-medium">Avg Latency</span>
+                        </div>
+                        <div
+                            class="text-2xl font-bold"
+                            x-text="(liveDataSummary.avg_latency_ms || 0) + 'ms'"
+                        ></div>
+                        <div class="text-xs text-base-content/60">
+                            response time
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Optional Features Status -->
-    <div class="card bg-base-100 shadow-lg mt-8">
+    <!-- System Status -->
+    <div class="card bg-base-100 shadow-lg">
         <div class="card-body py-4">
-            <h2 class="text-lg font-semibold mb-4">Optional Features</h2>
+            <h2 class="text-lg font-semibold mb-4">System Status</h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Features Column -->
+                <!-- Infrastructure Column -->
                 <div>
                     <h3
                         class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
                     >
-                        Features
+                        Infrastructure
                     </h3>
                     <ul class="space-y-2">
-                        <!-- Smart Enrichers (RAG + Web) -->
+                        <!-- Providers -->
                         <li class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.features?.smart_enrichers?.available"
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-4 w-4 text-success"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
                                 >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-success"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.features?.smart_enrichers?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Smart Enrichers</span>
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M5 13l4 4L19 7"
+                                    />
+                                </svg>
+                                <span class="text-sm">LLM Providers</span>
                             </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.features?.smart_enrichers?.reason || 'Available'"
-                            ></span>
+                            <span class="text-xs text-base-content/50">
+                                <span
+                                    x-text="stats.providers?.configured || 0"
+                                ></span>
+                                configured
+                            </span>
                         </li>
 
-                        <!-- Semantic Caching -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.dependencies?.chromadb?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-success"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.dependencies?.chromadb?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Semantic Caching</span>
-                            </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
-                            ></span>
-                        </li>
-
-                        <!-- Model Intelligence -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.features?.model_intelligence?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-success"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.features?.model_intelligence?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Model Intelligence</span>
-                            </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.features?.model_intelligence?.reason || 'Available'"
-                            ></span>
-                        </li>
-                    </ul>
-                </div>
-
-                <!-- Dependencies Column -->
-                <div>
-                    <h3
-                        class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
-                    >
-                        Dependencies
-                    </h3>
-                    <ul class="space-y-2">
                         <!-- Database -->
                         <li class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
@@ -914,10 +1140,208 @@ content %}
                                 </div>
                                 <span
                                     class="text-xs text-base-content/50"
-                                    x-text="provider.configured ? provider.url : (provider.requires_api_key ? 'API key not set' : 'URL not set')"
+                                    x-text="provider.configured ? 'Configured' : (provider.requires_api_key ? 'API key not set' : 'URL not set')"
                                 ></span>
                             </li>
                         </template>
+                    </ul>
+                </div>
+
+                <!-- Features Column -->
+                <div>
+                    <h3
+                        class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
+                    >
+                        Feature Availability
+                    </h3>
+                    <ul class="space-y-2">
+                        <!-- RAG -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template
+                                    x-if="featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
+                                    </svg>
+                                </template>
+                                <template
+                                    x-if="!featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">Document RAG</span>
+                            </div>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
+                            ></span>
+                        </li>
+
+                        <!-- Web Enrichment -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template
+                                    x-if="featureStatus.features?.smart_enrichers?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
+                                    </svg>
+                                </template>
+                                <template
+                                    x-if="!featureStatus.features?.smart_enrichers?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">Web Enrichment</span>
+                            </div>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.features?.smart_enrichers?.reason || 'Available'"
+                            ></span>
+                        </li>
+
+                        <!-- Semantic Caching -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template
+                                    x-if="featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
+                                    </svg>
+                                </template>
+                                <template
+                                    x-if="!featureStatus.dependencies?.chromadb?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">Semantic Caching</span>
+                            </div>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
+                            ></span>
+                        </li>
+
+                        <!-- Model Intelligence -->
+                        <li class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <template
+                                    x-if="featureStatus.features?.model_intelligence?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-success"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M5 13l4 4L19 7"
+                                        />
+                                    </svg>
+                                </template>
+                                <template
+                                    x-if="!featureStatus.features?.model_intelligence?.available"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 text-base-content/30"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M6 18L18 6M6 6l12 12"
+                                        />
+                                    </svg>
+                                </template>
+                                <span class="text-sm">Model Intelligence</span>
+                            </div>
+                            <span
+                                class="text-xs text-base-content/50"
+                                x-text="featureStatus.features?.model_intelligence?.reason || 'Available'"
+                            ></span>
+                        </li>
                     </ul>
                 </div>
             </div>
@@ -941,17 +1365,51 @@ content %}
     function dashboard() {
         return {
             stats: {},
+            smartStats: {},
             periodStats: null,
             topProviders: [],
             topModels: [],
             topClients: [],
             topTags: [],
+            topLiveDataSources: [],
+            liveDataSummary: {},
             toasts: [],
             period: "today",
             featureStatus: {},
 
             async init() {
-                await Promise.all([this.loadStats(), this.loadFeatureStatus()]);
+                await Promise.all([
+                    this.loadStats(),
+                    this.loadSmartStats(),
+                    this.loadFeatureStatus(),
+                    this.loadLiveDataStats(),
+                ]);
+            },
+
+            async loadSmartStats() {
+                try {
+                    const response = await fetch("/api/dashboard/smart-stats");
+                    if (response.ok) {
+                        this.smartStats = await response.json();
+                    }
+                } catch (err) {
+                    console.error("Failed to load smart stats:", err);
+                }
+            },
+
+            async loadLiveDataStats() {
+                try {
+                    const response = await fetch(
+                        "/api/dashboard/live-data-stats",
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.topLiveDataSources = data.top_sources || [];
+                        this.liveDataSummary = data.summary || {};
+                    }
+                } catch (err) {
+                    console.error("Failed to load live data stats:", err);
+                }
             },
 
             async loadFeatureStatus() {
@@ -1039,6 +1497,12 @@ content %}
                     return (tokens / 1000000).toFixed(1) + "M";
                 if (tokens >= 1000) return (tokens / 1000).toFixed(1) + "K";
                 return tokens.toString();
+            },
+
+            formatNumber(num) {
+                if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+                if (num >= 1000) return (num / 1000).toFixed(1) + "K";
+                return num.toString();
             },
 
             showToast(message, type = "success") {

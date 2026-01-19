@@ -142,6 +142,11 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         with _model_load_lock:
             embedding = model.encode(text, convert_to_numpy=True)
         estimated_tokens = len(text) // 4
+
+        # Clear CUDA cache after query to prevent memory buildup
+        # Important when processing many stores sequentially
+        self._clear_cuda_cache()
+
         return EmbeddingResult(
             embeddings=[embedding.tolist()],
             usage={"prompt_tokens": estimated_tokens, "total_tokens": estimated_tokens},
@@ -388,6 +393,9 @@ def get_embedding_provider(
     """
     Get an embedding provider.
 
+    For local embeddings, uses TTL-based caching to avoid repeated model loading
+    while still freeing GPU memory after inactivity.
+
     Args:
         provider_type: "local", "ollama", or "provider"
         model_name: Model to use for embeddings
@@ -403,7 +411,8 @@ def get_embedding_provider(
         ValueError: If required parameters are missing
     """
     if provider_type == "local":
-        return LocalEmbeddingProvider(model_name=model_name)
+        # Use TTL-cached provider for local embeddings
+        return get_cached_local_embedding_provider(model_name=model_name)
 
     elif provider_type == "ollama":
         if not ollama_url:
@@ -436,3 +445,38 @@ def get_embedding_provider(
             f"Unknown embedding provider type: {provider_type}. "
             f"Available: local, ollama, provider"
         )
+
+
+def get_cached_local_embedding_provider(
+    model_name: Optional[str] = None,
+) -> LocalEmbeddingProvider:
+    """
+    Get a cached local embedding provider with TTL-based eviction.
+
+    The provider is cached by model name and automatically unloaded after
+    5 minutes of inactivity to free GPU memory.
+
+    Args:
+        model_name: Model to use for embeddings (default: BAAI/bge-small-en-v1.5)
+
+    Returns:
+        Cached LocalEmbeddingProvider instance
+    """
+    from .model_cache import get_model_cache
+
+    actual_model = model_name or LocalEmbeddingProvider.DEFAULT_MODEL
+    cache_key = f"embedding:{actual_model}"
+
+    cache = get_model_cache()
+
+    def loader():
+        provider = LocalEmbeddingProvider(model_name=actual_model)
+        # Force model load now so it's ready
+        provider._get_model()
+        return provider
+
+    def unloader():
+        # The provider will be garbage collected, but we explicitly unload
+        pass  # Model cleanup handled by cache manager's GPU memory clear
+
+    return cache.get(cache_key, loader, unload_fn=unloader)

@@ -257,103 +257,74 @@ block content %}
                     Vision provider for parsing PDFs and images in documents
                 </p>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="space-y-4">
-                        <!-- Vision Provider -->
-                        <div class="form-control">
-                            <label class="label">
-                                <span class="label-text">Vision Provider</span>
-                                <template
-                                    x-if="settings.vision_provider === 'local'"
-                                >
-                                    <span
-                                        class="badge badge-sm"
-                                        :class="settings.gpu_available ? 'badge-success' : 'badge-warning'"
-                                        x-text="settings.gpu_available ? 'GPU: ' + settings.gpu_name : 'CPU'"
-                                    ></span>
-                                </template>
-                            </label>
-                            <select
-                                x-model="settings.vision_provider"
-                                @change="onVisionProviderChange()"
-                                class="select select-bordered"
+                <div class="space-y-4">
+                    <!-- Vision Provider -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Vision Provider</span>
+                            <template
+                                x-if="settings.vision_provider === 'local'"
                             >
-                                <option value="local">
-                                    Local (Docling default)
-                                </option>
+                                <span
+                                    class="badge badge-sm"
+                                    :class="settings.gpu_available ? 'badge-success' : 'badge-warning'"
+                                    x-text="settings.gpu_available ? 'GPU: ' + settings.gpu_name : 'CPU'"
+                                ></span>
+                            </template>
+                        </label>
+                        <select
+                            x-model="settings.vision_provider"
+                            @change="onVisionProviderChange()"
+                            class="select select-bordered"
+                        >
+                            <option value="local">
+                                Local (Docling default)
+                            </option>
+                            <option
+                                x-show="visionModels.ollama?.available"
+                                value="ollama"
+                            >
+                                Ollama
+                            </option>
+                            <template
+                                x-for="provider in visionModels.providers || []"
+                                :key="provider.name"
+                            >
                                 <option
-                                    x-show="visionModels.ollama?.available"
-                                    value="ollama"
-                                >
-                                    Ollama
-                                </option>
-                                <template
-                                    x-for="provider in visionModels.providers || []"
-                                    :key="provider.name"
-                                >
-                                    <option
-                                        :value="provider.name"
-                                        x-text="provider.name"
-                                    ></option>
-                                </template>
-                            </select>
-                        </div>
+                                    :value="provider.name"
+                                    x-text="provider.name"
+                                ></option>
+                            </template>
+                        </select>
+                    </div>
 
-                        <!-- Ollama Vision Instance & Model -->
-                        <template
-                            x-if="settings.vision_provider === 'ollama' && visionModels.ollama?.available"
-                        >
-                            <div class="grid grid-cols-2 gap-4">
-                                <div class="form-control">
-                                    <label class="label">
-                                        <span class="label-text"
-                                            >Ollama Instance</span
-                                        >
-                                    </label>
-                                    <select
-                                        x-model="settings.vision_ollama_instance"
-                                        @change="onVisionOllamaInstanceChange()"
-                                        class="select select-bordered"
+                    <!-- Ollama Vision Instance & Model -->
+                    <template
+                        x-if="settings.vision_provider === 'ollama' && visionModels.ollama?.available"
+                    >
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Ollama Instance</span
                                     >
-                                        <template
-                                            x-for="instance in visionModels.ollama.instances"
-                                            :key="instance.name"
-                                        >
-                                            <option
-                                                :value="instance.name"
-                                                x-text="instance.name + ' (' + instance.url + ')'"
-                                            ></option>
-                                        </template>
-                                    </select>
-                                </div>
-                                <div class="form-control">
-                                    <label class="label">
-                                        <span class="label-text"
-                                            >Vision Model</span
-                                        >
-                                    </label>
-                                    <select
-                                        x-model="settings.vision_model"
-                                        class="select select-bordered"
+                                </label>
+                                <select
+                                    x-model="settings.vision_ollama_instance"
+                                    @change="onVisionOllamaInstanceChange()"
+                                    class="select select-bordered"
+                                >
+                                    <template
+                                        x-for="instance in visionModels.ollama.instances"
+                                        :key="instance.name"
                                     >
-                                        <template
-                                            x-for="model in currentOllamaVisionModels"
-                                            :key="model.id || model"
-                                        >
-                                            <option
-                                                :value="model.id || model"
-                                                x-text="model.name || model"
-                                            ></option>
-                                        </template>
-                                    </select>
-                                </div>
+                                        <option
+                                            :value="instance.name"
+                                            x-text="instance.name + ' (' + instance.url + ')'"
+                                        ></option>
+                                    </template>
+                                </select>
                             </div>
-                        </template>
-
-                        <!-- Provider Vision Model -->
-                        <template
-                            x-if="settings.vision_provider !== 'local' && settings.vision_provider !== 'ollama'"
-                        >
                             <div class="form-control">
                                 <label class="label">
                                     <span class="label-text">Vision Model</span>
@@ -363,7 +334,7 @@ block content %}
                                     class="select select-bordered"
                                 >
                                     <template
-                                        x-for="model in currentProviderVisionModels"
+                                        x-for="model in currentOllamaVisionModels"
                                         :key="model.id || model"
                                     >
                                         <option
@@ -373,59 +344,80 @@ block content %}
                                     </template>
                                 </select>
                             </div>
-                        </template>
+                        </div>
+                    </template>
 
-                        <!-- Local Vision Info -->
-                        <template x-if="settings.vision_provider === 'local'">
-                            <div
-                                class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
-                            >
-                                Uses bundled Docling models for document
-                                parsing. Runs on CPU/GPU.
-                            </div>
-                        </template>
-                    </div>
-
-                    <div class="space-y-4">
-                        <!-- RAG PDF Parser -->
+                    <!-- Provider Vision Model -->
+                    <template
+                        x-if="settings.vision_provider !== 'local' && settings.vision_provider !== 'ollama'"
+                    >
                         <div class="form-control">
                             <label class="label">
-                                <span class="label-text">RAG PDF Parser</span>
+                                <span class="label-text">Vision Model</span>
                             </label>
                             <select
-                                x-model="settings.rag_pdf_parser"
+                                x-model="settings.vision_model"
                                 class="select select-bordered"
                             >
-                                <option value="docling">
-                                    Docling (with Vision model)
-                                </option>
-                                <option value="pypdf">
-                                    PyPDF (fast, text-only)
-                                </option>
-                            </select>
-                            <label class="label">
-                                <span
-                                    class="label-text-alt text-base-content/60"
+                                <template
+                                    x-for="model in currentProviderVisionModels"
+                                    :key="model.id || model"
                                 >
-                                    <template
-                                        x-if="settings.rag_pdf_parser === 'docling'"
-                                    >
-                                        <span
-                                            >Uses Vision model above. Best for
-                                            scanned docs.</span
-                                        >
-                                    </template>
-                                    <template
-                                        x-if="settings.rag_pdf_parser === 'pypdf'"
-                                    >
-                                        <span
-                                            >Fast text extraction. Won't work on
-                                            scanned documents.</span
-                                        >
-                                    </template>
-                                </span>
-                            </label>
+                                    <option
+                                        :value="model.id || model"
+                                        x-text="model.name || model"
+                                    ></option>
+                                </template>
+                            </select>
                         </div>
+                    </template>
+
+                    <!-- Local Vision Info -->
+                    <template x-if="settings.vision_provider === 'local'">
+                        <div
+                            class="bg-base-200 rounded-lg p-3 text-sm text-base-content/70"
+                        >
+                            Uses bundled Docling models for document parsing.
+                            Runs on CPU/GPU.
+                        </div>
+                    </template>
+
+                    <!-- RAG PDF Parser -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">RAG PDF Parser</span>
+                        </label>
+                        <select
+                            x-model="settings.rag_pdf_parser"
+                            class="select select-bordered"
+                        >
+                            <option value="docling">
+                                Docling (with Vision model)
+                            </option>
+                            <option value="pypdf">
+                                PyPDF (fast, text-only)
+                            </option>
+                        </select>
+                        <label class="label">
+                            <span class="label-text-alt text-base-content/60">
+                                <template
+                                    x-if="settings.rag_pdf_parser === 'docling'"
+                                >
+                                    <span
+                                        >Uses Vision model above. Best for
+                                        scanned docs.</span
+                                    >
+                                </template>
+                                <template
+                                    x-if="settings.rag_pdf_parser === 'pypdf'"
+                                >
+                                    <span
+                                        >Fast text extraction. Won't work on
+                                        scanned documents.</span
+                                    >
+                                </template>
+                            </span>
+                        </label>
                     </div>
                 </div>
             </div>

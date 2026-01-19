@@ -1483,6 +1483,15 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         or os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
                     ),
                 },
+                "slack": {
+                    "configured": bool(os.environ.get("SLACK_BOT_TOKEN")),
+                },
+                "todoist": {
+                    "configured": bool(
+                        os.environ.get("TODOIST_API_TOKEN")
+                        or os.environ.get("TODOIST_API_KEY")
+                    ),
+                },
             },
         }
 
@@ -2197,6 +2206,148 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 },
             }
         )
+
+    @admin.route("/api/dashboard/smart-stats", methods=["GET"])
+    @require_auth_api
+    def get_smart_stats():
+        """Get Smart Alias and Data Source statistics for the dashboard."""
+        from sqlalchemy import func
+
+        from db.models import DocumentStore, SmartAlias
+
+        with get_db_context() as db:
+            # Smart Alias statistics
+            aliases = db.query(SmartAlias).filter(SmartAlias.enabled == True).all()
+
+            # Aggregate stats across all aliases
+            total_requests = sum(a.total_requests for a in aliases)
+            total_routing = sum(a.routing_decisions for a in aliases)
+            total_enrichments = sum(a.context_injections for a in aliases)
+            total_searches = sum(a.search_requests for a in aliases)
+            total_scrapes = sum(a.scrape_requests for a in aliases)
+            total_cache_hits = sum(a.cache_hits for a in aliases)
+            total_cache_saved = sum(a.cache_cost_saved for a in aliases)
+
+            # Count aliases by feature
+            aliases_with_routing = sum(1 for a in aliases if a.use_routing)
+            aliases_with_rag = sum(1 for a in aliases if a.use_rag)
+            aliases_with_web = sum(1 for a in aliases if a.use_web)
+            aliases_with_cache = sum(1 for a in aliases if a.use_cache)
+            aliases_with_memory = sum(1 for a in aliases if a.use_memory)
+
+            # Top aliases by requests
+            top_aliases = sorted(aliases, key=lambda a: a.total_requests, reverse=True)[
+                :5
+            ]
+            top_aliases_data = [
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "requests": a.total_requests,
+                    "features": {
+                        "routing": a.use_routing,
+                        "rag": a.use_rag,
+                        "web": a.use_web,
+                        "cache": a.use_cache,
+                        "memory": a.use_memory,
+                    },
+                }
+                for a in top_aliases
+            ]
+
+            # Document Store statistics
+            stores = db.query(DocumentStore).all()
+            total_documents = sum(s.document_count for s in stores)
+            total_chunks = sum(s.chunk_count for s in stores)
+
+            stores_by_status = {
+                "ready": sum(1 for s in stores if s.index_status == "ready"),
+                "indexing": sum(1 for s in stores if s.index_status == "indexing"),
+                "error": sum(1 for s in stores if s.index_status == "error"),
+                "pending": sum(1 for s in stores if s.index_status == "pending"),
+            }
+
+            # Stores with errors or stale indexes (not indexed in 7 days if scheduled)
+            from datetime import datetime, timedelta
+
+            stale_threshold = datetime.utcnow() - timedelta(days=7)
+            stale_stores = [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "status": s.index_status,
+                    "last_indexed": s.last_indexed.isoformat()
+                    if s.last_indexed
+                    else None,
+                    "error": s.index_error[:100] if s.index_error else None,
+                }
+                for s in stores
+                if s.index_status == "error"
+                or (
+                    s.index_schedule
+                    and s.last_indexed
+                    and s.last_indexed < stale_threshold
+                )
+            ][:5]
+
+            return jsonify(
+                {
+                    "smart_aliases": {
+                        "total": len(aliases),
+                        "by_feature": {
+                            "routing": aliases_with_routing,
+                            "rag": aliases_with_rag,
+                            "web": aliases_with_web,
+                            "cache": aliases_with_cache,
+                            "memory": aliases_with_memory,
+                        },
+                        "stats": {
+                            "total_requests": total_requests,
+                            "routing_decisions": total_routing,
+                            "context_injections": total_enrichments,
+                            "search_requests": total_searches,
+                            "scrape_requests": total_scrapes,
+                            "cache_hits": total_cache_hits,
+                            "cache_cost_saved": total_cache_saved,
+                        },
+                        "top_aliases": top_aliases_data,
+                    },
+                    "document_stores": {
+                        "total": len(stores),
+                        "total_documents": total_documents,
+                        "total_chunks": total_chunks,
+                        "by_status": stores_by_status,
+                        "issues": stale_stores,
+                    },
+                }
+            )
+
+    @admin.route("/api/dashboard/live-data-stats", methods=["GET"])
+    @require_auth_api
+    def get_live_data_stats():
+        """Get Live Data Source statistics for the dashboard."""
+        from db.live_data_sources import get_top_live_data_sources
+
+        top_sources = get_top_live_data_sources(limit=5)
+
+        # Calculate summary stats
+        total_calls = sum(s["total_calls"] for s in top_sources)
+        successful_calls = sum(s["successful_calls"] for s in top_sources)
+        total_latency = sum(s["avg_latency_ms"] * s["total_calls"] for s in top_sources)
+
+        summary = {
+            "total_calls": total_calls,
+            "successful_calls": successful_calls,
+            "failed_calls": total_calls - successful_calls,
+            "success_rate": (
+                round(successful_calls / total_calls * 100, 1) if total_calls > 0 else 0
+            ),
+            "avg_latency_ms": (
+                round(total_latency / total_calls) if total_calls > 0 else 0
+            ),
+        }
+
+        return jsonify({"top_sources": top_sources, "summary": summary})
 
     # -------------------------------------------------------------------------
     # Ollama API (supports multiple Ollama instances)
@@ -3934,6 +4085,200 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"success": True})
 
     # =========================================================================
+    # GPU Model Cache API
+    # =========================================================================
+
+    @admin.route("/api/gpu-cache", methods=["GET"])
+    @require_auth_api
+    def get_gpu_cache_stats():
+        """Get GPU model cache statistics."""
+        try:
+            from rag.model_cache import get_model_cache
+
+            cache = get_model_cache()
+            stats = cache.get_stats()
+
+            # Add GPU memory info if available
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    stats["gpu_memory_used_mb"] = round(
+                        torch.cuda.memory_allocated() / 1024 / 1024, 1
+                    )
+                    stats["gpu_memory_reserved_mb"] = round(
+                        torch.cuda.memory_reserved() / 1024 / 1024, 1
+                    )
+            except ImportError:
+                pass
+
+            return jsonify(stats)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/gpu-cache/clear", methods=["POST"])
+    @require_auth_api
+    def clear_gpu_cache():
+        """Clear all cached GPU models to free memory."""
+        try:
+            from rag.model_cache import get_model_cache
+
+            cache = get_model_cache()
+            cache.clear()
+            return jsonify({"success": True, "message": "GPU model cache cleared"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # =========================================================================
+    # Session Cache API (in-memory session-scoped caches)
+    # =========================================================================
+
+    @admin.route("/api/session-cache", methods=["GET"])
+    @require_auth_api
+    def get_session_cache_stats():
+        """Get session cache statistics for live data context and email lookups."""
+        try:
+            from live.sources import get_session_cache_stats
+
+            stats = get_session_cache_stats()
+            return jsonify(stats)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/session-cache/reset-stats", methods=["POST"])
+    @require_auth_api
+    def reset_session_cache_stats():
+        """Reset session cache statistics (keeps cache data, just resets counters)."""
+        try:
+            from live.sources import clear_session_cache_stats
+
+            clear_session_cache_stats()
+            return jsonify({"success": True, "message": "Session cache stats reset"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # =========================================================================
+    # Live Data Cache API (database-persisted cache)
+    # =========================================================================
+
+    @admin.route("/api/live-cache", methods=["GET"])
+    @require_auth_api
+    def get_live_cache_stats():
+        """Get live data cache statistics."""
+        try:
+            from db.live_cache import get_all_cache_stats
+
+            stats = get_all_cache_stats()
+            return jsonify(stats)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/live-cache/clear", methods=["POST"])
+    @require_auth_api
+    def clear_live_cache():
+        """
+        Clear live data cache entries.
+
+        Request body (optional):
+        {
+            "cache_type": "data" | "entity" | "all",  // Default: "all"
+            "expired_only": true | false,             // Default: false
+            "source_type": "stocks"                   // Optional: filter by source
+        }
+        """
+        try:
+            from db.live_cache import (
+                clear_all_caches,
+                clear_data_cache,
+                clear_entity_cache,
+            )
+
+            data = request.get_json() or {}
+            cache_type = data.get("cache_type", "all")
+            expired_only = data.get("expired_only", False)
+            source_type = data.get("source_type")
+
+            result = {}
+
+            if cache_type in ("data", "all"):
+                result["data_cache_cleared"] = clear_data_cache(
+                    source_type=source_type, expired_only=expired_only
+                )
+
+            if cache_type in ("entity", "all"):
+                result["entity_cache_cleared"] = clear_entity_cache(
+                    source_type=source_type, expired_only=expired_only
+                )
+
+            return jsonify({"success": True, **result})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/live-cache/settings", methods=["GET"])
+    @require_auth_api
+    def get_live_cache_settings():
+        """Get live data cache settings."""
+        from db.live_cache import DEFAULT_TTLS
+        from db.settings import get_setting
+
+        # Get current settings or defaults
+        settings = {
+            "enabled": get_setting("live_cache_enabled") or "true",
+            "ttl_price": get_setting("live_cache_ttl_price")
+            or str(DEFAULT_TTLS["price"]),
+            "ttl_weather_current": get_setting("live_cache_ttl_weather_current")
+            or str(DEFAULT_TTLS["weather_current"]),
+            "ttl_weather_forecast": get_setting("live_cache_ttl_weather_forecast")
+            or str(DEFAULT_TTLS["weather_forecast"]),
+            "ttl_score_live": get_setting("live_cache_ttl_score_live")
+            or str(DEFAULT_TTLS["score_live"]),
+            "ttl_default": get_setting("live_cache_ttl_default")
+            or str(DEFAULT_TTLS["default"]),
+            "entity_ttl_days": get_setting("live_cache_entity_ttl_days") or "90",
+            "max_size_mb": get_setting("live_cache_max_size_mb") or "100",
+        }
+
+        # Add defaults for reference
+        settings["defaults"] = {
+            "ttl_price": DEFAULT_TTLS["price"],
+            "ttl_weather_current": DEFAULT_TTLS["weather_current"],
+            "ttl_weather_forecast": DEFAULT_TTLS["weather_forecast"],
+            "ttl_score_live": DEFAULT_TTLS["score_live"],
+            "ttl_default": DEFAULT_TTLS["default"],
+            "entity_ttl_days": 90,
+        }
+
+        return jsonify(settings)
+
+    @admin.route("/api/live-cache/settings", methods=["PUT"])
+    @require_auth_api
+    def update_live_cache_settings():
+        """Update live data cache settings."""
+        from db.settings import set_setting
+
+        data = request.get_json() or {}
+
+        # Map of allowed settings
+        allowed_keys = {
+            "enabled": "live_cache_enabled",
+            "ttl_price": "live_cache_ttl_price",
+            "ttl_weather_current": "live_cache_ttl_weather_current",
+            "ttl_weather_forecast": "live_cache_ttl_weather_forecast",
+            "ttl_score_live": "live_cache_ttl_score_live",
+            "ttl_default": "live_cache_ttl_default",
+            "entity_ttl_days": "live_cache_entity_ttl_days",
+            "max_size_mb": "live_cache_max_size_mb",
+        }
+
+        updated = []
+        for key, db_key in allowed_keys.items():
+            if key in data:
+                set_setting(db_key, str(data[key]))
+                updated.append(key)
+
+        return jsonify({"success": True, "updated": updated})
+
+    # =========================================================================
     # Model Sync API (sync models/pricing from LiteLLM)
     # =========================================================================
 
@@ -4938,6 +5283,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             os.environ.get("GOOGLE_CLIENT_ID")
             and os.environ.get("GOOGLE_CLIENT_SECRET")
         )
+        has_microsoft = bool(
+            os.environ.get("MICROSOFT_CLIENT_ID")
+            and os.environ.get("MICROSOFT_CLIENT_SECRET")
+        )
 
         return jsonify(
             {
@@ -4946,6 +5295,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "reason": None
                     if has_google
                     else "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET required",
+                },
+                "microsoft": {
+                    "available": has_microsoft,
+                    "reason": None
+                    if has_microsoft
+                    else "MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET required",
                 },
                 "notion": {
                     "available": has_notion,
@@ -5153,7 +5508,13 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 return jsonify(
                     {"error": "Source path is required for local sources"}
                 ), 400
-        elif source_type in ("mcp:gdrive", "mcp:gmail", "mcp:gcalendar"):
+        elif source_type in (
+            "mcp:gdrive",
+            "mcp:gmail",
+            "mcp:gcalendar",
+            "mcp:gtasks",
+            "mcp:gcontacts",
+        ):
             # Google sources require OAuth account
             if not google_account_id:
                 return jsonify(
@@ -5212,6 +5573,35 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 return jsonify(
                     {"error": "Website URL is required for website sources"}
                 ), 400
+        elif source_type == "slack":
+            # Slack - requires bot token
+            if not os.environ.get("SLACK_BOT_TOKEN"):
+                return jsonify(
+                    {"error": "SLACK_BOT_TOKEN environment variable is required"}
+                ), 400
+        elif source_type == "todoist":
+            # Todoist - requires API token
+            if not os.environ.get("TODOIST_API_TOKEN") and not os.environ.get(
+                "TODOIST_API_KEY"
+            ):
+                return jsonify(
+                    {
+                        "error": "TODOIST_API_TOKEN or TODOIST_API_KEY environment variable is required"
+                    }
+                ), 400
+        elif source_type in ("mcp:onedrive", "mcp:outlook", "mcp:onenote", "mcp:teams"):
+            # Microsoft sources require OAuth account
+            microsoft_account_id = data.get("microsoft_account_id")
+            if not microsoft_account_id:
+                return jsonify(
+                    {"error": "Microsoft account is required for Microsoft sources"}
+                ), 400
+        elif source_type == "websearch":
+            # Web search - requires query
+            if not data.get("websearch_query"):
+                return jsonify(
+                    {"error": "Search query is required for web search sources"}
+                ), 400
         else:
             return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
@@ -5228,6 +5618,23 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 gmail_label_name=data.get("gmail_label_name"),
                 gcalendar_calendar_id=data.get("gcalendar_calendar_id"),
                 gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
+                gtasks_tasklist_id=data.get("gtasks_tasklist_id"),
+                gtasks_tasklist_name=data.get("gtasks_tasklist_name"),
+                gcontacts_group_id=data.get("gcontacts_group_id"),
+                gcontacts_group_name=data.get("gcontacts_group_name"),
+                microsoft_account_id=data.get("microsoft_account_id"),
+                onedrive_folder_id=data.get("onedrive_folder_id"),
+                onedrive_folder_name=data.get("onedrive_folder_name"),
+                outlook_folder_id=data.get("outlook_folder_id"),
+                outlook_folder_name=data.get("outlook_folder_name"),
+                outlook_days_back=data.get("outlook_days_back", 90),
+                onenote_notebook_id=data.get("onenote_notebook_id"),
+                onenote_notebook_name=data.get("onenote_notebook_name"),
+                teams_team_id=data.get("teams_team_id"),
+                teams_team_name=data.get("teams_team_name"),
+                teams_channel_id=data.get("teams_channel_id"),
+                teams_channel_name=data.get("teams_channel_name"),
+                teams_days_back=data.get("teams_days_back", 90),
                 paperless_url=data.get("paperless_url"),
                 paperless_token=data.get("paperless_token"),
                 paperless_tag_id=data.get("paperless_tag_id"),
@@ -5243,6 +5650,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 website_max_pages=data.get("website_max_pages", 50),
                 website_include_pattern=data.get("website_include_pattern"),
                 website_exclude_pattern=data.get("website_exclude_pattern"),
+                website_crawler_override=data.get("website_crawler_override"),
+                slack_channel_id=data.get("slack_channel_id"),
+                slack_channel_types=data.get("slack_channel_types", "public_channel"),
+                slack_days_back=data.get("slack_days_back", 90),
+                todoist_project_id=data.get("todoist_project_id"),
+                todoist_project_name=data.get("todoist_project_name"),
+                todoist_filter=data.get("todoist_filter"),
+                todoist_include_completed=data.get("todoist_include_completed", False),
+                websearch_query=data.get("websearch_query"),
+                websearch_max_results=data.get("websearch_max_results", 10),
+                websearch_pages_to_scrape=data.get("websearch_pages_to_scrape", 5),
+                websearch_time_range=data.get("websearch_time_range"),
+                websearch_category=data.get("websearch_category"),
                 embedding_provider=data.get("embedding_provider", "local"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5257,6 +5677,29 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 enabled=data.get("enabled", True),
                 use_temporal_filtering=data.get("use_temporal_filtering", False),
             )
+
+            # Auto-create live source for Google Calendar/Tasks/Gmail document stores
+            if (
+                source_type in ("mcp:gcalendar", "mcp:gtasks", "mcp:gmail")
+                and google_account_id
+            ):
+                try:
+                    from db.live_data_sources import sync_live_source_for_document_store
+                    from db.oauth_tokens import get_oauth_token_info
+
+                    oauth_token = get_oauth_token_info(google_account_id)
+                    if oauth_token:
+                        sync_live_source_for_document_store(
+                            doc_store_name=name,
+                            doc_store_source_type=source_type,
+                            google_account_id=google_account_id,
+                            google_account_email=oauth_token.get("account_email")
+                            or "unknown",
+                            enabled=data.get("enabled", True),
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to auto-create live source for {name}: {e}")
+
             return jsonify(store.to_dict()), 201
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -5285,6 +5728,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 gmail_label_name=data.get("gmail_label_name"),
                 gcalendar_calendar_id=data.get("gcalendar_calendar_id"),
                 gcalendar_calendar_name=data.get("gcalendar_calendar_name"),
+                microsoft_account_id=data.get("microsoft_account_id"),
+                onedrive_folder_id=data.get("onedrive_folder_id"),
+                onedrive_folder_name=data.get("onedrive_folder_name"),
+                outlook_folder_id=data.get("outlook_folder_id"),
+                outlook_folder_name=data.get("outlook_folder_name"),
+                outlook_days_back=data.get("outlook_days_back"),
+                onenote_notebook_id=data.get("onenote_notebook_id"),
+                onenote_notebook_name=data.get("onenote_notebook_name"),
+                teams_team_id=data.get("teams_team_id"),
+                teams_team_name=data.get("teams_team_name"),
+                teams_channel_id=data.get("teams_channel_id"),
+                teams_channel_name=data.get("teams_channel_name"),
+                teams_days_back=data.get("teams_days_back"),
                 paperless_url=data.get("paperless_url"),
                 paperless_token=data.get("paperless_token"),
                 paperless_tag_id=data.get("paperless_tag_id"),
@@ -5300,6 +5756,19 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 website_max_pages=data.get("website_max_pages"),
                 website_include_pattern=data.get("website_include_pattern"),
                 website_exclude_pattern=data.get("website_exclude_pattern"),
+                website_crawler_override=data.get("website_crawler_override"),
+                slack_channel_id=data.get("slack_channel_id"),
+                slack_channel_types=data.get("slack_channel_types"),
+                slack_days_back=data.get("slack_days_back"),
+                todoist_project_id=data.get("todoist_project_id"),
+                todoist_project_name=data.get("todoist_project_name"),
+                todoist_filter=data.get("todoist_filter"),
+                todoist_include_completed=data.get("todoist_include_completed"),
+                websearch_query=data.get("websearch_query"),
+                websearch_max_results=data.get("websearch_max_results"),
+                websearch_pages_to_scrape=data.get("websearch_pages_to_scrape"),
+                websearch_time_range=data.get("websearch_time_range"),
+                websearch_category=data.get("websearch_category"),
                 embedding_provider=data.get("embedding_provider"),
                 embedding_model=data.get("embedding_model"),
                 ollama_url=data.get("ollama_url"),
@@ -5316,6 +5785,29 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             )
             if not store:
                 return jsonify({"error": "Document store not found"}), 404
+
+            # Sync live source for Google Calendar/Tasks/Gmail document stores
+            if (
+                store.source_type in ("mcp:gcalendar", "mcp:gtasks", "mcp:gmail")
+                and store.google_account_id
+            ):
+                try:
+                    from db.live_data_sources import sync_live_source_for_document_store
+                    from db.oauth_tokens import get_oauth_token_info
+
+                    oauth_token = get_oauth_token_info(store.google_account_id)
+                    if oauth_token:
+                        sync_live_source_for_document_store(
+                            doc_store_name=store.name,
+                            doc_store_source_type=store.source_type,
+                            google_account_id=store.google_account_id,
+                            google_account_email=oauth_token.get("account_email")
+                            or "unknown",
+                            enabled=store.enabled,
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to sync live source for {store.name}: {e}")
+
             return jsonify(store.to_dict())
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -5348,6 +5840,15 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 indexer.delete_store_collection(store_id)
             except Exception as e:
                 logger.warning(f"Failed to delete ChromaDB collection: {e}")
+
+        # Delete associated live source for Google Calendar/Tasks/Gmail
+        if store.source_type in ("mcp:gcalendar", "mcp:gtasks", "mcp:gmail"):
+            try:
+                from db.live_data_sources import delete_live_source_for_document_store
+
+                delete_live_source_for_document_store(store.name)
+            except Exception as e:
+                logger.warning(f"Failed to delete live source for {store.name}: {e}")
 
         if delete_document_store(store_id):
             return jsonify({"success": True})
@@ -5391,6 +5892,78 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             return jsonify({"success": True, "message": "Indexing cancelled"})
         except Exception as e:
             logger.error(f"Failed to cancel indexing: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/document-stores/<int:store_id>/preview", methods=["GET"])
+    @require_auth_api
+    def preview_store_contents(store_id: int):
+        """Preview indexed content from a document store."""
+        from db import get_document_store_by_id
+
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        if not store.collection_name:
+            return jsonify({"error": "Store has not been indexed yet"}), 400
+
+        try:
+            import chromadb
+
+            chroma_url = os.environ.get("CHROMA_URL")
+            if chroma_url:
+                chroma_client = chromadb.HttpClient(host=chroma_url)
+            else:
+                chroma_path = os.environ.get("CHROMA_PATH", "./chroma_data")
+                chroma_client = chromadb.PersistentClient(path=chroma_path)
+
+            try:
+                collection = chroma_client.get_collection(store.collection_name)
+            except Exception:
+                return jsonify(
+                    {"error": "Collection not found - store may need reindexing"}
+                ), 404
+
+            # Get limit from query params (default 20, max 100)
+            limit = min(int(request.args.get("limit", 20)), 100)
+            offset = int(request.args.get("offset", 0))
+
+            # Get documents with metadata
+            results = collection.get(
+                limit=limit, offset=offset, include=["documents", "metadatas"]
+            )
+
+            documents = []
+            if results and results.get("documents"):
+                for i, (doc, meta) in enumerate(
+                    zip(results["documents"], results["metadatas"])
+                ):
+                    documents.append(
+                        {
+                            "id": results["ids"][i] if results.get("ids") else i,
+                            "content": doc[:500] + "..." if len(doc) > 500 else doc,
+                            "full_length": len(doc),
+                            "source_uri": meta.get("source_uri", ""),
+                            "source_name": meta.get("source_name", ""),
+                            "chunk_index": meta.get("chunk_index", 0),
+                            "timestamp": meta.get("timestamp", ""),
+                        }
+                    )
+
+            return jsonify(
+                {
+                    "store_id": store_id,
+                    "store_name": store.name,
+                    "total_chunks": store.chunk_count or 0,
+                    "total_documents": store.document_count or 0,
+                    "showing": len(documents),
+                    "offset": offset,
+                    "documents": documents,
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to preview store contents: {e}")
             return jsonify({"error": str(e)}), 500
 
     @admin.route("/api/document-stores/<int:store_id>/clear", methods=["POST"])
@@ -5471,24 +6044,57 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
     # Google OAuth scopes for different services
     # All include userinfo.email to identify the account
+    # Write scopes are included for Smart Actions (draft creation, event creation, etc.)
     GOOGLE_SCOPES = {
         "drive": [
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",  # Create/edit files created by app
         ],
         "gmail": [
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.compose",  # Create drafts and send emails
+            "https://www.googleapis.com/auth/gmail.modify",  # Mark read/unread, archive, label
         ],
         "calendar": [
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",  # Create/edit calendar events
+            "https://www.googleapis.com/auth/calendar",  # Full access including delete
+        ],
+        "tasks": [
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/tasks.readonly",
+            "https://www.googleapis.com/auth/tasks",  # Create/edit tasks
+        ],
+        "contacts": [
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/contacts.readonly",
+            "https://www.googleapis.com/auth/contacts",  # Create/edit contacts
         ],
         "workspace": [
             "https://www.googleapis.com/auth/userinfo.email",
+            # Drive
             "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+            # Gmail
             "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.compose",
+            "https://www.googleapis.com/auth/gmail.modify",  # Mark read/unread, archive, label
+            # Calendar
             "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/calendar",  # Full access including delete
+            # Tasks
+            "https://www.googleapis.com/auth/tasks.readonly",
+            "https://www.googleapis.com/auth/tasks",
+            # Contacts
+            "https://www.googleapis.com/auth/contacts.readonly",
+            "https://www.googleapis.com/auth/contacts",
+        ],
+        "places": [
+            "https://www.googleapis.com/auth/userinfo.email",
         ],
     }
 
@@ -6177,6 +6783,141 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             logger.error(f"Error listing Paperless tags: {e}")
             return jsonify({"error": str(e)}), 500
 
+    @admin.route("/api/slack/channels", methods=["GET"])
+    @require_auth_api
+    def list_slack_channels():
+        """
+        List channels from Slack.
+
+        Returns a list of channels the bot can access.
+        """
+        import requests as http_requests
+
+        bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+
+        if not bot_token:
+            return jsonify({"error": "Slack bot token not configured"}), 400
+
+        try:
+            # Fetch conversations list
+            all_channels = []
+            cursor = None
+
+            while True:
+                params = {
+                    "types": "public_channel,private_channel",
+                    "exclude_archived": "true",
+                    "limit": 200,
+                }
+                if cursor:
+                    params["cursor"] = cursor
+
+                response = http_requests.get(
+                    "https://slack.com/api/conversations.list",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    params=params,
+                    timeout=15,
+                )
+
+                if response.status_code != 200:
+                    return (
+                        jsonify({"error": f"Slack error: {response.status_code}"}),
+                        response.status_code,
+                    )
+
+                data = response.json()
+
+                if not data.get("ok"):
+                    error = data.get("error", "Unknown error")
+                    return jsonify({"error": f"Slack API error: {error}"}), 400
+
+                channels = data.get("channels", [])
+                for channel in channels:
+                    all_channels.append(
+                        {
+                            "id": channel.get("id"),
+                            "name": channel.get("name", ""),
+                            "is_private": channel.get("is_private", False),
+                            "num_members": channel.get("num_members", 0),
+                        }
+                    )
+
+                # Check for pagination
+                cursor = data.get("response_metadata", {}).get("next_cursor")
+                if not cursor:
+                    break
+
+            # Sort by name
+            all_channels.sort(key=lambda x: x["name"].lower())
+
+            return jsonify({"channels": all_channels})
+
+        except http_requests.exceptions.Timeout:
+            return jsonify({"error": "Slack request timed out"}), 504
+        except http_requests.exceptions.ConnectionError:
+            return jsonify({"error": "Could not connect to Slack"}), 503
+        except Exception as e:
+            logger.error(f"Error listing Slack channels: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/todoist/projects", methods=["GET"])
+    @require_auth_api
+    def list_todoist_projects():
+        """
+        List projects from Todoist.
+
+        Returns a list of projects the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        # Support both TODOIST_API_TOKEN and TODOIST_API_KEY for compatibility
+        api_token = os.environ.get("TODOIST_API_TOKEN") or os.environ.get(
+            "TODOIST_API_KEY", ""
+        )
+
+        if not api_token:
+            return jsonify({"error": "Todoist API token not configured"}), 400
+
+        try:
+            response = http_requests.get(
+                "https://api.todoist.com/rest/v2/projects",
+                headers={"Authorization": f"Bearer {api_token}"},
+                timeout=15,
+            )
+
+            if response.status_code != 200:
+                return (
+                    jsonify({"error": f"Todoist error: {response.status_code}"}),
+                    response.status_code,
+                )
+
+            projects = response.json()
+
+            # Format projects for the dropdown
+            formatted_projects = []
+            for project in projects:
+                formatted_projects.append(
+                    {
+                        "id": project.get("id"),
+                        "name": project.get("name", ""),
+                        "color": project.get("color", ""),
+                        "is_favorite": project.get("is_favorite", False),
+                    }
+                )
+
+            # Sort by name
+            formatted_projects.sort(key=lambda x: x["name"].lower())
+
+            return jsonify({"projects": formatted_projects})
+
+        except http_requests.exceptions.Timeout:
+            return jsonify({"error": "Todoist request timed out"}), 504
+        except http_requests.exceptions.ConnectionError:
+            return jsonify({"error": "Could not connect to Todoist"}), 503
+        except Exception as e:
+            logger.error(f"Error listing Todoist projects: {e}")
+            return jsonify({"error": str(e)}), 500
+
     @admin.route("/api/oauth/google/<int:account_id>/labels", methods=["GET"])
     @require_auth_api
     def list_gmail_labels(account_id):
@@ -6298,6 +7039,1389 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
 
         return jsonify({"calendars": calendars})
 
+    @admin.route("/api/oauth/google/<int:account_id>/tasklists", methods=["GET"])
+    @require_auth_api
+    def list_google_tasklists(account_id):
+        """
+        List task lists from a Google Tasks account using direct API.
+
+        Returns a list of task lists the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        # Try the access token first
+        response = http_requests.get(
+            "https://tasks.googleapis.com/tasks/v1/users/@me/lists",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                # Update stored token
+                from db.oauth_tokens import update_oauth_token_data
+
+                update_oauth_token_data(account_id, {"access_token": access_token})
+
+                # Retry the request
+                response = http_requests.get(
+                    "https://tasks.googleapis.com/tasks/v1/users/@me/lists",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list task lists: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list task lists: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+        tasklists = []
+
+        for tasklist in data.get("items", []):
+            tasklist_id = tasklist.get("id", "")
+            title = tasklist.get("title", tasklist_id)
+            tasklists.append({"id": tasklist_id, "name": title})
+
+        return jsonify({"tasklists": tasklists})
+
+    @admin.route("/api/oauth/google/<int:account_id>/contactgroups", methods=["GET"])
+    @require_auth_api
+    def list_google_contactgroups(account_id):
+        """
+        List contact groups from a Google Contacts account using People API.
+
+        Returns a list of contact groups the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        # Try the access token first
+        response = http_requests.get(
+            "https://people.googleapis.com/v1/contactGroups",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"groupFields": "name,memberCount"},
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                # Update stored token
+                from db.oauth_tokens import update_oauth_token_data
+
+                update_oauth_token_data(account_id, {"access_token": access_token})
+
+                # Retry the request
+                response = http_requests.get(
+                    "https://people.googleapis.com/v1/contactGroups",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={"groupFields": "name,memberCount"},
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list contact groups: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list contact groups: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+        groups = []
+
+        for group in data.get("contactGroups", []):
+            resource_name = group.get("resourceName", "")
+            name = group.get("name", resource_name)
+            member_count = group.get("memberCount", 0)
+            group_type = group.get("groupType", "")
+
+            # Skip system groups except "myContacts" (all contacts with data)
+            if group_type == "SYSTEM_CONTACT_GROUP" and name not in [
+                "myContacts",
+                "starred",
+            ]:
+                continue
+
+            # Make names more user-friendly
+            display_name = name
+            if name == "myContacts":
+                display_name = "All Contacts"
+            elif name == "starred":
+                display_name = "Starred"
+
+            groups.append(
+                {
+                    "id": resource_name,
+                    "name": display_name,
+                    "memberCount": member_count,
+                }
+            )
+
+        return jsonify({"groups": groups})
+
+    # =========================================================================
+    # Microsoft OAuth
+    # =========================================================================
+
+    # Microsoft Graph API scopes for different services
+    # Personal accounts use "consumers" endpoint, work/school use "common" or tenant ID
+    # Write scopes are included for Smart Actions (draft creation, event creation, etc.)
+    MICROSOFT_SCOPES = {
+        "onedrive": [
+            "User.Read",  # Basic profile info
+            "Files.Read",  # OneDrive files (read-only)
+            "Files.ReadWrite",  # Create/edit files
+        ],
+        "outlook": [
+            "User.Read",
+            "Mail.Read",  # Outlook mail (read)
+            "Mail.ReadWrite",  # Create drafts
+            "Mail.Send",  # Send emails
+            "Calendars.Read",  # Outlook calendar (read)
+            "Calendars.ReadWrite",  # Create/edit calendar events
+        ],
+        "onenote": [
+            "User.Read",
+            "Notes.Read",  # OneNote notebooks (read)
+            "Notes.ReadWrite",  # Create/edit notes
+        ],
+        "tasks": [
+            "User.Read",
+            "Tasks.Read",  # To Do tasks (read)
+            "Tasks.ReadWrite",  # Create/edit tasks
+        ],
+        "full": [
+            "User.Read",
+            # OneDrive
+            "Files.Read",
+            "Files.ReadWrite",
+            # Outlook Mail
+            "Mail.Read",
+            "Mail.ReadWrite",
+            "Mail.Send",
+            # Calendar
+            "Calendars.Read",
+            "Calendars.ReadWrite",
+            # OneNote
+            "Notes.Read",
+            "Notes.ReadWrite",
+            # Tasks (To Do)
+            "Tasks.Read",
+            "Tasks.ReadWrite",
+            # Contacts
+            "Contacts.Read",
+            "Contacts.ReadWrite",
+            "offline_access",  # Required for refresh tokens
+        ],
+    }
+
+    @admin.route("/api/oauth/microsoft/start", methods=["GET"])
+    @require_auth_api
+    def microsoft_oauth_start():
+        """
+        Start Microsoft OAuth flow.
+
+        Query params:
+            - redirect_uri: Where to redirect after auth (default: /document-stores)
+
+        Returns redirect URL to Microsoft consent screen.
+        """
+        import secrets
+        import urllib.parse
+
+        client_id = os.environ.get("MICROSOFT_CLIENT_ID")
+        if not client_id:
+            return jsonify(
+                {
+                    "error": "MICROSOFT_CLIENT_ID not configured",
+                    "setup_required": True,
+                }
+            ), 400
+
+        # Request all scopes so one account works for OneDrive, Outlook, OneNote
+        scopes = MICROSOFT_SCOPES["full"]
+
+        # Generate state token for CSRF protection
+        import json
+
+        from db import set_setting
+
+        state = secrets.token_urlsafe(32)
+        oauth_data = {
+            "redirect": request.args.get("redirect_uri", "/document-stores"),
+            "scopes": scopes,
+        }
+        set_setting(f"oauth_state_{state}", json.dumps(oauth_data))
+
+        # Build the OAuth URL
+        # Use "consumers" for personal Microsoft accounts
+        # Use "common" for both personal and work/school accounts
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.microsoft_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.microsoft_oauth_callback"
+            )
+
+        params = {
+            "client_id": client_id,
+            "redirect_uri": callback_url,
+            "scope": " ".join(scopes),
+            "response_type": "code",
+            "state": state,
+            "response_mode": "query",
+        }
+
+        # Use "consumers" endpoint for personal accounts only
+        auth_url = (
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?"
+            + urllib.parse.urlencode(params)
+        )
+
+        return jsonify({"auth_url": auth_url})
+
+    @admin.route("/api/oauth/microsoft/callback", methods=["GET"])
+    def microsoft_oauth_callback():
+        """
+        Handle Microsoft OAuth callback.
+
+        Microsoft redirects here after user consents. We exchange the code for tokens.
+        """
+        import requests as http_requests
+
+        error = request.args.get("error")
+        error_description = request.args.get("error_description", "")
+        if error:
+            logger.error(f"Microsoft OAuth error: {error} - {error_description}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Microsoft authentication failed: {error_description or error}",
+            )
+
+        # Verify state - retrieve from database
+        import json
+
+        from db import delete_setting, get_setting
+
+        state = request.args.get("state")
+        oauth_data_json = get_setting(f"oauth_state_{state}") if state else None
+
+        if not state or not oauth_data_json:
+            logger.error("OAuth state mismatch or not found")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="Invalid OAuth state. Please try again.",
+            )
+
+        # Parse stored OAuth data and clean up
+        oauth_data = json.loads(oauth_data_json)
+        delete_setting(f"oauth_state_{state}")  # One-time use
+
+        code = request.args.get("code")
+        if not code:
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="No authorization code received.",
+            )
+
+        # Exchange code for tokens
+        client_id = os.environ.get("MICROSOFT_CLIENT_ID")
+        client_secret = os.environ.get("MICROSOFT_CLIENT_SECRET")
+
+        # Use EXTERNAL_URL if set (for reverse proxy setups)
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.microsoft_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.microsoft_oauth_callback"
+            )
+
+        try:
+            token_response = http_requests.post(
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": callback_url,
+                    "grant_type": "authorization_code",
+                },
+                timeout=30,
+            )
+            token_response.raise_for_status()
+            token_data = token_response.json()
+        except Exception as e:
+            logger.error(f"Failed to exchange Microsoft OAuth code: {e}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Failed to get tokens: {e}",
+            )
+
+        if "refresh_token" not in token_data:
+            logger.warning(
+                "No refresh_token in response - ensure offline_access scope is requested"
+            )
+
+        # Get user info from Microsoft Graph API
+        try:
+            userinfo_response = http_requests.get(
+                "https://graph.microsoft.com/v1.0/me",
+                headers={"Authorization": f"Bearer {token_data['access_token']}"},
+                timeout=30,
+            )
+            userinfo_response.raise_for_status()
+            userinfo = userinfo_response.json()
+            account_email = userinfo.get("mail") or userinfo.get(
+                "userPrincipalName", "unknown"
+            )
+            account_name = userinfo.get("displayName")
+        except Exception as e:
+            logger.warning(f"Failed to get Microsoft user info: {e}")
+            account_email = "unknown"
+            account_name = None
+
+        # Store the tokens
+        from db.oauth_tokens import store_oauth_token
+
+        scopes = oauth_data.get("scopes", [])
+
+        # Add client credentials to token data for later refresh
+        token_data["client_id"] = client_id
+        token_data["client_secret"] = client_secret
+        token_data["token_uri"] = (
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
+        )
+
+        token_id = store_oauth_token(
+            provider="microsoft",
+            account_email=account_email,
+            token_data=token_data,
+            scopes=scopes,
+            account_name=account_name,
+        )
+
+        redirect_url = oauth_data.get("redirect", "/document-stores")
+
+        return render_template(
+            "oauth_result.html",
+            success=True,
+            account_id=token_id,
+            account_email=account_email,
+            account_name=account_name,
+            redirect_url=redirect_url,
+            provider="Microsoft",
+        )
+
+    @admin.route("/api/oauth/microsoft/status", methods=["GET"])
+    @require_auth_api
+    def microsoft_oauth_status():
+        """
+        Check Microsoft OAuth configuration status.
+
+        Returns whether client credentials are configured and list of connected accounts.
+        """
+        from db.oauth_tokens import list_oauth_tokens
+
+        client_id = os.environ.get("MICROSOFT_CLIENT_ID")
+        client_secret = os.environ.get("MICROSOFT_CLIENT_SECRET")
+
+        configured = bool(client_id and client_secret)
+        accounts = list_oauth_tokens(provider="microsoft") if configured else []
+
+        return jsonify(
+            {
+                "configured": configured,
+                "accounts": accounts,
+            }
+        )
+
+    @admin.route("/api/oauth/microsoft/<int:account_id>/folders", methods=["GET"])
+    @require_auth_api
+    def list_onedrive_folders(account_id):
+        """
+        List folders from a OneDrive account using the Graph API.
+
+        Query params:
+            parent: Optional parent folder ID to list subfolders of.
+                    If not provided or 'root', lists root-level folders.
+
+        Returns a list of folders the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id, update_oauth_token_data
+
+        parent_id = request.args.get("parent", "root") or "root"
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        # Build the Graph API URL for listing folder children
+        if parent_id == "root":
+            url = "https://graph.microsoft.com/v1.0/me/drive/root/children"
+        else:
+            url = (
+                f"https://graph.microsoft.com/v1.0/me/drive/items/{parent_id}/children"
+            )
+
+        # Filter to only folders
+        params = {"$filter": "folder ne null", "$select": "id,name,folder"}
+
+        response = http_requests.get(
+            url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Microsoft access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                # Update stored token (Microsoft may return a new refresh token)
+                token_data["access_token"] = access_token
+                if new_tokens.get("refresh_token"):
+                    token_data["refresh_token"] = new_tokens["refresh_token"]
+                update_oauth_token_data(account_id, token_data)
+
+                # Retry the request
+                response = http_requests.get(
+                    url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list OneDrive folders: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list folders: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+
+        # Build folder list - include option for root/all
+        folders = [{"id": "", "name": "All files (root)"}]
+
+        for item in data.get("value", []):
+            if "folder" in item:
+                folders.append({"id": item["id"], "name": item["name"]})
+
+        return jsonify({"folders": folders, "parent": parent_id})
+
+    @admin.route("/api/oauth/microsoft/<int:account_id>/mail-folders", methods=["GET"])
+    @require_auth_api
+    def list_outlook_folders(account_id):
+        """
+        List mail folders from an Outlook account using the Graph API.
+
+        Returns a list of mail folders the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id, update_oauth_token_data
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        url = "https://graph.microsoft.com/v1.0/me/mailFolders"
+        params = {"$select": "id,displayName,totalItemCount"}
+
+        response = http_requests.get(
+            url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Microsoft access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                token_data["access_token"] = access_token
+                if new_tokens.get("refresh_token"):
+                    token_data["refresh_token"] = new_tokens["refresh_token"]
+                update_oauth_token_data(account_id, token_data)
+
+                response = http_requests.get(
+                    url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list Outlook folders: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list folders: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+
+        folders = []
+        for item in data.get("value", []):
+            folders.append(
+                {
+                    "id": item["id"],
+                    "name": f"{item['displayName']} ({item.get('totalItemCount', 0)})",
+                }
+            )
+
+        return jsonify({"folders": folders})
+
+    @admin.route("/api/oauth/microsoft/<int:account_id>/notebooks", methods=["GET"])
+    @require_auth_api
+    def list_onenote_notebooks(account_id):
+        """
+        List OneNote notebooks from a Microsoft account using the Graph API.
+
+        Returns a list of notebooks the user can select to limit indexing scope.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id, update_oauth_token_data
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        url = "https://graph.microsoft.com/v1.0/me/onenote/notebooks"
+        params = {"$select": "id,displayName,createdDateTime"}
+
+        response = http_requests.get(
+            url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Microsoft access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                token_data["access_token"] = access_token
+                if new_tokens.get("refresh_token"):
+                    token_data["refresh_token"] = new_tokens["refresh_token"]
+                update_oauth_token_data(account_id, token_data)
+
+                response = http_requests.get(
+                    url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list OneNote notebooks: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list notebooks: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+
+        notebooks = []
+        for item in data.get("value", []):
+            notebooks.append({"id": item["id"], "name": item["displayName"]})
+
+        return jsonify({"notebooks": notebooks})
+
+    @admin.route("/api/oauth/microsoft/<int:account_id>/teams", methods=["GET"])
+    @require_auth_api
+    def list_microsoft_teams(account_id):
+        """
+        List Teams from a Microsoft account using the Graph API.
+
+        Returns a list of teams the user is a member of.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id, update_oauth_token_data
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        url = "https://graph.microsoft.com/v1.0/me/joinedTeams"
+        params = {"$select": "id,displayName,description"}
+
+        response = http_requests.get(
+            url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Microsoft access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                token_data["access_token"] = access_token
+                if new_tokens.get("refresh_token"):
+                    token_data["refresh_token"] = new_tokens["refresh_token"]
+                update_oauth_token_data(account_id, token_data)
+
+                response = http_requests.get(
+                    url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list Teams: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list teams: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+
+        teams = []
+        for item in data.get("value", []):
+            teams.append({"id": item["id"], "name": item["displayName"]})
+
+        return jsonify({"teams": teams})
+
+    @admin.route(
+        "/api/oauth/microsoft/<int:account_id>/teams/<team_id>/channels",
+        methods=["GET"],
+    )
+    @require_auth_api
+    def list_teams_channels(account_id, team_id):
+        """
+        List channels from a Teams team using the Graph API.
+
+        Returns a list of channels in the specified team.
+        """
+        import requests as http_requests
+
+        from db.oauth_tokens import get_oauth_token_by_id, update_oauth_token_data
+
+        token_data = get_oauth_token_by_id(account_id)
+        if not token_data:
+            return jsonify({"error": "OAuth token not found"}), 404
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            return jsonify({"error": "No access token in stored credentials"}), 400
+
+        url = f"https://graph.microsoft.com/v1.0/teams/{team_id}/channels"
+        params = {"$select": "id,displayName,description"}
+
+        response = http_requests.get(
+            url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=10,
+        )
+
+        # Token expired, try to refresh
+        if (
+            response.status_code == 401
+            and refresh_token
+            and client_id
+            and client_secret
+        ):
+            logger.info("Microsoft access token expired, refreshing...")
+            refresh_response = http_requests.post(
+                "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=10,
+            )
+
+            if refresh_response.status_code == 200:
+                new_tokens = refresh_response.json()
+                access_token = new_tokens.get("access_token")
+
+                token_data["access_token"] = access_token
+                if new_tokens.get("refresh_token"):
+                    token_data["refresh_token"] = new_tokens["refresh_token"]
+                update_oauth_token_data(account_id, token_data)
+
+                response = http_requests.get(
+                    url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=10,
+                )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to list Teams channels: {response.status_code} {response.text}"
+            )
+            return jsonify(
+                {"error": f"Failed to list channels: {response.status_code}"}
+            ), 500
+
+        data = response.json()
+
+        channels = []
+        for item in data.get("value", []):
+            channels.append({"id": item["id"], "name": item["displayName"]})
+
+        return jsonify({"channels": channels})
+
+    # =========================================================================
+    # Oura OAuth
+    # =========================================================================
+
+    # Oura OAuth scopes
+    # See: https://cloud.ouraring.com/docs/authentication
+    OURA_SCOPES = [
+        "email",  # User's email address
+        "personal",  # Gender, age, height, weight
+        "daily",  # Sleep, activity, and readiness summaries
+        "heartrate",  # Heart rate time series data
+        "workout",  # Workout summaries
+        "session",  # Guided and unguided sessions
+        "spo2",  # SpO2 data
+    ]
+
+    @admin.route("/api/oauth/oura/start", methods=["GET"])
+    @require_auth_api
+    def oura_oauth_start():
+        """
+        Start Oura OAuth flow.
+
+        Query params:
+            - redirect_uri: Where to redirect after auth (default: /live-data-sources)
+
+        Returns redirect URL to Oura consent screen.
+        """
+        import secrets
+        import urllib.parse
+
+        client_id = os.environ.get("OURA_CLIENT_ID")
+        if not client_id:
+            return jsonify(
+                {
+                    "error": "OURA_CLIENT_ID not configured",
+                    "setup_required": True,
+                }
+            ), 400
+
+        # Generate state token for CSRF protection
+        import json
+
+        from db import set_setting
+
+        state = secrets.token_urlsafe(32)
+        oauth_data = {
+            "redirect": request.args.get("redirect_uri", "/live-data-sources"),
+            "scopes": OURA_SCOPES,
+        }
+        set_setting(f"oauth_state_{state}", json.dumps(oauth_data))
+
+        # Build the OAuth URL
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.oura_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.oura_oauth_callback"
+            )
+
+        params = {
+            "client_id": client_id,
+            "redirect_uri": callback_url,
+            "scope": " ".join(OURA_SCOPES),
+            "response_type": "code",
+            "state": state,
+        }
+
+        auth_url = (
+            "https://cloud.ouraring.com/oauth/authorize?"
+            + urllib.parse.urlencode(params)
+        )
+
+        return jsonify({"auth_url": auth_url})
+
+    @admin.route("/api/oauth/oura/callback", methods=["GET"])
+    def oura_oauth_callback():
+        """
+        Handle Oura OAuth callback.
+
+        Oura redirects here after user consents. We exchange the code for tokens.
+        """
+        import requests as http_requests
+
+        error = request.args.get("error")
+        if error:
+            logger.error(f"Oura OAuth error: {error}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Oura authentication failed: {error}",
+            )
+
+        # Verify state
+        import json
+
+        from db import delete_setting, get_setting
+
+        state = request.args.get("state")
+        oauth_data_json = get_setting(f"oauth_state_{state}") if state else None
+
+        if not state or not oauth_data_json:
+            logger.error("OAuth state mismatch or not found")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="Invalid OAuth state. Please try again.",
+            )
+
+        # Parse stored OAuth data and clean up
+        oauth_data = json.loads(oauth_data_json)
+        delete_setting(f"oauth_state_{state}")
+
+        code = request.args.get("code")
+        if not code:
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="No authorization code received.",
+            )
+
+        # Exchange code for tokens
+        client_id = os.environ.get("OURA_CLIENT_ID")
+        client_secret = os.environ.get("OURA_CLIENT_SECRET")
+
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.oura_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.oura_oauth_callback"
+            )
+
+        try:
+            token_response = http_requests.post(
+                "https://api.ouraring.com/oauth/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": callback_url,
+                    "grant_type": "authorization_code",
+                },
+                timeout=30,
+            )
+            token_response.raise_for_status()
+            token_data = token_response.json()
+        except Exception as e:
+            logger.error(f"Failed to exchange Oura OAuth code: {e}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Failed to get tokens: {e}",
+            )
+
+        # Get user info using the personal endpoint
+        try:
+            userinfo_response = http_requests.get(
+                "https://api.ouraring.com/v2/usercollection/personal_info",
+                headers={"Authorization": f"Bearer {token_data['access_token']}"},
+                timeout=30,
+            )
+            userinfo_response.raise_for_status()
+            userinfo = userinfo_response.json()
+            # Oura personal_info returns age, weight, height, biological_sex, email
+            account_email = userinfo.get("email", "oura-user")
+            # Use email as name since Oura doesn't return a display name
+            account_name = (
+                account_email.split("@")[0] if "@" in account_email else account_email
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get Oura user info: {e}")
+            account_email = "oura-user"
+            account_name = "Oura User"
+
+        # Store the tokens
+        from db.oauth_tokens import store_oauth_token
+
+        scopes = oauth_data.get("scopes", [])
+
+        # Add client credentials to token data for later refresh
+        token_data["client_id"] = client_id
+        token_data["client_secret"] = client_secret
+
+        token_id = store_oauth_token(
+            provider="oura",
+            account_email=account_email,
+            token_data=token_data,
+            scopes=scopes,
+            account_name=account_name,
+        )
+
+        redirect_url = oauth_data.get("redirect", "/live-data-sources")
+
+        return render_template(
+            "oauth_result.html",
+            success=True,
+            account_id=token_id,
+            account_email=account_email,
+            account_name=account_name,
+            redirect_url=redirect_url,
+            provider="Oura",
+        )
+
+    @admin.route("/api/oauth/oura/status", methods=["GET"])
+    @require_auth_api
+    def oura_oauth_status():
+        """Check if Oura OAuth is configured and list connected accounts."""
+        from db.oauth_tokens import list_oauth_tokens
+
+        client_id = os.environ.get("OURA_CLIENT_ID")
+        client_secret = os.environ.get("OURA_CLIENT_SECRET")
+
+        configured = bool(client_id and client_secret)
+        accounts = list_oauth_tokens(provider="oura") if configured else []
+
+        return jsonify(
+            {
+                "configured": configured,
+                "accounts": accounts,
+            }
+        )
+
+    # =========================================================================
+    # Withings OAuth
+    # =========================================================================
+
+    # Withings OAuth scopes
+    # See: https://developer.withings.com/developer-guide/v3/integration-guide/public-health-data-api/get-access/oauth-authorization-url/
+    WITHINGS_SCOPES = [
+        "user.info",  # User profile info
+        "user.metrics",  # Body measurements (weight, body composition)
+        "user.activity",  # Activity and sleep data
+    ]
+
+    @admin.route("/api/oauth/withings/start", methods=["GET"])
+    @require_auth_api
+    def withings_oauth_start():
+        """
+        Start Withings OAuth flow.
+
+        Query params:
+            - redirect_uri: Where to redirect after auth (default: /live-data-sources)
+
+        Returns redirect URL to Withings consent screen.
+        """
+        import secrets
+        import urllib.parse
+
+        client_id = os.environ.get("WITHINGS_CLIENT_ID")
+        if not client_id:
+            return jsonify(
+                {
+                    "error": "WITHINGS_CLIENT_ID not configured",
+                    "setup_required": True,
+                }
+            ), 400
+
+        # Generate state token for CSRF protection
+        import json
+
+        from db import set_setting
+
+        state = secrets.token_urlsafe(32)
+        oauth_data = {
+            "redirect": request.args.get("redirect_uri", "/live-data-sources"),
+            "scopes": WITHINGS_SCOPES,
+        }
+        set_setting(f"oauth_state_{state}", json.dumps(oauth_data))
+
+        # Build the OAuth URL
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.withings_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.withings_oauth_callback"
+            )
+
+        params = {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": callback_url,
+            "scope": ",".join(WITHINGS_SCOPES),
+            "state": state,
+        }
+
+        auth_url = (
+            "https://account.withings.com/oauth2_user/authorize2?"
+            + urllib.parse.urlencode(params)
+        )
+
+        return jsonify({"auth_url": auth_url})
+
+    @admin.route("/api/oauth/withings/callback", methods=["GET"])
+    def withings_oauth_callback():
+        """
+        Handle Withings OAuth callback.
+
+        Withings redirects here after user consents. We exchange the code for tokens.
+        """
+        import hashlib
+        import time
+
+        import requests as http_requests
+
+        error = request.args.get("error")
+        if error:
+            logger.error(f"Withings OAuth error: {error}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Withings authentication failed: {error}",
+            )
+
+        # Verify state
+        import json
+
+        from db import delete_setting, get_setting
+
+        state = request.args.get("state")
+        oauth_data_json = get_setting(f"oauth_state_{state}") if state else None
+
+        if not state or not oauth_data_json:
+            logger.error("OAuth state mismatch or not found")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="Invalid OAuth state. Please try again.",
+            )
+
+        # Parse stored OAuth data and clean up
+        oauth_data = json.loads(oauth_data_json)
+        delete_setting(f"oauth_state_{state}")
+
+        code = request.args.get("code")
+        if not code:
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error="No authorization code received.",
+            )
+
+        # Exchange code for tokens
+        client_id = os.environ.get("WITHINGS_CLIENT_ID")
+        client_secret = os.environ.get("WITHINGS_CLIENT_SECRET")
+
+        external_url = os.environ.get("EXTERNAL_URL")
+        if external_url:
+            callback_url = external_url.rstrip("/") + url_for(
+                "admin.withings_oauth_callback"
+            )
+        else:
+            callback_url = request.url_root.rstrip("/") + url_for(
+                "admin.withings_oauth_callback"
+            )
+
+        try:
+            # Withings OAuth token exchange - no signature needed for this step
+            token_response = http_requests.post(
+                "https://wbsapi.withings.net/v2/oauth2",
+                data={
+                    "action": "requesttoken",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": callback_url,
+                },
+                timeout=30,
+            )
+            token_response.raise_for_status()
+            response_data = token_response.json()
+
+            # Withings wraps the response in a "body" object
+            if response_data.get("status") != 0:
+                error_msg = response_data.get("error", "Unknown error")
+                logger.error(f"Withings token error: {error_msg}")
+                return render_template(
+                    "oauth_result.html",
+                    success=False,
+                    error=f"Withings token error: {error_msg}",
+                )
+
+            token_data = response_data.get("body", {})
+        except Exception as e:
+            logger.error(f"Failed to exchange Withings OAuth code: {e}")
+            return render_template(
+                "oauth_result.html",
+                success=False,
+                error=f"Failed to get tokens: {e}",
+            )
+
+        # Extract user ID from response
+        user_id = token_data.get("userid", "withings-user")
+        account_email = f"user-{user_id}@withings"
+        account_name = f"Withings User {user_id}"
+
+        # Store the tokens
+        from db.oauth_tokens import store_oauth_token
+
+        scopes = oauth_data.get("scopes", [])
+
+        # Add client credentials to token data for later refresh
+        token_data["client_id"] = client_id
+        token_data["client_secret"] = client_secret
+
+        token_id = store_oauth_token(
+            provider="withings",
+            account_email=account_email,
+            token_data=token_data,
+            scopes=scopes,
+            account_name=account_name,
+        )
+
+        redirect_url = oauth_data.get("redirect", "/live-data-sources")
+
+        return render_template(
+            "oauth_result.html",
+            success=True,
+            account_id=token_id,
+            account_email=account_email,
+            account_name=account_name,
+            redirect_url=redirect_url,
+            provider="Withings",
+        )
+
+    @admin.route("/api/oauth/withings/status", methods=["GET"])
+    @require_auth_api
+    def withings_oauth_status():
+        """Check if Withings OAuth is configured and list connected accounts."""
+        from db.oauth_tokens import list_oauth_tokens
+
+        client_id = os.environ.get("WITHINGS_CLIENT_ID")
+        client_secret = os.environ.get("WITHINGS_CLIENT_SECRET")
+
+        configured = bool(client_id and client_secret)
+        accounts = list_oauth_tokens(provider="withings") if configured else []
+
+        return jsonify(
+            {
+                "configured": configured,
+                "accounts": accounts,
+            }
+        )
+
     # =========================================================================
     # Smart Enrichers (unified RAG + Web)
     # =========================================================================
@@ -6392,6 +8516,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         use_web = data.get("use_web", False)
         use_cache = data.get("use_cache", False)
         use_smart_source_selection = data.get("use_smart_source_selection", False)
+        use_two_pass_retrieval = data.get("use_two_pass_retrieval", False)
 
         # Validate: can't have cache + web
         if use_cache and use_web:
@@ -6434,6 +8559,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_web=use_web,
                 use_cache=use_cache,
                 use_smart_source_selection=use_smart_source_selection,
+                use_two_pass_retrieval=use_two_pass_retrieval,
                 # Smart tag settings
                 is_smart_tag=data.get("is_smart_tag", False),
                 passthrough_model=data.get("passthrough_model", False),
@@ -6454,6 +8580,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 # Web settings
                 max_search_results=data.get("max_search_results", 5),
                 max_scrape_urls=data.get("max_scrape_urls", 3),
+                # Live data settings
+                use_live_data=data.get("use_live_data", False),
+                live_data_source_ids=data.get("live_data_source_ids"),
                 # Common enrichment
                 max_context_tokens=data.get("max_context_tokens", 4000),
                 rerank_provider=data.get("rerank_provider", "local"),
@@ -6479,6 +8608,27 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 # Memory
                 use_memory=data.get("use_memory", False),
                 memory_max_tokens=data.get("memory_max_tokens", 500),
+                # Actions
+                use_actions=data.get("use_actions", False),
+                allowed_actions=data.get("allowed_actions", []),
+                action_email_account_id=data.get("action_email_account_id"),
+                action_calendar_account_id=data.get("action_calendar_account_id"),
+                action_calendar_id=data.get("action_calendar_id"),
+                action_tasks_account_id=data.get("action_tasks_account_id"),
+                action_tasks_provider=data.get("action_tasks_provider"),
+                action_tasks_list_id=data.get("action_tasks_list_id"),
+                action_notification_urls=data.get("action_notification_urls"),
+                # Scheduled Prompts
+                scheduled_prompts_enabled=data.get("scheduled_prompts_enabled", False),
+                scheduled_prompts_account_id=data.get("scheduled_prompts_account_id"),
+                scheduled_prompts_calendar_id=data.get("scheduled_prompts_calendar_id"),
+                scheduled_prompts_calendar_name=data.get(
+                    "scheduled_prompts_calendar_name"
+                ),
+                scheduled_prompts_lookahead=data.get("scheduled_prompts_lookahead", 15),
+                scheduled_prompts_store_response=data.get(
+                    "scheduled_prompts_store_response", False
+                ),
             )
             return jsonify(alias.to_dict()), 201
         except ValueError as e:
@@ -6508,6 +8658,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_web=data.get("use_web"),
                 use_cache=data.get("use_cache"),
                 use_smart_source_selection=data.get("use_smart_source_selection"),
+                use_two_pass_retrieval=data.get("use_two_pass_retrieval"),
                 # Smart tag settings
                 is_smart_tag=data.get("is_smart_tag"),
                 passthrough_model=data.get("passthrough_model"),
@@ -6528,6 +8679,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 # Web settings
                 max_search_results=data.get("max_search_results"),
                 max_scrape_urls=data.get("max_scrape_urls"),
+                # Live data settings
+                use_live_data=data.get("use_live_data"),
+                live_data_source_ids=data.get("live_data_source_ids"),
                 # Common enrichment
                 max_context_tokens=data.get("max_context_tokens"),
                 rerank_provider=data.get("rerank_provider"),
@@ -6552,6 +8706,27 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 use_memory=data.get("use_memory"),
                 memory=data.get("memory"),
                 memory_max_tokens=data.get("memory_max_tokens"),
+                # Actions
+                use_actions=data.get("use_actions"),
+                allowed_actions=data.get("allowed_actions"),
+                action_email_account_id=data.get("action_email_account_id"),
+                action_calendar_account_id=data.get("action_calendar_account_id"),
+                action_calendar_id=data.get("action_calendar_id"),
+                action_tasks_account_id=data.get("action_tasks_account_id"),
+                action_tasks_provider=data.get("action_tasks_provider"),
+                action_tasks_list_id=data.get("action_tasks_list_id"),
+                action_notification_urls=data.get("action_notification_urls"),
+                # Scheduled Prompts
+                scheduled_prompts_enabled=data.get("scheduled_prompts_enabled"),
+                scheduled_prompts_account_id=data.get("scheduled_prompts_account_id"),
+                scheduled_prompts_calendar_id=data.get("scheduled_prompts_calendar_id"),
+                scheduled_prompts_calendar_name=data.get(
+                    "scheduled_prompts_calendar_name"
+                ),
+                scheduled_prompts_lookahead=data.get("scheduled_prompts_lookahead"),
+                scheduled_prompts_store_response=data.get(
+                    "scheduled_prompts_store_response"
+                ),
             )
             if not alias:
                 return jsonify({"error": "Smart alias not found"}), 404
@@ -6621,5 +8796,586 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             logger.error(f"Error getting routing stats: {e}")
 
         return jsonify(stats)
+
+    # -------------------------------------------------------------------------
+    # Scheduled Prompts Routes
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/scheduled-prompts", methods=["GET"])
+    @require_auth_api
+    def list_scheduled_prompts():
+        """List scheduled prompt executions."""
+        from db.scheduled_prompts import get_executions_for_alias, get_recent_executions
+
+        alias_id = request.args.get("alias_id", type=int)
+        limit = request.args.get("limit", default=50, type=int)
+
+        if alias_id:
+            executions = get_executions_for_alias(alias_id, limit=limit)
+        else:
+            executions = get_recent_executions(limit=limit)
+
+        return jsonify([e.to_dict() for e in executions])
+
+    @admin.route("/api/scheduled-prompts/stats", methods=["GET"])
+    @require_auth_api
+    def get_scheduled_prompt_stats():
+        """Get scheduled prompt execution statistics."""
+        from db.scheduled_prompts import get_execution_stats
+
+        alias_id = request.args.get("alias_id", type=int)
+        stats = get_execution_stats(smart_alias_id=alias_id)
+        return jsonify(stats)
+
+    @admin.route("/api/scheduled-prompts/<int:execution_id>", methods=["GET"])
+    @require_auth_api
+    def get_scheduled_prompt(execution_id: int):
+        """Get a specific scheduled prompt execution."""
+        from db.scheduled_prompts import get_execution_by_id
+
+        execution = get_execution_by_id(execution_id)
+        if not execution:
+            return jsonify({"error": "Execution not found"}), 404
+        return jsonify(execution.to_dict())
+
+    @admin.route("/api/scheduled-prompts/<int:execution_id>/retry", methods=["POST"])
+    @require_auth_api
+    def retry_scheduled_prompt(execution_id: int):
+        """Retry a failed or skipped scheduled prompt."""
+        from db.scheduled_prompts import get_execution_by_id, reset_execution_to_pending
+
+        execution = get_execution_by_id(execution_id)
+        if not execution:
+            return jsonify({"error": "Execution not found"}), 404
+
+        if execution.status not in ("failed", "skipped"):
+            return jsonify(
+                {"error": "Can only retry failed or skipped executions"}
+            ), 400
+
+        reset_execution_to_pending(execution_id)
+        return jsonify({"success": True})
+
+    @admin.route("/api/scheduled-prompts/<int:execution_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_scheduled_prompt(execution_id: int):
+        """Delete a scheduled prompt execution record."""
+        from db.scheduled_prompts import delete_execution
+
+        if delete_execution(execution_id):
+            return jsonify({"success": True})
+        return jsonify({"error": "Execution not found"}), 404
+
+    @admin.route("/api/scheduled-prompts/poll", methods=["POST"])
+    @require_auth_api
+    def trigger_prompt_poll():
+        """Manually trigger calendar polling for scheduled prompts."""
+        from scheduling import get_prompt_scheduler
+
+        alias_id = request.args.get("alias_id", type=int)
+
+        try:
+            scheduler = get_prompt_scheduler()
+            scheduler.poll_now(alias_id=alias_id)
+            return jsonify({"success": True})
+        except Exception as e:
+            logger.error(f"Error triggering prompt poll: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/scheduled-prompts/<int:execution_id>/execute", methods=["POST"])
+    @require_auth_api
+    def execute_scheduled_prompt_now(execution_id: int):
+        """Manually execute a pending scheduled prompt."""
+        from db.scheduled_prompts import get_execution_by_id
+        from scheduling import get_prompt_scheduler
+
+        execution = get_execution_by_id(execution_id)
+        if not execution:
+            return jsonify({"error": "Execution not found"}), 404
+
+        if execution.status != "pending":
+            return jsonify({"error": "Can only execute pending prompts"}), 400
+
+        try:
+            scheduler = get_prompt_scheduler()
+            scheduler.execute_now(execution_id)
+            return jsonify({"success": True})
+        except Exception as e:
+            logger.error(f"Error executing prompt: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # -------------------------------------------------------------------------
+    # Live Data Sources Routes
+    # -------------------------------------------------------------------------
+
+    @admin.route("/live-data-sources")
+    @require_auth
+    def live_data_sources_page():
+        """Live data sources management page."""
+        return render_template("live_data_sources.html")
+
+    @admin.route("/api/live-data-sources", methods=["GET"])
+    @require_auth_api
+    def list_live_data_sources():
+        """List all live data sources."""
+        from db import get_all_live_data_sources
+
+        sources = get_all_live_data_sources()
+        return jsonify([s.to_dict() for s in sources])
+
+    @admin.route("/api/live-data-sources", methods=["POST"])
+    @require_auth_api
+    def create_live_data_source():
+        """Create a new live data source."""
+        from db import create_live_data_source as db_create_source
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ["name", "source_type"]
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        try:
+            # Helper to parse JSON strings
+            def parse_json(val):
+                if val is None:
+                    return None
+                if isinstance(val, dict):
+                    return val
+                try:
+                    import json as json_mod
+
+                    return json_mod.loads(val) if val else None
+                except:
+                    return None
+
+            source = db_create_source(
+                name=data["name"],
+                source_type=data["source_type"],
+                description=data.get("description"),
+                endpoint_url=data.get("endpoint_url"),
+                http_method=data.get("http_method", "GET"),
+                headers=parse_json(data.get("headers_json")),
+                auth_type=data.get("auth_type", "none"),
+                auth_config=parse_json(data.get("auth_config_json")),
+                request_template=parse_json(data.get("request_template_json")),
+                query_params=parse_json(data.get("query_params_json")),
+                response_path=data.get("response_path"),
+                response_format_template=data.get("response_format_template"),
+                cache_ttl_seconds=data.get("cache_ttl_seconds", 60),
+                timeout_seconds=data.get("timeout_seconds", 10),
+                retry_count=data.get("retry_count", 1),
+                rate_limit_rpm=data.get("rate_limit_rpm", 60),
+                data_type=data.get("data_type", "general"),
+                best_for=data.get("best_for"),
+                enabled=data.get("enabled", True),
+            )
+            return jsonify(source.to_dict()), 201
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            logger.error(f"Error creating live data source: {e}")
+            return jsonify({"error": "Failed to create live data source"}), 500
+
+    @admin.route("/api/live-data-sources/rapidapi-status", methods=["GET"])
+    @require_auth_api
+    def rapidapi_status():
+        """Check if RapidAPI key is configured."""
+        import os
+
+        return jsonify({"configured": bool(os.environ.get("RAPIDAPI_KEY"))})
+
+    @admin.route("/api/live-data-sources/test-config", methods=["POST"])
+    @require_auth_api
+    def test_live_data_config():
+        """Test a live data source configuration without saving."""
+        from dataclasses import dataclass
+
+        from live.sources import MCPProvider
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        logger.info(f"test-config received: {data}")
+        source_type = data.get("source_type", "mcp_server")
+
+        # Create a mock source object for testing
+        @dataclass
+        class MockSource:
+            name: str = "test"
+            source_type: str = "mcp_server"
+            endpoint_url: str = ""
+            http_method: str = "GET"
+            timeout_seconds: int = 10
+            cache_ttl_seconds: int = 0
+            response_path: str = ""
+            response_format_template: str = ""
+            headers_json: str = ""
+            auth_type: str = "none"
+            auth_config_json: str = ""
+            request_template_json: str = ""
+            query_params_json: str = ""
+
+        try:
+            mock = MockSource(
+                source_type=source_type,
+                endpoint_url=data.get("endpoint_url", ""),
+                http_method=data.get("http_method", "GET"),
+                timeout_seconds=data.get("timeout_seconds", 10),
+                response_path=data.get("response_path", ""),
+                response_format_template=data.get("response_format_template", ""),
+                headers_json=data.get("headers_json", ""),
+                auth_type=data.get("auth_type", "none"),
+                auth_config_json=data.get("auth_config_json", ""),
+                request_template_json=data.get("request_template_json", ""),
+                query_params_json=data.get("query_params_json", ""),
+            )
+
+            # Use MCPProvider for MCP sources
+            if source_type == "mcp_server":
+                provider = MCPProvider(mock)
+                success, message = provider.test_connection()
+                if success:
+                    # Also report number of tools discovered
+                    tools = provider.list_tools()
+                    message = f"{message} ({len(tools)} tools discovered)"
+                return jsonify({"success": success, "message": message})
+            else:
+                # For legacy REST API sources, just validate the config
+                if not mock.endpoint_url:
+                    return jsonify(
+                        {"success": False, "message": "Endpoint URL required"}
+                    )
+                return jsonify(
+                    {"success": True, "message": "Configuration valid (not tested)"}
+                )
+        except Exception as e:
+            logger.error(f"Error testing config: {e}")
+            return jsonify({"success": False, "message": str(e)})
+
+    @admin.route("/api/live-data-sources/<int:source_id>", methods=["GET"])
+    @require_auth_api
+    def get_live_data_source(source_id: int):
+        """Get a specific live data source."""
+        from db import get_live_data_source_by_id
+
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+        return jsonify(source.to_dict())
+
+    @admin.route("/api/live-data-sources/<int:source_id>", methods=["PUT"])
+    @require_auth_api
+    def update_live_data_source(source_id: int):
+        """Update a live data source."""
+        from db import (
+            get_live_data_source_by_id,
+        )
+        from db import (
+            update_live_data_source as db_update_source,
+        )
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Check if source exists and if it's a built-in (limited updates)
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+
+        try:
+            # For built-in sources, only allow enabled toggle
+            if source.source_type.startswith("builtin_"):
+                if "enabled" not in data:
+                    return jsonify(
+                        {"error": "Only 'enabled' can be updated for built-in sources"}
+                    ), 400
+                updated = db_update_source(
+                    source_id=source_id, enabled=data.get("enabled")
+                )
+            else:
+                # For custom sources, allow full updates
+                # Helper to parse JSON strings
+                def parse_json(val):
+                    if val is None:
+                        return None
+                    if isinstance(val, dict):
+                        return val
+
+                    try:
+                        import json as json_mod
+
+                        return json_mod.loads(val) if val else None
+                    except:
+                        return None
+
+                updated = db_update_source(
+                    source_id=source_id,
+                    enabled=data.get("enabled", source.enabled),
+                    description=data.get("description", source.description),
+                    endpoint_url=data.get("endpoint_url", source.endpoint_url),
+                    http_method=data.get("http_method", source.http_method),
+                    headers=parse_json(data.get("headers_json")),
+                    auth_type=data.get("auth_type", source.auth_type),
+                    auth_config=parse_json(data.get("auth_config_json")),
+                    request_template=parse_json(data.get("request_template_json")),
+                    query_params=parse_json(data.get("query_params_json")),
+                    response_path=data.get("response_path", source.response_path),
+                    response_format_template=data.get(
+                        "response_format_template", source.response_format_template
+                    ),
+                    cache_ttl_seconds=data.get(
+                        "cache_ttl_seconds", source.cache_ttl_seconds
+                    ),
+                    timeout_seconds=data.get("timeout_seconds", source.timeout_seconds),
+                    retry_count=data.get("retry_count", source.retry_count),
+                    rate_limit_rpm=data.get("rate_limit_rpm", source.rate_limit_rpm),
+                    data_type=data.get("data_type", source.data_type),
+                    best_for=data.get("best_for", source.best_for),
+                )
+
+            if not updated:
+                return jsonify({"error": "Live data source not found"}), 404
+            return jsonify(updated.to_dict())
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            logger.error(f"Error updating live data source: {e}")
+            return jsonify({"error": "Failed to update live data source"}), 500
+
+    @admin.route("/api/live-data-sources/<int:source_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_live_data_source(source_id: int):
+        """Delete a live data source."""
+        from db import (
+            delete_live_data_source as db_delete_source,
+        )
+        from db import (
+            get_live_data_source_by_id,
+        )
+
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+
+        # Don't allow deleting built-in sources
+        if source.source_type.startswith("builtin_"):
+            return jsonify({"error": "Cannot delete built-in sources"}), 400
+
+        try:
+            success = db_delete_source(source_id)
+            if not success:
+                return jsonify(
+                    {
+                        "error": "Cannot delete: source is linked to one or more Smart Aliases"
+                    }
+                ), 400
+            return jsonify({"success": True})
+        except Exception as e:
+            logger.error(f"Error deleting live data source: {e}")
+            return jsonify({"error": "Failed to delete live data source"}), 500
+
+    @admin.route("/api/live-data-sources/<int:source_id>/test", methods=["POST"])
+    @require_auth_api
+    def test_live_data_source(source_id: int):
+        """Test a live data source connection and update status."""
+        from db import get_live_data_source_by_id, update_live_data_source_status
+        from live import get_provider_for_source
+
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+
+        try:
+            provider = get_provider_for_source(source)
+            success, message = provider.test_connection()
+
+            # Get tool count for MCP sources
+            tool_count = 0
+            if success and source.source_type == "mcp_server":
+                from live.sources import MCPProvider
+
+                if isinstance(provider, MCPProvider):
+                    tools = provider.list_tools()
+                    tool_count = len(tools)
+
+            # Update the source status in database
+            if success:
+                update_live_data_source_status(
+                    source_id, success=True, tool_count=tool_count
+                )
+            else:
+                update_live_data_source_status(source_id, success=False, error=message)
+
+            return jsonify(
+                {"success": success, "message": message, "tool_count": tool_count}
+            )
+        except Exception as e:
+            logger.error(f"Error testing live data source: {e}")
+            update_live_data_source_status(source_id, success=False, error=str(e))
+            return jsonify({"success": False, "message": str(e)})
+
+    @admin.route("/api/live-data-sources/<int:source_id>/tools", methods=["GET"])
+    @require_auth_api
+    def get_live_data_source_tools(source_id: int):
+        """Get MCP tools for a live data source."""
+        from db import get_live_data_source_by_id
+        from live.sources import MCPProvider
+
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+
+        if source.source_type != "mcp_server":
+            return jsonify({"tools": [], "message": "Not an MCP source"})
+
+        try:
+            provider = MCPProvider(source)
+            tools = provider.list_tools()
+            # Simplify tool info for UI
+            tool_list = []
+            for tool in tools:
+                schema = tool.get("inputSchema", {})
+                props = schema.get("properties", {})
+                # Get visible params only
+                params = [
+                    {"name": k, "required": k in schema.get("required", [])}
+                    for k, v in props.items()
+                    if not v.get("hidden")
+                ]
+                tool_list.append(
+                    {
+                        "name": tool.get("name", ""),
+                        "description": tool.get("description", ""),
+                        "params": params,
+                    }
+                )
+            return jsonify({"tools": tool_list, "count": len(tool_list)})
+        except Exception as e:
+            logger.error(f"Error getting tools: {e}")
+            return jsonify({"tools": [], "error": str(e)})
+
+    @admin.route(
+        "/api/live-data-sources/<int:source_id>/endpoint-stats", methods=["GET"]
+    )
+    @require_auth_api
+    def get_live_data_source_endpoint_stats(source_id: int):
+        """Get endpoint statistics for a live data source."""
+        from db import get_live_data_source_by_id
+        from db.live_data_sources import get_endpoint_stats
+
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+
+        stats = get_endpoint_stats(source_id)
+        return jsonify({"stats": stats})
+
+    @admin.route(
+        "/api/live-data-sources/<int:source_id>/reset-broken-tools", methods=["POST"]
+    )
+    @require_auth_api
+    def reset_broken_tools(source_id: int):
+        """Reset broken tools for a live data source so they can be tried again."""
+        from db import get_live_data_source_by_id
+        from db.live_data_sources import reset_all_broken_tools, reset_broken_tool
+
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+
+        data = request.get_json() or {}
+        tool_name = data.get("tool_name")
+
+        if tool_name:
+            # Reset specific tool
+            success = reset_broken_tool(source_id, tool_name)
+            if success:
+                return jsonify({"success": True, "message": f"Reset tool: {tool_name}"})
+            else:
+                return jsonify({"error": f"Tool not found: {tool_name}"}), 404
+        else:
+            # Reset all broken tools
+            count = reset_all_broken_tools(source_id)
+            return jsonify(
+                {"success": True, "message": f"Reset {count} broken tool(s)"}
+            )
+
+    @admin.route("/api/live-data-sources/<int:source_id>/fetch", methods=["POST"])
+    @require_auth_api
+    def fetch_live_data_source(source_id: int):
+        """Fetch data from a live data source with a test query."""
+        from db import get_live_data_source_by_id
+        from live import get_provider_for_source
+
+        source = get_live_data_source_by_id(source_id)
+        if not source:
+            return jsonify({"error": "Live data source not found"}), 404
+
+        data = request.get_json() or {}
+        query = data.get("query", "test")
+        params = data.get("params")  # Context/params for the provider
+
+        try:
+            provider = get_provider_for_source(source)
+            result = provider.fetch(query, params)
+            return jsonify(
+                {
+                    "success": result.success,
+                    "data": result.data,
+                    "formatted": result.formatted,
+                    "cache_hit": result.cache_hit,
+                    "latency_ms": result.latency_ms,
+                    "error": result.error,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error fetching from live data source: {e}")
+            return jsonify({"success": False, "error": str(e)})
+
+    @admin.route("/api/live-data-sources/sync-google", methods=["POST"])
+    @require_auth_api
+    def sync_google_live_sources():
+        """Create live sources for all existing Google Calendar/Tasks/Gmail document stores."""
+        from db.live_data_sources import sync_all_google_live_sources
+
+        try:
+            created = sync_all_google_live_sources()
+            return jsonify(
+                {
+                    "success": True,
+                    "created": created,
+                    "message": f"Created {len(created)} live source(s)",
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error syncing Google live sources: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/live-data-sources/for-smart-alias", methods=["GET"])
+    @require_auth_api
+    def list_live_data_sources_for_smart_alias():
+        """List all live data sources for Smart Alias configuration."""
+        from db import get_all_live_data_sources
+
+        sources = get_all_live_data_sources()
+        return jsonify(
+            [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "source_type": s.source_type,
+                    "data_type": s.data_type,
+                    "description": s.description,
+                    "enabled": s.enabled,
+                }
+                for s in sources
+            ]
+        )
 
     return admin

@@ -92,7 +92,8 @@ content %}
                             <!-- Main Row -->
                             <tr
                                 @click="toggleExpand(alias.id)"
-                                class="cursor-pointer hover:bg-base-200"
+                                class="cursor-pointer hover:bg-base-200 transition-colors duration-500"
+                                :data-alias-id="alias.id"
                             >
                                 <td class="w-8">
                                     <svg
@@ -138,7 +139,13 @@ content %}
                                             >Web</span
                                         >
                                         <span
-                                            x-show="alias.use_cache && !alias.use_web"
+                                            x-show="alias.use_live_data"
+                                            class="badge badge-sm badge-accent"
+                                            title="Live data sources enabled"
+                                            >Live</span
+                                        >
+                                        <span
+                                            x-show="alias.use_cache && !alias.use_web && !alias.use_live_data"
                                             class="badge badge-sm badge-secondary"
                                             title="Response caching"
                                             >Cache</span
@@ -150,7 +157,7 @@ content %}
                                             >Tag</span
                                         >
                                         <span
-                                            x-show="!alias.use_routing && !alias.use_rag && !alias.use_web && !alias.use_cache && !alias.is_smart_tag"
+                                            x-show="!alias.use_routing && !alias.use_rag && !alias.use_web && !alias.use_live_data && !alias.use_cache && !alias.is_smart_tag"
                                             class="badge badge-sm badge-ghost"
                                             >Simple</span
                                         >
@@ -687,634 +694,1030 @@ content %}
                     </label>
                     <div class="bg-base-200 rounded-lg p-4 space-y-4">
                         <!-- Smart Routing Option -->
-                        <label class="flex items-start gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                x-model="form.use_routing"
-                                class="checkbox checkbox-primary mt-1"
-                            />
-                            <div>
-                                <div class="font-medium">Smart Routing</div>
-                                <div class="text-sm text-base-content/60">
-                                    Use a designator model to pick the best
-                                    candidate for each request
-                                </div>
-                            </div>
-                        </label>
-
-                        <!-- Routing Settings (shown when enabled) -->
                         <div
-                            x-show="form.use_routing"
-                            x-transition
-                            class="ml-7 pl-4 border-l-2 border-primary space-y-3"
+                            class="border border-base-300 rounded-lg overflow-hidden"
                         >
-                            <!-- Designator Model -->
-                            <div class="form-control">
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Designator Model</span
-                                    >
-                                </label>
-                                <select
-                                    x-model="form.designator_model"
-                                    class="select select-bordered select-sm"
-                                    :class="{ 'select-error': formErrors.designator_model }"
-                                >
-                                    <option value="">Select model...</option>
-                                    <template
-                                        x-for="model in availableModels"
-                                        :key="model.id"
-                                    >
-                                        <option
-                                            :value="model.id"
-                                            x-text="model.id"
-                                        ></option>
-                                    </template>
-                                </select>
-                                <label
-                                    class="label py-0"
-                                    x-show="formErrors.designator_model"
-                                >
-                                    <span
-                                        class="label-text-alt text-error"
-                                        x-text="formErrors.designator_model"
-                                    ></span>
-                                </label>
-                            </div>
-
-                            <!-- Purpose -->
-                            <div class="form-control">
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Purpose (optional)</span
-                                    >
-                                </label>
-                                <textarea
-                                    x-model="form.purpose"
-                                    class="textarea textarea-bordered textarea-sm"
-                                    placeholder="Context for routing decisions"
-                                    rows="2"
-                                ></textarea>
-                            </div>
-
-                            <!-- Candidates -->
-                            <div class="form-control">
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Candidate Models</span
-                                    >
-                                </label>
-                                <div class="space-y-2">
-                                    <template
-                                        x-for="(candidate, index) in form.candidates"
-                                        :key="index"
-                                    >
-                                        <div
-                                            class="flex gap-2 items-start p-2 bg-base-300 rounded"
-                                        >
-                                            <div class="flex-1 space-y-1">
-                                                <select
-                                                    x-model="candidate.model"
-                                                    @change="onCandidateModelChange(index, candidate.model)"
-                                                    class="select select-bordered select-sm w-full"
-                                                >
-                                                    <option value="">
-                                                        Select model...
-                                                    </option>
-                                                    <template
-                                                        x-for="model in availableModels"
-                                                        :key="model.id"
-                                                    >
-                                                        <option
-                                                            :value="model.id"
-                                                            x-text="model.id"
-                                                        ></option>
-                                                    </template>
-                                                </select>
-                                                <textarea
-                                                    x-model="candidate.description"
-                                                    class="textarea textarea-bordered textarea-sm w-full"
-                                                    placeholder="Description for designator"
-                                                    rows="3"
-                                                ></textarea>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                @click="removeCandidate(index)"
-                                                class="btn btn-ghost btn-xs text-error"
-                                                :disabled="form.candidates.length <= 2"
-                                            >
-                                                <svg
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    class="h-4 w-4"
-                                                    fill="none"
-                                                    viewBox="0 0 24 24"
-                                                    stroke="currentColor"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M6 18L18 6M6 6l12 12"
-                                                    />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    </template>
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-primary/10': form.use_routing }"
+                                @click="if (form.use_routing) expanded.routing = !expanded.routing"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_routing"
+                                    @click.stop="expanded.routing = !form.use_routing"
+                                    class="checkbox checkbox-primary"
+                                />
+                                <div class="flex-1">
+                                    <div class="font-medium">Smart Routing</div>
+                                    <div class="text-sm text-base-content/60">
+                                        Use a designator model to pick the best
+                                        candidate for each request
+                                    </div>
                                 </div>
-                                <button
-                                    type="button"
-                                    @click="addCandidate()"
-                                    class="btn btn-ghost btn-xs mt-2"
+                                <svg
+                                    x-show="form.use_routing"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.routing }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
                                 >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-3 w-3 mr-1"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M12 4v16m8-8H4"
-                                        />
-                                    </svg>
-                                    Add Candidate
-                                </button>
-                                <label
-                                    class="label py-0"
-                                    x-show="formErrors.candidates"
-                                >
-                                    <span
-                                        class="label-text-alt text-error"
-                                        x-text="formErrors.candidates"
-                                    ></span>
-                                </label>
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
                             </div>
 
-                            <!-- Routing Strategy -->
-                            <div class="grid grid-cols-2 gap-3">
+                            <!-- Routing Settings (shown when enabled and expanded) -->
+                            <div
+                                x-show="form.use_routing && expanded.routing"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
+                                <!-- Designator Model -->
                                 <div class="form-control">
                                     <label class="label py-1">
                                         <span class="label-text text-sm"
-                                            >Strategy</span
+                                            >Designator Model</span
                                         >
                                     </label>
                                     <select
-                                        x-model="form.routing_strategy"
+                                        x-model="form.designator_model"
                                         class="select select-bordered select-sm"
+                                        :class="{ 'select-error': formErrors.designator_model }"
                                     >
-                                        <option value="per_request">
-                                            Per Request
+                                        <option value="">
+                                            Select model...
                                         </option>
-                                        <option value="per_session">
-                                            Per Session
-                                        </option>
+                                        <template
+                                            x-for="model in availableModels"
+                                            :key="model.id"
+                                        >
+                                            <option
+                                                :value="model.id"
+                                                x-text="model.id"
+                                            ></option>
+                                        </template>
                                     </select>
+                                    <label
+                                        class="label py-0"
+                                        x-show="formErrors.designator_model"
+                                    >
+                                        <span
+                                            class="label-text-alt text-error"
+                                            x-text="formErrors.designator_model"
+                                        ></span>
+                                    </label>
+                                </div>
+
+                                <!-- Purpose -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Purpose (optional)</span
+                                        >
+                                    </label>
+                                    <textarea
+                                        x-model="form.purpose"
+                                        class="textarea textarea-bordered textarea-sm"
+                                        placeholder="Context for routing decisions"
+                                        rows="2"
+                                    ></textarea>
+                                </div>
+
+                                <!-- Candidates -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Candidate Models</span
+                                        >
+                                    </label>
+                                    <div class="space-y-2">
+                                        <template
+                                            x-for="(candidate, index) in form.candidates"
+                                            :key="index"
+                                        >
+                                            <div
+                                                class="flex gap-2 items-start p-2 bg-base-300 rounded"
+                                            >
+                                                <div class="flex-1 space-y-1">
+                                                    <select
+                                                        x-model="candidate.model"
+                                                        @change="onCandidateModelChange(index, candidate.model)"
+                                                        class="select select-bordered select-sm w-full"
+                                                    >
+                                                        <option value="">
+                                                            Select model...
+                                                        </option>
+                                                        <template
+                                                            x-for="model in availableModels"
+                                                            :key="model.id"
+                                                        >
+                                                            <option
+                                                                :value="model.id"
+                                                                x-text="model.id"
+                                                            ></option>
+                                                        </template>
+                                                    </select>
+                                                    <textarea
+                                                        x-model="candidate.description"
+                                                        class="textarea textarea-bordered textarea-sm w-full"
+                                                        placeholder="Description for designator"
+                                                        rows="3"
+                                                    ></textarea>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    @click="removeCandidate(index)"
+                                                    class="btn btn-ghost btn-xs text-error"
+                                                    :disabled="form.candidates.length <= 2"
+                                                >
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        class="h-4 w-4"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            stroke-linecap="round"
+                                                            stroke-linejoin="round"
+                                                            stroke-width="2"
+                                                            d="M6 18L18 6M6 6l12 12"
+                                                        />
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        @click="addCandidate()"
+                                        class="btn btn-ghost btn-xs mt-2"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-3 w-3 mr-1"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M12 4v16m8-8H4"
+                                            />
+                                        </svg>
+                                        Add Candidate
+                                    </button>
+                                    <label
+                                        class="label py-0"
+                                        x-show="formErrors.candidates"
+                                    >
+                                        <span
+                                            class="label-text-alt text-error"
+                                            x-text="formErrors.candidates"
+                                        ></span>
+                                    </label>
+                                </div>
+
+                                <!-- Routing Strategy -->
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Strategy</span
+                                            >
+                                        </label>
+                                        <select
+                                            x-model="form.routing_strategy"
+                                            class="select select-bordered select-sm"
+                                        >
+                                            <option value="per_request">
+                                                Per Request
+                                            </option>
+                                            <option value="per_session">
+                                                Per Session
+                                            </option>
+                                        </select>
+                                    </div>
+                                    <div
+                                        class="form-control"
+                                        x-show="form.routing_strategy === 'per_session'"
+                                    >
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Session TTL (sec)</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.session_ttl"
+                                            class="input input-bordered input-sm"
+                                            min="60"
+                                            max="86400"
+                                        />
+                                    </div>
+                                </div>
+
+                                <!-- Model Intelligence -->
+                                <div class="form-control">
+                                    <label
+                                        class="label cursor-pointer justify-start gap-2 py-1"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            x-model="form.use_model_intelligence"
+                                            class="checkbox checkbox-sm checkbox-primary"
+                                        />
+                                        <span class="label-text text-sm"
+                                            >Use Model Intelligence</span
+                                        >
+                                    </label>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs"
+                                            >Enhance designator with
+                                            web-gathered model assessments</span
+                                        >
+                                    </label>
                                 </div>
                                 <div
+                                    x-show="form.use_model_intelligence"
                                     class="form-control"
-                                    x-show="form.routing_strategy === 'per_session'"
                                 >
                                     <label class="label py-1">
                                         <span class="label-text text-sm"
-                                            >Session TTL (sec)</span
+                                            >Intelligence Model</span
                                         >
                                     </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.session_ttl"
-                                        class="input input-bordered input-sm"
-                                        min="60"
-                                        max="86400"
-                                    />
+                                    <select
+                                        x-model="form.intelligence_model"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            Select model...
+                                        </option>
+                                        <template
+                                            x-for="model in availableModels"
+                                            :key="model.id"
+                                        >
+                                            <option
+                                                :value="model.id"
+                                                x-text="model.id"
+                                            ></option>
+                                        </template>
+                                    </select>
                                 </div>
-                            </div>
-
-                            <!-- Model Intelligence -->
-                            <div class="form-control">
-                                <label
-                                    class="label cursor-pointer justify-start gap-2 py-1"
+                                <!-- Refresh Intelligence Button (only shown when editing) -->
+                                <div
+                                    x-show="form.use_model_intelligence && editingAlias"
+                                    class="mt-2"
                                 >
-                                    <input
-                                        type="checkbox"
-                                        x-model="form.use_model_intelligence"
-                                        class="checkbox checkbox-sm checkbox-primary"
-                                    />
-                                    <span class="label-text text-sm"
-                                        >Use Model Intelligence</span
+                                    <button
+                                        type="button"
+                                        @click="refreshIntelligence()"
+                                        class="btn btn-outline btn-sm"
+                                        :class="{ 'loading': refreshingIntelligence }"
+                                        :disabled="refreshingIntelligence || !form.intelligence_model || form.candidates.length === 0"
                                     >
-                                </label>
-                                <label class="label py-0">
-                                    <span class="label-text-alt text-xs"
-                                        >Enhance designator with web-gathered
-                                        model assessments</span
-                                    >
-                                </label>
-                            </div>
-                            <div
-                                x-show="form.use_model_intelligence"
-                                class="form-control"
-                            >
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Intelligence Model</span
-                                    >
-                                </label>
-                                <select
-                                    x-model="form.intelligence_model"
-                                    class="select select-bordered select-sm"
-                                >
-                                    <option value="">Select model...</option>
-                                    <template
-                                        x-for="model in availableModels"
-                                        :key="model.id"
-                                    >
-                                        <option
-                                            :value="model.id"
-                                            x-text="model.id"
-                                        ></option>
-                                    </template>
-                                </select>
-                            </div>
-                            <!-- Refresh Intelligence Button (only shown when editing) -->
-                            <div
-                                x-show="form.use_model_intelligence && editingAlias"
-                                class="mt-2"
-                            >
-                                <button
-                                    type="button"
-                                    @click="refreshIntelligence()"
-                                    class="btn btn-outline btn-sm"
-                                    :class="{ 'loading': refreshingIntelligence }"
-                                    :disabled="refreshingIntelligence || !form.intelligence_model || form.candidates.length === 0"
-                                >
-                                    <svg
-                                        x-show="!refreshingIntelligence"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 mr-1"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                                        />
-                                    </svg>
-                                    Refresh Intelligence
-                                </button>
-                                <span
-                                    x-show="intelligenceMessage"
-                                    class="text-xs ml-2"
-                                    :class="intelligenceError ? 'text-error' : 'text-success'"
-                                    x-text="intelligenceMessage"
-                                ></span>
+                                        <svg
+                                            x-show="!refreshingIntelligence"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 mr-1"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                        Refresh Intelligence
+                                    </button>
+                                    <span
+                                        x-show="intelligenceMessage"
+                                        class="text-xs ml-2"
+                                        :class="intelligenceError ? 'text-error' : 'text-success'"
+                                        x-text="intelligenceMessage"
+                                    ></span>
+                                </div>
                             </div>
                         </div>
 
                         <!-- RAG Option -->
-                        <label class="flex items-start gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                x-model="form.use_rag"
-                                class="checkbox checkbox-info mt-1"
-                            />
-                            <div>
-                                <div class="font-medium">
-                                    RAG (Document Retrieval)
-                                </div>
-                                <div class="text-sm text-base-content/60">
-                                    Retrieve relevant chunks from indexed
-                                    document stores
-                                </div>
-                            </div>
-                        </label>
-
-                        <!-- RAG Settings (shown when RAG is enabled) -->
                         <div
-                            x-show="form.use_rag"
-                            x-transition
-                            class="ml-7 pl-4 border-l-2 border-info space-y-3"
+                            class="border border-base-300 rounded-lg overflow-hidden"
                         >
-                            <!-- Document Stores Selection -->
-                            <div class="form-control">
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Document Stores</span
-                                    >
-                                    <a
-                                        href="/document-stores"
-                                        class="label-text-alt link link-primary text-xs"
-                                        >Manage Stores</a
-                                    >
-                                </label>
-                                <template x-if="documentStores.length === 0">
-                                    <div
-                                        class="text-sm text-base-content/60 bg-base-300 rounded-lg p-3"
-                                    >
-                                        No document stores configured.
-                                        <a
-                                            href="/document-stores"
-                                            class="link link-primary"
-                                            >Create a document store</a
-                                        >
-                                        first.
-                                    </div>
-                                </template>
-                                <template x-if="documentStores.length > 0">
-                                    <div
-                                        class="bg-base-300 rounded-lg p-2 max-h-36 overflow-y-auto"
-                                    >
-                                        <template
-                                            x-for="store in documentStores"
-                                            :key="store.id"
-                                        >
-                                            <label
-                                                class="flex items-center gap-2 py-1 hover:bg-base-200 px-2 rounded cursor-pointer"
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    :value="store.id"
-                                                    x-model="form.store_ids"
-                                                    class="checkbox checkbox-sm checkbox-info"
-                                                />
-                                                <div class="flex-1 min-w-0">
-                                                    <span
-                                                        class="font-mono text-sm"
-                                                        x-text="store.name"
-                                                    ></span>
-                                                    <span
-                                                        class="badge badge-xs ml-1"
-                                                        :class="store.source_type === 'website' ? 'badge-info' : 'badge-ghost'"
-                                                        x-text="store.source_type === 'website' ? 'Web' : store.source_type === 'local' ? 'Local' : store.source_type.replace('mcp:', '')"
-                                                    ></span>
-                                                    <span
-                                                        class="badge badge-xs ml-1"
-                                                        :class="store.index_status === 'ready' ? 'badge-success' : 'badge-ghost'"
-                                                        x-text="store.index_status"
-                                                    ></span>
-                                                </div>
-                                            </label>
-                                        </template>
-                                    </div>
-                                </template>
-                                <label
-                                    class="label py-0"
-                                    x-show="formErrors.store_ids"
-                                >
-                                    <span
-                                        class="label-text-alt text-error"
-                                        x-text="formErrors.store_ids"
-                                    ></span>
-                                </label>
-                            </div>
-                            <!-- RAG Parameters -->
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="form-control">
-                                    <label class="label py-1">
-                                        <span class="label-text text-sm"
-                                            >Max Chunks</span
-                                        >
-                                    </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.max_results"
-                                        class="input input-bordered input-sm"
-                                        min="1"
-                                        max="50"
-                                    />
-                                </div>
-                                <div class="form-control">
-                                    <label class="label py-1">
-                                        <span class="label-text text-sm"
-                                            >Similarity Threshold</span
-                                        >
-                                    </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.similarity_threshold"
-                                        class="input input-bordered input-sm"
-                                        min="0"
-                                        max="1"
-                                        step="0.05"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Smart Source Selection (shown when RAG or Web could be used) -->
-                        <div
-                            x-show="form.use_rag || form.use_web"
-                            x-transition
-                            class="ml-7 pl-4 border-l-2 border-info space-y-3"
-                        >
-                            <label
-                                class="flex items-start gap-3 cursor-pointer"
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-info/10': form.use_rag }"
+                                @click="if (form.use_rag) expanded.rag = !expanded.rag"
                             >
                                 <input
                                     type="checkbox"
-                                    x-model="form.use_smart_source_selection"
-                                    class="checkbox checkbox-sm checkbox-info mt-1"
+                                    x-model="form.use_rag"
+                                    @click.stop="expanded.rag = !form.use_rag"
+                                    class="checkbox checkbox-info"
                                 />
-                                <div>
-                                    <div class="font-medium text-sm">
-                                        Smart Source Selection
+                                <div class="flex-1">
+                                    <div class="font-medium">
+                                        RAG (Document Retrieval)
                                     </div>
-                                    <div class="text-xs text-base-content/60">
-                                        Let the designator decide which document
-                                        stores and whether web search are useful
-                                        for each query
+                                    <div class="text-sm text-base-content/60">
+                                        Retrieve relevant chunks from indexed
+                                        document stores
                                     </div>
                                 </div>
-                            </label>
+                                <svg
+                                    x-show="form.use_rag"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.rag }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
+                            </div>
+
+                            <!-- RAG Settings (shown when RAG is enabled and expanded) -->
                             <div
-                                x-show="form.use_smart_source_selection && !form.use_routing && !form.designator_model"
-                                class="text-xs text-warning"
+                                x-show="form.use_rag && expanded.rag"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
                             >
-                                Requires a designator model (set one in Smart
-                                Routing or Web Access settings)
+                                <!-- Document Stores Selection -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Document Stores</span
+                                        >
+                                        <a
+                                            href="/document-stores"
+                                            class="label-text-alt link link-primary text-xs"
+                                            >Manage Stores</a
+                                        >
+                                    </label>
+                                    <template
+                                        x-if="documentStores.length === 0"
+                                    >
+                                        <div
+                                            class="text-sm text-base-content/60 bg-base-300 rounded-lg p-3"
+                                        >
+                                            No document stores configured.
+                                            <a
+                                                href="/document-stores"
+                                                class="link link-primary"
+                                                >Create a document store</a
+                                            >
+                                            first.
+                                        </div>
+                                    </template>
+                                    <template x-if="documentStores.length > 0">
+                                        <div
+                                            class="bg-base-300 rounded-lg p-2 max-h-36 overflow-y-auto"
+                                        >
+                                            <template
+                                                x-for="store in documentStores"
+                                                :key="store.id"
+                                            >
+                                                <label
+                                                    class="flex items-center gap-2 py-1 hover:bg-base-200 px-2 rounded cursor-pointer"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        :value="store.id"
+                                                        x-model="form.store_ids"
+                                                        class="checkbox checkbox-sm checkbox-info"
+                                                    />
+                                                    <div class="flex-1 min-w-0">
+                                                        <span
+                                                            class="font-mono text-sm"
+                                                            x-text="store.name"
+                                                        ></span>
+                                                        <span
+                                                            class="badge badge-xs ml-1"
+                                                            :class="store.source_type === 'website' ? 'badge-info' : 'badge-ghost'"
+                                                            x-text="store.source_type === 'website' ? 'Web' : store.source_type === 'local' ? 'Local' : store.source_type.replace('mcp:', '')"
+                                                        ></span>
+                                                        <span
+                                                            class="badge badge-xs ml-1"
+                                                            :class="store.index_status === 'ready' ? 'badge-success' : 'badge-ghost'"
+                                                            x-text="store.index_status"
+                                                        ></span>
+                                                    </div>
+                                                </label>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <label
+                                        class="label py-0"
+                                        x-show="formErrors.store_ids"
+                                    >
+                                        <span
+                                            class="label-text-alt text-error"
+                                            x-text="formErrors.store_ids"
+                                        ></span>
+                                    </label>
+                                </div>
+                                <!-- RAG Parameters -->
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Max Chunks</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.max_results"
+                                            class="input input-bordered input-sm"
+                                            min="1"
+                                            max="50"
+                                        />
+                                    </div>
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Similarity Threshold</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.similarity_threshold"
+                                            class="input input-bordered input-sm"
+                                            min="0"
+                                            max="1"
+                                            step="0.05"
+                                        />
+                                    </div>
+                                </div>
+                                <!-- Smart Source Selection (inside RAG settings) -->
+                                <label
+                                    class="flex items-start gap-3 cursor-pointer"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.use_smart_source_selection"
+                                        class="checkbox checkbox-sm checkbox-info mt-1"
+                                    />
+                                    <div>
+                                        <div class="font-medium text-sm">
+                                            Smart Source Selection
+                                        </div>
+                                        <div
+                                            class="text-xs text-base-content/60"
+                                        >
+                                            Let the designator decide which
+                                            document stores and whether web
+                                            search are useful for each query
+                                        </div>
+                                    </div>
+                                </label>
+                                <div
+                                    x-show="form.use_smart_source_selection && !form.use_routing && !form.designator_model"
+                                    class="text-xs text-warning"
+                                >
+                                    Requires a designator model (set one in
+                                    Smart Routing or Web Access settings)
+                                </div>
+                                <!-- Two-pass retrieval option -->
+                                <label
+                                    x-show="form.use_smart_source_selection"
+                                    class="flex items-start gap-3 cursor-pointer ml-6 mt-2"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.use_two_pass_retrieval"
+                                        class="checkbox checkbox-sm checkbox-info mt-1"
+                                    />
+                                    <div>
+                                        <div class="font-medium text-sm">
+                                            Two-Pass Retrieval
+                                        </div>
+                                        <div
+                                            class="text-xs text-base-content/60"
+                                        >
+                                            Preview 5 sample chunks from each
+                                            store before allocating tokens (more
+                                            accurate but slower)
+                                        </div>
+                                    </div>
+                                </label>
                             </div>
                         </div>
 
                         <!-- Web Option -->
-                        <label class="flex items-start gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                x-model="form.use_web"
-                                class="checkbox checkbox-warning mt-1"
-                            />
-                            <div>
-                                <div class="font-medium">
-                                    Realtime Web Access
-                                </div>
-                                <div class="text-sm text-base-content/60">
-                                    Search the web and scrape relevant pages for
-                                    current information
-                                </div>
-                            </div>
-                        </label>
-
-                        <!-- Web Settings (shown when Web is enabled) -->
                         <div
-                            x-show="form.use_web"
-                            x-transition
-                            class="ml-7 pl-4 border-l-2 border-warning space-y-3"
+                            class="border border-base-300 rounded-lg overflow-hidden"
                         >
-                            <!-- Web Designator Model (uses designator_model if routing, otherwise separate) -->
                             <div
-                                class="form-control"
-                                x-show="!form.use_routing"
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-warning/10': form.use_web }"
+                                @click="if (form.use_web) expanded.web = !expanded.web"
                             >
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Query Optimizer Model (optional)</span
-                                    >
-                                </label>
-                                <select
-                                    x-model="form.designator_model"
-                                    class="select select-bordered select-sm"
-                                >
-                                    <option value="">Use query as-is</option>
-                                    <template
-                                        x-for="model in availableModels"
-                                        :key="model.id"
-                                    >
-                                        <option
-                                            :value="model.id"
-                                            x-text="model.id"
-                                        ></option>
-                                    </template>
-                                </select>
-                                <label class="label py-0">
-                                    <span class="label-text-alt text-xs"
-                                        >Fast model to optimize search
-                                        queries</span
-                                    >
-                                </label>
-                            </div>
-                            <div
-                                x-show="form.use_routing"
-                                class="text-xs text-base-content/60"
-                            >
-                                Uses the routing designator model for query
-                                optimization
-                            </div>
-                            <!-- Web Parameters -->
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="form-control">
-                                    <label class="label py-1">
-                                        <span class="label-text text-sm"
-                                            >Max Search Results</span
-                                        >
-                                    </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.max_search_results"
-                                        class="input input-bordered input-sm"
-                                        min="1"
-                                        max="20"
-                                    />
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_web"
+                                    @click.stop="expanded.web = !form.use_web"
+                                    class="checkbox checkbox-warning"
+                                />
+                                <div class="flex-1">
+                                    <div class="font-medium">
+                                        Realtime Web Access
+                                    </div>
+                                    <div class="text-sm text-base-content/60">
+                                        Search the web and scrape relevant pages
+                                        for current information
+                                    </div>
                                 </div>
+                                <svg
+                                    x-show="form.use_web"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.web }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
+                            </div>
+
+                            <!-- Web Settings (shown when Web is enabled and expanded) -->
+                            <div
+                                x-show="form.use_web && expanded.web"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
+                                <!-- Web Designator Model (uses designator_model if routing, otherwise separate) -->
+                                <div
+                                    class="form-control"
+                                    x-show="!form.use_routing"
+                                >
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Query Optimizer Model
+                                            (optional)</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.designator_model"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            Use query as-is
+                                        </option>
+                                        <template
+                                            x-for="model in availableModels"
+                                            :key="model.id"
+                                        >
+                                            <option
+                                                :value="model.id"
+                                                x-text="model.id"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs"
+                                            >Fast model to optimize search
+                                            queries</span
+                                        >
+                                    </label>
+                                </div>
+                                <div
+                                    x-show="form.use_routing"
+                                    class="text-xs text-base-content/60"
+                                >
+                                    Uses the routing designator model for query
+                                    optimization
+                                </div>
+                                <!-- Web Parameters -->
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Max Search Results</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.max_search_results"
+                                            class="input input-bordered input-sm"
+                                            min="1"
+                                            max="20"
+                                        />
+                                    </div>
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Max URLs to Scrape</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.max_scrape_urls"
+                                            class="input input-bordered input-sm"
+                                            min="0"
+                                            max="10"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Live Data Option -->
+                        <div
+                            class="border border-base-300 rounded-lg overflow-hidden"
+                        >
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-accent/10': form.use_live_data }"
+                                @click="if (form.use_live_data) expanded.liveData = !expanded.liveData"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_live_data"
+                                    @click.stop="expanded.liveData = !form.use_live_data"
+                                    class="checkbox checkbox-accent"
+                                />
+                                <div class="flex-1">
+                                    <div class="font-medium">
+                                        Live Data Sources
+                                    </div>
+                                    <div class="text-sm text-base-content/60">
+                                        Query external APIs for real-time data
+                                        (weather, stocks, transport)
+                                    </div>
+                                </div>
+                                <svg
+                                    x-show="form.use_live_data"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.liveData }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
+                            </div>
+
+                            <!-- Live Data Settings (shown when enabled and expanded) -->
+                            <div
+                                x-show="form.use_live_data && expanded.liveData"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
                                 <div class="form-control">
                                     <label class="label py-1">
                                         <span class="label-text text-sm"
-                                            >Max URLs to Scrape</span
+                                            >Live Data Sources</span
                                         >
                                     </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.max_scrape_urls"
-                                        class="input input-bordered input-sm"
-                                        min="0"
-                                        max="10"
-                                    />
+                                    <template
+                                        x-if="availableLiveDataSources.length === 0"
+                                    >
+                                        <div
+                                            class="text-sm text-base-content/60"
+                                        >
+                                            No live data sources configured.
+                                            <a
+                                                href="/admin/live-data-sources"
+                                                class="link link-primary"
+                                                >Create one</a
+                                            >
+                                        </div>
+                                    </template>
+                                    <template
+                                        x-if="availableLiveDataSources.length > 0"
+                                    >
+                                        <div class="space-y-1">
+                                            <template
+                                                x-for="source in availableLiveDataSources"
+                                                :key="source.id"
+                                            >
+                                                <label
+                                                    class="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-base-200"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        class="checkbox checkbox-sm checkbox-accent"
+                                                        :value="source.id"
+                                                        x-model="form.live_data_source_ids"
+                                                    />
+                                                    <div class="flex-1">
+                                                        <span
+                                                            class="font-medium"
+                                                            x-text="source.name"
+                                                        ></span>
+                                                        <span
+                                                            class="badge badge-xs ml-1"
+                                                            :class="source.enabled ? 'badge-success' : 'badge-ghost'"
+                                                            x-text="source.data_type || source.source_type"
+                                                        ></span>
+                                                    </div>
+                                                    <span
+                                                        class="text-xs text-base-content/50"
+                                                        x-text="source.description"
+                                                    ></span>
+                                                </label>
+                                            </template>
+                                        </div>
+                                    </template>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Cache Option -->
-                        <label
-                            class="flex items-start gap-3 cursor-pointer"
-                            :class="{ 'opacity-50': form.use_web }"
-                        >
-                            <input
-                                type="checkbox"
-                                x-model="form.use_cache"
-                                class="checkbox checkbox-secondary mt-1"
-                                :disabled="form.use_web"
-                            />
-                            <div>
-                                <div class="font-medium">Response Caching</div>
-                                <div class="text-sm text-base-content/60">
-                                    Cache responses for semantically similar
-                                    queries
-                                </div>
-                                <div
-                                    x-show="form.use_web"
-                                    class="text-xs text-warning mt-1"
-                                >
-                                    Caching disabled when Web Access is enabled
-                                    (realtime data shouldn't be cached)
-                                </div>
-                            </div>
-                        </label>
-
-                        <!-- Cache Settings (shown when caching enabled and web not enabled) -->
                         <div
-                            x-show="form.use_cache && !form.use_web"
-                            x-transition
-                            class="ml-7 pl-4 border-l-2 border-secondary space-y-3"
+                            class="border border-base-300 rounded-lg overflow-hidden"
+                            :class="{ 'opacity-50': form.use_web || form.use_live_data }"
                         >
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="form-control">
-                                    <label class="label py-1">
-                                        <span class="label-text text-sm"
-                                            >Similarity Threshold</span
-                                        >
-                                    </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.cache_similarity_threshold"
-                                        class="input input-bordered input-sm"
-                                        min="0.5"
-                                        max="1"
-                                        step="0.01"
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-secondary/10': form.use_cache && !form.use_web && !form.use_live_data }"
+                                @click="if (form.use_cache && !form.use_web && !form.use_live_data) expanded.cache = !expanded.cache"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_cache"
+                                    @click.stop="expanded.cache = !form.use_cache"
+                                    class="checkbox checkbox-secondary"
+                                    :disabled="form.use_web || form.use_live_data"
+                                />
+                                <div class="flex-1">
+                                    <div class="font-medium">
+                                        Response Caching
+                                    </div>
+                                    <div class="text-sm text-base-content/60">
+                                        Cache responses for semantically similar
+                                        queries
+                                    </div>
+                                    <div
+                                        x-show="form.use_web || form.use_live_data"
+                                        class="text-xs text-warning mt-1"
+                                    >
+                                        Caching disabled when Web Access or Live
+                                        Data is enabled (realtime data shouldn't
+                                        be cached)
+                                    </div>
+                                </div>
+                                <svg
+                                    x-show="form.use_cache && !form.use_web && !form.use_live_data"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.cache }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
                                     />
+                                </svg>
+                            </div>
+
+                            <!-- Cache Settings (shown when caching enabled, expanded, and web not enabled) -->
+                            <div
+                                x-show="form.use_cache && !form.use_web && !form.use_live_data && expanded.cache"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Similarity Threshold</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.cache_similarity_threshold"
+                                            class="input input-bordered input-sm"
+                                            min="0.5"
+                                            max="1"
+                                            step="0.01"
+                                        />
+                                    </div>
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Cache TTL (hours)</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.cache_ttl_hours"
+                                            class="input input-bordered input-sm"
+                                            min="1"
+                                            max="8760"
+                                        />
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Min Tokens</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.cache_min_tokens"
+                                            class="input input-bordered input-sm"
+                                            min="0"
+                                        />
+                                    </div>
+                                    <div class="form-control">
+                                        <label class="label py-1">
+                                            <span class="label-text text-sm"
+                                                >Max Tokens</span
+                                            >
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="form.cache_max_tokens"
+                                            class="input input-bordered input-sm"
+                                            min="0"
+                                        />
+                                    </div>
                                 </div>
                                 <div class="form-control">
-                                    <label class="label py-1">
+                                    <label
+                                        class="label cursor-pointer justify-start gap-2 py-1"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            x-model="form.cache_match_system_prompt"
+                                            class="checkbox checkbox-sm checkbox-secondary"
+                                        />
                                         <span class="label-text text-sm"
-                                            >Cache TTL (hours)</span
+                                            >Match System Prompt</span
                                         >
                                     </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.cache_ttl_hours"
-                                        class="input input-bordered input-sm"
-                                        min="1"
-                                        max="8760"
-                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label
+                                        class="label cursor-pointer justify-start gap-2 py-1"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            x-model="form.cache_match_last_message_only"
+                                            class="checkbox checkbox-sm checkbox-secondary"
+                                        />
+                                        <span class="label-text text-sm"
+                                            >Match Last Message Only</span
+                                        >
+                                    </label>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs"
+                                            >Useful for OpenWebUI (ignores
+                                            conversation history)</span
+                                        >
+                                    </label>
                                 </div>
                             </div>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="form-control">
-                                    <label class="label py-1">
-                                        <span class="label-text text-sm"
-                                            >Min Tokens</span
-                                        >
-                                    </label>
-                                    <input
-                                        type="number"
-                                        x-model.number="form.cache_min_tokens"
-                                        class="input input-bordered input-sm"
-                                        min="0"
-                                    />
+                        </div>
+
+                        <!-- Smart Tag Option -->
+                        <div
+                            class="border border-base-300 rounded-lg overflow-hidden"
+                        >
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-accent/10': form.is_smart_tag }"
+                                @click="if (form.is_smart_tag) expanded.smartTag = !expanded.smartTag"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.is_smart_tag"
+                                    @click.stop="expanded.smartTag = !form.is_smart_tag"
+                                    class="checkbox checkbox-accent"
+                                />
+                                <div class="flex-1">
+                                    <div class="font-medium">Smart Tag</div>
+                                    <div class="text-sm text-base-content/60">
+                                        Trigger this alias when requests are
+                                        tagged with its name
+                                    </div>
                                 </div>
+                                <svg
+                                    x-show="form.is_smart_tag"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.smartTag }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
+                            </div>
+
+                            <!-- Smart Tag Settings (shown when enabled and expanded) -->
+                            <div
+                                x-show="form.is_smart_tag && expanded.smartTag"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
+                                <label
+                                    class="flex items-start gap-3 cursor-pointer"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        x-model="form.passthrough_model"
+                                        class="checkbox checkbox-accent checkbox-sm mt-1"
+                                    />
+                                    <div>
+                                        <div class="font-medium text-sm">
+                                            Passthrough Model
+                                        </div>
+                                        <div
+                                            class="text-xs text-base-content/60"
+                                        >
+                                            Honor the request's original model
+                                            instead of this alias's target
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Memory Option -->
+                        <div
+                            class="border border-base-300 rounded-lg overflow-hidden"
+                        >
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-success/10': form.use_memory }"
+                                @click="if (form.use_memory) expanded.memory = !expanded.memory"
+                            >
+                                <input
+                                    type="checkbox"
+                                    x-model="form.use_memory"
+                                    @click.stop="expanded.memory = !form.use_memory"
+                                    class="checkbox checkbox-success"
+                                />
+                                <div class="flex-1">
+                                    <div class="font-medium">
+                                        Persistent Memory
+                                    </div>
+                                    <div class="text-sm text-base-content/60">
+                                        Maintain memory about user preferences
+                                        across conversations
+                                    </div>
+                                </div>
+                                <svg
+                                    x-show="form.use_memory"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.memory }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
+                            </div>
+
+                            <!-- Memory Settings (shown when enabled and expanded) -->
+                            <div
+                                x-show="form.use_memory && expanded.memory"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
                                 <div class="form-control">
                                     <label class="label py-1">
                                         <span class="label-text text-sm"
@@ -1323,167 +1726,508 @@ content %}
                                     </label>
                                     <input
                                         type="number"
-                                        x-model.number="form.cache_max_tokens"
-                                        class="input input-bordered input-sm"
-                                        min="0"
+                                        x-model.number="form.memory_max_tokens"
+                                        class="input input-bordered input-sm w-32"
+                                        min="100"
+                                        max="2000"
                                     />
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Maximum memory size. When full, new
+                                            info displaces less important items.
+                                        </span>
+                                    </label>
                                 </div>
-                            </div>
-                            <div class="form-control">
-                                <label
-                                    class="label cursor-pointer justify-start gap-2 py-1"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        x-model="form.cache_match_system_prompt"
-                                        class="checkbox checkbox-sm checkbox-secondary"
-                                    />
-                                    <span class="label-text text-sm"
-                                        >Match System Prompt</span
-                                    >
-                                </label>
-                            </div>
-                            <div class="form-control">
-                                <label
-                                    class="label cursor-pointer justify-start gap-2 py-1"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        x-model="form.cache_match_last_message_only"
-                                        class="checkbox checkbox-sm checkbox-secondary"
-                                    />
-                                    <span class="label-text text-sm"
-                                        >Match Last Message Only</span
-                                    >
-                                </label>
-                                <label class="label py-0">
-                                    <span class="label-text-alt text-xs"
-                                        >Useful for OpenWebUI (ignores
-                                        conversation history)</span
-                                    >
-                                </label>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Memory Content</span
+                                        >
+                                        <span
+                                            x-show="form.memory_updated_at"
+                                            class="label-text-alt text-xs text-base-content/50"
+                                            x-text="'Updated: ' + formatDate(form.memory_updated_at)"
+                                        ></span>
+                                    </label>
+                                    <textarea
+                                        x-model="form.memory"
+                                        class="textarea textarea-bordered textarea-sm font-mono"
+                                        rows="4"
+                                        placeholder="Memory will be populated automatically, or seed it here..."
+                                    ></textarea>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            The designator updates this when new
+                                            information is learned
+                                        </span>
+                                        <span
+                                            class="label-text-alt text-xs"
+                                            x-text="'~' + Math.round((form.memory?.length || 0) / 4) + '/' + form.memory_max_tokens + ' tokens'"
+                                        ></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Smart Tag Option -->
-                        <label class="flex items-start gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                x-model="form.is_smart_tag"
-                                class="checkbox checkbox-accent mt-1"
-                            />
-                            <div>
-                                <div class="font-medium">Smart Tag</div>
-                                <div class="text-sm text-base-content/60">
-                                    Trigger this alias when requests are tagged
-                                    with its name
-                                </div>
-                            </div>
-                        </label>
-
-                        <!-- Passthrough Model (shown when Smart Tag is enabled) -->
+                        <!-- Actions Option -->
                         <div
-                            x-show="form.is_smart_tag"
-                            x-transition
-                            class="ml-7 pl-4 border-l-2 border-accent space-y-3"
+                            class="border border-base-300 rounded-lg overflow-hidden"
                         >
-                            <label
-                                class="flex items-start gap-3 cursor-pointer"
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-warning/10': form.use_actions }"
+                                @click="if (form.use_actions) expanded.actions = !expanded.actions"
                             >
                                 <input
                                     type="checkbox"
-                                    x-model="form.passthrough_model"
-                                    class="checkbox checkbox-accent checkbox-sm mt-1"
+                                    x-model="form.use_actions"
+                                    @click.stop="expanded.actions = !form.use_actions"
+                                    class="checkbox checkbox-warning"
                                 />
-                                <div>
-                                    <div class="font-medium text-sm">
-                                        Passthrough Model
-                                    </div>
-                                    <div class="text-xs text-base-content/60">
-                                        Honor the request's original model
-                                        instead of this alias's target
+                                <div class="flex-1">
+                                    <div class="font-medium">Smart Actions</div>
+                                    <div class="text-sm text-base-content/60">
+                                        Allow LLM to create email drafts and
+                                        perform other actions
                                     </div>
                                 </div>
-                            </label>
+                                <svg
+                                    x-show="form.use_actions"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.actions }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
+                            </div>
+
+                            <!-- Actions Settings (shown when enabled and expanded) -->
+                            <div
+                                x-show="form.use_actions && expanded.actions"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Allowed Actions</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="text"
+                                        x-model="form.allowed_actions_input"
+                                        class="input input-bordered input-sm"
+                                        placeholder="email:draft_*, calendar:*"
+                                    />
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Comma-separated patterns. Use * for
+                                            wildcards. Examples:
+                                            email:draft_new, email:draft_*,
+                                            calendar:*
+                                        </span>
+                                    </label>
+                                </div>
+                                <div
+                                    class="text-xs text-base-content/60 bg-base-300 p-2 rounded"
+                                >
+                                    <div class="font-medium mb-1">
+                                        Available action types:
+                                    </div>
+                                    <ul
+                                        class="list-disc list-inside space-y-0.5"
+                                    >
+                                        <li>
+                                            <code>email:draft_new</code> -
+                                            Create new email draft
+                                        </li>
+                                        <li>
+                                            <code>email:draft_reply</code> -
+                                            Create reply draft
+                                        </li>
+                                        <li>
+                                            <code>email:draft_forward</code> -
+                                            Create forward draft
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <!-- Default Accounts for Actions -->
+                                <div class="divider text-xs my-2">
+                                    Default Resources
+                                </div>
+
+                                <!-- Default Email Account -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Default Email Account</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.action_email_account_id"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            No account selected
+                                        </option>
+                                        <template
+                                            x-for="account in allEmailAccounts"
+                                            :key="account.id"
+                                        >
+                                            <option
+                                                :value="account.id"
+                                                x-text="account.account_email + ' (' + account.provider + ')'"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Account for draft_new, draft_reply,
+                                            draft_forward
+                                        </span>
+                                    </label>
+                                </div>
+
+                                <!-- Default Calendar Account & Calendar -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Default Calendar Account</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.action_calendar_account_id"
+                                        @change="loadCalendarsForAccount(form.action_calendar_account_id)"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            No account selected
+                                        </option>
+                                        <template
+                                            x-for="account in allCalendarAccounts"
+                                            :key="account.id"
+                                        >
+                                            <option
+                                                :value="account.id"
+                                                x-text="account.account_email + ' (' + account.provider + ')'"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <div
+                                    class="form-control"
+                                    x-show="form.action_calendar_account_id"
+                                >
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Default Calendar</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.action_calendar_id"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            Primary calendar
+                                        </option>
+                                        <template
+                                            x-for="cal in actionCalendars"
+                                            :key="cal.id"
+                                        >
+                                            <option
+                                                :value="cal.id"
+                                                x-text="cal.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Calendar for creating events
+                                        </span>
+                                    </label>
+                                </div>
+
+                                <!-- Default Tasks Account & List -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Default Tasks Account</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.action_tasks_account_id"
+                                        @change="loadTaskListsForAccount(form.action_tasks_account_id)"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            No account selected
+                                        </option>
+                                        <template
+                                            x-for="account in allTasksAccounts"
+                                            :key="account.id"
+                                        >
+                                            <option
+                                                :value="account.id"
+                                                x-text="account.account_email + ' (' + account.provider + ')'"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                </div>
+                                <div
+                                    class="form-control"
+                                    x-show="form.action_tasks_account_id"
+                                >
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Default Task List</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.action_tasks_list_id"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">Default list</option>
+                                        <template
+                                            x-for="list in actionTaskLists"
+                                            :key="list.id"
+                                        >
+                                            <option
+                                                :value="list.id"
+                                                x-text="list.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Task list for creating tasks
+                                        </span>
+                                    </label>
+                                </div>
+
+                                <!-- Notification URLs -->
+                                <div class="divider text-xs my-2">
+                                    Notifications
+                                </div>
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Notification URLs (Apprise)</span
+                                        >
+                                    </label>
+                                    <textarea
+                                        x-model="form.action_notification_urls"
+                                        class="textarea textarea-bordered textarea-sm font-mono text-sm"
+                                        rows="2"
+                                        placeholder="gotify://gotify/token&#10;slack://tokenA/tokenB/tokenC"
+                                    ></textarea>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            One Apprise URL per line. See
+                                            <a
+                                                href="https://github.com/caronc/apprise/wiki"
+                                                target="_blank"
+                                                class="link link-primary"
+                                                >Apprise docs</a
+                                            >
+                                            for URL formats.
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Memory Option -->
-                        <label class="flex items-start gap-3 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                x-model="form.use_memory"
-                                class="checkbox checkbox-success mt-1"
-                            />
-                            <div>
-                                <div class="font-medium">Persistent Memory</div>
-                                <div class="text-sm text-base-content/60">
-                                    Maintain memory about user preferences
-                                    across conversations
-                                </div>
-                            </div>
-                        </label>
-
-                        <!-- Memory Settings (shown when enabled) -->
+                        <!-- Scheduled Prompts Option -->
                         <div
-                            x-show="form.use_memory"
-                            x-transition
-                            class="ml-7 pl-4 border-l-2 border-success space-y-3"
+                            class="border border-base-300 rounded-lg overflow-hidden"
                         >
-                            <div class="form-control">
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Max Tokens</span
-                                    >
-                                </label>
+                            <div
+                                class="flex items-center gap-3 p-3 cursor-pointer hover:bg-base-300/50"
+                                :class="{ 'bg-info/10': form.scheduled_prompts_enabled }"
+                                @click="if (form.scheduled_prompts_enabled) expanded.scheduled_prompts = !expanded.scheduled_prompts"
+                            >
                                 <input
-                                    type="number"
-                                    x-model.number="form.memory_max_tokens"
-                                    class="input input-bordered input-sm w-32"
-                                    min="100"
-                                    max="2000"
+                                    type="checkbox"
+                                    x-model="form.scheduled_prompts_enabled"
+                                    @click.stop="expanded.scheduled_prompts = !form.scheduled_prompts_enabled"
+                                    class="checkbox checkbox-info"
                                 />
-                                <label class="label py-0">
-                                    <span class="label-text-alt text-xs">
-                                        Maximum memory size. When full, new info
-                                        displaces less important items.
-                                    </span>
-                                </label>
+                                <div class="flex-1">
+                                    <div class="font-medium">
+                                        Scheduled Prompts
+                                    </div>
+                                    <div class="text-sm text-base-content/60">
+                                        Execute prompts from calendar events at
+                                        their scheduled times
+                                    </div>
+                                </div>
+                                <svg
+                                    x-show="form.scheduled_prompts_enabled"
+                                    class="w-5 h-5 transition-transform"
+                                    :class="{ 'rotate-180': expanded.scheduled_prompts }"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M19 9l-7 7-7-7"
+                                    />
+                                </svg>
                             </div>
-                            <div class="form-control">
-                                <label class="label py-1">
-                                    <span class="label-text text-sm"
-                                        >Memory Content</span
+
+                            <!-- Scheduled Prompts Settings (shown when enabled and expanded) -->
+                            <div
+                                x-show="form.scheduled_prompts_enabled && expanded.scheduled_prompts"
+                                x-transition
+                                class="p-3 pt-0 border-t border-base-300 space-y-3"
+                            >
+                                <div class="alert alert-info py-2 text-sm">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        class="stroke-current shrink-0 w-5 h-5"
                                     >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        ></path>
+                                    </svg>
                                     <span
-                                        x-show="form.memory_updated_at"
-                                        class="label-text-alt text-xs text-base-content/50"
-                                        x-text="'Updated: ' + formatDate(form.memory_updated_at)"
-                                    ></span>
-                                </label>
-                                <textarea
-                                    x-model="form.memory"
-                                    class="textarea textarea-bordered textarea-sm font-mono"
-                                    rows="4"
-                                    placeholder="Memory will be populated automatically, or seed it here..."
-                                ></textarea>
-                                <label class="label py-0">
-                                    <span class="label-text-alt text-xs">
-                                        The designator updates this when new
-                                        information is learned
-                                    </span>
-                                    <span
-                                        class="label-text-alt text-xs"
-                                        x-text="'~' + Math.round((form.memory?.length || 0) / 4) + '/' + form.memory_max_tokens + ' tokens'"
-                                    ></span>
-                                </label>
+                                        >Create calendar events where the
+                                        <strong>description</strong> contains
+                                        the prompt to execute. The event title
+                                        is used for logging.</span
+                                    >
+                                </div>
+
+                                <!-- Calendar Account -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Calendar Account</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.scheduled_prompts_account_id"
+                                        @change="loadCalendarsForScheduledPrompts(form.scheduled_prompts_account_id)"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            Select account...
+                                        </option>
+                                        <template
+                                            x-for="account in allCalendarAccounts"
+                                            :key="account.id"
+                                        >
+                                            <option
+                                                :value="account.id"
+                                                x-text="account.account_email + ' (' + account.provider + ')'"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                </div>
+
+                                <!-- Calendar Selection -->
+                                <div
+                                    class="form-control"
+                                    x-show="form.scheduled_prompts_account_id"
+                                >
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Prompts Calendar</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.scheduled_prompts_calendar_id"
+                                        @change="updateScheduledPromptsCalendarName()"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">
+                                            Primary calendar
+                                        </option>
+                                        <template
+                                            x-for="cal in scheduledPromptsCalendars"
+                                            :key="cal.id"
+                                        >
+                                            <option
+                                                :value="cal.id"
+                                                x-text="cal.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Dedicated calendar for scheduled
+                                            prompts
+                                        </span>
+                                    </label>
+                                </div>
+
+                                <!-- Lookahead Minutes -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Lookahead (minutes)</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        x-model.number="form.scheduled_prompts_lookahead"
+                                        class="input input-bordered input-sm"
+                                        min="5"
+                                        max="60"
+                                        placeholder="15"
+                                    />
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            How far ahead to poll for upcoming
+                                            events (default: 15 min)
+                                        </span>
+                                    </label>
+                                </div>
+
+                                <!-- Store Response -->
+                                <div class="form-control">
+                                    <label
+                                        class="label cursor-pointer py-1 justify-start gap-3"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            x-model="form.scheduled_prompts_store_response"
+                                            class="checkbox checkbox-sm"
+                                        />
+                                        <span class="label-text text-sm"
+                                            >Store full response</span
+                                        >
+                                    </label>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Save the complete LLM response
+                                            (otherwise just preview)
+                                        </span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Common Settings (collapsed) -->
+                <!-- Common Settings (collapsed by default) -->
                 <div class="collapse collapse-arrow bg-base-200 mt-4">
-                    <input type="checkbox" :checked="form.system_prompt" />
+                    <input type="checkbox" />
                     <div class="collapse-title text-sm font-medium">
                         Advanced Settings
                     </div>
@@ -1734,6 +2478,15 @@ content %}
             aliases: [],
             availableModels: [],
             documentStores: [],
+            availableLiveDataSources: [],
+            googleAccounts: [],
+            microsoftAccounts: [],
+            // Action default resource lists
+            allEmailAccounts: [],
+            allCalendarAccounts: [],
+            allTasksAccounts: [],
+            actionCalendars: [],
+            actionTaskLists: [],
             routerStats: {}, // Per-candidate request counts
             expandedRows: [],
             showModal: false,
@@ -1748,6 +2501,20 @@ content %}
             intelligenceError: false,
             modelIntelligence: {}, // Cache for fetched intelligence
             formErrors: {},
+            // Track which feature sections are expanded
+            expanded: {
+                routing: false,
+                rag: false,
+                web: false,
+                liveData: false,
+                cache: false,
+                smartTag: false,
+                memory: false,
+                actions: false,
+                scheduled_prompts: false,
+            },
+            // Calendars for scheduled prompts (separate from action calendars)
+            scheduledPromptsCalendars: [],
             form: {
                 name: "",
                 target_model: "",
@@ -1770,10 +2537,14 @@ content %}
                 similarity_threshold: 0.7,
                 // Smart source selection
                 use_smart_source_selection: false,
+                use_two_pass_retrieval: false,
                 // Web
                 use_web: false,
                 max_search_results: 5,
                 max_scrape_urls: 3,
+                // Live Data
+                use_live_data: false,
+                live_data_source_ids: [],
                 // Common enrichment
                 max_context_tokens: 4000,
                 rerank_provider: "local",
@@ -1796,6 +2567,23 @@ content %}
                 memory: "",
                 memory_max_tokens: 500,
                 memory_updated_at: null,
+                // Actions
+                use_actions: false,
+                allowed_actions_input: "",
+                action_email_account_id: "",
+                action_calendar_account_id: "",
+                action_calendar_id: "",
+                action_tasks_account_id: "",
+                action_tasks_provider: "",
+                action_tasks_list_id: "",
+                action_notification_urls: "",
+                // Scheduled Prompts
+                scheduled_prompts_enabled: false,
+                scheduled_prompts_account_id: "",
+                scheduled_prompts_calendar_id: "",
+                scheduled_prompts_calendar_name: "",
+                scheduled_prompts_lookahead: 15,
+                scheduled_prompts_store_response: false,
                 // Metadata
                 tags_input: "",
                 description: "",
@@ -1808,9 +2596,65 @@ content %}
                     this.loadAliases(),
                     this.loadModels(),
                     this.loadDocumentStores(),
+                    this.loadLiveDataSources(),
                     this.loadRouterStats(),
+                    this.loadOAuthAccounts(),
                 ]);
                 this.loading = false;
+
+                // Handle deeplink - expand and scroll to specific alias
+                const params = new URLSearchParams(window.location.search);
+                const expandId = params.get("expand");
+                const expandName = params.get("name");
+
+                if (expandId) {
+                    const aliasId = parseInt(expandId);
+                    if (!this.expandedRows.includes(aliasId)) {
+                        this.expandedRows.push(aliasId);
+                    }
+                    this.$nextTick(() => {
+                        const row = document.querySelector(
+                            `[data-alias-id="${aliasId}"]`,
+                        );
+                        if (row) {
+                            row.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center",
+                            });
+                            row.classList.add("bg-primary/10");
+                            setTimeout(
+                                () => row.classList.remove("bg-primary/10"),
+                                2000,
+                            );
+                        }
+                    });
+                } else if (expandName) {
+                    const alias = this.aliases.find(
+                        (a) =>
+                            a.name.toLowerCase() === expandName.toLowerCase(),
+                    );
+                    if (alias) {
+                        if (!this.expandedRows.includes(alias.id)) {
+                            this.expandedRows.push(alias.id);
+                        }
+                        this.$nextTick(() => {
+                            const row = document.querySelector(
+                                `[data-alias-id="${alias.id}"]`,
+                            );
+                            if (row) {
+                                row.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "center",
+                                });
+                                row.classList.add("bg-primary/10");
+                                setTimeout(
+                                    () => row.classList.remove("bg-primary/10"),
+                                    2000,
+                                );
+                            }
+                        });
+                    }
+                }
             },
 
             async loadAliases() {
@@ -1838,6 +2682,206 @@ content %}
                 } catch (error) {
                     console.error("Failed to load document stores:", error);
                 }
+            },
+
+            async loadLiveDataSources() {
+                try {
+                    const response = await fetch(
+                        "/api/live-data-sources/for-smart-alias",
+                    );
+                    this.availableLiveDataSources = await response.json();
+                } catch (error) {
+                    console.error("Failed to load live data sources:", error);
+                }
+            },
+
+            async loadOAuthAccounts() {
+                try {
+                    const response = await fetch("/api/oauth/tokens");
+                    const tokens = await response.json();
+                    // Filter by provider
+                    this.googleAccounts = tokens.filter(
+                        (t) => t.provider === "google",
+                    );
+                    this.microsoftAccounts = tokens.filter(
+                        (t) => t.provider === "microsoft",
+                    );
+
+                    // Build action-category account lists
+                    // Email: both Google (Gmail) and Microsoft (Outlook)
+                    this.allEmailAccounts = tokens.filter(
+                        (t) =>
+                            t.provider === "google" ||
+                            t.provider === "microsoft",
+                    );
+                    // Calendar: both Google Calendar and Microsoft (Outlook Calendar)
+                    this.allCalendarAccounts = tokens.filter(
+                        (t) =>
+                            t.provider === "google" ||
+                            t.provider === "microsoft",
+                    );
+                    // Tasks: Google Tasks, Microsoft To Do, and Todoist
+                    this.allTasksAccounts = tokens.filter(
+                        (t) =>
+                            t.provider === "google" ||
+                            t.provider === "microsoft",
+                    );
+
+                    // Check if Todoist is configured and add it as a tasks option
+                    try {
+                        const featureResp = await fetch("/api/feature-status");
+                        if (featureResp.ok) {
+                            const features = await featureResp.json();
+                            if (
+                                features.dependencies?.document_sources?.todoist
+                                    ?.configured
+                            ) {
+                                // Add Todoist as a special "account" with id="todoist"
+                                this.allTasksAccounts.push({
+                                    id: "todoist",
+                                    provider: "todoist",
+                                    account_email: "Todoist",
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Failed to check Todoist integration:", e);
+                    }
+                } catch (error) {
+                    console.error("Failed to load OAuth accounts:", error);
+                }
+            },
+
+            async loadCalendarsForAccount(accountId) {
+                if (!accountId) {
+                    this.actionCalendars = [];
+                    this.form.action_calendar_id = "";
+                    return;
+                }
+                try {
+                    // Find the account to determine provider
+                    const account = this.allCalendarAccounts.find(
+                        (a) => a.id == accountId,
+                    );
+                    if (!account) return;
+
+                    if (account.provider === "google") {
+                        const response = await fetch(
+                            `/api/oauth/google/${accountId}/calendars`,
+                        );
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.actionCalendars = data.calendars || [];
+                        }
+                    } else if (account.provider === "microsoft") {
+                        const response = await fetch(
+                            `/api/oauth/microsoft/${accountId}/calendars`,
+                        );
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.actionCalendars = data.calendars || [];
+                        }
+                    }
+                } catch (error) {
+                    console.error("Failed to load calendars:", error);
+                    this.actionCalendars = [];
+                }
+            },
+
+            async loadTaskListsForAccount(accountId) {
+                if (!accountId) {
+                    this.actionTaskLists = [];
+                    this.form.action_tasks_list_id = "";
+                    return;
+                }
+                try {
+                    // Find the account to determine provider
+                    const account = this.allTasksAccounts.find(
+                        (a) => a.id == accountId,
+                    );
+                    if (!account) return;
+
+                    if (account.provider === "google") {
+                        const response = await fetch(
+                            `/api/oauth/google/${accountId}/tasklists`,
+                        );
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.actionTaskLists = data.tasklists || [];
+                        }
+                    } else if (account.provider === "microsoft") {
+                        const response = await fetch(
+                            `/api/oauth/microsoft/${accountId}/todolists`,
+                        );
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.actionTaskLists = data.lists || [];
+                        }
+                    } else if (account.provider === "todoist") {
+                        const response = await fetch("/api/todoist/projects");
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.actionTaskLists = data.projects || [];
+                        }
+                    }
+                } catch (error) {
+                    console.error("Failed to load task lists:", error);
+                    this.actionTaskLists = [];
+                }
+            },
+
+            async loadCalendarsForScheduledPrompts(accountId) {
+                if (!accountId) {
+                    this.scheduledPromptsCalendars = [];
+                    this.form.scheduled_prompts_calendar_id = "";
+                    this.form.scheduled_prompts_calendar_name = "";
+                    return;
+                }
+                try {
+                    // Find the account to determine provider
+                    const account = this.allCalendarAccounts.find(
+                        (a) => a.id == accountId,
+                    );
+                    if (!account) return;
+
+                    if (account.provider === "google") {
+                        const response = await fetch(
+                            `/api/oauth/google/${accountId}/calendars`,
+                        );
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.scheduledPromptsCalendars =
+                                data.calendars || [];
+                        }
+                    } else if (account.provider === "microsoft") {
+                        const response = await fetch(
+                            `/api/oauth/microsoft/${accountId}/calendars`,
+                        );
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.scheduledPromptsCalendars =
+                                data.calendars || [];
+                        }
+                    }
+                } catch (error) {
+                    console.error(
+                        "Failed to load calendars for scheduled prompts:",
+                        error,
+                    );
+                    this.scheduledPromptsCalendars = [];
+                }
+            },
+
+            updateScheduledPromptsCalendarName() {
+                const calId = this.form.scheduled_prompts_calendar_id;
+                if (!calId) {
+                    this.form.scheduled_prompts_calendar_name = "";
+                    return;
+                }
+                const cal = this.scheduledPromptsCalendars.find(
+                    (c) => c.id === calId,
+                );
+                this.form.scheduled_prompts_calendar_name = cal ? cal.name : "";
             },
 
             async loadRouterStats() {
@@ -1935,6 +2979,17 @@ content %}
             openAddModal() {
                 this.editingAlias = null;
                 this.formErrors = {};
+                // Reset expanded state for all feature sections
+                this.expanded = {
+                    routing: false,
+                    rag: false,
+                    web: false,
+                    liveData: false,
+                    cache: false,
+                    smartTag: false,
+                    memory: false,
+                    actions: false,
+                };
                 this.form = {
                     name: "",
                     target_model: "",
@@ -1957,10 +3012,14 @@ content %}
                     similarity_threshold: 0.7,
                     // Smart source selection
                     use_smart_source_selection: false,
+                    use_two_pass_retrieval: false,
                     // Web
                     use_web: false,
                     max_search_results: 5,
                     max_scrape_urls: 3,
+                    // Live Data
+                    use_live_data: false,
+                    live_data_source_ids: [],
                     // Common enrichment
                     max_context_tokens: 4000,
                     rerank_provider: "local",
@@ -1982,18 +3041,51 @@ content %}
                     use_memory: false,
                     memory: "",
                     memory_updated_at: null,
+                    // Actions
+                    use_actions: false,
+                    allowed_actions_input: "",
+                    action_email_account_id: "",
+                    action_calendar_account_id: "",
+                    action_calendar_id: "",
+                    action_tasks_account_id: "",
+                    action_tasks_provider: "",
+                    action_tasks_list_id: "",
+                    action_notification_urls: "",
+                    // Scheduled Prompts
+                    scheduled_prompts_enabled: false,
+                    scheduled_prompts_account_id: "",
+                    scheduled_prompts_calendar_id: "",
+                    scheduled_prompts_calendar_name: "",
+                    scheduled_prompts_lookahead: 15,
+                    scheduled_prompts_store_response: false,
                     // Metadata
                     tags_input: "",
                     description: "",
                     system_prompt: "",
                     enabled: true,
                 };
+                this.scheduledPromptsCalendars = [];
                 this.showModal = true;
             },
 
             async openEditModal(alias) {
                 this.editingAlias = alias;
                 this.formErrors = {};
+
+                // Expand sections that are enabled (so user sees their settings)
+                // All sections start collapsed by default
+                this.expanded = {
+                    routing: false,
+                    rag: false,
+                    web: false,
+                    liveData: false,
+                    cache: false,
+                    smartTag: false,
+                    memory: false,
+                    actions: false,
+                    scheduled_prompts: false,
+                };
+                this.scheduledPromptsCalendars = [];
 
                 // Deep clone candidates
                 const candidates = JSON.parse(
@@ -2024,10 +3116,15 @@ content %}
                     // Smart source selection
                     use_smart_source_selection:
                         alias.use_smart_source_selection || false,
+                    use_two_pass_retrieval:
+                        alias.use_two_pass_retrieval || false,
                     // Web
                     use_web: alias.use_web || false,
                     max_search_results: alias.max_search_results || 5,
                     max_scrape_urls: alias.max_scrape_urls || 3,
+                    // Live Data
+                    use_live_data: alias.use_live_data || false,
+                    live_data_source_ids: alias.live_data_source_ids || [],
                     // Common enrichment
                     max_context_tokens: alias.max_context_tokens || 4000,
                     rerank_provider: alias.rerank_provider || "local",
@@ -2053,6 +3150,39 @@ content %}
                     memory: alias.memory || "",
                     memory_max_tokens: alias.memory_max_tokens || 500,
                     memory_updated_at: alias.memory_updated_at || null,
+                    // Actions
+                    use_actions: alias.use_actions || false,
+                    allowed_actions_input: (alias.allowed_actions || []).join(
+                        ", ",
+                    ),
+                    action_email_account_id:
+                        alias.action_email_account_id || "",
+                    action_calendar_account_id:
+                        alias.action_calendar_account_id || "",
+                    action_calendar_id: alias.action_calendar_id || "",
+                    // For tasks, use "todoist" as account_id if provider is todoist
+                    action_tasks_account_id:
+                        alias.action_tasks_provider === "todoist"
+                            ? "todoist"
+                            : alias.action_tasks_account_id || "",
+                    action_tasks_provider: alias.action_tasks_provider || "",
+                    action_tasks_list_id: alias.action_tasks_list_id || "",
+                    action_notification_urls: (
+                        alias.action_notification_urls || []
+                    ).join("\n"),
+                    // Scheduled Prompts
+                    scheduled_prompts_enabled:
+                        alias.scheduled_prompts_enabled || false,
+                    scheduled_prompts_account_id:
+                        alias.scheduled_prompts_account_id || "",
+                    scheduled_prompts_calendar_id:
+                        alias.scheduled_prompts_calendar_id || "",
+                    scheduled_prompts_calendar_name:
+                        alias.scheduled_prompts_calendar_name || "",
+                    scheduled_prompts_lookahead:
+                        alias.scheduled_prompts_lookahead || 15,
+                    scheduled_prompts_store_response:
+                        alias.scheduled_prompts_store_response || false,
                     // Metadata
                     tags_input: (alias.tags || []).join(", "),
                     description: alias.description || "",
@@ -2065,6 +3195,101 @@ content %}
                 if (alias.use_model_intelligence) {
                     await this.loadIntelligenceForCandidates();
                 }
+
+                // Restore action dropdowns after options are rendered
+                // (Alpine x-model doesn't sync when options are rendered via x-for after value is set)
+                setTimeout(async () => {
+                    // Email account
+                    if (alias.action_email_account_id) {
+                        const emailEl = document.querySelector(
+                            'select[x-model="form.action_email_account_id"]',
+                        );
+                        if (emailEl) {
+                            emailEl.value = alias.action_email_account_id;
+                            emailEl.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    // Calendar account - need to load calendars first
+                    if (alias.action_calendar_account_id) {
+                        const calAcctEl = document.querySelector(
+                            'select[x-model="form.action_calendar_account_id"]',
+                        );
+                        if (calAcctEl) {
+                            calAcctEl.value = alias.action_calendar_account_id;
+                            calAcctEl.dispatchEvent(new Event("change"));
+                        }
+                        // Load calendars and restore selection
+                        await this.loadCalendarsForAccount(
+                            alias.action_calendar_account_id,
+                        );
+                        if (alias.action_calendar_id) {
+                            setTimeout(() => {
+                                const calEl = document.querySelector(
+                                    'select[x-model="form.action_calendar_id"]',
+                                );
+                                if (calEl) {
+                                    calEl.value = alias.action_calendar_id;
+                                    calEl.dispatchEvent(new Event("change"));
+                                }
+                            }, 100);
+                        }
+                    }
+                    // Tasks account - need to load task lists first
+                    // Handle both OAuth accounts (integer ID) and Todoist (provider="todoist")
+                    const tasksAccountValue =
+                        alias.action_tasks_provider === "todoist"
+                            ? "todoist"
+                            : alias.action_tasks_account_id;
+                    if (tasksAccountValue) {
+                        const tasksAcctEl = document.querySelector(
+                            'select[x-model="form.action_tasks_account_id"]',
+                        );
+                        if (tasksAcctEl) {
+                            tasksAcctEl.value = tasksAccountValue;
+                            tasksAcctEl.dispatchEvent(new Event("change"));
+                        }
+                        // Load task lists and restore selection
+                        await this.loadTaskListsForAccount(tasksAccountValue);
+                        if (alias.action_tasks_list_id) {
+                            setTimeout(() => {
+                                const listEl = document.querySelector(
+                                    'select[x-model="form.action_tasks_list_id"]',
+                                );
+                                if (listEl) {
+                                    listEl.value = alias.action_tasks_list_id;
+                                    listEl.dispatchEvent(new Event("change"));
+                                }
+                            }, 100);
+                        }
+                    }
+                    // Scheduled prompts calendar account
+                    if (alias.scheduled_prompts_account_id) {
+                        const schedAcctEl = document.querySelector(
+                            'select[x-model="form.scheduled_prompts_account_id"]',
+                        );
+                        if (schedAcctEl) {
+                            schedAcctEl.value =
+                                alias.scheduled_prompts_account_id;
+                            schedAcctEl.dispatchEvent(new Event("change"));
+                        }
+                        // Load calendars and restore selection
+                        await this.loadCalendarsForScheduledPrompts(
+                            alias.scheduled_prompts_account_id,
+                        );
+                        if (alias.scheduled_prompts_calendar_id) {
+                            setTimeout(() => {
+                                const calEl = document.querySelector(
+                                    'select[x-model="form.scheduled_prompts_calendar_id"]',
+                                );
+                                if (calEl) {
+                                    calEl.value =
+                                        alias.scheduled_prompts_calendar_id;
+                                    calEl.dispatchEvent(new Event("change"));
+                                }
+                            }, 100);
+                        }
+                    }
+                }, 100);
             },
 
             closeModal() {
@@ -2079,6 +3304,15 @@ content %}
             removeCandidate(index) {
                 if (this.form.candidates.length > 2) {
                     this.form.candidates.splice(index, 1);
+                }
+            },
+
+            toggleLiveDataSource(sourceId) {
+                const idx = this.form.live_data_source_ids.indexOf(sourceId);
+                if (idx === -1) {
+                    this.form.live_data_source_ids.push(sourceId);
+                } else {
+                    this.form.live_data_source_ids.splice(idx, 1);
                 }
             },
 
@@ -2176,18 +3410,25 @@ content %}
                     // Smart source selection
                     use_smart_source_selection:
                         this.form.use_smart_source_selection,
+                    use_two_pass_retrieval: this.form.use_two_pass_retrieval,
                     // Web
                     use_web: this.form.use_web,
                     max_search_results: this.form.max_search_results,
                     max_scrape_urls: this.form.max_scrape_urls,
+                    // Live Data
+                    use_live_data: this.form.use_live_data,
+                    live_data_source_ids: this.form.live_data_source_ids,
                     // Common enrichment
                     max_context_tokens: this.form.max_context_tokens,
                     rerank_provider: this.form.rerank_provider,
                     rerank_top_n: this.form.rerank_top_n,
                     context_priority: this.form.context_priority,
                     show_sources: this.form.show_sources,
-                    // Cache (only if web not enabled)
-                    use_cache: this.form.use_web ? false : this.form.use_cache,
+                    // Cache (only if web/live not enabled)
+                    use_cache:
+                        this.form.use_web || this.form.use_live_data
+                            ? false
+                            : this.form.use_cache,
                     cache_similarity_threshold:
                         this.form.cache_similarity_threshold,
                     cache_match_system_prompt:
@@ -2204,6 +3445,49 @@ content %}
                     use_memory: this.form.use_memory,
                     memory: this.form.memory || null,
                     memory_max_tokens: this.form.memory_max_tokens,
+                    // Actions
+                    use_actions: this.form.use_actions,
+                    allowed_actions: this.form.allowed_actions_input
+                        ? this.form.allowed_actions_input
+                              .split(",")
+                              .map((a) => a.trim())
+                              .filter((a) => a)
+                        : [],
+                    action_email_account_id:
+                        this.form.action_email_account_id || null,
+                    action_calendar_account_id:
+                        this.form.action_calendar_account_id || null,
+                    action_calendar_id: this.form.action_calendar_id || null,
+                    // Handle Todoist (string "todoist") vs OAuth (integer ID)
+                    action_tasks_account_id:
+                        this.form.action_tasks_account_id === "todoist"
+                            ? null
+                            : this.form.action_tasks_account_id || null,
+                    action_tasks_provider:
+                        this.form.action_tasks_account_id === "todoist"
+                            ? "todoist"
+                            : null,
+                    action_tasks_list_id:
+                        this.form.action_tasks_list_id || null,
+                    action_notification_urls: this.form.action_notification_urls
+                        ? this.form.action_notification_urls
+                              .split("\n")
+                              .map((u) => u.trim())
+                              .filter((u) => u)
+                        : null,
+                    // Scheduled Prompts
+                    scheduled_prompts_enabled:
+                        this.form.scheduled_prompts_enabled,
+                    scheduled_prompts_account_id:
+                        this.form.scheduled_prompts_account_id || null,
+                    scheduled_prompts_calendar_id:
+                        this.form.scheduled_prompts_calendar_id || null,
+                    scheduled_prompts_calendar_name:
+                        this.form.scheduled_prompts_calendar_name || null,
+                    scheduled_prompts_lookahead:
+                        this.form.scheduled_prompts_lookahead || 15,
+                    scheduled_prompts_store_response:
+                        this.form.scheduled_prompts_store_response || false,
                     // Metadata
                     tags: tags,
                     description: this.form.description || null,

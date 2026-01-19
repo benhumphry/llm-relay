@@ -74,6 +74,23 @@ def create_document_store(
     gmail_label_name: Optional[str] = None,
     gcalendar_calendar_id: Optional[str] = None,
     gcalendar_calendar_name: Optional[str] = None,
+    gtasks_tasklist_id: Optional[str] = None,
+    gtasks_tasklist_name: Optional[str] = None,
+    gcontacts_group_id: Optional[str] = None,
+    gcontacts_group_name: Optional[str] = None,
+    microsoft_account_id: Optional[int] = None,
+    onedrive_folder_id: Optional[str] = None,
+    onedrive_folder_name: Optional[str] = None,
+    outlook_folder_id: Optional[str] = None,
+    outlook_folder_name: Optional[str] = None,
+    outlook_days_back: int = 90,
+    onenote_notebook_id: Optional[str] = None,
+    onenote_notebook_name: Optional[str] = None,
+    teams_team_id: Optional[str] = None,
+    teams_team_name: Optional[str] = None,
+    teams_channel_id: Optional[str] = None,
+    teams_channel_name: Optional[str] = None,
+    teams_days_back: int = 90,
     paperless_url: Optional[str] = None,
     paperless_token: Optional[str] = None,
     paperless_tag_id: Optional[int] = None,
@@ -89,6 +106,19 @@ def create_document_store(
     website_max_pages: int = 50,
     website_include_pattern: Optional[str] = None,
     website_exclude_pattern: Optional[str] = None,
+    website_crawler_override: Optional[str] = None,
+    slack_channel_id: Optional[str] = None,
+    slack_channel_types: str = "public_channel",
+    slack_days_back: int = 90,
+    todoist_project_id: Optional[str] = None,
+    todoist_project_name: Optional[str] = None,
+    todoist_filter: Optional[str] = None,
+    todoist_include_completed: bool = False,
+    websearch_query: Optional[str] = None,
+    websearch_max_results: int = 10,
+    websearch_pages_to_scrape: int = 5,
+    websearch_time_range: Optional[str] = None,
+    websearch_category: Optional[str] = None,
     embedding_provider: str = "local",
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -125,6 +155,23 @@ def create_document_store(
             gmail_label_name=gmail_label_name,
             gcalendar_calendar_id=gcalendar_calendar_id,
             gcalendar_calendar_name=gcalendar_calendar_name,
+            gtasks_tasklist_id=gtasks_tasklist_id,
+            gtasks_tasklist_name=gtasks_tasklist_name,
+            gcontacts_group_id=gcontacts_group_id,
+            gcontacts_group_name=gcontacts_group_name,
+            microsoft_account_id=microsoft_account_id,
+            onedrive_folder_id=onedrive_folder_id,
+            onedrive_folder_name=onedrive_folder_name,
+            outlook_folder_id=outlook_folder_id,
+            outlook_folder_name=outlook_folder_name,
+            outlook_days_back=outlook_days_back,
+            onenote_notebook_id=onenote_notebook_id,
+            onenote_notebook_name=onenote_notebook_name,
+            teams_team_id=teams_team_id,
+            teams_team_name=teams_team_name,
+            teams_channel_id=teams_channel_id,
+            teams_channel_name=teams_channel_name,
+            teams_days_back=teams_days_back,
             paperless_url=paperless_url,
             paperless_token=paperless_token,
             paperless_tag_id=paperless_tag_id,
@@ -140,6 +187,19 @@ def create_document_store(
             website_max_pages=website_max_pages,
             website_include_pattern=website_include_pattern,
             website_exclude_pattern=website_exclude_pattern,
+            website_crawler_override=website_crawler_override,
+            slack_channel_id=slack_channel_id,
+            slack_channel_types=slack_channel_types,
+            slack_days_back=slack_days_back,
+            todoist_project_id=todoist_project_id,
+            todoist_project_name=todoist_project_name,
+            todoist_filter=todoist_filter,
+            todoist_include_completed=todoist_include_completed,
+            websearch_query=websearch_query,
+            websearch_max_results=websearch_max_results,
+            websearch_pages_to_scrape=websearch_pages_to_scrape,
+            websearch_time_range=websearch_time_range,
+            websearch_category=websearch_category,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
             ollama_url=ollama_url,
@@ -184,6 +244,23 @@ def update_document_store(
     gmail_label_name: Optional[str] = None,
     gcalendar_calendar_id: Optional[str] = None,
     gcalendar_calendar_name: Optional[str] = None,
+    gtasks_tasklist_id: Optional[str] = None,
+    gtasks_tasklist_name: Optional[str] = None,
+    gcontacts_group_id: Optional[str] = None,
+    gcontacts_group_name: Optional[str] = None,
+    microsoft_account_id: Optional[int] = None,
+    onedrive_folder_id: Optional[str] = None,
+    onedrive_folder_name: Optional[str] = None,
+    outlook_folder_id: Optional[str] = None,
+    outlook_folder_name: Optional[str] = None,
+    outlook_days_back: Optional[int] = None,
+    onenote_notebook_id: Optional[str] = None,
+    onenote_notebook_name: Optional[str] = None,
+    teams_team_id: Optional[str] = None,
+    teams_team_name: Optional[str] = None,
+    teams_channel_id: Optional[str] = None,
+    teams_channel_name: Optional[str] = None,
+    teams_days_back: Optional[int] = None,
     paperless_url: Optional[str] = None,
     paperless_token: Optional[str] = None,
     paperless_tag_id: Optional[int] = None,
@@ -199,6 +276,19 @@ def update_document_store(
     website_max_pages: Optional[int] = None,
     website_include_pattern: Optional[str] = None,
     website_exclude_pattern: Optional[str] = None,
+    website_crawler_override: Optional[str] = None,
+    slack_channel_id: Optional[str] = None,
+    slack_channel_types: Optional[str] = None,
+    slack_days_back: Optional[int] = None,
+    todoist_project_id: Optional[str] = None,
+    todoist_project_name: Optional[str] = None,
+    todoist_filter: Optional[str] = None,
+    todoist_include_completed: Optional[bool] = None,
+    websearch_query: Optional[str] = None,
+    websearch_max_results: Optional[int] = None,
+    websearch_pages_to_scrape: Optional[int] = None,
+    websearch_time_range: Optional[str] = None,
+    websearch_category: Optional[str] = None,
     embedding_provider: Optional[str] = None,
     embedding_model: Optional[str] = None,
     ollama_url: Optional[str] = None,
@@ -250,6 +340,60 @@ def update_document_store(
             store.gcalendar_calendar_name = (
                 gcalendar_calendar_name if gcalendar_calendar_name else None
             )
+        if gtasks_tasklist_id is not None:
+            store.gtasks_tasklist_id = (
+                gtasks_tasklist_id if gtasks_tasklist_id else None
+            )
+        if gtasks_tasklist_name is not None:
+            store.gtasks_tasklist_name = (
+                gtasks_tasklist_name if gtasks_tasklist_name else None
+            )
+        if gcontacts_group_id is not None:
+            store.gcontacts_group_id = (
+                gcontacts_group_id if gcontacts_group_id else None
+            )
+        if gcontacts_group_name is not None:
+            store.gcontacts_group_name = (
+                gcontacts_group_name if gcontacts_group_name else None
+            )
+        if microsoft_account_id is not None:
+            store.microsoft_account_id = microsoft_account_id
+        if onedrive_folder_id is not None:
+            store.onedrive_folder_id = (
+                onedrive_folder_id if onedrive_folder_id else None
+            )
+        if onedrive_folder_name is not None:
+            store.onedrive_folder_name = (
+                onedrive_folder_name if onedrive_folder_name else None
+            )
+        if outlook_folder_id is not None:
+            store.outlook_folder_id = outlook_folder_id if outlook_folder_id else None
+        if outlook_folder_name is not None:
+            store.outlook_folder_name = (
+                outlook_folder_name if outlook_folder_name else None
+            )
+        if outlook_days_back is not None:
+            store.outlook_days_back = outlook_days_back
+        if onenote_notebook_id is not None:
+            store.onenote_notebook_id = (
+                onenote_notebook_id if onenote_notebook_id else None
+            )
+        if onenote_notebook_name is not None:
+            store.onenote_notebook_name = (
+                onenote_notebook_name if onenote_notebook_name else None
+            )
+        if teams_team_id is not None:
+            store.teams_team_id = teams_team_id if teams_team_id else None
+        if teams_team_name is not None:
+            store.teams_team_name = teams_team_name if teams_team_name else None
+        if teams_channel_id is not None:
+            store.teams_channel_id = teams_channel_id if teams_channel_id else None
+        if teams_channel_name is not None:
+            store.teams_channel_name = (
+                teams_channel_name if teams_channel_name else None
+            )
+        if teams_days_back is not None:
+            store.teams_days_back = teams_days_back
         if paperless_url is not None:
             store.paperless_url = paperless_url if paperless_url else None
         if paperless_token is not None:
@@ -287,6 +431,42 @@ def update_document_store(
         if website_exclude_pattern is not None:
             store.website_exclude_pattern = (
                 website_exclude_pattern if website_exclude_pattern else None
+            )
+        if website_crawler_override is not None:
+            store.website_crawler_override = (
+                website_crawler_override if website_crawler_override else None
+            )
+        if slack_channel_id is not None:
+            store.slack_channel_id = slack_channel_id if slack_channel_id else None
+        if slack_channel_types is not None:
+            store.slack_channel_types = slack_channel_types
+        if slack_days_back is not None:
+            store.slack_days_back = slack_days_back
+        if todoist_project_id is not None:
+            store.todoist_project_id = (
+                todoist_project_id if todoist_project_id else None
+            )
+        if todoist_project_name is not None:
+            store.todoist_project_name = (
+                todoist_project_name if todoist_project_name else None
+            )
+        if todoist_filter is not None:
+            store.todoist_filter = todoist_filter if todoist_filter else None
+        if todoist_include_completed is not None:
+            store.todoist_include_completed = todoist_include_completed
+        if websearch_query is not None:
+            store.websearch_query = websearch_query if websearch_query else None
+        if websearch_max_results is not None:
+            store.websearch_max_results = websearch_max_results
+        if websearch_pages_to_scrape is not None:
+            store.websearch_pages_to_scrape = websearch_pages_to_scrape
+        if websearch_time_range is not None:
+            store.websearch_time_range = (
+                websearch_time_range if websearch_time_range else None
+            )
+        if websearch_category is not None:
+            store.websearch_category = (
+                websearch_category if websearch_category else None
             )
         if embedding_provider is not None:
             store.embedding_provider = embedding_provider
@@ -486,6 +666,23 @@ def _store_to_detached(
         gmail_label_name=store.gmail_label_name,
         gcalendar_calendar_id=store.gcalendar_calendar_id,
         gcalendar_calendar_name=store.gcalendar_calendar_name,
+        gtasks_tasklist_id=store.gtasks_tasklist_id,
+        gtasks_tasklist_name=store.gtasks_tasklist_name,
+        gcontacts_group_id=store.gcontacts_group_id,
+        gcontacts_group_name=store.gcontacts_group_name,
+        microsoft_account_id=store.microsoft_account_id,
+        onedrive_folder_id=store.onedrive_folder_id,
+        onedrive_folder_name=store.onedrive_folder_name,
+        outlook_folder_id=store.outlook_folder_id,
+        outlook_folder_name=store.outlook_folder_name,
+        outlook_days_back=store.outlook_days_back,
+        onenote_notebook_id=store.onenote_notebook_id,
+        onenote_notebook_name=store.onenote_notebook_name,
+        teams_team_id=store.teams_team_id,
+        teams_team_name=store.teams_team_name,
+        teams_channel_id=store.teams_channel_id,
+        teams_channel_name=store.teams_channel_name,
+        teams_days_back=store.teams_days_back,
         paperless_url=store.paperless_url,
         paperless_token=store.paperless_token,
         paperless_tag_id=store.paperless_tag_id,
@@ -501,6 +698,19 @@ def _store_to_detached(
         website_max_pages=store.website_max_pages,
         website_include_pattern=store.website_include_pattern,
         website_exclude_pattern=store.website_exclude_pattern,
+        website_crawler_override=store.website_crawler_override,
+        slack_channel_id=store.slack_channel_id,
+        slack_channel_types=store.slack_channel_types,
+        slack_days_back=store.slack_days_back,
+        todoist_project_id=store.todoist_project_id,
+        todoist_project_name=store.todoist_project_name,
+        todoist_filter=store.todoist_filter,
+        todoist_include_completed=store.todoist_include_completed,
+        websearch_query=store.websearch_query,
+        websearch_max_results=store.websearch_max_results,
+        websearch_pages_to_scrape=store.websearch_pages_to_scrape,
+        websearch_time_range=store.websearch_time_range,
+        websearch_category=store.websearch_category,
         embedding_provider=store.embedding_provider,
         embedding_model=store.embedding_model,
         ollama_url=store.ollama_url,

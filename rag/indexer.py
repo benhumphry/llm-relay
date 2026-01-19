@@ -165,7 +165,7 @@ class RAGIndexer:
             collection = self._chroma_client.get_collection(store.collection_name)
 
             # Get a diverse sample of chunks (up to 20)
-            sample_size = min(20, store.chunk_count)
+            sample_size = min(20, store.chunk_count or 0)
             results = collection.get(
                 limit=sample_size, include=["documents", "metadatas"]
             )
@@ -205,16 +205,16 @@ CONTENT SAMPLES:
 
 Based on these samples, provide:
 
-1. THEMES: List 3-7 broad, general topic categories covered (as a JSON array of strings). Use high-level domain categories like "Marketing", "Technology", "Finance", "Legal", "Healthcare", "Engineering", "Research" rather than specific topics or details from the documents. Think of these as simple tags for categorization.
-2. BEST_FOR: Describe in general terms what types of questions this store can answer (1 sentence). Focus on the category of information, not specific details. Example: "Questions about marketing industry trends and news" not "Questions about specific CMO appointments at Puma".
-3. SUMMARY: A brief, general description of the content type (1 sentence). Example: "Industry news articles and reports" not detailed descriptions of specific content.
+1. THEMES: List 5-15 broad topic categories covered (as a JSON array of strings). Include both high-level domain categories (e.g., "Marketing", "Technology", "Finance") and more specific but still general sub-themes (e.g., "Semiconductor Industry", "AI Regulation", "Executive Leadership"). If content appears to be recent or time-sensitive, include a theme like "Recent News" or "Current Events". Think of these as tags that help match queries to this store.
+2. BEST_FOR: Describe what types of questions this store can answer (1-2 sentences). Focus on the category of information and recency. Example: "Recent news and analysis about the technology industry, particularly semiconductor and AI developments" not specific article details.
+3. SUMMARY: A brief description of the content type and coverage (1 sentence). Mention if content is recent/current. Example: "Recent industry news articles and analysis reports" not detailed descriptions of specific content.
 
-Keep all responses general and categorical - avoid mentioning specific companies, people, dates, or events from the documents.
+Avoid mentioning specific company names, people, or exact dates from the documents - keep themes general enough to match related queries.
 
 Respond in this exact format:
-THEMES: ["Category1", "Category2"]
-BEST_FOR: <general use case description>
-SUMMARY: <general content type description>"""
+THEMES: ["Category1", "Category2", "Category3", ...]
+BEST_FOR: <use case description>
+SUMMARY: <content type description>"""
 
             # Call the LLM
             from providers import registry
@@ -335,11 +335,15 @@ SUMMARY: <general content type description>"""
             self._scheduler.start()
             logger.info("RAG Indexer scheduler started")
 
-            # Schedule existing RAGs and document stores
-            self._schedule_all_rags()
+            # Schedule existing document stores
             self._schedule_all_stores()
-        except ImportError:
-            logger.warning("APScheduler not installed - scheduled indexing disabled")
+        except ImportError as e:
+            logger.warning(
+                f"APScheduler not installed - scheduled indexing disabled: {e}"
+            )
+            self._scheduler = None
+        except Exception as e:
+            logger.error(f"Failed to initialize scheduler: {e}")
             self._scheduler = None
 
     def stop(self):
@@ -387,14 +391,6 @@ SUMMARY: <general content type description>"""
 
         except Exception as e:
             logger.error(f"Failed to reset stuck indexing jobs: {e}")
-
-    def _schedule_all_rags(self):
-        """Schedule indexing for all legacy RAGs with schedules."""
-        from db import get_rags_with_schedule
-
-        rags = get_rags_with_schedule()
-        for rag in rags:
-            self.schedule_rag(rag.id, rag.index_schedule)
 
     def _schedule_all_stores(self):
         """Schedule indexing for all document stores with schedules."""
@@ -722,6 +718,16 @@ SUMMARY: <general content type description>"""
                 gdrive_folder_id=store.gdrive_folder_id,
                 gmail_label_id=store.gmail_label_id,
                 gcalendar_calendar_id=store.gcalendar_calendar_id,
+                gtasks_tasklist_id=store.gtasks_tasklist_id,
+                gcontacts_group_id=store.gcontacts_group_id,
+                microsoft_account_id=store.microsoft_account_id,
+                onedrive_folder_id=store.onedrive_folder_id,
+                outlook_folder_id=store.outlook_folder_id,
+                outlook_days_back=store.outlook_days_back,
+                onenote_notebook_id=store.onenote_notebook_id,
+                teams_team_id=store.teams_team_id,
+                teams_channel_id=store.teams_channel_id,
+                teams_days_back=store.teams_days_back,
                 paperless_url=store.paperless_url,
                 paperless_token=store.paperless_token,
                 paperless_tag_id=store.paperless_tag_id,
@@ -736,6 +742,18 @@ SUMMARY: <general content type description>"""
                 website_max_pages=store.website_max_pages,
                 website_include_pattern=store.website_include_pattern,
                 website_exclude_pattern=store.website_exclude_pattern,
+                website_crawler_override=store.website_crawler_override,
+                slack_channel_id=store.slack_channel_id,
+                slack_channel_types=store.slack_channel_types,
+                slack_days_back=store.slack_days_back,
+                todoist_project_id=store.todoist_project_id,
+                todoist_filter=store.todoist_filter,
+                todoist_include_completed=store.todoist_include_completed,
+                websearch_query=store.websearch_query,
+                websearch_max_results=store.websearch_max_results,
+                websearch_pages_to_scrape=store.websearch_pages_to_scrape,
+                websearch_time_range=store.websearch_time_range,
+                websearch_category=store.websearch_category,
                 vision_provider=vision_provider,
                 vision_model=vision_model,
                 vision_ollama_url=vision_ollama_url,
@@ -776,7 +794,22 @@ SUMMARY: <general content type description>"""
                 collection.count()
             )  # Track existing chunks for progress
 
-            all_docs = list(source.list_documents())
+            # Collect documents from source, updating progress during listing
+            all_docs = []
+            listing_count = 0
+            for doc_info in source.list_documents():
+                all_docs.append(doc_info)
+                listing_count += 1
+                # Update progress every 10 documents during listing phase
+                if listing_count % 10 == 0:
+                    update_document_store_index_status(
+                        store_id,
+                        "indexing",
+                        document_count=listing_count,
+                        chunk_count=0,
+                    )
+                    logger.debug(f"Listed {listing_count} documents so far...")
+
             total_files = len(all_docs)
             logger.info(f"Found {total_files} documents in source")
 
@@ -867,7 +900,7 @@ SUMMARY: <general content type description>"""
                     update_document_store_index_status(
                         store_id,
                         "indexing",
-                        document_count=doc_count + skipped_count,
+                        document_count=total_files,
                         chunk_count=existing_chunk_count + len(documents),
                     )
                 except Exception as e:
@@ -1368,13 +1401,19 @@ SUMMARY: <general content type description>"""
             vision_model=vision_model,
             vision_ollama_url=vision_ollama_url,
         )
-        result = converter.convert(str(file_path))
+        try:
+            result = converter.convert(str(file_path))
 
-        # Get text content
-        text = result.document.export_to_markdown()
+            # Get text content
+            text = result.document.export_to_markdown()
 
-        # Chunk the text
-        return self._chunk_text(text, chunk_size, chunk_overlap)
+            # Chunk the text
+            return self._chunk_text(text, chunk_size, chunk_overlap)
+        finally:
+            # Clean up converter and GPU memory after each document
+            # to prevent memory accumulation during batch processing
+            del converter
+            self._clear_gpu_memory()
 
     def _process_simple(
         self, file_path: Path, suffix: str, chunk_size: int, chunk_overlap: int

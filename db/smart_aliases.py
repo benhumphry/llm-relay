@@ -11,7 +11,7 @@ from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from .connection import get_db_context
-from .models import DocumentStore, SmartAlias, smart_alias_stores
+from .models import DocumentStore, LiveDataSource, SmartAlias, smart_alias_stores
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,10 @@ def get_all_smart_aliases(db: Optional[Session] = None) -> list[SmartAlias]:
     if db:
         return (
             db.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .order_by(SmartAlias.name)
             .all()
         )
@@ -29,7 +32,10 @@ def get_all_smart_aliases(db: Optional[Session] = None) -> list[SmartAlias]:
     with get_db_context() as session:
         aliases = (
             session.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .order_by(SmartAlias.name)
             .all()
         )
@@ -43,7 +49,10 @@ def get_smart_alias_by_name(
     if db:
         return (
             db.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .filter(SmartAlias.name == name)
             .first()
         )
@@ -51,7 +60,10 @@ def get_smart_alias_by_name(
     with get_db_context() as session:
         alias = (
             session.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .filter(SmartAlias.name == name)
             .first()
         )
@@ -69,7 +81,10 @@ def get_smart_tag_by_name(
     if db:
         return (
             db.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .filter(
                 SmartAlias.name == tag_name,
                 SmartAlias.is_smart_tag == True,
@@ -81,7 +96,10 @@ def get_smart_tag_by_name(
     with get_db_context() as session:
         alias = (
             session.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .filter(
                 SmartAlias.name == tag_name,
                 SmartAlias.is_smart_tag == True,
@@ -99,7 +117,10 @@ def get_smart_alias_by_id(
     if db:
         return (
             db.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .filter(SmartAlias.id == alias_id)
             .first()
         )
@@ -107,7 +128,10 @@ def get_smart_alias_by_id(
     with get_db_context() as session:
         alias = (
             session.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .filter(SmartAlias.id == alias_id)
             .first()
         )
@@ -122,6 +146,7 @@ def create_smart_alias(
     use_rag: bool = False,
     use_web: bool = False,
     use_cache: bool = False,
+    use_live_data: bool = False,
     # Smart tag settings
     is_smart_tag: bool = False,
     passthrough_model: bool = False,
@@ -141,9 +166,12 @@ def create_smart_alias(
     similarity_threshold: float = 0.7,
     # Smart source selection
     use_smart_source_selection: bool = False,
+    use_two_pass_retrieval: bool = False,
     # Web settings
     max_search_results: int = 5,
     max_scrape_urls: int = 3,
+    # Live data settings
+    live_data_source_ids: list[int] | None = None,
     # Common enrichment settings
     max_context_tokens: int = 4000,
     rerank_provider: str = "local",
@@ -167,6 +195,23 @@ def create_smart_alias(
     # Memory
     use_memory: bool = False,
     memory_max_tokens: int = 500,
+    # Actions
+    use_actions: bool = False,
+    allowed_actions: list[str] | None = None,
+    action_email_account_id: int | None = None,
+    action_calendar_account_id: int | None = None,
+    action_calendar_id: str | None = None,
+    action_tasks_account_id: int | None = None,
+    action_tasks_provider: str | None = None,
+    action_tasks_list_id: str | None = None,
+    action_notification_urls: list[str] | None = None,
+    # Scheduled prompts
+    scheduled_prompts_enabled: bool = False,
+    scheduled_prompts_account_id: int | None = None,
+    scheduled_prompts_calendar_id: str | None = None,
+    scheduled_prompts_calendar_name: str | None = None,
+    scheduled_prompts_lookahead: int = 15,
+    scheduled_prompts_store_response: bool = True,
     db: Optional[Session] = None,
 ) -> SmartAlias:
     """
@@ -179,6 +224,8 @@ def create_smart_alias(
         use_rag: Enable RAG document retrieval
         use_web: Enable realtime web search
         use_cache: Enable response caching (ignored if use_web=True)
+        use_live_data: Enable live data source queries
+        live_data_source_ids: List of LiveDataSource IDs to query
         designator_model: Model for routing/web query generation
         purpose: Context for routing decisions
         candidates: List of candidate models for routing
@@ -233,6 +280,7 @@ def create_smart_alias(
             use_rag=use_rag,
             use_web=use_web,
             use_cache=use_cache,
+            use_live_data=use_live_data,
             # Smart tag
             is_smart_tag=is_smart_tag,
             passthrough_model=passthrough_model,
@@ -250,6 +298,7 @@ def create_smart_alias(
             similarity_threshold=similarity_threshold,
             # Smart source selection
             use_smart_source_selection=use_smart_source_selection,
+            use_two_pass_retrieval=use_two_pass_retrieval,
             # Web
             max_search_results=max_search_results,
             max_scrape_urls=max_scrape_urls,
@@ -275,12 +324,31 @@ def create_smart_alias(
             # Memory
             use_memory=use_memory,
             memory_max_tokens=memory_max_tokens,
+            # Actions
+            use_actions=use_actions,
+            action_email_account_id=action_email_account_id,
+            action_calendar_account_id=action_calendar_account_id,
+            action_calendar_id=action_calendar_id,
+            action_tasks_account_id=action_tasks_account_id,
+            action_tasks_provider=action_tasks_provider,
+            action_tasks_list_id=action_tasks_list_id,
+            # Scheduled prompts
+            scheduled_prompts_enabled=scheduled_prompts_enabled,
+            scheduled_prompts_account_id=scheduled_prompts_account_id,
+            scheduled_prompts_calendar_id=scheduled_prompts_calendar_id,
+            scheduled_prompts_calendar_name=scheduled_prompts_calendar_name,
+            scheduled_prompts_lookahead=scheduled_prompts_lookahead,
+            scheduled_prompts_store_response=scheduled_prompts_store_response,
         )
 
         if candidates:
             alias.candidates = candidates
         if tags:
             alias.tags = tags
+        if allowed_actions:
+            alias.allowed_actions = allowed_actions
+        if action_notification_urls:
+            alias.action_notification_urls = action_notification_urls
 
         session.add(alias)
         session.flush()
@@ -293,6 +361,16 @@ def create_smart_alias(
                 .all()
             )
             alias.document_stores = stores
+            session.flush()
+
+        # Link to live data sources if provided
+        if live_data_source_ids:
+            sources = (
+                session.query(LiveDataSource)
+                .filter(LiveDataSource.id.in_(live_data_source_ids))
+                .all()
+            )
+            alias.live_data_sources = sources
             session.flush()
 
         logger.info(f"Created smart alias: {name}")
@@ -316,6 +394,7 @@ def update_smart_alias(
     use_rag: bool | None = None,
     use_web: bool | None = None,
     use_cache: bool | None = None,
+    use_live_data: bool | None = None,
     # Smart tag settings
     is_smart_tag: bool | None = None,
     passthrough_model: bool | None = None,
@@ -335,9 +414,12 @@ def update_smart_alias(
     similarity_threshold: float | None = None,
     # Smart source selection
     use_smart_source_selection: bool | None = None,
+    use_two_pass_retrieval: bool | None = None,
     # Web settings
     max_search_results: int | None = None,
     max_scrape_urls: int | None = None,
+    # Live data settings
+    live_data_source_ids: list[int] | None = None,
     # Common enrichment settings
     max_context_tokens: int | None = None,
     rerank_provider: str | None = None,
@@ -362,6 +444,23 @@ def update_smart_alias(
     use_memory: bool | None = None,
     memory: str | None = None,
     memory_max_tokens: int | None = None,
+    # Actions
+    use_actions: bool | None = None,
+    allowed_actions: list[str] | None = None,
+    action_email_account_id: int | None = None,
+    action_calendar_account_id: int | None = None,
+    action_calendar_id: str | None = None,
+    action_tasks_account_id: int | None = None,
+    action_tasks_provider: str | None = None,
+    action_tasks_list_id: str | None = None,
+    action_notification_urls: list[str] | None = None,
+    # Scheduled prompts
+    scheduled_prompts_enabled: bool | None = None,
+    scheduled_prompts_account_id: int | None = None,
+    scheduled_prompts_calendar_id: str | None = None,
+    scheduled_prompts_calendar_name: str | None = None,
+    scheduled_prompts_lookahead: int | None = None,
+    scheduled_prompts_store_response: bool | None = None,
     db: Optional[Session] = None,
 ) -> Optional[SmartAlias]:
     """
@@ -410,6 +509,8 @@ def update_smart_alias(
             alias.use_web = use_web
         if use_cache is not None:
             alias.use_cache = use_cache
+        if use_live_data is not None:
+            alias.use_live_data = use_live_data
 
         # Smart tag
         if is_smart_tag is not None:
@@ -446,6 +547,15 @@ def update_smart_alias(
             )
             alias.document_stores = stores
             session.flush()
+        # Live data sources
+        if live_data_source_ids is not None:
+            sources = (
+                session.query(LiveDataSource)
+                .filter(LiveDataSource.id.in_(live_data_source_ids))
+                .all()
+            )
+            alias.live_data_sources = sources
+            session.flush()
         if max_results is not None:
             alias.max_results = max_results
         if similarity_threshold is not None:
@@ -454,6 +564,8 @@ def update_smart_alias(
         # Smart source selection
         if use_smart_source_selection is not None:
             alias.use_smart_source_selection = use_smart_source_selection
+        if use_two_pass_retrieval is not None:
+            alias.use_two_pass_retrieval = use_two_pass_retrieval
 
         # Web
         if max_search_results is not None:
@@ -508,6 +620,63 @@ def update_smart_alias(
             alias.memory = memory
         if memory_max_tokens is not None:
             alias.memory_max_tokens = memory_max_tokens
+
+        # Actions
+        if use_actions is not None:
+            alias.use_actions = use_actions
+        if allowed_actions is not None:
+            alias.allowed_actions = allowed_actions
+        if action_notification_urls is not None:
+            alias.action_notification_urls = action_notification_urls
+        if action_email_account_id is not None:
+            # Allow setting to 0 to clear the account
+            alias.action_email_account_id = (
+                action_email_account_id if action_email_account_id != 0 else None
+            )
+        if action_calendar_account_id is not None:
+            alias.action_calendar_account_id = (
+                action_calendar_account_id if action_calendar_account_id != 0 else None
+            )
+        if action_calendar_id is not None:
+            alias.action_calendar_id = (
+                action_calendar_id if action_calendar_id else None
+            )
+        if action_tasks_account_id is not None:
+            alias.action_tasks_account_id = (
+                action_tasks_account_id if action_tasks_account_id != 0 else None
+            )
+        if action_tasks_provider is not None:
+            alias.action_tasks_provider = (
+                action_tasks_provider if action_tasks_provider else None
+            )
+        if action_tasks_list_id is not None:
+            alias.action_tasks_list_id = (
+                action_tasks_list_id if action_tasks_list_id else None
+            )
+
+        # Scheduled prompts
+        if scheduled_prompts_enabled is not None:
+            alias.scheduled_prompts_enabled = scheduled_prompts_enabled
+        if scheduled_prompts_account_id is not None:
+            alias.scheduled_prompts_account_id = (
+                scheduled_prompts_account_id
+                if scheduled_prompts_account_id != 0
+                else None
+            )
+        if scheduled_prompts_calendar_id is not None:
+            alias.scheduled_prompts_calendar_id = (
+                scheduled_prompts_calendar_id if scheduled_prompts_calendar_id else None
+            )
+        if scheduled_prompts_calendar_name is not None:
+            alias.scheduled_prompts_calendar_name = (
+                scheduled_prompts_calendar_name
+                if scheduled_prompts_calendar_name
+                else None
+            )
+        if scheduled_prompts_lookahead is not None:
+            alias.scheduled_prompts_lookahead = scheduled_prompts_lookahead
+        if scheduled_prompts_store_response is not None:
+            alias.scheduled_prompts_store_response = scheduled_prompts_store_response
 
         session.flush()
         logger.info(f"Updated smart alias: {alias.name}")
@@ -703,7 +872,10 @@ def get_enabled_smart_aliases(
     def _get(session: Session) -> list[SmartAlias]:
         return (
             session.query(SmartAlias)
-            .options(joinedload(SmartAlias.document_stores))
+            .options(
+                joinedload(SmartAlias.document_stores),
+                joinedload(SmartAlias.live_data_sources),
+            )
             .filter(SmartAlias.enabled == True)  # noqa: E712
             .all()
         )
@@ -715,6 +887,106 @@ def get_enabled_smart_aliases(
     with get_db_context() as session:
         aliases = _get(session)
         return {a.name: _alias_to_detached(a) for a in aliases}
+
+
+def _live_source_to_dict(source: LiveDataSource) -> dict:
+    """Convert a LiveDataSource to a dict for detached alias."""
+    return {
+        "id": source.id,
+        "name": source.name,
+        "source_type": source.source_type,
+        "enabled": source.enabled,
+        "description": source.description,
+        "endpoint_url": source.endpoint_url,
+        "http_method": source.http_method,
+        "headers_json": source.headers_json,
+        "auth_type": source.auth_type,
+        "auth_config_json": source.auth_config_json,
+        "request_template_json": source.request_template_json,
+        "query_params_json": source.query_params_json,
+        "response_path": source.response_path,
+        "response_format_template": source.response_format_template,
+        "cache_ttl_seconds": source.cache_ttl_seconds,
+        "timeout_seconds": source.timeout_seconds,
+        "retry_count": source.retry_count,
+        "rate_limit_rpm": source.rate_limit_rpm,
+        "data_type": source.data_type,
+        "sample_response_json": source.sample_response_json,
+        "best_for": source.best_for,
+        "last_success": source.last_success,
+        "last_error": source.last_error,
+        "error_count": source.error_count,
+        "created_at": source.created_at,
+        "updated_at": source.updated_at,
+    }
+
+
+class DetachedLiveDataSource:
+    """Lightweight detached live data source for use outside session."""
+
+    def __init__(self, data: dict):
+        self.id = data["id"]
+        self.name = data["name"]
+        self.source_type = data["source_type"]
+        self.enabled = data["enabled"]
+        self.description = data["description"]
+        self.endpoint_url = data["endpoint_url"]
+        self.http_method = data["http_method"]
+        self.headers_json = data["headers_json"]
+        self.auth_type = data["auth_type"]
+        self.auth_config_json = data["auth_config_json"]
+        self.request_template_json = data["request_template_json"]
+        self.query_params_json = data["query_params_json"]
+        self.response_path = data["response_path"]
+        self.response_format_template = data["response_format_template"]
+        self.cache_ttl_seconds = data["cache_ttl_seconds"]
+        self.timeout_seconds = data["timeout_seconds"]
+        self.retry_count = data["retry_count"]
+        self.rate_limit_rpm = data["rate_limit_rpm"]
+        self.data_type = data["data_type"]
+        self.sample_response_json = data["sample_response_json"]
+        self.best_for = data["best_for"]
+        self.last_success = data["last_success"]
+        self.last_error = data["last_error"]
+        self.error_count = data["error_count"]
+        self.created_at = data["created_at"]
+        self.updated_at = data["updated_at"]
+
+    @property
+    def headers(self) -> dict | None:
+        """Get headers as a dict."""
+        if not self.headers_json:
+            return None
+        import json
+
+        return json.loads(self.headers_json)
+
+    @property
+    def auth_config(self) -> dict | None:
+        """Get auth config as a dict."""
+        if not self.auth_config_json:
+            return None
+        import json
+
+        return json.loads(self.auth_config_json)
+
+    @property
+    def request_template(self) -> dict | None:
+        """Get request template as a dict."""
+        if not self.request_template_json:
+            return None
+        import json
+
+        return json.loads(self.request_template_json)
+
+    @property
+    def query_params(self) -> dict | None:
+        """Get query params as a dict."""
+        if not self.query_params_json:
+            return None
+        import json
+
+        return json.loads(self.query_params_json)
 
 
 def _store_to_dict(store: DocumentStore) -> dict:
@@ -818,6 +1090,14 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         for store in alias.document_stores:
             detached_stores.append(DetachedDocumentStore(_store_to_dict(store)))
 
+    # Create detached live data sources
+    detached_live_sources = []
+    if alias.live_data_sources:
+        for source in alias.live_data_sources:
+            detached_live_sources.append(
+                DetachedLiveDataSource(_live_source_to_dict(source))
+            )
+
     detached = SmartAlias(
         name=alias.name,
         target_model=alias.target_model,
@@ -826,6 +1106,7 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         use_rag=alias.use_rag,
         use_web=alias.use_web,
         use_cache=alias.use_cache,
+        use_live_data=alias.use_live_data,
         # Smart tag
         is_smart_tag=alias.is_smart_tag,
         passthrough_model=alias.passthrough_model,
@@ -844,6 +1125,7 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         similarity_threshold=alias.similarity_threshold,
         # Smart source selection
         use_smart_source_selection=alias.use_smart_source_selection,
+        use_two_pass_retrieval=alias.use_two_pass_retrieval,
         # Web
         max_search_results=alias.max_search_results,
         max_scrape_urls=alias.max_scrape_urls,
@@ -882,12 +1164,30 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         memory=alias.memory,
         memory_max_tokens=alias.memory_max_tokens,
         memory_updated_at=alias.memory_updated_at,
+        # Actions
+        use_actions=alias.use_actions,
+        allowed_actions_json=alias.allowed_actions_json,
+        action_email_account_id=alias.action_email_account_id,
+        action_calendar_account_id=alias.action_calendar_account_id,
+        action_calendar_id=alias.action_calendar_id,
+        action_tasks_account_id=alias.action_tasks_account_id,
+        action_tasks_provider=alias.action_tasks_provider,
+        action_tasks_list_id=alias.action_tasks_list_id,
+        action_notification_urls_json=alias.action_notification_urls_json,
+        # Scheduled prompts
+        scheduled_prompts_enabled=alias.scheduled_prompts_enabled,
+        scheduled_prompts_account_id=alias.scheduled_prompts_account_id,
+        scheduled_prompts_calendar_id=alias.scheduled_prompts_calendar_id,
+        scheduled_prompts_calendar_name=alias.scheduled_prompts_calendar_name,
+        scheduled_prompts_lookahead=alias.scheduled_prompts_lookahead,
+        scheduled_prompts_store_response=alias.scheduled_prompts_store_response,
     )
     detached.id = alias.id
     detached.created_at = alias.created_at
     detached.updated_at = alias.updated_at
 
-    # Attach detached stores
+    # Attach detached stores and live sources
     detached._detached_stores = detached_stores
+    detached._detached_live_sources = detached_live_sources
 
     return detached

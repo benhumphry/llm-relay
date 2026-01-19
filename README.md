@@ -76,7 +76,8 @@ The core feature for intelligent model handling. Create a Smart Alias and enable
 | **RAG** | Inject relevant context from your indexed documents |
 | **Web** | Real-time web search and scraping for current information |
 | **Cache** | Semantic response caching to reduce costs |
-| **Memory** | Persistent conversation memory across sessions |
+| **Memory** | Persistent memory that remembers explicit user facts across sessions |
+| **Smart Source Selection** | Designator allocates token budget across RAG stores and web |
 | **Smart Tag** | Trigger by request tag instead of model name |
 
 **Example configurations:**

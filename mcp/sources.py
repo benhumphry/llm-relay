@@ -1481,12 +1481,23 @@ Date: {date}
         elif "@" in from_addr:
             from_name = from_addr.split("@")[0]
 
+        # Get account email for action routing
+        token_data = self._get_token_data()
+        account_email = token_data.get("account_email", "") if token_data else ""
+
+        # Get thread ID for reply threading
+        thread_id = msg_data.get("threadId", "")
+
         return DocumentContent(
             uri=uri,
             name=subject[:100] if subject else message_id,
             mime_type="text/plain",
             text=content,
             metadata={
+                "message_id": message_id,  # For replies/forwards
+                "thread_id": thread_id,  # For threading context
+                "account_id": self.account_id,  # Internal OAuth account ID
+                "account_email": account_email,  # For action routing
                 "email_date": email_date,
                 "from": from_addr,
                 "from_name": from_name,
@@ -1844,6 +1855,631 @@ Attendees: {attendee_list}
                 "end_time": end_time,
                 "location": location or None,
                 "source_type": "calendar",
+            },
+        )
+
+
+class GoogleTasksDocumentSource(DocumentSource):
+    """
+    Document source for Google Tasks using direct API calls.
+
+    Uses Google Tasks API directly with stored OAuth tokens.
+    Indexes task lists and their tasks for RAG retrieval.
+    """
+
+    def __init__(
+        self,
+        account_id: int,
+        tasklist_id: Optional[str] = None,
+        include_completed: bool = True,
+    ):
+        """
+        Initialize with OAuth account ID and optional task list filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            tasklist_id: Optional task list ID to filter (default: all lists)
+            include_completed: Whether to include completed tasks
+        """
+        self.account_id = account_id
+        self.tasklist_id = tasklist_id
+        self.include_completed = include_completed
+        self._access_token: Optional[str] = None
+        self._token_data: Optional[dict] = None
+
+    def _get_token_data(self) -> Optional[dict]:
+        """Get and cache the decrypted token data."""
+        if self._token_data is None:
+            from db.oauth_tokens import get_oauth_token_by_id
+
+            self._token_data = get_oauth_token_by_id(self.account_id)
+        return self._token_data
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if necessary."""
+        import requests as http_requests
+
+        token_data = self._get_token_data()
+        if not token_data:
+            logger.error(f"OAuth token {self.account_id} not found")
+            return None
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            logger.error("No access token in stored credentials")
+            return None
+
+        # Try the access token first with a simple API call
+        test_response = http_requests.get(
+            "https://tasks.googleapis.com/tasks/v1/users/@me/lists",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"maxResults": 1},
+            timeout=10,
+        )
+
+        if test_response.status_code == 200:
+            return access_token
+
+        # Token expired, try to refresh
+        if not refresh_token or not client_id or not client_secret:
+            logger.error(
+                "Cannot refresh token - missing refresh_token or client credentials"
+            )
+            return None
+
+        logger.info("Access token expired, refreshing...")
+        refresh_response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+
+        if refresh_response.status_code != 200:
+            logger.error(f"Token refresh failed: {refresh_response.text}")
+            return None
+
+        new_token_data = refresh_response.json()
+        new_access_token = new_token_data.get("access_token")
+
+        # Update stored token
+        from db.oauth_tokens import update_oauth_token_data
+
+        updated_data = {**token_data, "access_token": new_access_token}
+        update_oauth_token_data(self.account_id, updated_data)
+
+        self._token_data = updated_data
+        logger.info("Token refreshed successfully")
+        return new_access_token
+
+    def is_available(self) -> bool:
+        """Check if we can access Google Tasks."""
+        return self._get_access_token() is not None
+
+    def _get_task_lists(self, access_token: str) -> list[dict]:
+        """Get all task lists for the user."""
+        import requests as http_requests
+
+        task_lists = []
+        page_token = None
+
+        while True:
+            params = {"maxResults": 100}
+            if page_token:
+                params["pageToken"] = page_token
+
+            response = http_requests.get(
+                "https://tasks.googleapis.com/tasks/v1/users/@me/lists",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Tasks API error listing task lists: {response.status_code}"
+                )
+                break
+
+            data = response.json()
+            task_lists.extend(data.get("items", []))
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        return task_lists
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List tasks from Google Tasks."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list tasks - no valid access token")
+            return
+
+        # Get task lists
+        if self.tasklist_id:
+            task_lists = [{"id": self.tasklist_id, "title": "Selected List"}]
+        else:
+            task_lists = self._get_task_lists(access_token)
+
+        logger.info(f"Listing tasks from {len(task_lists)} task list(s)")
+
+        total_tasks = 0
+
+        for tasklist in task_lists:
+            tasklist_id = tasklist.get("id")
+            tasklist_title = tasklist.get("title", "Untitled")
+
+            params = {
+                "maxResults": 100,
+                "showCompleted": str(self.include_completed).lower(),
+            }
+            page_token = None
+
+            while True:
+                if page_token:
+                    params["pageToken"] = page_token
+
+                response = http_requests.get(
+                    f"https://tasks.googleapis.com/tasks/v1/lists/{tasklist_id}/tasks",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=30,
+                )
+
+                if response.status_code != 200:
+                    logger.error(
+                        f"Tasks API error: {response.status_code} - {response.text}"
+                    )
+                    break
+
+                data = response.json()
+                tasks = data.get("items", [])
+
+                for task in tasks:
+                    task_id = task.get("id")
+                    title = task.get("title", "(No title)")
+                    updated = task.get("updated")
+
+                    if not title.strip():
+                        continue  # Skip empty tasks
+
+                    total_tasks += 1
+                    yield DocumentInfo(
+                        uri=f"gtasks://{tasklist_id}/{task_id}",
+                        name=f"{tasklist_title}: {title[:80]}",
+                        mime_type="text/plain",
+                        modified_time=updated,
+                    )
+
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+
+        logger.info(f"Found {total_tasks} tasks to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a task from Google Tasks."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read task - no valid access token")
+            return None
+
+        # Extract task list ID and task ID from URI (gtasks://tasklist_id/task_id)
+        if not uri.startswith("gtasks://"):
+            logger.error(f"Invalid Tasks URI: {uri}")
+            return None
+
+        parts = uri.replace("gtasks://", "").split("/", 1)
+        if len(parts) != 2:
+            logger.error(f"Invalid Tasks URI format: {uri}")
+            return None
+
+        tasklist_id, task_id = parts
+
+        response = http_requests.get(
+            f"https://tasks.googleapis.com/tasks/v1/lists/{tasklist_id}/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get task {task_id}: {response.status_code}")
+            return None
+
+        task = response.json()
+
+        # Extract task details
+        title = task.get("title", "(No title)")
+        notes = task.get("notes", "")
+        status = task.get("status", "needsAction")
+        due = task.get("due", "")
+        completed = task.get("completed", "")
+        updated = task.get("updated", "")
+
+        # Format status nicely
+        status_text = "Completed" if status == "completed" else "Pending"
+
+        # Format as readable text
+        content_parts = [f"Task: {title}", f"Status: {status_text}"]
+
+        if due:
+            # Due date is in RFC 3339 format
+            due_date = due[:10] if len(due) >= 10 else due
+            content_parts.append(f"Due: {due_date}")
+
+        if completed:
+            completed_date = completed[:10] if len(completed) >= 10 else completed
+            content_parts.append(f"Completed: {completed_date}")
+
+        if notes:
+            content_parts.append(f"\nNotes:\n{notes}")
+
+        content = "\n".join(content_parts)
+
+        # Extract due date for metadata
+        due_date = due[:10] if due and len(due) >= 10 else None
+
+        return DocumentContent(
+            uri=uri,
+            name=title[:100],
+            mime_type="text/plain",
+            text=content.strip(),
+            metadata={
+                "due_date": due_date,
+                "status": status,
+                "completed": status == "completed",
+                "source_type": "task",
+            },
+        )
+
+
+class GoogleContactsDocumentSource(DocumentSource):
+    """
+    Document source for Google Contacts using the People API.
+
+    Uses Google People API directly with stored OAuth tokens.
+    Indexes contacts for RAG retrieval (names, emails, phones, etc.).
+    """
+
+    def __init__(
+        self,
+        account_id: int,
+        include_other_contacts: bool = False,
+    ):
+        """
+        Initialize with OAuth account ID.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            include_other_contacts: Include "Other contacts" (auto-saved from interactions)
+        """
+        self.account_id = account_id
+        self.include_other_contacts = include_other_contacts
+        self._access_token: Optional[str] = None
+        self._token_data: Optional[dict] = None
+
+    def _get_token_data(self) -> Optional[dict]:
+        """Get and cache the decrypted token data."""
+        if self._token_data is None:
+            from db.oauth_tokens import get_oauth_token_by_id
+
+            self._token_data = get_oauth_token_by_id(self.account_id)
+        return self._token_data
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if necessary."""
+        import requests as http_requests
+
+        token_data = self._get_token_data()
+        if not token_data:
+            logger.error(f"OAuth token {self.account_id} not found")
+            return None
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            logger.error("No access token in stored credentials")
+            return None
+
+        # Try the access token first with a simple API call
+        test_response = http_requests.get(
+            "https://people.googleapis.com/v1/people/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"personFields": "names"},
+            timeout=10,
+        )
+
+        if test_response.status_code == 200:
+            return access_token
+
+        # Token expired, try to refresh
+        if not refresh_token or not client_id or not client_secret:
+            logger.error(
+                "Cannot refresh token - missing refresh_token or client credentials"
+            )
+            return None
+
+        logger.info("Access token expired, refreshing...")
+        refresh_response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+
+        if refresh_response.status_code != 200:
+            logger.error(f"Token refresh failed: {refresh_response.text}")
+            return None
+
+        new_token_data = refresh_response.json()
+        new_access_token = new_token_data.get("access_token")
+
+        # Update stored token
+        from db.oauth_tokens import update_oauth_token_data
+
+        updated_data = {**token_data, "access_token": new_access_token}
+        update_oauth_token_data(self.account_id, updated_data)
+
+        self._token_data = updated_data
+        logger.info("Token refreshed successfully")
+        return new_access_token
+
+    def is_available(self) -> bool:
+        """Check if we can access Google Contacts."""
+        return self._get_access_token() is not None
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List contacts from Google People API."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list contacts - no valid access token")
+            return
+
+        logger.info("Listing Google Contacts")
+
+        # Fields to request for each contact
+        person_fields = "names,emailAddresses,phoneNumbers,organizations,metadata"
+
+        total_contacts = 0
+        page_token = None
+
+        while True:
+            params = {
+                "pageSize": 100,
+                "personFields": person_fields,
+                "sortOrder": "LAST_MODIFIED_DESCENDING",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+
+            response = http_requests.get(
+                "https://people.googleapis.com/v1/people/me/connections",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"People API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            connections = data.get("connections", [])
+
+            for person in connections:
+                resource_name = person.get("resourceName", "")
+                names = person.get("names", [])
+                name = names[0].get("displayName", "Unknown") if names else "Unknown"
+
+                # Get modification time from metadata
+                metadata = person.get("metadata", {})
+                sources = metadata.get("sources", [])
+                modified_time = None
+                if sources:
+                    modified_time = sources[0].get("updateTime")
+
+                total_contacts += 1
+                yield DocumentInfo(
+                    uri=f"gcontacts://{resource_name}",
+                    name=name[:100],
+                    mime_type="text/vcard",
+                    modified_time=modified_time,
+                )
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        # Optionally include "Other contacts"
+        if self.include_other_contacts:
+            page_token = None
+            while True:
+                params = {
+                    "pageSize": 100,
+                    "readMask": "names,emailAddresses,phoneNumbers",
+                }
+                if page_token:
+                    params["pageToken"] = page_token
+
+                response = http_requests.get(
+                    "https://people.googleapis.com/v1/otherContacts",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params=params,
+                    timeout=30,
+                )
+
+                if response.status_code != 200:
+                    logger.warning(f"Other contacts API error: {response.status_code}")
+                    break
+
+                data = response.json()
+                other_contacts = data.get("otherContacts", [])
+
+                for person in other_contacts:
+                    resource_name = person.get("resourceName", "")
+                    names = person.get("names", [])
+                    name = (
+                        names[0].get("displayName", "Unknown") if names else "Unknown"
+                    )
+
+                    total_contacts += 1
+                    yield DocumentInfo(
+                        uri=f"gcontacts://{resource_name}",
+                        name=f"(Other) {name[:90]}",
+                        mime_type="text/vcard",
+                    )
+
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+
+        logger.info(f"Found {total_contacts} contacts to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a contact from Google People API."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read contact - no valid access token")
+            return None
+
+        # Extract resource name from URI (gcontacts://people/c123456)
+        if not uri.startswith("gcontacts://"):
+            logger.error(f"Invalid Contacts URI: {uri}")
+            return None
+
+        resource_name = uri.replace("gcontacts://", "")
+
+        # Request comprehensive fields
+        person_fields = (
+            "names,emailAddresses,phoneNumbers,organizations,addresses,"
+            "birthdays,biographies,urls,relations,occupations,nicknames"
+        )
+
+        response = http_requests.get(
+            f"https://people.googleapis.com/v1/{resource_name}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"personFields": person_fields},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to get contact {resource_name}: {response.status_code}"
+            )
+            return None
+
+        person = response.json()
+
+        # Extract contact details
+        names = person.get("names", [])
+        display_name = names[0].get("displayName", "Unknown") if names else "Unknown"
+
+        emails = person.get("emailAddresses", [])
+        phones = person.get("phoneNumbers", [])
+        orgs = person.get("organizations", [])
+        addresses = person.get("addresses", [])
+        birthdays = person.get("birthdays", [])
+        bios = person.get("biographies", [])
+        urls = person.get("urls", [])
+        nicknames = person.get("nicknames", [])
+
+        # Format as readable text
+        content_parts = [f"Contact: {display_name}"]
+
+        if nicknames:
+            nick_list = ", ".join(n.get("value", "") for n in nicknames)
+            content_parts.append(f"Nicknames: {nick_list}")
+
+        if emails:
+            for email in emails:
+                email_type = email.get("type", "other")
+                email_val = email.get("value", "")
+                content_parts.append(f"Email ({email_type}): {email_val}")
+
+        if phones:
+            for phone in phones:
+                phone_type = phone.get("type", "other")
+                phone_val = phone.get("value", "")
+                content_parts.append(f"Phone ({phone_type}): {phone_val}")
+
+        if orgs:
+            for org in orgs:
+                org_name = org.get("name", "")
+                org_title = org.get("title", "")
+                if org_name or org_title:
+                    org_str = (
+                        f"{org_title} at {org_name}"
+                        if org_title and org_name
+                        else (org_title or org_name)
+                    )
+                    content_parts.append(f"Organization: {org_str}")
+
+        if addresses:
+            for addr in addresses:
+                addr_type = addr.get("type", "other")
+                formatted = addr.get("formattedValue", "")
+                if formatted:
+                    content_parts.append(f"Address ({addr_type}): {formatted}")
+
+        if birthdays:
+            for bday in birthdays:
+                date = bday.get("date", {})
+                if date:
+                    bday_str = f"{date.get('year', '????')}-{date.get('month', '??'):02d}-{date.get('day', '??'):02d}"
+                    content_parts.append(f"Birthday: {bday_str}")
+
+        if urls:
+            for url in urls:
+                url_type = url.get("type", "other")
+                url_val = url.get("value", "")
+                content_parts.append(f"URL ({url_type}): {url_val}")
+
+        if bios:
+            for bio in bios:
+                bio_val = bio.get("value", "")
+                if bio_val:
+                    content_parts.append(f"\nNotes: {bio_val}")
+
+        content = "\n".join(content_parts)
+
+        # Primary email for metadata
+        primary_email = emails[0].get("value") if emails else None
+
+        return DocumentContent(
+            uri=uri,
+            name=display_name[:100],
+            mime_type="text/plain",
+            text=content.strip(),
+            metadata={
+                "email": primary_email,
+                "source_type": "contact",
             },
         )
 
@@ -3077,7 +3713,7 @@ class WebsiteDocumentSource(DocumentSource):
     Document source for crawled websites.
 
     Uses either builtin trafilatura crawler or Jina Reader API
-    (configured globally in Web Config settings).
+    (configured globally in Web Config settings, or overridden per-store).
     """
 
     def __init__(
@@ -3087,6 +3723,7 @@ class WebsiteDocumentSource(DocumentSource):
         max_pages: int = 50,
         include_pattern: Optional[str] = None,
         exclude_pattern: Optional[str] = None,
+        crawler_override: Optional[str] = None,
     ):
         """
         Initialize with website URL and crawl settings.
@@ -3097,12 +3734,14 @@ class WebsiteDocumentSource(DocumentSource):
             max_pages: Maximum number of pages to crawl
             include_pattern: Regex pattern - only crawl URLs matching this
             exclude_pattern: Regex pattern - skip URLs matching this
+            crawler_override: Override global crawler setting (None, "builtin", or "jina")
         """
         self.url = url
         self.crawl_depth = crawl_depth
         self.max_pages = max_pages
         self.include_pattern = include_pattern
         self.exclude_pattern = exclude_pattern
+        self.crawler_override = crawler_override
         self._crawled_pages: Optional[list] = None
         self._crawl_result = None
 
@@ -3141,7 +3780,12 @@ class WebsiteDocumentSource(DocumentSource):
             return False
 
     def _get_crawl_provider(self) -> str:
-        """Get the configured crawl provider from settings."""
+        """Get the crawl provider, checking per-store override first."""
+        # Check for per-store override
+        if self.crawler_override:
+            return self.crawler_override
+
+        # Fall back to global setting
         try:
             from db.connection import get_db_context
             from db.models import Setting
@@ -3216,6 +3860,1781 @@ class WebsiteDocumentSource(DocumentSource):
         return None
 
 
+class SlackDocumentSource(DocumentSource):
+    """
+    Document source for Slack using the REST API.
+
+    Indexes messages from Slack channels. Requires a Bot User OAuth Token
+    with appropriate scopes (channels:history, channels:read, users:read).
+
+    Credentials are read from SLACK_BOT_TOKEN environment variable.
+    """
+
+    def __init__(
+        self,
+        channel_id: Optional[str] = None,
+        channel_types: str = "public_channel",
+        days_back: int = 90,
+    ):
+        """
+        Initialize Slack document source.
+
+        Args:
+            channel_id: Optional specific channel ID to index (indexes all accessible if None)
+            channel_types: Comma-separated channel types to index (public_channel, private_channel)
+            days_back: How many days of history to fetch (max 90 for free plan)
+        """
+        self.channel_id = channel_id
+        self.channel_types = channel_types
+        self.days_back = min(days_back or 90, 90)  # Free plan limit
+        self.bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+        self.base_url = "https://slack.com/api"
+        self._user_cache: dict = {}  # Cache user info to reduce API calls
+
+    def _get_headers(self) -> dict:
+        """Get headers for API requests."""
+        return {
+            "Authorization": f"Bearer {self.bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+
+    def is_available(self) -> bool:
+        """Check if we can connect to Slack."""
+        import requests as http_requests
+
+        if not self.bot_token:
+            logger.warning("No Slack bot token configured (SLACK_BOT_TOKEN)")
+            return False
+
+        try:
+            response = http_requests.get(
+                f"{self.base_url}/auth.test",
+                headers=self._get_headers(),
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ok"):
+                    logger.debug(f"Slack connected as: {data.get('user')}")
+                    return True
+                else:
+                    logger.warning(f"Slack auth failed: {data.get('error')}")
+                    return False
+            return False
+        except Exception as e:
+            logger.warning(f"Slack not available: {e}")
+            return False
+
+    def _get_user_name(self, user_id: str) -> str:
+        """Get username for a user ID (cached)."""
+        import requests as http_requests
+
+        if user_id in self._user_cache:
+            return self._user_cache[user_id]
+
+        try:
+            response = http_requests.get(
+                f"{self.base_url}/users.info",
+                headers=self._get_headers(),
+                params={"user": user_id},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ok"):
+                    user = data.get("user", {})
+                    # Prefer display name, fall back to real name, then username
+                    name = (
+                        user.get("profile", {}).get("display_name")
+                        or user.get("real_name")
+                        or user.get("name")
+                        or user_id
+                    )
+                    self._user_cache[user_id] = name
+                    return name
+        except Exception as e:
+            logger.debug(f"Failed to get user info for {user_id}: {e}")
+
+        self._user_cache[user_id] = user_id
+        return user_id
+
+    def _list_channels(self) -> list:
+        """List accessible channels."""
+        import requests as http_requests
+
+        channels = []
+        cursor = None
+
+        while True:
+            params = {
+                "types": self.channel_types,
+                "limit": 200,
+                "exclude_archived": "true",
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            response = http_requests.get(
+                f"{self.base_url}/conversations.list",
+                headers=self._get_headers(),
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Slack API error: {response.status_code}")
+                break
+
+            data = response.json()
+            if not data.get("ok"):
+                logger.error(f"Slack API error: {data.get('error')}")
+                break
+
+            channels.extend(data.get("channels", []))
+
+            # Check for pagination
+            cursor = data.get("response_metadata", {}).get("next_cursor")
+            if not cursor:
+                break
+
+        return channels
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List Slack channels as documents (each channel = one document)."""
+        from datetime import datetime, timedelta
+
+        if self.channel_id:
+            # Single channel mode
+            channels = [{"id": self.channel_id, "name": self.channel_id}]
+        else:
+            channels = self._list_channels()
+
+        logger.info(f"Found {len(channels)} Slack channels to index")
+
+        oldest_ts = (datetime.utcnow() - timedelta(days=self.days_back)).timestamp()
+
+        for channel in channels:
+            channel_id = channel.get("id")
+            channel_name = channel.get("name", channel_id)
+
+            # Use channel's latest message timestamp as modified time if available
+            # For simplicity, we'll use current time
+            yield DocumentInfo(
+                uri=f"slack://{channel_id}",
+                name=f"#{channel_name}",
+                mime_type="text/plain",
+                modified_time=datetime.utcnow().isoformat(),
+            )
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read messages from a Slack channel."""
+        from datetime import datetime, timedelta
+
+        import requests as http_requests
+
+        # Parse channel ID from URI
+        if not uri.startswith("slack://"):
+            logger.error(f"Invalid Slack URI: {uri}")
+            return None
+
+        channel_id = uri.replace("slack://", "")
+
+        # Calculate oldest timestamp
+        oldest_ts = (datetime.utcnow() - timedelta(days=self.days_back)).timestamp()
+
+        messages = []
+        cursor = None
+        total_fetched = 0
+
+        while True:
+            params = {
+                "channel": channel_id,
+                "oldest": str(oldest_ts),
+                "limit": 200,
+                "inclusive": "true",
+            }
+            if cursor:
+                params["cursor"] = cursor
+
+            try:
+                response = http_requests.get(
+                    f"{self.base_url}/conversations.history",
+                    headers=self._get_headers(),
+                    params=params,
+                    timeout=30,
+                )
+            except Exception as e:
+                logger.error(f"Failed to fetch Slack messages: {e}")
+                break
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Slack API error: {response.status_code} - {response.text}"
+                )
+                break
+
+            data = response.json()
+            if not data.get("ok"):
+                error = data.get("error", "unknown")
+                if error == "channel_not_found":
+                    logger.warning(f"Channel not found: {channel_id}")
+                elif error == "not_in_channel":
+                    logger.warning(
+                        f"Bot not in channel {channel_id} - invite bot to channel"
+                    )
+                else:
+                    logger.error(f"Slack API error: {error}")
+                break
+
+            batch = data.get("messages", [])
+            messages.extend(batch)
+            total_fetched += len(batch)
+
+            # Check for pagination
+            if not data.get("has_more"):
+                break
+            cursor = data.get("response_metadata", {}).get("next_cursor")
+
+            # Safety limit
+            if total_fetched >= 10000:
+                logger.warning(f"Hit message limit (10000) for channel {channel_id}")
+                break
+
+        if not messages:
+            logger.info(f"No messages found in channel {channel_id}")
+            return DocumentContent(
+                uri=uri,
+                name=f"#{channel_id}",
+                mime_type="text/plain",
+                text="(No messages in the specified time range)",
+            )
+
+        # Sort messages by timestamp (oldest first)
+        messages.sort(key=lambda m: float(m.get("ts", 0)))
+
+        # Format messages as readable text
+        formatted_lines = []
+        for msg in messages:
+            # Skip bot messages, join/leave messages, etc. unless they have text
+            msg_type = msg.get("subtype", "")
+            if msg_type in (
+                "channel_join",
+                "channel_leave",
+                "channel_topic",
+                "channel_purpose",
+            ):
+                continue
+
+            text = msg.get("text", "").strip()
+            if not text:
+                continue
+
+            # Get timestamp and format it
+            ts = float(msg.get("ts", 0))
+            dt = datetime.fromtimestamp(ts)
+            date_str = dt.strftime("%Y-%m-%d %H:%M")
+
+            # Get username
+            user_id = msg.get("user", "unknown")
+            username = self._get_user_name(user_id)
+
+            # Format the message
+            formatted_lines.append(f"[{date_str}] {username}: {text}")
+
+        # Get channel name for the document
+        channel_name = channel_id
+        try:
+            info_response = http_requests.get(
+                f"{self.base_url}/conversations.info",
+                headers=self._get_headers(),
+                params={"channel": channel_id},
+                timeout=10,
+            )
+            if info_response.status_code == 200:
+                info_data = info_response.json()
+                if info_data.get("ok"):
+                    channel_name = info_data.get("channel", {}).get("name", channel_id)
+        except Exception:
+            pass
+
+        content = f"# Slack Channel: #{channel_name}\n"
+        content += f"# Messages from last {self.days_back} days\n"
+        content += f"# Total messages: {len(formatted_lines)}\n\n"
+        content += "\n".join(formatted_lines)
+
+        logger.info(f"Indexed {len(formatted_lines)} messages from #{channel_name}")
+
+        return DocumentContent(
+            uri=uri,
+            name=f"#{channel_name}",
+            mime_type="text/plain",
+            text=content,
+        )
+
+
+class TodoistDocumentSource(DocumentSource):
+    """
+    Document source for Todoist using the REST API.
+
+    Indexes tasks from Todoist. Requires TODOIST_API_TOKEN environment variable.
+    Uses personal API tokens from https://app.todoist.com/prefs/integrations
+    """
+
+    BASE_URL = "https://api.todoist.com/rest/v2"
+
+    def __init__(
+        self,
+        project_id: Optional[str] = None,
+        filter_expr: Optional[str] = None,
+        include_completed: bool = False,
+    ):
+        """
+        Initialize with optional project filter.
+
+        Args:
+            project_id: Optional project ID to filter tasks
+            filter_expr: Optional Todoist filter expression (e.g., "today", "priority 1")
+            include_completed: Whether to include completed tasks
+        """
+        self.project_id = project_id
+        self.filter_expr = filter_expr
+        self.include_completed = include_completed
+        # Support both TODOIST_API_TOKEN and TODOIST_API_KEY for compatibility
+        self.api_token = os.environ.get("TODOIST_API_TOKEN") or os.environ.get(
+            "TODOIST_API_KEY", ""
+        )
+        self._projects_cache: dict[str, str] = {}  # id -> name
+
+    def _get_headers(self) -> dict[str, str]:
+        """Get authorization headers."""
+        return {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "application/json",
+        }
+
+    def is_available(self) -> bool:
+        """Check if Todoist API is configured and accessible."""
+        if not self.api_token:
+            return False
+
+        import requests as http_requests
+
+        try:
+            response = http_requests.get(
+                f"{self.BASE_URL}/projects",
+                headers=self._get_headers(),
+                timeout=10,
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    def _get_projects(self) -> dict[str, str]:
+        """Get all projects and cache them (id -> name mapping)."""
+        if self._projects_cache:
+            return self._projects_cache
+
+        import requests as http_requests
+
+        try:
+            response = http_requests.get(
+                f"{self.BASE_URL}/projects",
+                headers=self._get_headers(),
+                timeout=30,
+            )
+            if response.status_code == 200:
+                projects = response.json()
+                self._projects_cache = {p["id"]: p["name"] for p in projects}
+        except Exception as e:
+            logger.error(f"Failed to fetch Todoist projects: {e}")
+
+        return self._projects_cache
+
+    def _get_project_name(self, project_id: str) -> str:
+        """Get project name from cache or fetch."""
+        projects = self._get_projects()
+        return projects.get(project_id, "Unknown Project")
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List tasks from Todoist."""
+        import requests as http_requests
+
+        if not self.api_token:
+            logger.error("Cannot list tasks - TODOIST_API_TOKEN not set")
+            return
+
+        # Build query parameters
+        params = {}
+        if self.project_id:
+            params["project_id"] = self.project_id
+        if self.filter_expr:
+            params["filter"] = self.filter_expr
+
+        try:
+            # Get active tasks
+            response = http_requests.get(
+                f"{self.BASE_URL}/tasks",
+                headers=self._get_headers(),
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Todoist API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            tasks = response.json()
+            logger.info(f"Found {len(tasks)} active tasks from Todoist")
+
+            for task in tasks:
+                task_id = task.get("id")
+                content = task.get("content", "(No title)")
+                project_id = task.get("project_id", "")
+                project_name = self._get_project_name(project_id)
+
+                # Use created_at as modified time (Todoist doesn't have updated_at in REST API)
+                created_at = task.get("created_at")
+
+                yield DocumentInfo(
+                    uri=f"todoist://{task_id}",
+                    name=f"{project_name}: {content[:80]}",
+                    mime_type="text/plain",
+                    modified_time=created_at,
+                )
+
+            # Get completed tasks if requested
+            if self.include_completed:
+                # Completed tasks require Sync API, but we can use a filter
+                completed_params = {"filter": "completed"}
+                if self.project_id:
+                    completed_params["project_id"] = self.project_id
+
+                # Note: REST API v2 doesn't support completed tasks directly
+                # For now, we skip this - would need Sync API for completed tasks
+                logger.debug("Completed tasks require Sync API - skipping")
+
+        except Exception as e:
+            logger.error(f"Error listing Todoist tasks: {e}")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a task from Todoist."""
+        import requests as http_requests
+
+        if not self.api_token:
+            logger.error("Cannot read task - TODOIST_API_TOKEN not set")
+            return None
+
+        # Extract task ID from URI (todoist://task_id)
+        if not uri.startswith("todoist://"):
+            logger.error(f"Invalid Todoist URI: {uri}")
+            return None
+
+        task_id = uri.replace("todoist://", "")
+
+        try:
+            response = http_requests.get(
+                f"{self.BASE_URL}/tasks/{task_id}",
+                headers=self._get_headers(),
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Failed to get Todoist task {task_id}: {response.status_code}"
+                )
+                return None
+
+            task = response.json()
+
+            # Extract task details
+            content = task.get("content", "(No title)")
+            description = task.get("description", "")
+            project_id = task.get("project_id", "")
+            project_name = self._get_project_name(project_id)
+            priority = task.get("priority", 1)  # 1-4, where 4 is highest
+            labels = task.get("labels", [])
+            due = task.get("due")
+            created_at = task.get("created_at", "")
+
+            # Format priority
+            priority_names = {1: "Low", 2: "Medium", 3: "High", 4: "Urgent"}
+            priority_text = priority_names.get(priority, "Normal")
+
+            # Format as readable text
+            content_parts = [
+                f"Task: {content}",
+                f"Project: {project_name}",
+                f"Priority: {priority_text}",
+            ]
+
+            if labels:
+                content_parts.append(f"Labels: {', '.join(labels)}")
+
+            if due:
+                due_date = due.get("date", "")
+                due_string = due.get("string", "")
+                if due_string:
+                    content_parts.append(f"Due: {due_string}")
+                elif due_date:
+                    content_parts.append(f"Due: {due_date}")
+
+            if description:
+                content_parts.append(f"\nDescription:\n{description}")
+
+            text_content = "\n".join(content_parts)
+
+            # Extract due date for metadata
+            due_date = due.get("date") if due else None
+
+            return DocumentContent(
+                uri=uri,
+                name=content[:100],
+                mime_type="text/plain",
+                text=text_content.strip(),
+                metadata={
+                    "project": project_name,
+                    "project_id": project_id,
+                    "priority": priority,
+                    # ChromaDB doesn't accept lists - convert to comma-separated string
+                    "labels": ", ".join(labels) if labels else "",
+                    "due_date": due_date or "",
+                    "source_type": "task",
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"Error reading Todoist task {task_id}: {e}")
+            return None
+
+
+# =============================================================================
+# Microsoft Graph API Document Sources
+# =============================================================================
+
+
+class MicrosoftGraphMixin:
+    """
+    Mixin providing common Microsoft Graph API authentication and token refresh.
+
+    Used by OneDrive, Outlook, and OneNote document sources.
+    """
+
+    account_id: int
+    _token_data: Optional[dict]
+
+    def _get_token_data(self) -> Optional[dict]:
+        """Get and cache the decrypted token data."""
+        if self._token_data is None:
+            from db.oauth_tokens import get_oauth_token_by_id
+
+            self._token_data = get_oauth_token_by_id(self.account_id)
+        return self._token_data
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if necessary."""
+        import requests as http_requests
+
+        token_data = self._get_token_data()
+        if not token_data:
+            logger.error(f"Microsoft OAuth token {self.account_id} not found")
+            return None
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            logger.error("No access token in stored Microsoft credentials")
+            return None
+
+        # Try the access token first with a simple Graph API call
+        test_response = http_requests.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+
+        if test_response.status_code == 200:
+            return access_token
+
+        # Token expired, try to refresh
+        if not refresh_token or not client_id or not client_secret:
+            logger.error(
+                "Cannot refresh Microsoft token - missing refresh_token or client credentials"
+            )
+            return None
+
+        logger.info("Microsoft access token expired, refreshing...")
+        refresh_response = http_requests.post(
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+
+        if refresh_response.status_code != 200:
+            logger.error(f"Microsoft token refresh failed: {refresh_response.text}")
+            return None
+
+        new_token_data = refresh_response.json()
+        new_access_token = new_token_data.get("access_token")
+
+        # Update stored token (Microsoft may return a new refresh token)
+        from db.oauth_tokens import update_oauth_token_data
+
+        updated_data = {**token_data, "access_token": new_access_token}
+        if new_token_data.get("refresh_token"):
+            updated_data["refresh_token"] = new_token_data["refresh_token"]
+        update_oauth_token_data(self.account_id, updated_data)
+
+        # Update cache
+        self._token_data = updated_data
+        logger.info("Microsoft token refreshed successfully")
+        return new_access_token
+
+
+class OneDriveDocumentSource(MicrosoftGraphMixin, DocumentSource):
+    """
+    Document source for OneDrive using Microsoft Graph API.
+
+    Uses Graph API directly with stored OAuth tokens for file access.
+    Supports Docling processing with optional vision models for PDFs
+    and other binary document formats.
+    """
+
+    # Binary file types that should be processed through Docling
+    DOCLING_MIME_TYPES = {
+        "application/pdf": ".pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/tiff": ".tiff",
+        "image/bmp": ".bmp",
+    }
+
+    def __init__(
+        self,
+        account_id: int,
+        folder_id: Optional[str] = None,
+        vision_provider: str = "local",
+        vision_model: Optional[str] = None,
+        vision_ollama_url: Optional[str] = None,
+    ):
+        """
+        Initialize with OAuth account ID and optional folder filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            folder_id: Optional folder ID to restrict indexing scope
+            vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
+            vision_model: Vision model name (e.g., "granite3.2-vision:latest")
+            vision_ollama_url: Ollama URL when using ollama provider
+        """
+        self.account_id = account_id
+        self.folder_id = folder_id
+        self.vision_provider = vision_provider
+        self.vision_model = vision_model
+        self.vision_ollama_url = vision_ollama_url
+        self._token_data: Optional[dict] = None
+        self._document_converter = None
+
+    def is_available(self) -> bool:
+        """Check if we can access OneDrive."""
+        return self._get_access_token() is not None
+
+    def _get_document_converter(self):
+        """Get or create a Docling DocumentConverter with vision support."""
+        if self._document_converter is None:
+            from rag.vision import get_document_converter
+
+            self._document_converter = get_document_converter(
+                vision_provider=self.vision_provider,
+                vision_model=self.vision_model,
+                vision_ollama_url=self.vision_ollama_url,
+            )
+        return self._document_converter
+
+    def _is_supported_file(self, mime_type: str, name: str) -> bool:
+        """Check if a file type is supported for indexing."""
+        # Binary types we can process through Docling
+        if mime_type in self.DOCLING_MIME_TYPES:
+            return True
+
+        # Check file extension for text types
+        name_lower = name.lower()
+        text_extensions = {".txt", ".md", ".html", ".htm", ".json", ".xml", ".csv"}
+        for ext in text_extensions:
+            if name_lower.endswith(ext):
+                return True
+
+        return False
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all documents in OneDrive or specified folder."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list OneDrive documents - no valid access token")
+            return
+
+        # Build the Graph API URL
+        if self.folder_id:
+            url = f"https://graph.microsoft.com/v1.0/me/drive/items/{self.folder_id}/children"
+            logger.info(f"Listing documents in OneDrive folder: {self.folder_id}")
+        else:
+            url = "https://graph.microsoft.com/v1.0/me/drive/root/children"
+            logger.info("Listing all documents in OneDrive root")
+
+        total_files = 0
+
+        while url:
+            response = http_requests.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={
+                    "$select": "id,name,file,folder,size,lastModifiedDateTime",
+                    "$top": 100,
+                },
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"OneDrive API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            items = data.get("value", [])
+
+            for item in items:
+                # Skip folders
+                if "folder" in item:
+                    continue
+
+                # Get file info
+                file_info = item.get("file", {})
+                mime_type = file_info.get("mimeType", "application/octet-stream")
+                name = item["name"]
+
+                # Check if it's a supported type
+                if not self._is_supported_file(mime_type, name):
+                    continue
+
+                total_files += 1
+                yield DocumentInfo(
+                    uri=f"onedrive://{item['id']}",
+                    name=name,
+                    mime_type=mime_type,
+                    size=item.get("size"),
+                    modified_time=item.get("lastModifiedDateTime"),
+                )
+
+            # Check for next page
+            url = data.get("@odata.nextLink")
+
+        logger.info(f"Found {total_files} OneDrive documents to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a document from OneDrive."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read OneDrive document - no valid access token")
+            return None
+
+        # Extract file ID from URI (onedrive://file_id)
+        if not uri.startswith("onedrive://"):
+            logger.error(f"Invalid OneDrive URI: {uri}")
+            return None
+
+        file_id = uri.replace("onedrive://", "")
+
+        # Get file metadata first
+        meta_response = http_requests.get(
+            f"https://graph.microsoft.com/v1.0/me/drive/items/{file_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"$select": "id,name,file,size"},
+            timeout=30,
+        )
+
+        if meta_response.status_code != 200:
+            logger.error(f"Failed to get OneDrive file metadata: {meta_response.text}")
+            return None
+
+        file_meta = meta_response.json()
+        file_info = file_meta.get("file", {})
+        mime_type = file_info.get("mimeType", "application/octet-stream")
+        name = file_meta.get("name", file_id)
+
+        # Handle binary files through Docling (PDF, DOCX, images, etc.)
+        if mime_type in self.DOCLING_MIME_TYPES:
+            return self._download_and_process_with_docling(
+                access_token, file_id, name, mime_type
+            )
+
+        # Handle text files
+        return self._download_text(access_token, file_id, name, mime_type)
+
+    def _download_and_process_with_docling(
+        self, access_token: str, file_id: str, name: str, mime_type: str
+    ) -> Optional[DocumentContent]:
+        """Download a binary file and process it through Docling with vision support."""
+        import tempfile
+
+        import requests as http_requests
+
+        # Download the file content
+        response = http_requests.get(
+            f"https://graph.microsoft.com/v1.0/me/drive/items/{file_id}/content",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=120,
+        )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to download OneDrive file {name}: {response.status_code}"
+            )
+            return None
+
+        # Get file extension for temp file
+        extension = self.DOCLING_MIME_TYPES.get(mime_type, ".bin")
+
+        # Save to temp file and process with Docling
+        try:
+            with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp:
+                tmp.write(response.content)
+                tmp_path = tmp.name
+
+            try:
+                converter = self._get_document_converter()
+                result = converter.convert(tmp_path)
+                text = result.document.export_to_markdown()
+
+                logger.debug(
+                    f"Processed OneDrive file {name} with Docling: {len(text)} chars"
+                )
+
+                return DocumentContent(
+                    uri=f"onedrive://{file_id}",
+                    name=name,
+                    mime_type="text/markdown",
+                    text=text,
+                )
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"Docling processing failed for OneDrive file {name}: {e}")
+            return None
+
+    def _download_text(
+        self, access_token: str, file_id: str, name: str, mime_type: str
+    ) -> Optional[DocumentContent]:
+        """Download a text file from OneDrive."""
+        import requests as http_requests
+
+        response = http_requests.get(
+            f"https://graph.microsoft.com/v1.0/me/drive/items/{file_id}/content",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=60,
+        )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Failed to download OneDrive file {name}: {response.status_code}"
+            )
+            return None
+
+        # Try to decode as text
+        try:
+            text = response.content.decode("utf-8", errors="ignore")
+        except Exception:
+            text = response.text
+
+        return DocumentContent(
+            uri=f"onedrive://{file_id}",
+            name=name,
+            mime_type=mime_type or "text/plain",
+            text=text,
+        )
+
+
+class OutlookMailDocumentSource(MicrosoftGraphMixin, DocumentSource):
+    """
+    Document source for Outlook Mail using Microsoft Graph API.
+
+    Indexes emails from user's mailbox with optional folder filtering.
+    """
+
+    def __init__(
+        self,
+        account_id: int,
+        folder_id: Optional[str] = None,
+        days_back: int = 90,
+    ):
+        """
+        Initialize with OAuth account ID and optional folder filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            folder_id: Optional folder ID to filter emails (e.g., "inbox", "sentitems")
+            days_back: Number of days of email history to index (default: 90)
+        """
+        self.account_id = account_id
+        self.folder_id = folder_id
+        self.days_back = days_back
+        self._token_data: Optional[dict] = None
+
+    def is_available(self) -> bool:
+        """Check if we can access Outlook."""
+        return self._get_access_token() is not None
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List emails in the mailbox or specified folder."""
+        from datetime import datetime, timedelta
+
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list Outlook emails - no valid access token")
+            return
+
+        # Calculate date filter
+        since_date = datetime.utcnow() - timedelta(days=self.days_back)
+        date_filter = f"receivedDateTime ge {since_date.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+
+        # Build the Graph API URL
+        if self.folder_id:
+            url = f"https://graph.microsoft.com/v1.0/me/mailFolders/{self.folder_id}/messages"
+            logger.info(f"Listing emails in Outlook folder: {self.folder_id}")
+        else:
+            url = "https://graph.microsoft.com/v1.0/me/messages"
+            logger.info("Listing all emails in Outlook")
+
+        total_emails = 0
+
+        while url:
+            response = http_requests.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={
+                    "$select": "id,subject,from,receivedDateTime,hasAttachments",
+                    "$filter": date_filter,
+                    "$orderby": "receivedDateTime desc",
+                    "$top": 100,
+                },
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Outlook API error: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            messages = data.get("value", [])
+
+            for msg in messages:
+                total_emails += 1
+                from_addr = msg.get("from", {}).get("emailAddress", {})
+                from_name = from_addr.get("name", from_addr.get("address", "Unknown"))
+
+                yield DocumentInfo(
+                    uri=f"outlook://{msg['id']}",
+                    name=f"{msg.get('subject', 'No Subject')} - {from_name}",
+                    mime_type="message/rfc822",
+                    modified_time=msg.get("receivedDateTime"),
+                )
+
+            # Check for next page
+            url = data.get("@odata.nextLink")
+
+        logger.info(f"Found {total_emails} Outlook emails to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read an email from Outlook."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read Outlook email - no valid access token")
+            return None
+
+        # Extract message ID from URI (outlook://message_id)
+        if not uri.startswith("outlook://"):
+            logger.error(f"Invalid Outlook URI: {uri}")
+            return None
+
+        message_id = uri.replace("outlook://", "")
+
+        # Get full message content
+        response = http_requests.get(
+            f"https://graph.microsoft.com/v1.0/me/messages/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={
+                "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments"
+            },
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get Outlook email: {response.text}")
+            return None
+
+        msg = response.json()
+
+        # Build email content
+        from_addr = msg.get("from", {}).get("emailAddress", {})
+        from_str = (
+            f"{from_addr.get('name', '')} <{from_addr.get('address', '')}>".strip()
+        )
+
+        to_list = []
+        for recipient in msg.get("toRecipients", []):
+            addr = recipient.get("emailAddress", {})
+            to_list.append(
+                f"{addr.get('name', '')} <{addr.get('address', '')}>".strip()
+            )
+
+        cc_list = []
+        for recipient in msg.get("ccRecipients", []):
+            addr = recipient.get("emailAddress", {})
+            cc_list.append(
+                f"{addr.get('name', '')} <{addr.get('address', '')}>".strip()
+            )
+
+        # Get body content (prefer text, fall back to HTML stripped)
+        body = msg.get("body", {})
+        body_content = body.get("content", "")
+        body_type = body.get("contentType", "text")
+
+        if body_type.lower() == "html":
+            # Strip HTML using trafilatura
+            try:
+                import trafilatura
+
+                body_content = trafilatura.extract(body_content) or body_content
+            except Exception:
+                # Fallback: basic HTML tag stripping
+                import re
+
+                body_content = re.sub(r"<[^>]+>", "", body_content)
+
+        # Format the email
+        content = f"Subject: {msg.get('subject', 'No Subject')}\n"
+        content += f"From: {from_str}\n"
+        content += f"To: {', '.join(to_list)}\n"
+        if cc_list:
+            content += f"Cc: {', '.join(cc_list)}\n"
+        content += f"Date: {msg.get('receivedDateTime', '')}\n"
+        content += f"Has Attachments: {msg.get('hasAttachments', False)}\n"
+        content += "\n---\n\n"
+        content += body_content
+
+        # Get account email for action routing
+        token_data = self._get_token_data()
+        account_email = token_data.get("account_email", "") if token_data else ""
+
+        # Get conversation ID for threading (Outlook's equivalent of thread_id)
+        conversation_id = msg.get("conversationId", "")
+
+        # Parse email date to YYYY-MM-DD format
+        email_date = None
+        received_dt = msg.get("receivedDateTime", "")
+        if received_dt:
+            try:
+                email_date = received_dt[:10]  # Already ISO format
+            except Exception:
+                pass
+
+        return DocumentContent(
+            uri=uri,
+            name=msg.get("subject", "No Subject"),
+            mime_type="text/plain",
+            text=content,
+            metadata={
+                "message_id": message_id,  # For replies/forwards
+                "conversation_id": conversation_id,  # Outlook's thread equivalent
+                "account_id": self.account_id,  # Internal OAuth account ID
+                "account_email": account_email,  # For action routing
+                "email_date": email_date,
+                "from": from_str,
+                "from_name": from_addr.get("name", ""),
+                "to": ", ".join(to_list),
+                "cc": ", ".join(cc_list) if cc_list else "",
+                "subject": msg.get("subject", ""),
+                "source_type": "email",
+            },
+        )
+
+
+class OneNoteDocumentSource(MicrosoftGraphMixin, DocumentSource):
+    """
+    Document source for OneNote using Microsoft Graph API.
+
+    Indexes notebooks and pages from user's OneNote.
+    """
+
+    def __init__(
+        self,
+        account_id: int,
+        notebook_id: Optional[str] = None,
+    ):
+        """
+        Initialize with OAuth account ID and optional notebook filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            notebook_id: Optional notebook ID to restrict indexing scope
+        """
+        self.account_id = account_id
+        self.notebook_id = notebook_id
+        self._token_data: Optional[dict] = None
+
+    def is_available(self) -> bool:
+        """Check if we can access OneNote."""
+        return self._get_access_token() is not None
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all pages in OneNote or specified notebook."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list OneNote pages - no valid access token")
+            return
+
+        # If notebook specified, list pages in that notebook's sections
+        # Otherwise, list all pages across all notebooks
+        if self.notebook_id:
+            # First get sections in the notebook
+            sections_url = f"https://graph.microsoft.com/v1.0/me/onenote/notebooks/{self.notebook_id}/sections"
+            logger.info(f"Listing pages in OneNote notebook: {self.notebook_id}")
+        else:
+            sections_url = "https://graph.microsoft.com/v1.0/me/onenote/sections"
+            logger.info("Listing all OneNote pages")
+
+        total_pages = 0
+
+        # Get all sections
+        sections_response = http_requests.get(
+            sections_url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+
+        if sections_response.status_code != 200:
+            logger.error(
+                f"OneNote sections API error: {sections_response.status_code} - {sections_response.text}"
+            )
+            return
+
+        sections_data = sections_response.json()
+        sections = sections_data.get("value", [])
+        logger.info(f"Found {len(sections)} OneNote sections to scan")
+
+        # For each section, get pages
+        for section_idx, section in enumerate(sections):
+            section_id = section["id"]
+            section_name = section.get("displayName", "Unknown Section")
+            logger.info(
+                f"Scanning section {section_idx + 1}/{len(sections)}: {section_name}"
+            )
+
+            pages_url = f"https://graph.microsoft.com/v1.0/me/onenote/sections/{section_id}/pages"
+
+            while pages_url:
+                pages_response = http_requests.get(
+                    pages_url,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    params={
+                        "$select": "id,title,createdDateTime,lastModifiedDateTime",
+                        "$top": 100,
+                    },
+                    timeout=30,
+                )
+
+                if pages_response.status_code != 200:
+                    logger.warning(
+                        f"Failed to list pages in section {section_name}: {pages_response.status_code}"
+                    )
+                    break
+
+                pages_data = pages_response.json()
+                pages = pages_data.get("value", [])
+                logger.debug(f"Found {len(pages)} pages in section {section_name}")
+
+                for page in pages:
+                    total_pages += 1
+                    yield DocumentInfo(
+                        uri=f"onenote://{page['id']}",
+                        name=f"{section_name} / {page.get('title', 'Untitled')}",
+                        mime_type="text/html",
+                        modified_time=page.get("lastModifiedDateTime"),
+                    )
+
+                # Check for next page
+                pages_url = pages_data.get("@odata.nextLink")
+
+        logger.info(f"Found {total_pages} OneNote pages to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a page from OneNote."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read OneNote page - no valid access token")
+            return None
+
+        # Extract page ID from URI (onenote://page_id)
+        if not uri.startswith("onenote://"):
+            logger.error(f"Invalid OneNote URI: {uri}")
+            return None
+
+        page_id = uri.replace("onenote://", "")
+
+        # Get page content (returns HTML)
+        response = http_requests.get(
+            f"https://graph.microsoft.com/v1.0/me/onenote/pages/{page_id}/content",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=60,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get OneNote page content: {response.text}")
+            return None
+
+        html_content = response.text
+
+        # Get page metadata for the title
+        meta_response = http_requests.get(
+            f"https://graph.microsoft.com/v1.0/me/onenote/pages/{page_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"$select": "id,title,parentSection"},
+            timeout=30,
+        )
+
+        title = "Untitled"
+        section_name = ""
+        if meta_response.status_code == 200:
+            meta = meta_response.json()
+            title = meta.get("title", "Untitled")
+            section_name = meta.get("parentSection", {}).get("displayName", "")
+
+        # Convert HTML to text using trafilatura
+        try:
+            import trafilatura
+
+            text_content = trafilatura.extract(html_content)
+            if not text_content:
+                # Fallback: basic HTML tag stripping
+                import re
+
+                text_content = re.sub(r"<[^>]+>", " ", html_content)
+                text_content = re.sub(r"\s+", " ", text_content).strip()
+        except Exception as e:
+            logger.warning(f"trafilatura extraction failed for OneNote page: {e}")
+            # Fallback: basic HTML tag stripping
+            import re
+
+            text_content = re.sub(r"<[^>]+>", " ", html_content)
+            text_content = re.sub(r"\s+", " ", text_content).strip()
+
+        # Format with metadata
+        full_name = f"{section_name} / {title}" if section_name else title
+        content = f"# {title}\n\n{text_content}"
+
+        return DocumentContent(
+            uri=uri,
+            name=full_name,
+            mime_type="text/plain",
+            text=content,
+        )
+
+
+class TeamsDocumentSource(MicrosoftGraphMixin, DocumentSource):
+    """
+    Document source for Microsoft Teams channel messages using Graph API.
+
+    Indexes messages from Teams channels with optional team/channel filtering.
+    """
+
+    def __init__(
+        self,
+        account_id: int,
+        team_id: Optional[str] = None,
+        channel_id: Optional[str] = None,
+        days_back: int = 90,
+    ):
+        """
+        Initialize with OAuth account ID and optional team/channel filter.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            team_id: Optional team ID to filter (required if channel_id is set)
+            channel_id: Optional channel ID to filter messages
+            days_back: Number of days of message history to index (default: 90)
+        """
+        self.account_id = account_id
+        self.team_id = team_id
+        self.channel_id = channel_id
+        self.days_back = days_back
+        self._token_data: Optional[dict] = None
+
+    def is_available(self) -> bool:
+        """Check if we can access Teams."""
+        return self._get_access_token() is not None
+
+    def _get_teams(self, access_token: str) -> list[dict]:
+        """Get list of teams the user is a member of."""
+        import requests as http_requests
+
+        teams = []
+        url = "https://graph.microsoft.com/v1.0/me/joinedTeams"
+
+        while url:
+            response = http_requests.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"$select": "id,displayName,description"},
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Teams API error: {response.status_code} - {response.text}"
+                )
+                break
+
+            data = response.json()
+            teams.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+
+        return teams
+
+    def _get_channels(self, access_token: str, team_id: str) -> list[dict]:
+        """Get list of channels for a team."""
+        import requests as http_requests
+
+        channels = []
+        url = f"https://graph.microsoft.com/v1.0/teams/{team_id}/channels"
+
+        while url:
+            response = http_requests.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"$select": "id,displayName,description"},
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Teams channels API error: {response.status_code} - {response.text}"
+                )
+                break
+
+            data = response.json()
+            channels.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+
+        return channels
+
+    def _get_channel_messages(
+        self, access_token: str, team_id: str, channel_id: str, since_date: str
+    ) -> Iterator[dict]:
+        """Get messages from a channel."""
+        import requests as http_requests
+
+        url = f"https://graph.microsoft.com/v1.0/teams/{team_id}/channels/{channel_id}/messages"
+
+        while url:
+            response = http_requests.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={
+                    "$top": 50,
+                    "$orderby": "createdDateTime desc",
+                },
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Teams messages API error: {response.status_code} - {response.text}"
+                )
+                break
+
+            data = response.json()
+            messages = data.get("value", [])
+
+            for msg in messages:
+                # Check date filter (Graph API doesn't support $filter on messages)
+                created = msg.get("createdDateTime", "")
+                if created and created < since_date:
+                    # Messages are ordered by date desc, so we can stop here
+                    return
+
+                yield msg
+
+            url = data.get("@odata.nextLink")
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List messages from Teams channels."""
+        from datetime import datetime, timedelta
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list Teams messages - no valid access token")
+            return
+
+        # Calculate date filter
+        since_date = (datetime.utcnow() - timedelta(days=self.days_back)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+
+        total_messages = 0
+
+        # Determine which teams/channels to index
+        if self.team_id and self.channel_id:
+            # Specific channel
+            teams_channels = [(self.team_id, self.channel_id)]
+        elif self.team_id:
+            # All channels in a specific team
+            channels = self._get_channels(access_token, self.team_id)
+            teams_channels = [(self.team_id, ch["id"]) for ch in channels]
+        else:
+            # All channels in all teams
+            teams_channels = []
+            teams = self._get_teams(access_token)
+            for team in teams:
+                channels = self._get_channels(access_token, team["id"])
+                for ch in channels:
+                    teams_channels.append((team["id"], ch["id"]))
+
+        logger.info(f"Indexing messages from {len(teams_channels)} Teams channel(s)")
+
+        for team_id, channel_id in teams_channels:
+            for msg in self._get_channel_messages(
+                access_token, team_id, channel_id, since_date
+            ):
+                # Skip system messages
+                msg_type = msg.get("messageType", "")
+                if msg_type != "message":
+                    continue
+
+                # Skip deleted messages
+                if msg.get("deletedDateTime"):
+                    continue
+
+                total_messages += 1
+                sender = msg.get("from", {}).get("user", {})
+                sender_name = sender.get("displayName", "Unknown")
+
+                # Build a readable name
+                body = msg.get("body", {}).get("content", "")
+                # Get first 50 chars of message for the name
+                preview = body[:50].replace("\n", " ").strip()
+                if len(body) > 50:
+                    preview += "..."
+
+                yield DocumentInfo(
+                    uri=f"teams://{team_id}/{channel_id}/{msg['id']}",
+                    name=f"{sender_name}: {preview}"
+                    if preview
+                    else f"{sender_name}: [message]",
+                    mime_type="text/plain",
+                    modified_time=msg.get("createdDateTime"),
+                )
+
+        logger.info(f"Found {total_messages} Teams messages to index")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a message from Teams."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read Teams message - no valid access token")
+            return None
+
+        # Extract IDs from URI (teams://team_id/channel_id/message_id)
+        if not uri.startswith("teams://"):
+            logger.error(f"Invalid Teams URI: {uri}")
+            return None
+
+        parts = uri.replace("teams://", "").split("/")
+        if len(parts) != 3:
+            logger.error(f"Invalid Teams URI format: {uri}")
+            return None
+
+        team_id, channel_id, message_id = parts
+
+        # Get the message
+        response = http_requests.get(
+            f"https://graph.microsoft.com/v1.0/teams/{team_id}/channels/{channel_id}/messages/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get Teams message: {response.text}")
+            return None
+
+        msg = response.json()
+
+        # Get sender info
+        sender = msg.get("from", {}).get("user", {})
+        sender_name = sender.get("displayName", "Unknown")
+        sender_email = sender.get("email", "")
+
+        # Get body content
+        body = msg.get("body", {})
+        body_content = body.get("content", "")
+        body_type = body.get("contentType", "text")
+
+        if body_type.lower() == "html":
+            # Strip HTML
+            try:
+                import trafilatura
+
+                body_content = trafilatura.extract(body_content) or body_content
+            except Exception:
+                import re
+
+                body_content = re.sub(r"<[^>]+>", "", body_content)
+
+        # Get replies count
+        replies_url = msg.get("replies@odata.context", "")
+
+        # Format the message
+        content = f"From: {sender_name}"
+        if sender_email:
+            content += f" <{sender_email}>"
+        content += f"\nDate: {msg.get('createdDateTime', '')}\n"
+
+        # Add subject if present (usually for channel posts)
+        subject = msg.get("subject")
+        if subject:
+            content += f"Subject: {subject}\n"
+
+        # Add mentions if any
+        mentions = msg.get("mentions", [])
+        if mentions:
+            mention_names = [
+                m.get("mentioned", {}).get("user", {}).get("displayName", "")
+                for m in mentions
+            ]
+            mention_names = [n for n in mention_names if n]
+            if mention_names:
+                content += f"Mentions: {', '.join(mention_names)}\n"
+
+        # Add attachments info if any
+        attachments = msg.get("attachments", [])
+        if attachments:
+            attachment_names = [a.get("name", "attachment") for a in attachments]
+            content += f"Attachments: {', '.join(attachment_names)}\n"
+
+        content += "\n---\n\n"
+        content += body_content
+
+        # Try to get replies
+        try:
+            replies_response = http_requests.get(
+                f"https://graph.microsoft.com/v1.0/teams/{team_id}/channels/{channel_id}/messages/{message_id}/replies",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"$top": 50},
+                timeout=30,
+            )
+
+            if replies_response.status_code == 200:
+                replies = replies_response.json().get("value", [])
+                if replies:
+                    content += f"\n\n--- Replies ({len(replies)}) ---\n"
+                    for reply in replies:
+                        reply_sender = reply.get("from", {}).get("user", {})
+                        reply_sender_name = reply_sender.get("displayName", "Unknown")
+                        reply_body = reply.get("body", {}).get("content", "")
+                        reply_type = reply.get("body", {}).get("contentType", "text")
+
+                        if reply_type.lower() == "html":
+                            try:
+                                import trafilatura
+
+                                reply_body = (
+                                    trafilatura.extract(reply_body) or reply_body
+                                )
+                            except Exception:
+                                import re
+
+                                reply_body = re.sub(r"<[^>]+>", "", reply_body)
+
+                        content += f"\n[{reply_sender_name} @ {reply.get('createdDateTime', '')}]\n"
+                        content += f"{reply_body}\n"
+        except Exception as e:
+            logger.warning(f"Failed to get replies for message: {e}")
+
+        return DocumentContent(
+            uri=uri,
+            name=f"{sender_name}: {msg.get('subject', 'Teams message')}",
+            mime_type="text/plain",
+            text=content,
+        )
+
+
+class WebSearchDocumentSource(DocumentSource):
+    """
+    Document source for scheduled web searches.
+
+    Runs a web search query, scrapes the top results, and indexes the content.
+    Useful for keeping up-to-date with news or specific topics.
+    """
+
+    def __init__(
+        self,
+        query: str,
+        max_results: int = 10,
+        pages_to_scrape: int = 5,
+        time_range: Optional[str] = None,
+        category: Optional[str] = None,
+    ):
+        """
+        Initialize with search query and settings.
+
+        Args:
+            query: Search query string (e.g., "uk latest news")
+            max_results: Maximum number of search results to fetch
+            pages_to_scrape: How many of those results to actually scrape
+            time_range: Optional time filter (day, week, month, year)
+            category: Optional search category (news, general, etc.)
+        """
+        self.query = query
+        self.max_results = max_results
+        self.pages_to_scrape = pages_to_scrape
+        self.time_range = time_range
+        self.category = category
+        self._search_results: Optional[list] = None
+        self._scraped_content: Optional[dict] = None
+
+    def is_available(self) -> bool:
+        """Check if search is available."""
+        from augmentation.search import get_configured_search_provider
+
+        provider = get_configured_search_provider()
+        return provider is not None
+
+    def _search_if_needed(self):
+        """Run the search if not already done."""
+        if self._search_results is not None:
+            return
+
+        from augmentation.search import get_configured_search_provider
+
+        provider = get_configured_search_provider()
+        if not provider:
+            logger.error("No search provider configured for web search source")
+            self._search_results = []
+            return
+
+        logger.info(
+            f"Running web search: '{self.query}' (max_results={self.max_results}, "
+            f"time_range={self.time_range}, category={self.category})"
+        )
+
+        try:
+            self._search_results = provider.search(
+                query=self.query,
+                max_results=self.max_results,
+                time_range=self.time_range,
+                category=self.category,
+            )
+            logger.info(f"Found {len(self._search_results)} search results")
+        except Exception as e:
+            logger.error(f"Web search failed: {e}")
+            self._search_results = []
+
+    def _scrape_if_needed(self):
+        """Scrape top results if not already done."""
+        if self._scraped_content is not None:
+            return
+
+        self._search_if_needed()
+        self._scraped_content = {}
+
+        if not self._search_results:
+            return
+
+        # Get scraper
+        from augmentation.scraper import WebScraper
+
+        scraper = WebScraper()
+
+        # Scrape top N results
+        urls_to_scrape = [r.url for r in self._search_results[: self.pages_to_scrape]]
+        logger.info(f"Scraping {len(urls_to_scrape)} pages from search results")
+
+        scraped = scraper.scrape_multiple(urls_to_scrape, max_urls=self.pages_to_scrape)
+
+        for result in scraped:
+            if result.success and result.content:
+                self._scraped_content[result.url] = result
+
+        logger.info(
+            f"Successfully scraped {len(self._scraped_content)}/{len(urls_to_scrape)} pages"
+        )
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List all scraped search result pages as documents."""
+        from datetime import datetime
+
+        self._scrape_if_needed()
+
+        # Use current timestamp for all results from this search run
+        # This ensures old search results get replaced on re-index
+        search_timestamp = datetime.utcnow().isoformat()
+
+        for url, result in self._scraped_content.items():
+            yield DocumentInfo(
+                uri=url,
+                name=result.title or url,
+                mime_type="text/html",
+                modified_time=search_timestamp,
+            )
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read content from a scraped search result."""
+        self._scrape_if_needed()
+
+        if uri not in self._scraped_content:
+            return None
+
+        result = self._scraped_content[uri]
+        return DocumentContent(
+            uri=uri,
+            name=result.title or uri,
+            mime_type="text/plain",
+            text=result.content,
+        )
+
+
 def get_document_source(
     source_type: str,
     source_path: Optional[str] = None,
@@ -3224,6 +5643,16 @@ def get_document_source(
     gdrive_folder_id: Optional[str] = None,
     gmail_label_id: Optional[str] = None,
     gcalendar_calendar_id: Optional[str] = None,
+    gtasks_tasklist_id: Optional[str] = None,
+    gcontacts_group_id: Optional[str] = None,
+    microsoft_account_id: Optional[int] = None,
+    onedrive_folder_id: Optional[str] = None,
+    outlook_folder_id: Optional[str] = None,
+    outlook_days_back: int = 90,
+    onenote_notebook_id: Optional[str] = None,
+    teams_team_id: Optional[str] = None,
+    teams_channel_id: Optional[str] = None,
+    teams_days_back: int = 90,
     paperless_url: Optional[str] = None,  # Deprecated - use PAPERLESS_URL env var
     paperless_token: Optional[str] = None,  # Deprecated - use PAPERLESS_TOKEN env var
     paperless_tag_id: Optional[int] = None,
@@ -3238,6 +5667,18 @@ def get_document_source(
     website_max_pages: int = 50,
     website_include_pattern: Optional[str] = None,
     website_exclude_pattern: Optional[str] = None,
+    website_crawler_override: Optional[str] = None,
+    slack_channel_id: Optional[str] = None,
+    slack_channel_types: str = "public_channel",
+    slack_days_back: int = 90,
+    todoist_project_id: Optional[str] = None,
+    todoist_filter: Optional[str] = None,
+    todoist_include_completed: bool = False,
+    websearch_query: Optional[str] = None,
+    websearch_max_results: int = 10,
+    websearch_pages_to_scrape: int = 5,
+    websearch_time_range: Optional[str] = None,
+    websearch_category: Optional[str] = None,
     vision_provider: str = "local",
     vision_model: Optional[str] = None,
     vision_ollama_url: Optional[str] = None,
@@ -3246,13 +5687,23 @@ def get_document_source(
     Factory function to create the appropriate document source.
 
     Args:
-        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar", "mcp:github", "notion", "nextcloud", "paperless", or "website"
+        source_type: "local", "mcp", "mcp:gdrive", "mcp:gmail", "mcp:gcalendar",
+            "mcp:gtasks", "mcp:gcontacts", "mcp:onedrive", "mcp:outlook",
+            "mcp:onenote", "mcp:github", "slack", "notion", "nextcloud",
+            "paperless", or "website"
         source_path: Path for local sources
         mcp_config: Configuration dict for MCP sources
         google_account_id: OAuth account ID for Google sources
         gdrive_folder_id: Optional folder ID to filter Google Drive indexing
         gmail_label_id: Optional label ID to filter Gmail indexing (e.g., "INBOX", "SENT")
         gcalendar_calendar_id: Optional calendar ID to filter Calendar indexing
+        gtasks_tasklist_id: Optional task list ID to filter Tasks indexing
+        gcontacts_group_id: Optional contact group ID to filter Contacts indexing
+        microsoft_account_id: OAuth account ID for Microsoft sources
+        onedrive_folder_id: Optional folder ID to filter OneDrive indexing
+        outlook_folder_id: Optional folder ID to filter Outlook indexing (e.g., "inbox")
+        outlook_days_back: Days of email history to index (default: 90)
+        onenote_notebook_id: Optional notebook ID to filter OneNote indexing
         paperless_url: Deprecated - credentials read from PAPERLESS_URL env var
         paperless_token: Deprecated - credentials read from PAPERLESS_TOKEN env var
         github_repo: Repository in "owner/repo" format for GitHub sources
@@ -3266,6 +5717,9 @@ def get_document_source(
         website_max_pages: Maximum number of pages to crawl
         website_include_pattern: Regex pattern - only crawl matching URLs
         website_exclude_pattern: Regex pattern - skip matching URLs
+        slack_channel_id: Optional specific Slack channel ID to index
+        slack_channel_types: Channel types to index (public_channel, private_channel)
+        slack_days_back: How many days of Slack history to fetch (max 90 for free plan)
         vision_provider: Vision model provider for Docling ("local", "ollama", etc.)
         vision_model: Vision model name (e.g., "granite3.2-vision:latest")
         vision_ollama_url: Ollama URL when using ollama provider
@@ -3348,6 +5802,23 @@ def get_document_source(
             max_pages=website_max_pages,
             include_pattern=website_include_pattern,
             exclude_pattern=website_exclude_pattern,
+            crawler_override=website_crawler_override,
+        )
+
+    elif source_type == "websearch":
+        if not websearch_query:
+            raise ValueError("websearch_query required for web search document source")
+        logger.info(
+            f"Creating Web Search source (query='{websearch_query}', "
+            f"max_results={websearch_max_results}, pages_to_scrape={websearch_pages_to_scrape}, "
+            f"time_range={websearch_time_range}, category={websearch_category})"
+        )
+        return WebSearchDocumentSource(
+            query=websearch_query,
+            max_results=websearch_max_results,
+            pages_to_scrape=websearch_pages_to_scrape,
+            time_range=websearch_time_range,
+            category=websearch_category,
         )
 
     elif source_type == "mcp:gdrive":
@@ -3395,6 +5866,131 @@ def get_document_source(
             calendar_id=gcalendar_calendar_id,
             # Default: 30 days back, 30 days forward
         )
+
+    elif source_type == "mcp:gtasks":
+        # Google Tasks - use direct API
+        if not google_account_id:
+            raise ValueError(f"google_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating Google Tasks source (account={google_account_id}, "
+            f"tasklist={gtasks_tasklist_id or '@default'})"
+        )
+        return GoogleTasksDocumentSource(
+            account_id=google_account_id,
+            tasklist_id=gtasks_tasklist_id,
+        )
+
+    elif source_type == "mcp:gcontacts":
+        # Google Contacts - use direct People API
+        if not google_account_id:
+            raise ValueError(f"google_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating Google Contacts source (account={google_account_id}, "
+            f"group={gcontacts_group_id or 'all'})"
+        )
+        return GoogleContactsDocumentSource(
+            account_id=google_account_id,
+            group_id=gcontacts_group_id,
+        )
+
+    elif source_type == "mcp:onedrive":
+        # OneDrive - use Microsoft Graph API
+        if not microsoft_account_id:
+            raise ValueError(f"microsoft_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating OneDrive source (account={microsoft_account_id}, "
+            f"folder={onedrive_folder_id or 'root'}, vision={vision_provider})"
+        )
+        return OneDriveDocumentSource(
+            account_id=microsoft_account_id,
+            folder_id=onedrive_folder_id,
+            vision_provider=vision_provider,
+            vision_model=vision_model,
+            vision_ollama_url=vision_ollama_url,
+        )
+
+    elif source_type == "mcp:outlook":
+        # Outlook Mail - use Microsoft Graph API
+        if not microsoft_account_id:
+            raise ValueError(f"microsoft_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating Outlook source (account={microsoft_account_id}, "
+            f"folder={outlook_folder_id or 'all'}, days_back={outlook_days_back})"
+        )
+        return OutlookMailDocumentSource(
+            account_id=microsoft_account_id,
+            folder_id=outlook_folder_id,
+            days_back=outlook_days_back,
+        )
+
+    elif source_type == "mcp:onenote":
+        # OneNote - use Microsoft Graph API
+        if not microsoft_account_id:
+            raise ValueError(f"microsoft_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating OneNote source (account={microsoft_account_id}, "
+            f"notebook={onenote_notebook_id or 'all'})"
+        )
+        return OneNoteDocumentSource(
+            account_id=microsoft_account_id,
+            notebook_id=onenote_notebook_id,
+        )
+
+    elif source_type == "mcp:teams":
+        # Microsoft Teams - use Microsoft Graph API
+        if not microsoft_account_id:
+            raise ValueError(f"microsoft_account_id required for {source_type} source")
+
+        logger.info(
+            f"Creating Teams source (account={microsoft_account_id}, "
+            f"team={teams_team_id or 'all'}, channel={teams_channel_id or 'all'}, "
+            f"days_back={teams_days_back})"
+        )
+        return TeamsDocumentSource(
+            account_id=microsoft_account_id,
+            team_id=teams_team_id,
+            channel_id=teams_channel_id,
+            days_back=teams_days_back,
+        )
+
+    elif source_type == "slack":
+        # Slack - use direct REST API
+        source = SlackDocumentSource(
+            channel_id=slack_channel_id,
+            channel_types=slack_channel_types,
+            days_back=slack_days_back,
+        )
+        if not source.bot_token:
+            raise ValueError(
+                "SLACK_BOT_TOKEN environment variable required for Slack source"
+            )
+        logger.info(
+            f"Creating Slack source (channel={slack_channel_id or 'all'}, "
+            f"types={slack_channel_types}, days_back={slack_days_back})"
+        )
+        return source
+
+    elif source_type == "todoist":
+        # Todoist - use direct REST API
+        source = TodoistDocumentSource(
+            project_id=todoist_project_id,
+            filter_expr=todoist_filter,
+            include_completed=todoist_include_completed,
+        )
+        if not source.api_token:
+            raise ValueError(
+                "TODOIST_API_TOKEN or TODOIST_API_KEY environment variable required for Todoist source"
+            )
+        logger.info(
+            f"Creating Todoist source (project={todoist_project_id or 'all'}, "
+            f"filter={todoist_filter or 'none'}, include_completed={todoist_include_completed})"
+        )
+        return source
 
     elif source_type == "mcp" or source_type.startswith("mcp:"):
         if not mcp_config:

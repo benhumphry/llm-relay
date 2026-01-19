@@ -9,6 +9,7 @@ Uses:
 import logging
 import re
 import tempfile
+import time
 from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
@@ -18,6 +19,12 @@ from urllib.parse import urlparse
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Simple in-memory cache for scraped content
+# Format: {url: (ScrapeResult, timestamp)}
+_scrape_cache: dict[str, tuple["ScrapeResult", float]] = {}
+SCRAPE_CACHE_TTL = 300  # 5 minutes
+SCRAPE_CACHE_MAX_SIZE = 100  # Maximum cached entries
 
 
 # Content types that Docling can handle
@@ -223,6 +230,18 @@ class WebScraper:
         Returns:
             ScrapeResult with extracted content
         """
+        # Check cache first
+        cached = self._get_cached(url)
+        if cached:
+            logger.debug(f"Cache hit for {url}")
+            return cached
+
+        result = self._do_scrape(url)
+        self._set_cached(url, result)
+        return result
+
+    def _do_scrape(self, url: str) -> ScrapeResult:
+        """Internal scrape implementation."""
         try:
             # Check if URL points to a document by extension
             parsed = urlparse(url)
@@ -639,6 +658,40 @@ class WebScraper:
                 break
 
         return "\n".join(lines)
+
+    def _get_cached(self, url: str) -> Optional[ScrapeResult]:
+        """Get cached scrape result if still valid."""
+        if url in _scrape_cache:
+            result, cached_at = _scrape_cache[url]
+            if time.time() - cached_at < SCRAPE_CACHE_TTL:
+                return result
+            # Expired, remove it
+            del _scrape_cache[url]
+        return None
+
+    def _set_cached(self, url: str, result: ScrapeResult) -> None:
+        """Cache a successful scrape result."""
+        # Only cache successful results
+        if not result.success:
+            return
+
+        # Evict old entries if cache is full
+        if len(_scrape_cache) >= SCRAPE_CACHE_MAX_SIZE:
+            # Remove oldest entries
+            now = time.time()
+            expired = [
+                u for u, (_, t) in _scrape_cache.items() if now - t > SCRAPE_CACHE_TTL
+            ]
+            for u in expired:
+                del _scrape_cache[u]
+
+            # If still full, remove oldest
+            if len(_scrape_cache) >= SCRAPE_CACHE_MAX_SIZE:
+                oldest = min(_scrape_cache.items(), key=lambda x: x[1][1])
+                del _scrape_cache[oldest[0]]
+
+        _scrape_cache[url] = (result, time.time())
+        logger.debug(f"Cached scrape result for {url}")
 
     def _extract_title(self, html: str) -> str:
         """Extract title from HTML."""

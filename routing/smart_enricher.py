@@ -48,16 +48,38 @@ class EnrichmentResult:
     designator_usage: dict | None = None
     designator_model: str | None = None
 
+    # Live data metadata
+    live_sources_queried: list[str] = field(default_factory=list)
+    live_data_errors: list[str] = field(default_factory=list)
+
     # Budget allocations (from smart source selection)
     store_budgets: dict[int, int] | None = None  # {store_id: tokens}
     store_id_to_name: dict[int, str] | None = None  # {store_id: name} for display
     web_budget: int | None = None
+    live_budget: int | None = None
     total_budget: int | None = None  # Total context budget for percentage calc
     show_sources: bool = False  # Whether to append sources to response
 
     # Memory metadata
     memory_included: bool = False
     memory_update_pending: bool = False  # Flag to trigger memory update after response
+
+    # Actions metadata
+    actions_enabled: bool = False
+    allowed_actions: list[str] = field(default_factory=list)
+    # Action-category defaults
+    action_email_account_id: int | None = None
+    action_calendar_account_id: int | None = None
+    action_calendar_id: str | None = None
+    action_tasks_account_id: int | None = None
+    action_tasks_list_id: str | None = None
+    action_notification_urls: list[str] | None = None
+    # Scheduled prompts config (for schedule:prompt action)
+    scheduled_prompts_account_id: int | None = None
+    scheduled_prompts_calendar_id: str | None = None
+
+    # Session context (for action handlers)
+    session_key: str | None = None
 
 
 class SmartEnricherEngine:
@@ -105,10 +127,31 @@ class SmartEnricherEngine:
                 return True
         return False
 
+    def _get_linked_live_sources(self) -> list:
+        """Get live data sources linked to this enricher.
+
+        If no specific sources are linked, returns ALL enabled sources.
+        """
+        if (
+            hasattr(self.enricher, "_detached_live_sources")
+            and self.enricher._detached_live_sources
+        ):
+            return self.enricher._detached_live_sources
+        if (
+            hasattr(self.enricher, "live_data_sources")
+            and self.enricher.live_data_sources
+        ):
+            return self.enricher.live_data_sources
+        # Fall back to all enabled live data sources
+        from db import get_all_live_data_sources
+
+        return [s for s in get_all_live_data_sources() if s.enabled]
+
     def enrich(
         self,
         messages: list[dict],
         system: str | None = None,
+        session_key: str | None = None,
     ) -> EnrichmentResult:
         """
         Enrich a request with document and/or web context.
@@ -116,10 +159,12 @@ class SmartEnricherEngine:
         Args:
             messages: List of message dicts
             system: Optional system prompt
+            session_key: Optional session identifier for session-scoped caching
 
         Returns:
             EnrichmentResult with augmented system/messages and metadata
         """
+        self._session_key = session_key  # Store for use in _retrieve_live_context
         from providers.registry import ResolvedModel
 
         # Resolve target model first
@@ -151,6 +196,7 @@ class SmartEnricherEngine:
                 augmented_system=system,
                 augmented_messages=messages,
                 context_injected=False,
+                session_key=session_key,
             )
 
         # Collect context from enabled sources
@@ -162,6 +208,7 @@ class SmartEnricherEngine:
             enricher_tags=self.enricher.tags,
             augmented_system=system,
             augmented_messages=messages,
+            session_key=session_key,
         )
 
         # Smart source selection - let designator choose which sources to use
@@ -171,9 +218,17 @@ class SmartEnricherEngine:
         store_budgets = None  # Token budgets per store (from smart selection)
         store_id_to_name = None  # Mapping for display
         web_budget = None  # Token budget for web search
+        search_query = None  # Pre-computed search query from unified selection
+        live_params = None  # Live data parameters from unified selection
+        selected_model = None  # Model from unified routing selection
 
         if getattr(self.enricher, "use_smart_source_selection", False):
-            selection = self._select_sources(query)
+            # Get routing config if provided (for unified designator call)
+            routing_config = getattr(self.enricher, "routing_config", None)
+
+            selection = self._select_sources(
+                query, messages=messages, routing_config=routing_config
+            )
             if selection:
                 use_rag = selection.get("use_rag", use_rag)
                 use_web = selection.get("use_web", use_web)
@@ -183,16 +238,89 @@ class SmartEnricherEngine:
                 )  # Token budgets per store
                 store_id_to_name = selection.get("store_id_to_name")  # ID -> name
                 web_budget = selection.get("web_budget")  # Token budget for web
+                search_query = selection.get(
+                    "search_query"
+                )  # Pre-computed search query
+                live_params = selection.get("live_params")  # Live data params
+                selected_model = selection.get("selected_model")  # Routed model
+
+                # If routing selected a model, update the resolved target
+                if selected_model:
+                    try:
+                        routed_resolved = self.registry._resolve_actual_model(
+                            selected_model
+                        )
+                        resolved = ResolvedModel(
+                            provider=routed_resolved.provider,
+                            model_id=routed_resolved.model_id,
+                            alias_name=self.enricher.name,
+                            alias_tags=self.enricher.tags,
+                        )
+                        result_metadata.resolved = resolved
+                        logger.info(f"Unified selection routed to: {selected_model}")
+                    except ValueError as e:
+                        logger.warning(
+                            f"Selected model '{selected_model}' not available: {e}"
+                        )
+
                 logger.info(
                     f"Smart source selection: use_rag={use_rag}, use_web={use_web}, "
-                    f"store_budgets={store_budgets or 'default'}, web_budget={web_budget or 'default'}"
+                    f"store_budgets={store_budgets or 'default'}, web_budget={web_budget or 'default'}, "
+                    f"live_params={list(live_params.keys()) if live_params else 'none'}, "
+                    f"selected_model={selected_model}"
                 )
 
-        # RAG retrieval (if enabled)
+        # Run retrievals in parallel - web is slowest so benefits most from parallelism
+        use_live_data = getattr(self.enricher, "use_live_data", False)
+
+        # Use ThreadPoolExecutor for parallel retrieval
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        futures = {}
+        rag_context, rag_metadata = None, {}
+        web_context, web_metadata = None, {}
+        live_context, live_metadata = None, {}
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Submit all tasks - web first as it's slowest
+            if use_web:
+                futures["web"] = executor.submit(
+                    self._retrieve_web_context,
+                    query,
+                    max_tokens=web_budget,
+                    search_query=search_query,
+                )
+            if use_live_data:
+                logger.info(f"Fetching live data context, live_params={live_params}")
+                futures["live"] = executor.submit(
+                    self._retrieve_live_context, query, live_params=live_params
+                )
+            if use_rag:
+                futures["rag"] = executor.submit(
+                    self._retrieve_rag_context,
+                    query,
+                    selected_store_ids=selected_stores,
+                    store_budgets=store_budgets,
+                )
+
+            # Collect results as they complete
+            for future in as_completed(futures.values()):
+                # Find which key this future belongs to
+                for key, f in futures.items():
+                    if f == future:
+                        try:
+                            if key == "rag":
+                                rag_context, rag_metadata = future.result()
+                            elif key == "web":
+                                web_context, web_metadata = future.result()
+                            elif key == "live":
+                                live_context, live_metadata = future.result()
+                        except Exception as e:
+                            logger.error(f"Error in {key} retrieval: {e}")
+                        break
+
+        # Process RAG results
         if use_rag:
-            rag_context, rag_metadata = self._retrieve_rag_context(
-                query, selected_store_ids=selected_stores, store_budgets=store_budgets
-            )
             if rag_context:
                 context_parts.append(("rag", rag_context))
             # Copy RAG metadata
@@ -203,11 +331,8 @@ class SmartEnricherEngine:
             result_metadata.embedding_model = rag_metadata.get("embedding_model")
             result_metadata.embedding_provider = rag_metadata.get("embedding_provider")
 
-        # Web search and scrape (if enabled)
+        # Process Web results
         if use_web:
-            web_context, web_metadata = self._retrieve_web_context(
-                query, max_tokens=web_budget
-            )
             if web_context:
                 context_parts.append(("web", web_context))
             # Copy web metadata
@@ -216,15 +341,45 @@ class SmartEnricherEngine:
             result_metadata.designator_usage = web_metadata.get("designator_usage")
             result_metadata.designator_model = web_metadata.get("designator_model")
 
+        # Process Live data results
+        if use_live_data:
+            if live_context:
+                context_parts.append(("live", live_context))
+
+            # Also inject any previous session live context (accumulated from prior queries)
+            # This preserves context across multiple live data requests (e.g., weather in London then Cornwall)
+            if session_key:
+                try:
+                    from live.sources import get_session_live_context
+
+                    prior_context = get_session_live_context(session_key)
+                    if prior_context and prior_context != live_context:
+                        # Only add if there's prior context different from current
+                        context_parts.append(("live_history", prior_context))
+                        logger.info(
+                            f"Injected prior session live context ({len(prior_context)} chars)"
+                        )
+                except Exception as e:
+                    logger.debug(f"Failed to get session live context: {e}")
+
+            # Copy live metadata
+            result_metadata.live_sources_queried = live_metadata.get(
+                "sources_queried", []
+            )
+            result_metadata.live_data_errors = live_metadata.get("errors", [])
+
         # Determine enrichment type based on what was actually used
         if context_parts:
             types_used = [t for t, _ in context_parts]
-            if "rag" in types_used and "web" in types_used:
+            # Determine enrichment type - combinations become "hybrid"
+            if len(types_used) > 1:
                 result_metadata.enrichment_type = "hybrid"
             elif "rag" in types_used:
                 result_metadata.enrichment_type = "rag"
             elif "web" in types_used:
                 result_metadata.enrichment_type = "web"
+            elif "live" in types_used:
+                result_metadata.enrichment_type = "live"
 
             # Merge context
             merged_context = self._merge_context(context_parts)
@@ -269,29 +424,192 @@ class SmartEnricherEngine:
             # This allows building initial memory even when starting from empty
             result_metadata.memory_update_pending = True
 
+        # Handle actions if enabled - inject action instructions into system prompt
+        use_actions = getattr(self.enricher, "use_actions", False)
+        allowed_actions = getattr(self.enricher, "allowed_actions", [])
+        logger.info(
+            f"Enricher '{self.enricher.name}': Actions check - use_actions={use_actions}, allowed_actions={allowed_actions}"
+        )
+        if use_actions:
+            if allowed_actions:
+                try:
+                    from actions import get_system_prompt_for_actions
+
+                    action_instructions = get_system_prompt_for_actions(allowed_actions)
+                    logger.info(
+                        f"Enricher '{self.enricher.name}': Action instructions length={len(action_instructions) if action_instructions else 0}"
+                    )
+                    if action_instructions:
+                        current_system = result_metadata.augmented_system or ""
+                        result_metadata.augmented_system = (
+                            current_system + action_instructions
+                        )
+                        result_metadata.actions_enabled = True
+                        result_metadata.allowed_actions = allowed_actions
+                        # Pass default account IDs for action execution
+                        result_metadata.action_email_account_id = getattr(
+                            self.enricher, "action_email_account_id", None
+                        )
+                        result_metadata.action_calendar_account_id = getattr(
+                            self.enricher, "action_calendar_account_id", None
+                        )
+                        result_metadata.action_calendar_id = getattr(
+                            self.enricher, "action_calendar_id", None
+                        )
+                        result_metadata.action_tasks_account_id = getattr(
+                            self.enricher, "action_tasks_account_id", None
+                        )
+                        result_metadata.action_tasks_list_id = getattr(
+                            self.enricher, "action_tasks_list_id", None
+                        )
+                        result_metadata.action_notification_urls = getattr(
+                            self.enricher, "action_notification_urls", None
+                        )
+                        # Scheduled prompts config (for schedule:prompt action)
+                        result_metadata.scheduled_prompts_account_id = getattr(
+                            self.enricher, "scheduled_prompts_account_id", None
+                        )
+                        result_metadata.scheduled_prompts_calendar_id = getattr(
+                            self.enricher, "scheduled_prompts_calendar_id", None
+                        )
+                        logger.info(
+                            f"Enricher '{self.enricher.name}': Injected action instructions ({len(action_instructions)} chars)"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to inject action instructions: {e}")
+
         return result_metadata
 
     def _get_query(self, messages: list[dict], max_chars: int = 2000) -> str:
-        """Extract the user's query from messages."""
+        """
+        Extract the user's query from messages.
+
+        For short queries (< 50 chars) that might be follow-ups like "Yes", "No", "Do it",
+        include preceding context so the designator understands what the user is responding to.
+        """
+        # Find the last user message
+        last_user_content = ""
         for msg in reversed(messages):
             if msg.get("role") == "user":
                 content = msg.get("content", "")
                 if isinstance(content, str):
-                    return content[:max_chars]
+                    last_user_content = content
                 elif isinstance(content, list):
                     texts = []
                     for block in content:
                         if isinstance(block, dict) and block.get("type") == "text":
                             texts.append(block.get("text", ""))
-                    return " ".join(texts)[:max_chars]
-        return ""
+                    last_user_content = " ".join(texts)
+                break
 
-    def _select_sources(self, query: str) -> dict | None:
+        if not last_user_content:
+            return ""
+
+        # For short follow-up queries, include conversation context
+        if len(last_user_content) < 50 and len(messages) > 1:
+            # Build context from recent messages (last assistant message + user query)
+            context_parts = []
+            for msg in messages[-4:]:  # Last 4 messages for context
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    content = " ".join(
+                        block.get("text", "")
+                        for block in content
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                if content and role in ("user", "assistant"):
+                    # Truncate long messages
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    context_parts.append(f"{role.upper()}: {content}")
+
+            if context_parts:
+                context = "\n".join(context_parts)
+                return context[:max_chars]
+
+        return last_user_content[:max_chars]
+
+    def _get_preview_samples(
+        self, query: str, store_info: list[dict], chunks_per_store: int = 5
+    ) -> dict[int, list[str]]:
         """
-        Use the designator model to select which sources to use for a query.
+        Retrieve preview samples from each store for two-pass retrieval.
+
+        Args:
+            query: The user's query
+            store_info: List of store info dicts with 'id' and 'name'
+            chunks_per_store: Number of chunks to retrieve per store
 
         Returns:
-            Dict with 'use_rag', 'use_web', and 'store_ids' keys, or None if selection fails
+            Dict mapping store_id to list of chunk text samples
+        """
+        samples = {}
+        linked_stores = self._get_linked_stores()
+
+        try:
+            from rag import get_retriever
+
+            retriever = get_retriever()
+
+            # Query each store individually to get samples
+            for info in store_info:
+                store_id = info["id"]
+                # Find the store object
+                store = next(
+                    (s for s in linked_stores if getattr(s, "id", None) == store_id),
+                    None,
+                )
+                if not store:
+                    continue
+
+                try:
+                    result = retriever.retrieve_from_stores(
+                        stores=[store],
+                        query=query,
+                        max_results=chunks_per_store,
+                        similarity_threshold=0.3,  # Lower threshold for preview
+                        rerank_provider="none",  # Skip reranking for speed
+                    )
+
+                    if result.chunks:
+                        # Extract just the text, truncated
+                        samples[store_id] = [
+                            chunk.text[:300] + "..."
+                            if len(chunk.text) > 300
+                            else chunk.text
+                            for chunk in result.chunks[:chunks_per_store]
+                        ]
+                except Exception as e:
+                    logger.warning(f"Failed to get preview from store {store_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Two-pass preview retrieval failed: {e}")
+
+        return samples
+
+    def _select_sources(
+        self,
+        query: str,
+        messages: list[dict] | None = None,
+        routing_config: dict | None = None,
+    ) -> dict | None:
+        """
+        Use the designator model to select sources and allocate budget in a single call.
+
+        Handles RAG stores, web search, live data sources, AND model routing together.
+
+        Args:
+            query: The user's query text
+            messages: Full message list (needed for model routing context)
+            routing_config: If provided, also select model. Dict with:
+                - candidates: List of candidate model dicts
+                - purpose: Router purpose description
+                - token_count: Estimated request tokens
+                - has_images: Whether request contains images
+
+        Returns:
+            Dict with budget allocations, live data parameters, and optionally selected_model
         """
         if not self.enricher.designator_model:
             logger.warning(
@@ -299,7 +617,7 @@ class SmartEnricherEngine:
             )
             return None
 
-        # Build list of available sources with descriptions and intelligence
+        # Build list of available RAG stores
         linked_stores = self._get_linked_stores()
         store_info = []
         for store in linked_stores:
@@ -312,7 +630,6 @@ class SmartEnricherEngine:
                     getattr(store, "description", None)
                     or f"Document store: {store_name}"
                 )
-                # Get intelligence fields if available
                 themes = getattr(store, "themes", None) or []
                 best_for = getattr(store, "best_for", None)
                 content_summary = getattr(store, "content_summary", None)
@@ -328,65 +645,277 @@ class SmartEnricherEngine:
                     }
                 )
 
-        if not store_info and not self.enricher.use_web:
-            logger.debug("No ready stores and web disabled - nothing to select from")
+        # Build list of available live data sources
+        linked_live_sources = self._get_linked_live_sources()
+        live_source_info = []
+        mcp_tool_info = []  # Separate list for MCP tools
+        use_live_data = getattr(self.enricher, "use_live_data", False)
+        if use_live_data:
+            for source in linked_live_sources:
+                if not getattr(source, "enabled", True):
+                    continue
+                name = getattr(source, "name", "")
+                source_type = getattr(source, "source_type", "")
+                data_type = getattr(source, "data_type", "")
+                best_for = getattr(source, "best_for", "")
+                description = getattr(source, "description", "")
+
+                # MCP sources provide their own tool descriptions
+                if source_type == "mcp_server":
+                    from live.sources import MCPProvider
+
+                    try:
+                        provider = MCPProvider(source)
+                        if provider.is_available():
+                            tools = provider.list_tools()
+                            for tool in tools:
+                                tool_name = tool.get("name", "")
+                                tool_desc = tool.get("description", "No description")
+                                if len(tool_desc) > 150:
+                                    tool_desc = tool_desc[:147] + "..."
+                                schema = tool.get("inputSchema", {})
+                                required = schema.get("required", [])
+                                properties = schema.get("properties", {})
+
+                                # Build param hints from schema
+                                param_parts = []
+                                for param_name in required:
+                                    prop = properties.get(param_name, {})
+                                    param_type = prop.get("type", "string")
+                                    param_parts.append(f"{param_name} ({param_type})")
+
+                                mcp_tool_info.append(
+                                    {
+                                        "source_name": name,
+                                        "tool_name": tool_name,
+                                        "description": tool_desc,
+                                        "params": param_parts,
+                                    }
+                                )
+                    except Exception as e:
+                        logger.warning(f"Failed to get MCP tools from {name}: {e}")
+                    continue
+
+                # Parameter hints based on source type (non-MCP)
+                param_hints = ""
+                if source_type == "builtin_weather":
+                    param_hints = (
+                        "Parameters: location (city name), type (current|forecast)"
+                    )
+                elif source_type == "builtin_stocks":
+                    param_hints = "Parameters: symbol (US stock ticker like AAPL, MSFT, NVDA). For portfolio queries, extract ALL stock symbols from user context and create separate entries for each."
+                elif source_type == "builtin_alpha_vantage":
+                    param_hints = "Parameters: symbol (UK stock ticker like LGEN.LON, TSCO.LON, or fund name like 'L&G Global Technology'), period (optional: 1W, 1M, 3M, 6M, 1Y for historical data)"
+                elif source_type == "builtin_transport":
+                    param_hints = "Parameters: station (DEPARTURE station - use user's home location from context), destination (optional), type (departures|arrivals)"
+                elif source_type == "gmail":
+                    param_hints = "Parameters: action (today|unread|recent|search). Use action='today' for today's emails, action='unread' for unread, action='search' with query for specific searches (e.g. from:sender subject:topic)"
+
+                live_source_info.append(
+                    {
+                        "name": name,
+                        "source_type": source_type,
+                        "data_type": data_type,
+                        "best_for": best_for,
+                        "description": description,
+                        "param_hints": param_hints,
+                    }
+                )
+
+        # Check if we have anything to select from
+        has_rag = bool(store_info)
+        has_web = self.enricher.use_web
+        has_live = bool(live_source_info)
+        has_mcp = bool(mcp_tool_info)
+
+        if has_live:
+            logger.info(
+                f"Live sources for designator: {[s['name'] + ' [' + s.get('param_hints', '') + ']' for s in live_source_info]}"
+            )
+        if has_mcp:
+            logger.info(
+                f"MCP tools for designator: {len(mcp_tool_info)} tools from {set(t['source_name'] for t in mcp_tool_info)}"
+            )
+
+        if not has_rag and not has_web and not has_live and not has_mcp:
+            logger.debug("No sources available for selection")
             return None
 
-        # Build the prompt for the designator
+        # Two-pass retrieval: get preview samples from each store first
+        preview_samples = {}
+        use_two_pass = getattr(self.enricher, "use_two_pass_retrieval", False)
+        if use_two_pass and store_info:
+            logger.info("Two-pass retrieval: fetching preview samples from each store")
+            preview_samples = self._get_preview_samples(
+                query, store_info, chunks_per_store=5
+            )
+
+        # Try cache lookup for live data params first
+        cached_live_params = {}
+        if has_live:
+            cached_live_params = self._try_cached_params(query, linked_live_sources)
+
+        # Build the prompt sections
         sources_text = ""
+
+        # RAG stores section
         if store_info:
-            sources_text = "DOCUMENT STORES:\n"
+            sources_text += "DOCUMENT STORES (indexed content for semantic search):\n"
             for s in store_info:
-                sources_text += f"- ID: {s['id']}, Name: {s['name']}\n"
+                sources_text += f"- store_{s['id']}: {s['name']}\n"
                 sources_text += f"  Description: {s['description']}\n"
-                # Add intelligence info if available
                 if s.get("themes"):
                     sources_text += f"  Themes: {', '.join(s['themes'])}\n"
                 if s.get("best_for"):
                     sources_text += f"  Best for: {s['best_for']}\n"
                 if s.get("content_summary"):
                     sources_text += f"  Content: {s['content_summary']}\n"
+                store_samples = preview_samples.get(s["id"], [])
+                if store_samples:
+                    sources_text += f"  SAMPLE CONTENT ({len(store_samples)} chunks):\n"
+                    for i, sample in enumerate(store_samples, 1):
+                        sample_text = sample.replace("\n", " ")[:250]
+                        sources_text += f"    [{i}] {sample_text}\n"
+            sources_text += "\n"
 
-        web_available = (
-            "Web search is AVAILABLE."
-            if self.enricher.use_web
-            else "Web search is NOT available."
-        )
+        # Web search section
+        if has_web:
+            sources_text += "WEB SEARCH (real-time internet search and scraping):\n"
+            sources_text += "- web: Search the internet for current information\n"
+            sources_text += "  Best for: Current events, news, recent information not in document stores\n\n"
 
-        # Get total context budget
+        # Live data sources section (builtin providers)
+        if live_source_info:
+            sources_text += "LIVE DATA SOURCES (real-time API queries):\n"
+            sources_text += "(Use the source NAME in live_params, e.g., 'weather', 'stocks', 'transport')\n"
+            for s in live_source_info:
+                sources_text += f"- {s['name']}"
+                if s.get("data_type"):
+                    sources_text += f" [{s['data_type']}]"
+                sources_text += "\n"
+                if s.get("description"):
+                    sources_text += f"  Description: {s['description']}\n"
+                if s.get("best_for"):
+                    sources_text += f"  Best for: {s['best_for']}\n"
+                if s.get("param_hints"):
+                    sources_text += f"  {s['param_hints']}\n"
+            sources_text += "\n"
+
+        # MCP API tools section (from MCP servers like RapidAPI)
+        if mcp_tool_info:
+            # Group tools by source
+            mcp_by_source: dict[str, list] = {}
+            for tool in mcp_tool_info:
+                src = tool["source_name"]
+                if src not in mcp_by_source:
+                    mcp_by_source[src] = []
+                mcp_by_source[src].append(tool)
+
+            sources_text += "MCP API TOOLS (call specific API endpoints):\n"
+            sources_text += (
+                '(Use source_name in live_params with "tool_name" and "tool_args")\n'
+            )
+            for src_name, tools in mcp_by_source.items():
+                sources_text += f"\n{src_name} API:\n"
+                for tool in tools[:10]:  # Limit to 10 tools per source
+                    sources_text += f"  - {tool['tool_name']}: {tool['description']}\n"
+                    if tool.get("params"):
+                        sources_text += f"    Required: {', '.join(tool['params'])}\n"
+                if len(tools) > 10:
+                    sources_text += f"  ... and {len(tools) - 10} more tools\n"
+            sources_text += "\n"
+
+        # Get total context budget - designator allocates the full budget
         max_context = getattr(self.enricher, "max_context_tokens", 4000)
+        priority_budget = max_context  # Full budget for designator to allocate
 
-        # Split budget: 50% for priority allocation, 50% baseline for all sources
-        priority_budget = max_context // 2
-        num_sources = len(store_info) + (1 if self.enricher.use_web else 0)
-        baseline_per_source = (max_context - priority_budget) // max(num_sources, 1)
+        # Build routing section if routing is enabled
+        routing_text = ""
+        routing_instructions = ""
+        routing_json_field = ""
+        routing_rules = ""
+        if routing_config and routing_config.get("candidates"):
+            candidates = routing_config["candidates"]
+            purpose = routing_config.get("purpose", "General purpose routing")
+            token_count = routing_config.get("token_count", 0)
+            has_images = routing_config.get("has_images", False)
 
-        prompt = f"""You are a source selection assistant. Allocate a PRIORITY context token budget across sources most relevant to the user's query.
+            routing_text = "MODEL ROUTING:\n"
+            routing_text += f"Purpose: {purpose}\n"
+            routing_text += f"Request: ~{token_count} tokens, images={'yes' if has_images else 'no'}\n"
+            routing_text += "Available models:\n"
+            for c in candidates:
+                model = c.get("model", "")
+                ctx = c.get("context_length", 0)
+                caps = ", ".join(c.get("capabilities", [])) or "general"
+                notes = c.get("notes", "")
+                routing_text += f"- {model} (context: {ctx}, caps: {caps})"
+                if notes:
+                    routing_text += f"\n  {notes[:200]}"
+                routing_text += "\n"
+            routing_text += "\n"
 
-PRIORITY BUDGET TO ALLOCATE: {priority_budget} tokens (50% of total)
-Note: All sources will receive a baseline of {baseline_per_source} tokens each regardless of your allocation. Your allocation adds EXTRA budget to prioritized sources.
+            routing_instructions = "\n4. Select the best model for this request"
+            routing_json_field = ',\n  "selected_model": "provider/model-id"'
+            routing_rules = (
+                '\n- "selected_model": The best model from the list for this query'
+            )
 
-{sources_text}
-{web_available}
+        # Get user context: intelligence (static) and memory (learned)
+        # Note: purpose describes the alias role, not user info, so we don't include it here
+        intelligence = getattr(self.enricher, "intelligence", "") or ""
+        memory = getattr(self.enricher, "memory", "") or ""
 
+        user_context_section = ""
+        user_context_parts = []
+        if intelligence:
+            user_context_parts.append(f"User Profile:\n{intelligence}")
+        if memory:
+            user_context_parts.append(f"Learned Information:\n{memory}")
+
+        if user_context_parts:
+            user_context_section = f"""USER CONTEXT:
+{chr(10).join(user_context_parts)}
+
+"""
+
+        prompt = f"""You are a source selection assistant. Analyze the query and:
+1. Allocate token budget to document stores and web search based on relevance
+2. If web search is relevant, generate an optimized search query
+3. For any relevant live data sources, extract the specific parameters needed{routing_instructions}
+
+TOTAL BUDGET: {priority_budget} tokens to distribute across document stores and web search.
+Sources only get tokens you explicitly allocate - there is no baseline. Allocate 0 to irrelevant sources.
+
+{user_context_section}{routing_text}{sources_text}
 USER QUERY:
 {query}
 
-Respond with a JSON object allocating the PRIORITY budget to the most relevant sources:
-- "allocations": object mapping source to EXTRA token budget, e.g. {{"store_1": 1500, "web": 500}}
-- Use store IDs as keys (e.g. "store_5" for store ID 5)
-- Use "web" as the key for web search budget
-- Allocations should sum to at most {priority_budget} tokens
-- Only include sources that are particularly relevant - others will still get baseline tokens
+Respond with a JSON object:
+{{
+  "allocations": {{"store_ID": extra_tokens, "web": extra_tokens}},
+  "search_query": "optimized web search query if web is used",
+  "live_params": {{"source_name": [{{"param": "value"}}]}}{routing_json_field}
+}}
 
-Guidelines:
-- Use the themes, best_for, and content fields to match stores to the query topic
-- Allocate more tokens to sources most likely to have relevant information
-- Use document stores for internal/archived content matching their descriptions
-- Use web search for current events, recent news, or information unlikely to be in document stores
-- Focus priority budget on 1-3 most relevant sources
+Rules:
+- "allocations": Distribute the FULL {priority_budget} token budget across relevant stores/web based on relevance. Aim to use most or all of the budget. Give more tokens to highly relevant sources, fewer to less relevant ones.
+- "search_query": If allocating to web, provide an optimized 3-8 word search query. Omit if not using web.
+- "live_params": Array of parameter objects per source. Use multiple entries for multiple queries (e.g., multiple stock symbols, multi-leg journeys, multiple cities).
+  Examples for builtin sources:
+  - Single stock: {{"stocks": [{{"symbol": "AAPL"}}]}}
+  - Multiple stocks (portfolio): {{"stocks": [{{"symbol": "NVDA"}}, {{"symbol": "U"}}, {{"symbol": "AAPL"}}]}}
+  - Multi-city weather: {{"weather": [{{"location": "London"}}, {{"location": "Paris"}}]}}
+  - Multi-leg train journey: {{"transport": [{{"station": "KGX"}}, {{"station": "EDB"}}]}}
+  Examples for MCP API tools:
+  - MCP tool call: {{"rapidapi-news": [{{"tool_name": "search", "tool_args": {{"query": "technology"}}}}]}}
+  - Multiple MCP calls: {{"rapidapi-finance": [{{"tool_name": "getQuote", "tool_args": {{"symbol": "AAPL"}}}}, {{"tool_name": "getQuote", "tool_args": {{"symbol": "MSFT"}}}}]}}
+  - Multi-step lookup (when API requires ID lookup first): {{"rapidapi-weather": [{{"agentic": true, "goal": "get weather for Paris"}}]}}
+- If no live data needed, use empty object: "live_params": {{}}{routing_rules}
+- Live data sources provide real-time API data. PREFER live data sources over web search when a matching source exists (e.g., use MCP tools for news queries, stocks for stock prices, weather for weather)
+- TIP: It's better to allocate the full budget across multiple sources than to leave budget unused
 
-Respond with ONLY the JSON object, no other text."""
+Respond with ONLY the JSON object."""
 
         try:
             designator_resolved = self.registry._resolve_actual_model(
@@ -398,22 +927,28 @@ Respond with ONLY the JSON object, no other text."""
                 model=designator_resolved.model_id,
                 messages=[{"role": "user", "content": prompt}],
                 system=None,
-                options={"max_tokens": 300, "temperature": 0},
+                options={"max_tokens": 800, "temperature": 0},
             )
 
             response_text = result.get("content", "").strip()
 
-            # Parse JSON response
+            logger.debug(f"Designator prompt:\n{prompt}")
+            logger.info(f"Designator response: {response_text}")
+
+            # Parse JSON response - handle nested objects
             import json
             import re
 
-            # Try to extract JSON from the response
-            json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
+            # Find the outermost JSON object
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
             if json_match:
                 selection = json.loads(json_match.group())
-                allocations = selection.get("allocations", selection)
+                allocations = selection.get("allocations", {})
+                search_query = selection.get("search_query")
+                live_params = selection.get("live_params", {})
+                selected_model = selection.get("selected_model")
 
-                # Parse priority allocations from designator
+                # Parse priority allocations for stores
                 valid_store_ids = {s["id"] for s in store_info}
                 priority_budgets = {}
                 web_priority = 0
@@ -424,7 +959,7 @@ Respond with ONLY the JSON object, no other text."""
                     budget = int(budget)
 
                     if key == "web":
-                        web_priority = budget if self.enricher.use_web else 0
+                        web_priority = budget if has_web else 0
                     elif key.startswith("store_"):
                         try:
                             store_id = int(key.replace("store_", ""))
@@ -433,7 +968,6 @@ Respond with ONLY the JSON object, no other text."""
                         except ValueError:
                             pass
                     else:
-                        # Try parsing as plain store ID
                         try:
                             store_id = int(key)
                             if store_id in valid_store_ids:
@@ -441,30 +975,92 @@ Respond with ONLY the JSON object, no other text."""
                         except ValueError:
                             pass
 
-                # Build final budgets: baseline + priority for ALL stores
+                # Build final store budgets - only include stores with allocation > 0
                 store_budgets = {}
                 for store_id in valid_store_ids:
-                    store_budgets[store_id] = (
-                        baseline_per_source + priority_budgets.get(store_id, 0)
-                    )
+                    budget = priority_budgets.get(store_id, 0)
+                    if budget > 0:
+                        store_budgets[store_id] = budget
 
-                # Web budget: baseline + priority (if web is enabled)
-                web_budget = 0
-                if self.enricher.use_web:
-                    web_budget = baseline_per_source + web_priority
+                # Web budget
+                web_budget = web_priority if has_web else 0
 
-                # Always use RAG if we have stores (they all get baseline)
+                # Process live params - merge with cache and validate
+                # New format: {"source_name": [{"param": "value"}, ...]} (array)
+                # Legacy format: {"source_name": {"param": "value"}} (single dict)
+                # Include both builtin sources and MCP sources
+                valid_live_names = {s["name"] for s in live_source_info}
+                valid_live_names.update({t["source_name"] for t in mcp_tool_info})
+                final_live_params = {}
+
+                logger.debug(
+                    f"Designator live_params raw: {live_params}, valid_names: {valid_live_names}"
+                )
+
+                for name, params_data in live_params.items():
+                    if name not in valid_live_names:
+                        continue
+
+                    # Normalize to list format
+                    if isinstance(params_data, list):
+                        params_list = params_data
+                    elif isinstance(params_data, dict):
+                        # Legacy single dict format
+                        params_list = [params_data]
+                    else:
+                        continue
+
+                    # Process each param set in the array
+                    processed_params = []
+                    for params in params_list:
+                        if not isinstance(params, dict):
+                            continue
+                        # Merge with cached params if available
+                        if name in cached_live_params:
+                            merged = cached_live_params[name].copy()
+                            for k, v in params.items():
+                                if k not in merged:
+                                    merged[k] = v
+                            params = merged
+                        else:
+                            # Only set query as fallback if designator didn't provide one
+                            # Don't overwrite designator-extracted queries (e.g., Gmail search syntax)
+                            if (
+                                "query" not in params
+                                and "action" not in params
+                                and "tool_name" not in params
+                            ):
+                                params["query"] = query
+                            # Cache for future use (only cache first param set)
+                            if not processed_params:
+                                self._cache_extracted_params(
+                                    name, params, linked_live_sources
+                                )
+                        processed_params.append(params)
+
+                    if processed_params:
+                        final_live_params[name] = processed_params
+
                 use_rag = bool(store_budgets)
                 use_web = web_budget > 0
-                # Return ALL store IDs since they all get queried now
                 store_ids = list(store_budgets.keys()) if store_budgets else None
-
-                # Build store_id -> name mapping for display
                 store_id_to_name = {s["id"]: s["name"] for s in store_info}
 
+                # Validate selected_model if routing was requested
+                if routing_config and selected_model:
+                    valid_models = [
+                        c.get("model") for c in routing_config.get("candidates", [])
+                    ]
+                    if selected_model not in valid_models:
+                        logger.warning(
+                            f"Designator returned invalid model '{selected_model}', ignoring"
+                        )
+                        selected_model = None
+
                 logger.info(
-                    f"Source selection: priority={priority_budgets}, baseline={baseline_per_source}/source, "
-                    f"final budgets: stores={store_budgets}, web={web_budget}"
+                    f"Unified source selection: stores={store_budgets}, web={web_budget}, "
+                    f"search_query={search_query}, live_params={list(final_live_params.keys())}, "
+                    f"selected_model={selected_model}"
                 )
 
                 return {
@@ -474,6 +1070,9 @@ Respond with ONLY the JSON object, no other text."""
                     "store_budgets": store_budgets if store_budgets else None,
                     "store_id_to_name": store_id_to_name,
                     "web_budget": web_budget if web_budget > 0 else None,
+                    "search_query": search_query,
+                    "live_params": final_live_params if final_live_params else None,
+                    "selected_model": selected_model,
                 }
 
             logger.warning(
@@ -571,7 +1170,10 @@ Respond with ONLY the JSON object, no other text."""
             metadata["sources"] = list(
                 set(chunk.source_file for chunk in result.chunks)
             )
-            metadata["stores_queried"] = result.stores_queried or []
+            # Get stores that actually contributed chunks (not just queried)
+            metadata["stores_queried"] = list(
+                set(chunk.store_name for chunk in result.chunks if chunk.store_name)
+            )
             metadata["embedding_usage"] = result.embedding_usage
             metadata["embedding_model"] = result.embedding_model
             metadata["embedding_provider"] = result.embedding_provider
@@ -583,14 +1185,16 @@ Respond with ONLY the JSON object, no other text."""
             return "", metadata
 
     def _retrieve_web_context(
-        self, query: str, max_tokens: int | None = None
+        self, query: str, max_tokens: int | None = None, search_query: str | None = None
     ) -> tuple[str, dict]:
         """
         Retrieve context from web search and scraping.
 
         Args:
             query: The user's query
-            max_tokens: If provided, override the default token budget for web context
+            max_tokens: If provided, override the default token budget for web context.
+                       When from smart source selection, this determines dynamic search/scrape limits.
+            search_query: If provided, use this pre-computed search query (from unified selection)
 
         Returns:
             Tuple of (context string, metadata dict)
@@ -602,21 +1206,23 @@ Respond with ONLY the JSON object, no other text."""
             "designator_model": None,
         }
 
-        # Generate optimized search query using designator model (if configured)
-        search_query = query
-        if self.enricher.designator_model:
+        # Use pre-computed search query if provided, otherwise generate one
+        if search_query:
+            # Search query already computed by unified _select_sources
+            pass
+        elif self.enricher.designator_model:
+            # Fallback: generate optimized search query (non-smart-selection path)
             optimized_query, designator_usage = self._call_designator(query)
             if optimized_query:
                 search_query = optimized_query
+            else:
+                search_query = query
             metadata["designator_usage"] = designator_usage
             metadata["designator_model"] = self.enricher.designator_model
+        else:
+            search_query = query
 
         metadata["search_query"] = search_query
-
-        # Execute web search
-        search_results, urls_with_context = self._execute_search(search_query)
-        if not search_results:
-            return "", metadata
 
         # Calculate max tokens for web context
         if max_tokens is None:
@@ -632,18 +1238,515 @@ Respond with ONLY the JSON object, no other text."""
             else:
                 max_tokens = self.enricher.max_context_tokens
 
+        # Calculate dynamic search/scrape limits based on token budget
+        # When designator allocates tokens, scale search results and scrape URLs accordingly
+        # Default values from enricher config serve as maximums
+        default_max_results = self.enricher.max_search_results
+        default_max_scrape = self.enricher.max_scrape_urls
+        total_context = self.enricher.max_context_tokens
+
+        if max_tokens and total_context > 0:
+            # Scale based on token allocation ratio
+            # Higher allocation = more search results and URLs to scrape
+            ratio = max_tokens / total_context
+
+            # At full budget: use configured maximums
+            # At low budget: reduce proportionally (minimum 1 result, 1 URL)
+            # Use a curve that gives reasonable results at lower allocations
+            dynamic_max_results = max(1, int(default_max_results * min(1.0, ratio * 2)))
+            dynamic_max_scrape = max(1, int(default_max_scrape * min(1.0, ratio * 2)))
+
+            logger.debug(
+                f"Dynamic web limits: {max_tokens}/{total_context} tokens = "
+                f"{dynamic_max_results} results (max {default_max_results}), "
+                f"{dynamic_max_scrape} URLs (max {default_max_scrape})"
+            )
+        else:
+            # No token budget specified - use defaults
+            dynamic_max_results = default_max_results
+            dynamic_max_scrape = default_max_scrape
+
+        # Execute web search with dynamic limit
+        search_results, urls_with_context = self._execute_search(
+            search_query, max_results=dynamic_max_results
+        )
+        if not search_results:
+            return "", metadata
+
         context_parts = [search_results]
 
-        # Rerank and scrape URLs
+        # Rerank and scrape URLs with dynamic limit
         if urls_with_context:
             urls = self._rerank_urls(search_query, urls_with_context)
             if urls:
-                scrape_results, scraped_urls = self._execute_scrape(urls, max_tokens)
+                scrape_results, scraped_urls = self._execute_scrape(
+                    urls, max_tokens, max_urls=dynamic_max_scrape
+                )
                 if scrape_results:
                     context_parts.append(scrape_results)
                     metadata["scraped_urls"] = scraped_urls
 
         return "\n\n".join(context_parts), metadata
+
+    def _retrieve_live_context(
+        self, query: str, live_params: dict[str, dict] | None = None
+    ) -> tuple[str, dict]:
+        """
+        Retrieve context from live data sources.
+
+        Args:
+            query: The user's query
+            live_params: If provided, pre-computed parameters from unified selection.
+                        Dict mapping source name to params dict.
+
+        Returns:
+            Tuple of (context string, metadata dict)
+        """
+        metadata = {
+            "sources_queried": [],
+            "errors": [],
+            "params_extracted": {},
+        }
+
+        linked_sources = self._get_linked_live_sources()
+        if not linked_sources:
+            logger.debug(
+                f"Enricher '{self.enricher.name}': No live data sources linked"
+            )
+            return "", metadata
+
+        # Filter to enabled sources only
+        enabled_sources = [s for s in linked_sources if getattr(s, "enabled", True)]
+        if not enabled_sources:
+            logger.debug(
+                f"Enricher '{self.enricher.name}': No enabled live data sources"
+            )
+            return "", metadata
+
+        # Use pre-computed params if provided, otherwise query all sources
+        # live_params format: {"source_name": [{"param": "value"}, ...]} (array of param sets)
+        if live_params:
+            source_params = live_params
+            metadata["params_extracted"] = source_params
+            # Only query sources that have params (deemed relevant by designator)
+            # Each source can have multiple param sets (array) for multiple queries
+            sources_to_query = []
+            for source in enabled_sources:
+                source_name = getattr(source, "name", "")
+                if source_name in source_params:
+                    params_list = source_params[source_name]
+                    # Handle both array format (new) and single dict format (legacy)
+                    if isinstance(params_list, list):
+                        # For stocks with multiple symbols, consolidate into a portfolio fetch
+                        # This ensures funds in user memory are also fetched via web fallback
+                        if source_name == "stocks" and len(params_list) > 1:
+                            # Multiple stock symbols = portfolio query
+                            # Use a single portfolio fetch instead of individual queries
+                            sources_to_query.append(
+                                (source, {"_portfolio_fetch": True, "query": query})
+                            )
+                        else:
+                            for params in params_list:
+                                sources_to_query.append((source, params))
+                    elif isinstance(params_list, dict):
+                        # Legacy single dict format
+                        sources_to_query.append((source, params_list))
+        else:
+            # No smart selection params - don't query any live sources
+            # The designator should explicitly select relevant sources via live_params
+            # Querying all sources with raw query leads to spurious API calls
+            # (e.g., weather API called with "what size strap does watch use?" as location)
+            sources_to_query = []
+
+        if not sources_to_query:
+            logger.debug(
+                f"Enricher '{self.enricher.name}': Designator found no relevant live sources"
+            )
+            return "", metadata
+
+        try:
+            from live import get_provider_for_source
+
+            # Add user context to params for placeholder resolution
+            user_intelligence = getattr(self.enricher, "intelligence", "") or ""
+            user_purpose = getattr(self.enricher, "purpose", "") or ""
+            user_memory = getattr(self.enricher, "memory", "") or ""
+
+            context_parts = []
+            sources_already_logged = set()  # Track which sources we've logged
+
+            for source, params in sources_to_query:
+                source_name = getattr(source, "name", "")
+                # Only add to sources_queried once per source (not per query)
+                if source_name not in sources_already_logged:
+                    metadata["sources_queried"].append(source_name)
+                    sources_already_logged.add(source_name)
+
+                try:
+                    provider = get_provider_for_source(source)
+                    if not provider.is_available():
+                        metadata["errors"].append(f"{source_name}: Not available")
+                        continue
+
+                    # Pass structured params as context, including user context for placeholder resolution
+                    enriched_params = dict(params)
+                    if user_intelligence:
+                        enriched_params["user_intelligence"] = user_intelligence
+                    if user_purpose:
+                        enriched_params["purpose"] = user_purpose
+                    if user_memory:
+                        enriched_params["user_memory"] = user_memory
+                    # Pass designator model for MCP agentic fallback
+                    if self.enricher.designator_model:
+                        enriched_params["designator_model"] = (
+                            self.enricher.designator_model
+                        )
+                    # Pass session key for session-scoped caching (e.g., Gmail)
+                    if hasattr(self, "_session_key") and self._session_key:
+                        enriched_params["session_key"] = self._session_key
+
+                    # Track timing for stats
+                    import time
+
+                    start_time = time.time()
+                    result = provider.fetch(params.get("query", query), enriched_params)
+                    latency_ms = int((time.time() - start_time) * 1000)
+
+                    # Determine endpoint name for tracking
+                    endpoint_name = params.get("_endpoint", "default")
+                    if hasattr(provider, "last_endpoint"):
+                        endpoint_name = provider.last_endpoint or endpoint_name
+
+                    if result.success and result.formatted:
+                        context_parts.append(result.formatted)
+
+                        # Update source status and record call stats
+                        from db.live_data_sources import (
+                            record_live_data_call,
+                            update_live_data_source_status,
+                        )
+
+                        update_live_data_source_status(source.id, success=True)
+                        record_live_data_call(
+                            source.id,
+                            endpoint_name,
+                            success=True,
+                            latency_ms=latency_ms,
+                        )
+                    elif result.error:
+                        metadata["errors"].append(f"{source_name}: {result.error}")
+                        logger.warning(
+                            f"Live data error from {source_name}: {result.error}"
+                        )
+                        from db.live_data_sources import (
+                            record_live_data_call,
+                            update_live_data_source_status,
+                        )
+
+                        update_live_data_source_status(
+                            source.id, success=False, error=result.error
+                        )
+                        record_live_data_call(
+                            source.id,
+                            endpoint_name,
+                            success=False,
+                            latency_ms=latency_ms,
+                            error=result.error,
+                        )
+
+                except Exception as e:
+                    metadata["errors"].append(f"{source_name}: {str(e)}")
+                    logger.error(f"Error fetching from {source_name}: {e}")
+
+            if context_parts:
+                live_context = "=== Live Data ===\n" + "\n\n".join(context_parts)
+                return live_context, metadata
+
+        except Exception as e:
+            logger.error(f"Live data retrieval failed: {e}")
+            metadata["errors"].append(str(e))
+
+        return "", metadata
+
+    def _try_cached_params(self, query: str, sources: list) -> dict[str, dict]:
+        """
+        Try to resolve parameters from ChromaDB cache using semantic matching.
+
+        Args:
+            query: The user's query
+            sources: List of enabled live data sources
+
+        Returns:
+            Dict mapping source name to cached parameters (may be partial)
+        """
+        cached_params = {}
+
+        try:
+            from live.param_cache import lookup_parameter
+
+            for source in sources:
+                name = getattr(source, "name", "")
+                source_type = getattr(source, "source_type", "")
+
+                # Try to find cached value based on source type
+                if source_type == "builtin_weather":
+                    cached_loc = lookup_parameter("weather", "location", query)
+                    if cached_loc:
+                        cached_params[name] = {
+                            "location": cached_loc,
+                            "type": "current",
+                            "query": query,
+                            "cache_hit": True,
+                        }
+                        logger.debug(f"Cache hit for weather location: {cached_loc}")
+
+                elif source_type == "builtin_stocks":
+                    cached_symbol = lookup_parameter("stocks", "symbol", query)
+                    if cached_symbol:
+                        cached_params[name] = {
+                            "symbol": cached_symbol,
+                            "query": query,
+                            "cache_hit": True,
+                        }
+                        logger.debug(f"Cache hit for stock symbol: {cached_symbol}")
+
+                elif source_type == "builtin_alpha_vantage":
+                    cached_symbol = lookup_parameter("stocks-uk", "symbol", query)
+                    if cached_symbol:
+                        cached_params[name] = {
+                            "symbol": cached_symbol,
+                            "query": query,
+                            "cache_hit": True,
+                        }
+                        logger.debug(f"Cache hit for UK stock symbol: {cached_symbol}")
+
+                elif source_type == "builtin_transport":
+                    cached_station = lookup_parameter("transport", "station", query)
+                    if cached_station:
+                        cached_params[name] = {
+                            "station": cached_station,
+                            "type": "departures",
+                            "query": query,
+                            "cache_hit": True,
+                        }
+                        logger.debug(
+                            f"Cache hit for transport station: {cached_station}"
+                        )
+
+        except Exception as e:
+            logger.debug(f"Cache lookup failed: {e}")
+
+        return cached_params
+
+    def _extract_live_data_params(self, query: str, sources: list) -> dict[str, dict]:
+        """
+        Use the designator to extract structured parameters for live data sources.
+
+        First checks ChromaDB cache for semantic matches (e.g., "British capital"
+        matching cached "London"). Falls back to designator for cache misses.
+
+        Args:
+            query: The user's query
+            sources: List of enabled live data sources
+
+        Returns:
+            Dict mapping source name to extracted parameters, e.g.:
+            {
+                "weather": {"location": "London", "type": "current"},
+                "stocks": {"symbol": "AAPL"},
+            }
+        """
+        # First try cache lookup for all sources
+        cached_params = self._try_cached_params(query, sources)
+        if cached_params:
+            # Check if we got cache hits for all sources that might be relevant
+            # If so, we can skip the designator call entirely
+            logger.info(f"Using cached params for {len(cached_params)} source(s)")
+            # Still need designator to determine relevance, but can hint with cached values
+
+        if not self.enricher.designator_model:
+            # Fall back to querying all sources with raw query (or cached params)
+            result = {}
+            for s in sources:
+                name = getattr(s, "name", "")
+                if name in cached_params:
+                    result[name] = cached_params[name]
+                else:
+                    result[name] = {"query": query}
+            return result
+
+        # Build source descriptions for the prompt
+        source_info = []
+        for source in sources:
+            name = getattr(source, "name", "")
+            source_type = getattr(source, "source_type", "")
+            data_type = getattr(source, "data_type", "")
+            best_for = getattr(source, "best_for", "")
+            description = getattr(source, "description", "")
+
+            info = f"- {name} ({source_type})"
+            if data_type:
+                info += f" [data_type: {data_type}]"
+            if best_for:
+                info += f"\n  Best for: {best_for}"
+            if description:
+                info += f"\n  Description: {description}"
+
+            # Add parameter hints based on source type
+            if source_type == "builtin_weather":
+                info += "\n  Parameters: location (city name), type (current|forecast)"
+            elif source_type == "builtin_stocks":
+                info += "\n  Parameters: symbol (US stock ticker like AAPL, MSFT)"
+            elif source_type == "builtin_alpha_vantage":
+                info += "\n  Parameters: symbol (UK stock like LGEN.LON or fund name), period (optional: 1W, 1M, 3M, 6M, 1Y)"
+            elif source_type == "builtin_transport":
+                info += "\n  Parameters: station (3-letter code or name), type (departures|arrivals)"
+            else:
+                # Extract parameter hints from query_params_json and endpoint_url for custom sources
+                params_found = []
+                query_params = getattr(source, "query_params_json", "") or ""
+                endpoint_url = getattr(source, "endpoint_url", "") or ""
+                # Find {{param}} placeholders
+                import re
+
+                for text in [query_params, endpoint_url]:
+                    matches = re.findall(r"\{\{(\w+)\}\}", text)
+                    params_found.extend(matches)
+                if params_found:
+                    unique_params = list(
+                        dict.fromkeys(params_found)
+                    )  # Preserve order, remove dupes
+                    info += f"\n  Parameters: {', '.join(unique_params)}"
+
+            source_info.append(info)
+
+        sources_text = "\n".join(source_info)
+
+        prompt = f"""Analyze the user's query and determine which live data sources are relevant.
+For each relevant source, extract the specific parameters needed to query it.
+
+AVAILABLE LIVE DATA SOURCES:
+{sources_text}
+
+USER QUERY:
+{query}
+
+Respond with a JSON object where keys are source names and values are parameter objects.
+Only include sources that are RELEVANT to the query. If no sources are relevant, return {{}}.
+
+Examples:
+- "What's the weather in Paris?" -> {{"weather": {{"location": "Paris", "type": "current"}}}}
+- "AAPL stock price" -> {{"stocks": {{"symbol": "AAPL"}}}}
+- "Trains from Kings Cross" -> {{"transport": {{"station": "KGX", "type": "departures"}}}}
+- "Tell me a joke" -> {{}}  (no live data needed)
+
+Respond with ONLY the JSON object, no other text."""
+
+        try:
+            designator_resolved = self.registry._resolve_actual_model(
+                self.enricher.designator_model
+            )
+            provider = designator_resolved.provider
+
+            result = provider.chat_completion(
+                model=designator_resolved.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                system=None,
+                options={"max_tokens": 300, "temperature": 0},
+            )
+
+            response_text = result.get("content", "").strip()
+
+            # Parse JSON response
+            import json
+            import re
+
+            # Extract JSON from response
+            json_match = re.search(r"\{[^{}]*\}", response_text, re.DOTALL)
+            if json_match:
+                params = json.loads(json_match.group())
+
+                # Validate and filter to actual source names
+                valid_names = {getattr(s, "name", "") for s in sources}
+                filtered_params = {}
+                for name, p in params.items():
+                    if name in valid_names and isinstance(p, dict):
+                        # Merge with cached params if available (cache takes priority)
+                        if name in cached_params:
+                            # Use cached values but mark source was deemed relevant
+                            merged = cached_params[name].copy()
+                            # Designator may have additional params, merge them
+                            for k, v in p.items():
+                                if k not in merged:
+                                    merged[k] = v
+                            filtered_params[name] = merged
+                            logger.debug(f"Merged cached params for {name}")
+                        else:
+                            # Add raw query as fallback
+                            p["query"] = query
+                            filtered_params[name] = p
+                            # Cache extracted parameters for semantic reuse
+                            self._cache_extracted_params(name, p, sources)
+
+                logger.info(f"Designator extracted live data params: {filtered_params}")
+                return filtered_params
+
+            logger.warning(f"Could not parse live data params: {response_text}")
+
+        except Exception as e:
+            logger.error(f"Live data param extraction failed: {e}")
+
+        # Fall back to querying all sources
+        return {getattr(s, "name", ""): {"query": query} for s in sources}
+
+    def _cache_extracted_params(
+        self, source_name: str, params: dict, sources: list
+    ) -> None:
+        """Cache extracted parameters in ChromaDB for semantic reuse."""
+        try:
+            from live.param_cache import cache_parameter
+
+            # Find source type
+            source = next(
+                (s for s in sources if getattr(s, "name", "") == source_name), None
+            )
+            if not source:
+                return
+
+            source_type = getattr(source, "source_type", "")
+
+            # Cache based on source type
+            if source_type == "builtin_weather" and "location" in params:
+                cache_parameter(
+                    source_type="weather",
+                    param_type="location",
+                    query_text=params["location"],
+                    resolved_value=params["location"],
+                )
+            elif source_type == "builtin_stocks" and "symbol" in params:
+                cache_parameter(
+                    source_type="stocks",
+                    param_type="symbol",
+                    query_text=params.get("query", params["symbol"]),
+                    resolved_value=params["symbol"],
+                )
+            elif source_type == "builtin_alpha_vantage" and "symbol" in params:
+                cache_parameter(
+                    source_type="stocks-uk",
+                    param_type="symbol",
+                    query_text=params.get("query", params["symbol"]),
+                    resolved_value=params["symbol"],
+                )
+            elif source_type == "builtin_transport" and "station" in params:
+                cache_parameter(
+                    source_type="transport",
+                    param_type="station",
+                    query_text=params.get("query", params["station"]),
+                    resolved_value=params["station"],
+                )
+
+        except Exception as e:
+            logger.debug(f"Failed to cache params: {e}")
 
     def _call_designator(self, query: str) -> tuple[Optional[str], Optional[dict]]:
         """Call the designator LLM to generate an optimized search query."""
@@ -690,8 +1793,15 @@ SEARCH QUERY:"""
             logger.error(f"Designator call failed: {e}")
             return None, None
 
-    def _execute_search(self, query: str) -> tuple[str, list[dict]]:
-        """Execute web search and return formatted results plus URL data."""
+    def _execute_search(
+        self, query: str, max_results: int | None = None
+    ) -> tuple[str, list[dict]]:
+        """Execute web search and return formatted results plus URL data.
+
+        Args:
+            query: Search query
+            max_results: Maximum results to return (defaults to enricher config)
+        """
         from augmentation import get_configured_search_provider
         from augmentation.query_intent import extract_query_intent
 
@@ -699,6 +1809,10 @@ SEARCH QUERY:"""
         if not provider:
             logger.warning("No search provider configured")
             return "", []
+
+        # Use provided max_results or fall back to enricher config
+        if max_results is None:
+            max_results = self.enricher.max_search_results
 
         try:
             # Extract temporal and category intent from query
@@ -712,7 +1826,7 @@ SEARCH QUERY:"""
 
             results = provider.search(
                 query,
-                max_results=self.enricher.max_search_results,
+                max_results=max_results,
                 time_range=intent.time_range,
                 category=intent.category,
             )
@@ -731,9 +1845,15 @@ SEARCH QUERY:"""
             return "", []
 
     def _execute_scrape(
-        self, urls: list[str], max_tokens: int
+        self, urls: list[str], max_tokens: int, max_urls: int | None = None
     ) -> tuple[str, list[str]]:
-        """Scrape URLs and return formatted content."""
+        """Scrape URLs and return formatted content.
+
+        Args:
+            urls: List of URLs to scrape
+            max_tokens: Token budget for scraped content
+            max_urls: Maximum URLs to scrape (defaults to enricher config)
+        """
         scraper_provider = self._get_scraper_provider()
 
         if scraper_provider == "jina":
@@ -751,7 +1871,11 @@ SEARCH QUERY:"""
 
             scraper = WebScraper()
 
-        results = scraper.scrape_multiple(urls, max_urls=self.enricher.max_scrape_urls)
+        # Use provided max_urls or fall back to enricher config
+        if max_urls is None:
+            max_urls = self.enricher.max_scrape_urls
+
+        results = scraper.scrape_multiple(urls, max_urls=max_urls)
         scraped_urls = [r.url for r in results if r.success]
 
         # Rough estimate: 4 chars per token
@@ -812,17 +1936,20 @@ SEARCH QUERY:"""
         # Get priority setting (only relevant when both RAG and Web present)
         priority = getattr(self.enricher, "context_priority", "balanced")
 
-        # Order context based on priority (prioritized source first)
-        if priority == "prefer_web":
-            # Put web first
-            context_parts = sorted(
-                context_parts, key=lambda x: 0 if x[0] == "web" else 1
-            )
-        else:
-            # Default: put RAG first (for balanced and prefer_rag)
-            context_parts = sorted(
-                context_parts, key=lambda x: 0 if x[0] == "rag" else 1
-            )
+        # Define sort order: live data first (most current), then by priority
+        # Live data always comes first as it's real-time, history comes after
+        def sort_key(item):
+            source_type = item[0]
+            if source_type == "live":
+                return 0  # Current live data first
+            elif source_type == "live_history":
+                return 1  # Prior session live data second
+            elif priority == "prefer_web":
+                return 2 if source_type == "web" else 3
+            else:  # balanced or prefer_rag
+                return 2 if source_type == "rag" else 3
+
+        context_parts = sorted(context_parts, key=sort_key)
 
         # Build merged context with source labels
         merged = []
@@ -831,6 +1958,12 @@ SEARCH QUERY:"""
                 merged.append(f"=== Document Context ===\n{context}")
             elif source_type == "web":
                 merged.append(f"=== Web Context ===\n{context}")
+            elif source_type == "live":
+                # Live context already has its header from _retrieve_live_context
+                merged.append(context)
+            elif source_type == "live_history":
+                # Prior live data from this session
+                merged.append(f"=== Previous Live Data (this session) ===\n{context}")
             else:
                 merged.append(context)
 
@@ -841,7 +1974,7 @@ SEARCH QUERY:"""
         if not context.strip():
             return original_system or ""
 
-        current_date = datetime.utcnow().strftime("%Y-%m-%d")
+        current_datetime = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
         # Build priority-specific instruction when both sources are used
         priority = getattr(self.enricher, "context_priority", "balanced")
@@ -863,7 +1996,7 @@ If the context contains relevant details, reference them directly in your respon
 
         context_block = f"""
 <enriched_context>
-Today's date: {current_date}
+Current date/time: {current_datetime}
 
 {instruction}
 
@@ -922,6 +2055,7 @@ Use this information to personalize your responses.
         Returns:
             True if memory was updated, False otherwise
         """
+
         if not getattr(self.enricher, "use_memory", False):
             return False
 
@@ -978,11 +2112,16 @@ Good examples of what to remember:
 - "I prefer Python over JavaScript" → Remember: language preference
 - "I'm working on a mobile app project" → Remember: current project
 - "My name is Ben" → Remember: name
+- "I have 100 shares in Apple" → Remember: stock holdings
+- "I own a Tesla Model 3" → Remember: possessions
+- "My budget is £50,000" → Remember: financial info they shared
 
 Do NOT remember:
-- Topics they asked questions about (asking about X doesn't mean they're interested in X)
-- Inferences from what information they requested
+- Topics they merely asked questions about without stating personal facts
+- Pure inferences from what information they requested
 - Anything from the assistant's response - only the user's own statements
+
+IMPORTANT: If the user says "I have X" or "I own X" or "My X is Y", that IS an explicit statement about themselves and SHOULD be remembered.
 
 {capacity_guidance}
 
@@ -1026,8 +2165,12 @@ The memory must be concise and stay within the token limit. Merge new informatio
                         )
 
             elif response_text.startswith("NO_UPDATE"):
-                logger.debug(
+                logger.info(
                     f"No memory update needed for smart alias '{self.enricher.name}'"
+                )
+            else:
+                logger.warning(
+                    f"Unexpected memory response format: {response_text[:100]}"
                 )
 
             return False

@@ -39,6 +39,23 @@ Consolidated separate features into unified **Smart Aliases**:
 - **Extensible format**: `@relay[command:key=value]` for future commands
 - **Context Priority**: Token allocation for hybrid RAG+Web (balanced/prefer_rag/prefer_web)
 
+## v1.8: Memory & Smart Source Selection
+
+- **Persistent Memory**: Remembers explicit user facts across sessions
+  - Only captures what users directly state about themselves
+  - Does NOT infer from topics asked about
+  - Memory injected into future requests as context
+  - Viewable and clearable from Admin UI
+- **Smart Source Selection**: Intelligent token budget allocation across RAG stores
+  - Document Store intelligence (themes, best_for, summary)
+  - Designator allocates 50% priority budget to most relevant sources
+  - 50% baseline ensures all sources contribute
+  - Works with Web as an additional source
+- **Document Store Intelligence**: Auto-generated metadata for routing
+  - Themes: High-level domain categories
+  - Best For: Types of questions the store can answer
+  - Summary: Brief description of content type
+
 ## Document Sources (v1.6+)
 
 Direct API integrations (no Node.js required):
@@ -46,33 +63,120 @@ Direct API integrations (no Node.js required):
 - Notion (via REST API)
 - GitHub (via REST API)
 - Paperless-ngx (via REST API)
+- Nextcloud (via WebDAV)
+- Websites (via crawler)
 - Local filesystem
 
 ---
 
 # Planned Features
 
-## v1.8: Additional Integrations
+## v1.9: Extended Data Sources
+
+Final v1.x release focused on expanding document source integrations.
+
+### Communication & Collaboration
+
+| Source | API Type | Status |
+|--------|----------|--------|
+| Slack | REST API | Planned |
+| Microsoft Teams | Graph API | Planned |
+| Discord | Bot API | Planned |
+| Mattermost | REST API | Planned |
+
+### Cloud Storage & Documents
+
+| Source | API Type | Status |
+|--------|----------|--------|
+| Dropbox | REST API | Planned |
+| OneDrive | Graph API | Planned |
+| OneNote | Graph API | Planned |
+| Box | REST API | Planned |
+| S3/MinIO | S3 API | Planned |
+
+### Email
+
+| Source | API Type | Status |
+|--------|----------|--------|
+| Outlook | Graph API | Planned |
+| IMAP (generic) | IMAP | Planned |
+
+### Project Management
+
+| Source | API Type | Status |
+|--------|----------|--------|
+| Jira | REST API | Planned |
+| Linear | GraphQL | Planned |
+| Trello | REST API | Planned |
+| Asana | REST API | Planned |
+| Confluence | REST API | Planned |
+
+### Notes & Tasks
+
+| Source | API Type | Status |
+|--------|----------|--------|
+| Todoist | REST API | Planned |
+| Evernote | REST API | Planned (deprecated API) |
+
+### Knowledge & Research
+
+| Source | API Type | Status |
+|--------|----------|--------|
+| Readwise/Reader | REST API | Planned |
+| Raindrop.io | REST API | Planned |
+| Zotero | REST API | Planned |
+| Airtable | REST API | Planned |
 
 ### Search Providers
 
 | Provider | Description | Status |
 |----------|-------------|--------|
-| `searxng` | Self-hosted metasearch | ✓ Done |
-| `perplexity` | Perplexity API | ✓ Done |
-| `jina` | Jina Search API | ✓ Done |
-| `tavily` | AI-focused search API | Planned |
-| `brave` | Privacy-focused search | Planned |
+| Exa | Neural/semantic search | Planned |
 
-### Document Store Providers
+### Not Feasible (No Public API)
 
-Additional sources for RAG document stores:
-- Nextcloud (done - v1.8)
-- Confluence (planned)
-- SharePoint (planned)
-- Dropbox (planned)
-- S3/MinIO (planned)
-- IMAP (email archives) (planned)
+These were considered but lack viable API access:
+- WhatsApp (business API only, no personal)
+- Signal (no API)
+- Telegram (bot-only access)
+- Apple iCloud/Notes (no public API)
+- Things (Mac-only, no API)
+
+---
+
+## v2.0: Major Release
+
+### Webhooks for Document Stores
+
+Real-time indexing triggered by external system events:
+
+| Feature | Description |
+|---------|-------------|
+| Generic refresh endpoint | `POST /api/webhooks/stores/{id}/refresh` - trigger re-index |
+| Source-specific handlers | Smart incremental updates (e.g., Paperless, Notion, GitHub) |
+| Webhook secrets | HMAC signature verification for security |
+| Selective re-indexing | Update only changed documents, not full re-index |
+
+**Use cases:**
+- Paperless-ngx: Index new documents immediately after OCR
+- Notion: Re-index page when updated
+- GitHub: Re-index on push to tracked branches
+- Google Drive: Push notifications for file changes
+
+### Smart Query Studio
+
+Built-in chat interface for testing:
+- OpenWebUI-style conversation UI
+- Model selector with all aliases
+- Blind A/B testing
+- Response comparison
+
+### Model Sync Service
+
+Subscription for high-quality model metadata:
+- Regularly refreshed model intelligence
+- Accurate pricing data
+- Deprecation notices
 
 ### Media Endpoints
 
@@ -84,76 +188,207 @@ Additional sources for RAG document stores:
 
 ---
 
-## v2.0: Major Release
+## v2.1: Smart Actions (Partially Implemented)
 
-### Smart Pipe Studio
-
-Visual pipeline builder for chaining components:
-
-```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  Web Search  │───▶│    Router    │───▶│    Cache     │
-└──────────────┘    └──────────────┘    └──────────────┘
-```
-
-**Node types:**
-- `augmentor` - Web search/scrape
-- `rag` - Document context
-- `router` - Model selection
-- `cache` - Response caching
-- `gate` - Conditional branching
-- `transform` - Prompt transformation
-
-### Smart Query Studio
-
-Built-in chat interface for testing:
-- OpenWebUI-style conversation UI
-- Model selector with all aliases
-- Blind A/B testing
-- Pipeline testing
-
-### Model Sync Service
-
-Subscription for high-quality model metadata:
-- Regularly refreshed model intelligence
-- Accurate pricing data
-- Deprecation notices
-
----
-
-## v2.1: Smart Actions
-
-Bidirectional Google Integration - let LLMs take actions with user approval.
+Bidirectional integrations - let LLMs take actions. First phase (email drafts) is implemented.
 
 ### Concept
 
-LLM outputs structured action blocks:
+LLM outputs structured action blocks in responses:
 
 ```xml
-<smart_action type="calendar_create">
-{"summary": "Meeting with John", "start": "2026-01-14T14:00:00"}
+<smart_action type="email" action="draft_new">
+{"account": "user@gmail.com", "to": ["recipient@example.com"], "subject": "Meeting follow-up", "body": "..."}
 </smart_action>
 ```
 
-Proxy detects actions and presents approval UI to user.
+The proxy:
+1. Detects action blocks during response streaming
+2. Strips action blocks from client-visible response
+3. Validates and executes allowed actions
+4. Logs results (success/failure)
 
-### Supported Actions
+### Implemented Actions
 
-| Type | Description |
-|------|-------------|
-| `calendar_create` | Create calendar event |
-| `calendar_update` | Modify existing event |
-| `email_reply` | Reply to email thread |
-| `email_compose` | New email |
-| `drive_create` | Create document |
+#### Email Actions (Gmail - Implemented)
+| Action | Description | Status |
+|--------|-------------|--------|
+| `email:draft_new` | Create new email draft | ✅ Implemented |
+| `email:draft_reply` | Create reply draft | ✅ Implemented |
+| `email:draft_forward` | Create forward draft | ✅ Implemented |
+| `email:send` | Send email immediately | 🔜 Planned |
+
+**Action Schemas:**
+
+```xml
+<!-- Create new draft -->
+<smart_action type="email" action="draft_new">
+{
+  "account": "user@gmail.com",
+  "to": ["recipient@example.com"],
+  "cc": [],
+  "bcc": [],
+  "subject": "Subject line",
+  "body": "Email body text",
+  "body_type": "text"
+}
+</smart_action>
+
+<!-- Reply to email (requires message_id from email chunk metadata) -->
+<smart_action type="email" action="draft_reply">
+{
+  "account": "user@gmail.com",
+  "message_id": "abc123xyz",
+  "to": ["sender@example.com"],
+  "reply_all": false,
+  "body": "Reply text"
+}
+</smart_action>
+
+<!-- Forward email -->
+<smart_action type="email" action="draft_forward">
+{
+  "account": "user@gmail.com",
+  "message_id": "abc123xyz",
+  "to": ["forward-to@example.com"],
+  "body": "FYI - see below"
+}
+</smart_action>
+```
+
+### Planned Actions
+
+#### Calendar Actions
+| Action | Description |
+|--------|-------------|
+| `calendar:create` | Create event |
+| `calendar:update` | Modify existing event |
+| `calendar:delete` | Cancel/delete event |
+| `calendar:rsvp` | Respond to invitation |
+
+#### Scheduled Prompts (Proactive Agent)
+| Action | Description |
+|--------|-------------|
+| `schedule:once` | Run prompt at specific time |
+| `schedule:recurring` | Run prompt on cron schedule |
+| `schedule:cancel` | Cancel scheduled prompt |
+
+**Examples:**
+```xml
+<!-- Daily news digest email -->
+<smart_action type="schedule" action="recurring">
+{
+  "cron": "0 8 * * *",
+  "prompt": "Search for today's top AI news and email me a summary",
+  "alias": "personal-assistant",
+  "name": "morning-news-digest"
+}
+</smart_action>
+
+<!-- One-time reminder -->
+<smart_action type="schedule" action="once">
+{
+  "at": "2026-01-20T09:00:00",
+  "prompt": "Remind me to follow up with John about the proposal",
+  "alias": "personal-assistant"
+}
+</smart_action>
+```
+
+#### Document Actions
+| Action | Description |
+|--------|-------------|
+| `drive:create` | Create document |
+| `drive:update` | Edit document |
+| `drive:share` | Share with users |
+| `notion:create` | Create Notion page |
+| `notion:update` | Update Notion page |
+
+#### Communication Actions
+| Action | Description |
+|--------|-------------|
+| `slack:message` | Send Slack message |
+| `slack:react` | Add reaction |
+| `teams:message` | Send Teams message |
+
+#### Task Actions
+| Action | Description |
+|--------|-------------|
+| `task:create` | Create task (Todoist, Asana, etc.) |
+| `task:complete` | Mark task done |
+| `task:update` | Update task details |
+
+### Scheduled Prompts Architecture
+
+Scheduled prompts turn LLM Relay into a proactive agent:
+
+1. **Scheduler service** runs in background (APScheduler)
+2. **Prompt execution** uses configured Smart Alias
+3. **Output routing** - results can trigger further actions:
+   - Send as email
+   - Post to Slack
+   - Store in document
+   - Just log (for monitoring)
+4. **Context injection** - scheduled prompts get full RAG/Web enrichment
+5. **Admin UI** - view, pause, edit, delete scheduled prompts
 
 ### Security
 
-- Explicit user approval required
-- OAuth write scopes
-- Action audit log
-- Rate limiting
-- Per-alias allow-lists
+- **Approval modes**: always-ask, pre-approved-list, never (disabled)
+- **Per-alias allow-lists**: which actions each alias can perform (pattern matching: `email:draft_*`)
+- **OAuth write scopes**: ✅ Implemented - Google and Microsoft OAuth now request write permissions
+  - Google: `gmail.compose`, `calendar.events`, `tasks`, `contacts`, `drive.file`
+  - Microsoft: `Mail.ReadWrite`, `Mail.Send`, `Calendars.ReadWrite`, `Tasks.ReadWrite`, etc.
+- **Action audit log**: full history of all actions taken
+- **Rate limiting**: prevent runaway scheduled prompts
+- **Confirmation for destructive actions**: delete, send always require approval
+- **Scheduled prompt limits**: max concurrent, max per day
+
+### Extensibility
+
+Smart Actions are designed as a plugin architecture:
+
+```python
+class ActionHandler(ABC):
+    """Base class for action handlers."""
+    
+    @property
+    @abstractmethod
+    def action_type(self) -> str:
+        """e.g., 'email', 'calendar', 'slack'"""
+    
+    @property
+    @abstractmethod
+    def supported_actions(self) -> list[str]:
+        """e.g., ['send', 'draft', 'archive']"""
+    
+    @abstractmethod
+    def validate(self, action: str, params: dict) -> tuple[bool, str]:
+        """Validate action params before execution."""
+    
+    @abstractmethod
+    def execute(self, action: str, params: dict, context: ActionContext) -> ActionResult:
+        """Execute the action."""
+    
+    @abstractmethod
+    def get_approval_summary(self, action: str, params: dict) -> str:
+        """Human-readable summary for approval UI."""
+```
+
+**Adding new actions:**
+1. Create handler class extending `ActionHandler`
+2. Register in `actions/registry.py`
+3. Add UI components if needed (optional)
+4. Actions automatically available to LLMs via system prompt injection
+
+**Future action ideas:**
+- `homeassistant:*` - Smart home control
+- `webhook:*` - Call arbitrary webhooks
+- `database:*` - Query/update databases
+- `code:*` - Execute sandboxed code
+- `notification:*` - Push notifications (mobile, desktop)
+- `payment:*` - Invoice, payment requests (with extra security)
+- `social:*` - Post to Twitter/LinkedIn/etc.
 
 ---
 
@@ -165,16 +400,25 @@ Proxy detects actions and presents approval UI to user.
 - [x] Smart Aliases unification
 - [x] Smart Tags
 - [x] @relay query commands
-- [x] Document sources (Notion, GitHub, Google, Paperless)
+- [x] Document sources (Notion, GitHub, Google, Paperless, Nextcloud, Websites, Todoist)
+- [x] Persistent Memory (explicit user facts only)
+- [x] Smart Source Selection (designator-controlled budget allocation)
+- [x] Document Store Intelligence (themes, best_for, summary)
+- [x] Smart Actions framework (detection, parsing, execution, action block stripping)
+- [x] Smart Actions - Email drafts (Gmail: draft_new, draft_reply, draft_forward)
+- [x] OAuth write scopes for Google and Microsoft (gmail.compose, calendar.events, etc.)
 
-## Next Up (v1.8)
-- [ ] Additional search providers (Tavily, Brave)
-- [ ] Additional document store providers (TBD)
-- [ ] Image generation endpoint
-- [ ] Audio transcription endpoint
+## Next Up (v1.9)
+- [ ] Slack integration
+- [ ] Microsoft Graph integrations (Teams, OneDrive, OneNote, Outlook)
+- [ ] Dropbox integration
+- [ ] Jira / Linear integration
+- [ ] IMAP generic email
+- [ ] Exa search provider
+- [ ] Smart Actions - Outlook email drafts
 
 ## Future (v2.0+)
-- [ ] Smart Pipe Studio
 - [ ] Smart Query Studio
 - [ ] Model Sync service
-- [ ] Smart Actions (bidirectional Google)
+- [ ] Media endpoints (images, audio)
+- [ ] Smart Actions - Calendar, scheduled prompts, send actions

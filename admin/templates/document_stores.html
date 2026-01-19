@@ -6,16 +6,8 @@ block content %}
         class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6"
     >
         <div>
-            <h1
-                class="text-2xl font-bold"
-                x-text="filterMode === 'website' ? 'Websites' : 'Document Stores'"
-            >
-                Document Stores
-            </h1>
-            <p
-                class="text-base-content/60"
-                x-text="filterMode === 'website' ? 'Crawled and indexed websites for Smart RAGs' : 'Configure and index document sources for Smart RAGs'"
-            >
+            <h1 class="text-2xl font-bold">Document Stores</h1>
+            <p class="text-base-content/60">
                 Configure and index document sources for Smart RAGs
             </p>
         </div>
@@ -34,10 +26,67 @@ block content %}
                     d="M12 4v16m8-8H4"
                 />
             </svg>
+            Add Store
+        </button>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="tabs tabs-boxed bg-base-200 mb-4 inline-flex">
+        <button
+            @click="setFilter('all')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'all' }"
+        >
+            All
+            <span class="badge badge-sm ml-1" x-text="tabCounts.all"></span>
+        </button>
+        <button
+            @click="setFilter('local')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'local' }"
+            x-show="tabCounts.local > 0"
+        >
+            Local
+            <span class="badge badge-sm ml-1" x-text="tabCounts.local"></span>
+        </button>
+        <button
+            @click="setFilter('google')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'google' }"
+            x-show="tabCounts.google > 0"
+        >
+            Google
+            <span class="badge badge-sm ml-1" x-text="tabCounts.google"></span>
+        </button>
+        <button
+            @click="setFilter('microsoft')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'microsoft' }"
+            x-show="tabCounts.microsoft > 0"
+        >
+            Microsoft
             <span
-                x-text="filterMode === 'website' ? 'Add Website' : 'Add Store'"
-                >Add Store</span
-            >
+                class="badge badge-sm ml-1"
+                x-text="tabCounts.microsoft"
+            ></span>
+        </button>
+        <button
+            @click="setFilter('website')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'website' }"
+            x-show="tabCounts.website > 0"
+        >
+            Websites
+            <span class="badge badge-sm ml-1" x-text="tabCounts.website"></span>
+        </button>
+        <button
+            @click="setFilter('other')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'other' }"
+            x-show="tabCounts.other > 0"
+        >
+            Other
+            <span class="badge badge-sm ml-1" x-text="tabCounts.other"></span>
         </button>
     </div>
 
@@ -49,7 +98,7 @@ block content %}
     </template>
 
     <!-- No Stores Configured -->
-    <template x-if="!loading && stores.length === 0">
+    <template x-if="!loading && filteredStores.length === 0">
         <div class="card bg-base-100 shadow-lg">
             <div class="card-body text-center py-12">
                 <svg
@@ -66,32 +115,29 @@ block content %}
                         d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
                     />
                 </svg>
-                <h3
-                    class="mt-4 text-lg font-medium"
-                    x-text="filterMode === 'website' ? 'No Websites Configured' : 'No Document Stores Configured'"
-                >
-                    No Document Stores Configured
+                <h3 class="mt-4 text-lg font-medium">
+                    <span x-show="filterMode === 'all'"
+                        >No Document Stores Configured</span
+                    >
+                    <span
+                        x-show="filterMode !== 'all'"
+                        x-text="'No ' + filterLabel + ' stores'"
+                    ></span>
                 </h3>
-                <p
-                    class="mt-2 text-base-content/60 max-w-md mx-auto"
-                    x-text="filterMode === 'website' ? 'Websites are crawled and indexed for semantic search. Add a website to enable RAG-based Q&A over web content.' : 'Document stores index documents from local folders or MCP sources. They can be shared across multiple Smart RAGs for multi-source search.'"
-                >
-                    Document stores index documents from local folders or MCP
-                    sources. They can be shared across multiple Smart RAGs for
-                    multi-source search.
+                <p class="mt-2 text-base-content/60 max-w-md mx-auto">
+                    Document stores index documents from local folders, cloud
+                    services, or websites. They can be shared across multiple
+                    Smart RAGs for multi-source search.
                 </p>
                 <button @click="openAddModal()" class="btn btn-primary mt-4">
-                    <span
-                        x-text="filterMode === 'website' ? 'Add Your First Website' : 'Create Your First Store'"
-                        >Create Your First Store</span
-                    >
+                    Create Your First Store
                 </button>
             </div>
         </div>
     </template>
 
     <!-- Store Table -->
-    <template x-if="!loading && stores.length > 0">
+    <template x-if="!loading && filteredStores.length > 0">
         <div class="card bg-base-100 shadow-lg">
             <div class="overflow-x-auto">
                 <table class="table">
@@ -101,23 +147,19 @@ block content %}
                             <th>Name</th>
                             <th>Source</th>
                             <th>Index</th>
-                            <th
-                                class="text-right"
-                                x-text="filterMode === 'website' ? 'Pages' : 'Docs'"
-                            >
-                                Docs
-                            </th>
+                            <th class="text-right">Docs</th>
                             <th class="text-right">Chunks</th>
                             <th>Status</th>
                             <th class="text-right">Actions</th>
                         </tr>
                     </thead>
-                    <template x-for="store in stores" :key="store.id">
+                    <template x-for="store in filteredStores" :key="store.id">
                         <tbody>
                             <!-- Main Row -->
                             <tr
                                 @click="toggleExpand(store.id)"
-                                class="cursor-pointer hover:bg-base-200"
+                                class="cursor-pointer hover:bg-base-200 transition-colors duration-500"
+                                :data-store-id="store.id"
                             >
                                 <td class="w-8">
                                     <svg
@@ -242,6 +284,34 @@ block content %}
                                                     stroke-linejoin="round"
                                                     stroke-width="2"
                                                     d="M6 18L18 6M6 6l12 12"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <!-- Preview button (shown when has content) -->
+                                        <button
+                                            x-show="store.chunk_count > 0"
+                                            @click="openPreviewModal(store)"
+                                            class="btn btn-ghost btn-sm text-info"
+                                            title="Preview content"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                                />
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
                                                 />
                                             </svg>
                                         </button>
@@ -648,6 +718,16 @@ block content %}
                             <option value="mcp:gcalendar">
                                 Google Calendar
                             </option>
+                            <option value="mcp:gtasks">Google Tasks</option>
+                            <option value="mcp:gcontacts">
+                                Google Contacts
+                            </option>
+                        </optgroup>
+                        <optgroup label="Microsoft">
+                            <option value="mcp:onedrive">OneDrive</option>
+                            <option value="mcp:outlook">Outlook Mail</option>
+                            <option value="mcp:onenote">OneNote</option>
+                            <option value="mcp:teams">Teams</option>
                         </optgroup>
                         <optgroup label="Document Management">
                             <option
@@ -671,6 +751,9 @@ block content %}
                         </optgroup>
                         <optgroup label="Web">
                             <option value="website">Website (crawled)</option>
+                            <option value="websearch">
+                                Web Search (scheduled)
+                            </option>
                         </optgroup>
                         <optgroup label="Other Integrations">
                             <option
@@ -680,10 +763,16 @@ block content %}
                                 GitHub
                             </option>
                             <option
-                                value="mcp:slack"
-                                x-show="mcpStatus.slack?.available"
+                                value="slack"
+                                x-show="documentSources.slack?.configured"
                             >
                                 Slack
+                            </option>
+                            <option
+                                value="todoist"
+                                x-show="documentSources.todoist?.configured"
+                            >
+                                Todoist
                             </option>
                         </optgroup>
                     </select>
@@ -1368,9 +1457,385 @@ block content %}
                     </div>
                 </div>
 
-                <!-- Google OAuth Configuration (for mcp:gdrive, mcp:gmail, mcp:gcalendar) -->
+                <!-- Web Search Configuration -->
                 <div
-                    x-show="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar'].includes(form.source_type)"
+                    class="mt-4 space-y-4"
+                    x-show="form.source_type === 'websearch'"
+                >
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Search Query</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.websearch_query"
+                            class="input input-bordered"
+                            placeholder="e.g., uk latest news"
+                            :required="form.source_type === 'websearch'"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >The search query to run on each index</span
+                            >
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Max Search Results</span
+                                >
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.websearch_max_results"
+                                class="input input-bordered"
+                                min="1"
+                                max="50"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Number of search results to fetch</span
+                                >
+                            </label>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Pages to Scrape</span>
+                            </label>
+                            <input
+                                type="number"
+                                x-model.number="form.websearch_pages_to_scrape"
+                                class="input input-bordered"
+                                min="1"
+                                max="20"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >How many results to actually scrape</span
+                                >
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Time Range (optional)</span
+                                >
+                            </label>
+                            <select
+                                x-model="form.websearch_time_range"
+                                class="select select-bordered"
+                            >
+                                <option value="">Any time</option>
+                                <option value="day">Past day</option>
+                                <option value="week">Past week</option>
+                                <option value="month">Past month</option>
+                                <option value="year">Past year</option>
+                            </select>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Category (optional)</span
+                                >
+                            </label>
+                            <select
+                                x-model="form.websearch_category"
+                                class="select select-bordered"
+                            >
+                                <option value="">General</option>
+                                <option value="news">News</option>
+                                <option value="images">Images</option>
+                                <option value="videos">Videos</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="alert alert-info">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="stroke-current shrink-0 h-6 w-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <div class="text-sm">
+                            Runs a web search, scrapes the top results, and
+                            indexes the content. Set an Index Schedule to keep
+                            results fresh. Use Max Documents to limit storage.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Slack Configuration -->
+                <div
+                    class="mt-4 space-y-4"
+                    x-show="form.source_type === 'slack'"
+                >
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Channel (optional)</span>
+                        </label>
+                        <div class="flex gap-2">
+                            <select
+                                x-model="form.slack_channel_id"
+                                class="select select-bordered flex-1"
+                                @focus="loadSlackChannels()"
+                            >
+                                <option value="">
+                                    All accessible channels
+                                </option>
+                                <template
+                                    x-for="channel in slackChannels"
+                                    :key="channel.id"
+                                >
+                                    <option
+                                        :value="channel.id"
+                                        x-text="'#' + channel.name"
+                                    ></option>
+                                </template>
+                            </select>
+                            <button
+                                type="button"
+                                class="btn btn-square btn-outline"
+                                @click="loadSlackChannels()"
+                                :class="{ 'loading': loadingSlackChannels }"
+                                title="Refresh channels"
+                            >
+                                <svg
+                                    x-show="!loadingSlackChannels"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Leave empty to index all channels the bot can
+                                access</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Channel Types</span>
+                        </label>
+                        <div class="flex gap-4">
+                            <label class="label cursor-pointer gap-2">
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm"
+                                    :checked="form.slack_channel_types.includes('public_channel')"
+                                    @change="toggleSlackChannelType('public_channel')"
+                                />
+                                <span class="label-text">Public channels</span>
+                            </label>
+                            <label class="label cursor-pointer gap-2">
+                                <input
+                                    type="checkbox"
+                                    class="checkbox checkbox-sm"
+                                    :checked="form.slack_channel_types.includes('private_channel')"
+                                    @change="toggleSlackChannelType('private_channel')"
+                                />
+                                <span class="label-text">Private channels</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Days of History</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model.number="form.slack_days_back"
+                            class="input input-bordered w-32"
+                            min="1"
+                            max="90"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Max 90 days on Slack free plan</span
+                            >
+                        </label>
+                    </div>
+                    <div class="alert alert-info">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="stroke-current shrink-0 h-6 w-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <div class="text-sm">
+                            Authentication via
+                            <code class="font-mono">SLACK_BOT_TOKEN</code>
+                            environment variable. Create a Slack app at
+                            <a
+                                href="https://api.slack.com/apps"
+                                target="_blank"
+                                class="link"
+                                >api.slack.com/apps</a
+                            >
+                            with scopes: channels:history, channels:read,
+                            users:read.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Todoist Configuration -->
+                <div
+                    class="mt-4 space-y-4"
+                    x-show="form.source_type === 'todoist'"
+                    x-effect="if (form.source_type === 'todoist' && todoistProjects.length === 0 && !loadingTodoistProjects) loadTodoistProjects()"
+                >
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Project (optional)</span>
+                        </label>
+                        <div class="flex gap-2">
+                            <select
+                                x-model="form.todoist_project_id"
+                                @change="onTodoistProjectChange()"
+                                class="select select-bordered flex-1"
+                                :disabled="loadingTodoistProjects"
+                            >
+                                <option value="">All projects</option>
+                                <template
+                                    x-for="project in todoistProjects"
+                                    :key="project.id"
+                                >
+                                    <option
+                                        :value="project.id"
+                                        x-text="project.name"
+                                    ></option>
+                                </template>
+                            </select>
+                            <button
+                                type="button"
+                                class="btn btn-square btn-outline"
+                                @click="loadTodoistProjects()"
+                                :class="{ 'loading': loadingTodoistProjects }"
+                                title="Refresh projects"
+                            >
+                                <svg
+                                    x-show="!loadingTodoistProjects"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                    />
+                                </svg>
+                            </button>
+                        </div>
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Leave empty to index tasks from all
+                                projects</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Filter (optional)</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.todoist_filter"
+                            class="input input-bordered font-mono"
+                            placeholder="e.g., today | overdue | #Work"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Todoist filter expression (see
+                                <a
+                                    href="https://todoist.com/help/articles/introduction-to-filters-V98wIH"
+                                    target="_blank"
+                                    class="link"
+                                    >filter documentation</a
+                                >)</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="form.todoist_include_completed"
+                                class="checkbox checkbox-sm"
+                            />
+                            <span class="label-text"
+                                >Include completed tasks</span
+                            >
+                        </label>
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >When enabled, indexes completed tasks as well
+                                (requires Todoist Pro)</span
+                            >
+                        </label>
+                    </div>
+                    <div class="alert alert-info">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="stroke-current shrink-0 h-6 w-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <div class="text-sm">
+                            Authentication via
+                            <code class="font-mono">TODOIST_API_TOKEN</code>
+                            environment variable. Get your API token from
+                            <a
+                                href="https://todoist.com/prefs/integrations"
+                                target="_blank"
+                                class="link"
+                                >Todoist Settings &gt; Integrations &gt;
+                                Developer</a
+                            >.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Google OAuth Configuration (for mcp:gdrive, mcp:gmail, mcp:gcalendar, mcp:gtasks, mcp:gcontacts) -->
+                <div
+                    x-show="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts'].includes(form.source_type)"
                     class="mt-4"
                 >
                     <!-- No OAuth configured -->
@@ -1454,7 +1919,7 @@ block content %}
                                         x-model="form.google_account_id"
                                         @change="onGoogleAccountChange()"
                                         class="select select-bordered flex-1"
-                                        :required="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar'].includes(form.source_type)"
+                                        :required="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts'].includes(form.source_type)"
                                     >
                                         <option value="">
                                             Select an account...
@@ -1866,13 +2331,808 @@ block content %}
                                     >
                                 </label>
                             </div>
+
+                            <!-- Google Tasks Task List Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:gtasks' && form.google_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Task List (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.gtasks_tasklist_id"
+                                        @change="onTaskListChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingTaskLists"
+                                    >
+                                        <option value="">All task lists</option>
+                                        <template
+                                            x-for="list in googleTaskLists"
+                                            :key="list.id"
+                                        >
+                                            <option
+                                                :value="list.id"
+                                                x-text="list.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadGoogleTaskLists()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingTaskLists }"
+                                        :disabled="loadingTaskLists || !form.google_account_id"
+                                        title="Refresh task lists"
+                                    >
+                                        <svg
+                                            x-show="!loadingTaskLists"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select a specific task list to index,
+                                        or leave empty for all task lists</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Google Contacts Label Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:gcontacts' && form.google_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Label (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.gcontacts_group_id"
+                                        @change="onContactGroupChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingContactGroups"
+                                    >
+                                        <option value="">All contacts</option>
+                                        <template
+                                            x-for="group in googleContactGroups"
+                                            :key="group.id"
+                                        >
+                                            <option
+                                                :value="group.id"
+                                                x-text="group.name + (group.memberCount ? ' (' + group.memberCount + ')' : '')"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadGoogleContactGroups()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingContactGroups }"
+                                        :disabled="loadingContactGroups || !form.google_account_id"
+                                        title="Refresh labels"
+                                    >
+                                        <svg
+                                            x-show="!loadingContactGroups"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select a label to filter contacts, or
+                                        leave empty for all contacts</span
+                                    >
+                                </label>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Microsoft OAuth Configuration (for mcp:onedrive, mcp:outlook, mcp:onenote, mcp:teams) -->
+                <div
+                    x-show="['mcp:onedrive', 'mcp:outlook', 'mcp:onenote', 'mcp:teams'].includes(form.source_type)"
+                    class="mt-4"
+                >
+                    <!-- No OAuth configured -->
+                    <template x-if="!microsoftOAuth.configured">
+                        <div class="alert alert-warning">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="stroke-current shrink-0 h-6 w-6"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
+                            </svg>
+                            <div>
+                                <h3 class="font-bold">
+                                    Microsoft OAuth Not Configured
+                                </h3>
+                                <div class="text-sm">
+                                    Set MICROSOFT_CLIENT_ID and
+                                    MICROSOFT_CLIENT_SECRET environment
+                                    variables.
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- OAuth configured but no accounts connected -->
+                    <template
+                        x-if="microsoftOAuth.configured && microsoftOAuth.accounts.length === 0"
+                    >
+                        <div class="alert alert-info">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="stroke-current shrink-0 h-6 w-6"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <div>
+                                <h3 class="font-bold">
+                                    Connect Microsoft Account
+                                </h3>
+                                <div class="text-sm">
+                                    Authorize access to Microsoft services to
+                                    index documents.
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                @click="startMicrosoftOAuth()"
+                                class="btn btn-sm btn-primary"
+                            >
+                                Connect Microsoft Account
+                            </button>
+                        </div>
+                    </template>
+
+                    <!-- OAuth configured with accounts - show selector -->
+                    <template
+                        x-if="microsoftOAuth.configured && microsoftOAuth.accounts.length > 0"
+                    >
+                        <div class="space-y-4">
+                            <div class="form-control">
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Microsoft Account</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.microsoft_account_id"
+                                        @change="onMicrosoftAccountChange()"
+                                        class="select select-bordered flex-1"
+                                        :required="['mcp:onedrive', 'mcp:outlook', 'mcp:onenote', 'mcp:teams'].includes(form.source_type)"
+                                    >
+                                        <option value="">
+                                            Select an account...
+                                        </option>
+                                        <template
+                                            x-for="account in microsoftOAuth.accounts"
+                                            :key="account.id"
+                                        >
+                                            <option
+                                                :value="account.id"
+                                                x-text="account.account_email + (account.account_name ? ' (' + account.account_name + ')' : '')"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="startMicrosoftOAuth()"
+                                        class="btn btn-ghost btn-sm"
+                                        title="Connect another account"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M12 4v16m8-8H4"
+                                            />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        @click="deleteMicrosoftAccount()"
+                                        class="btn btn-ghost btn-sm text-error"
+                                        title="Delete selected account"
+                                        :disabled="!form.microsoft_account_id"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- OneDrive Folder Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:onedrive' && form.microsoft_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Folder (optional)</span
+                                    >
+                                </label>
+
+                                <!-- Selected folder display -->
+                                <div
+                                    class="flex items-center gap-2 mb-2"
+                                    x-show="form.onedrive_folder_id"
+                                >
+                                    <span class="badge badge-primary gap-1">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                            />
+                                        </svg>
+                                        <span
+                                            x-text="form.onedrive_folder_name || 'Selected folder'"
+                                        ></span>
+                                    </span>
+                                    <button
+                                        type="button"
+                                        @click="clearOneDriveFolderSelection()"
+                                        class="btn btn-ghost btn-xs"
+                                        title="Clear selection"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <!-- Breadcrumb navigation -->
+                                <div
+                                    class="text-sm flex items-center gap-1 mb-2 flex-wrap"
+                                    x-show="onedriveFolderBreadcrumbs.length > 0"
+                                >
+                                    <a
+                                        href="#"
+                                        @click.prevent="navigateToOneDriveFolder('', 'OneDrive')"
+                                        class="link link-hover"
+                                    >
+                                        OneDrive
+                                    </a>
+                                    <template
+                                        x-for="(crumb, index) in onedriveFolderBreadcrumbs"
+                                        :key="crumb.id"
+                                    >
+                                        <span class="flex items-center gap-1">
+                                            <span class="text-base-content/50"
+                                                >&gt;</span
+                                            >
+                                            <a
+                                                href="#"
+                                                @click.prevent="navigateToOneDriveBreadcrumb(index)"
+                                                class="link link-hover"
+                                                x-text="crumb.name"
+                                            ></a>
+                                        </span>
+                                    </template>
+                                </div>
+
+                                <!-- Folder list -->
+                                <div
+                                    class="border rounded-lg max-h-48 overflow-y-auto bg-base-200"
+                                >
+                                    <div
+                                        x-show="loadingOneDriveFolders"
+                                        class="flex justify-center py-4"
+                                    >
+                                        <span
+                                            class="loading loading-spinner loading-sm"
+                                        ></span>
+                                    </div>
+                                    <ul
+                                        x-show="!loadingOneDriveFolders"
+                                        class="menu menu-sm p-1"
+                                    >
+                                        <!-- "Select this folder" option when inside a subfolder -->
+                                        <li
+                                            x-show="onedriveFolderBreadcrumbs.length > 0"
+                                        >
+                                            <a
+                                                href="#"
+                                                @click.prevent="selectCurrentOneDriveFolder()"
+                                                class="text-primary font-medium"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M5 13l4 4L19 7"
+                                                    />
+                                                </svg>
+                                                Select this folder
+                                            </a>
+                                        </li>
+                                        <!-- "All files" option at root level -->
+                                        <li
+                                            x-show="onedriveFolderBreadcrumbs.length === 0"
+                                        >
+                                            <a
+                                                href="#"
+                                                @click.prevent="selectOneDriveFolder('', 'All files (no filter)')"
+                                                class="text-base-content/70"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M4 6h16M4 10h16M4 14h16M4 18h16"
+                                                    />
+                                                </svg>
+                                                All files (no folder filter)
+                                            </a>
+                                        </li>
+                                        <!-- Folder items -->
+                                        <template
+                                            x-for="folder in onedriveFolders"
+                                            :key="folder.id"
+                                        >
+                                            <li>
+                                                <a
+                                                    href="#"
+                                                    @click.prevent="navigateToOneDriveFolder(folder.id, folder.name)"
+                                                    class="flex justify-between"
+                                                >
+                                                    <span
+                                                        class="flex items-center gap-2"
+                                                    >
+                                                        <svg
+                                                            xmlns="http://www.w3.org/2000/svg"
+                                                            class="h-4 w-4 text-info"
+                                                            fill="none"
+                                                            viewBox="0 0 24 24"
+                                                            stroke="currentColor"
+                                                        >
+                                                            <path
+                                                                stroke-linecap="round"
+                                                                stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                                            />
+                                                        </svg>
+                                                        <span
+                                                            x-text="folder.name"
+                                                        ></span>
+                                                    </span>
+                                                    <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        class="h-4 w-4 text-base-content/50"
+                                                        fill="none"
+                                                        viewBox="0 0 24 24"
+                                                        stroke="currentColor"
+                                                    >
+                                                        <path
+                                                            stroke-linecap="round"
+                                                            stroke-linejoin="round"
+                                                            stroke-width="2"
+                                                            d="M9 5l7 7-7 7"
+                                                        />
+                                                    </svg>
+                                                </a>
+                                            </li>
+                                        </template>
+                                        <!-- No folders message -->
+                                        <li
+                                            x-show="onedriveFolders.length === 0 && !loadingOneDriveFolders"
+                                        >
+                                            <span
+                                                class="text-base-content/50 italic"
+                                                >No subfolders</span
+                                            >
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Navigate to select a folder, or leave
+                                        empty for all files</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Outlook Folder Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:outlook' && form.microsoft_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Folder (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.outlook_folder_id"
+                                        @change="onOutlookFolderChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingOutlookFolders"
+                                    >
+                                        <option value="">
+                                            All emails (Inbox)
+                                        </option>
+                                        <template
+                                            x-for="folder in outlookFolders"
+                                            :key="folder.id"
+                                        >
+                                            <option
+                                                :value="folder.id"
+                                                x-text="folder.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadOutlookFolders()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingOutlookFolders }"
+                                        :disabled="loadingOutlookFolders || !form.microsoft_account_id"
+                                        title="Refresh folders"
+                                    >
+                                        <svg
+                                            x-show="!loadingOutlookFolders"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Limit indexing to emails from this
+                                        folder</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Outlook Days Back -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:outlook' && form.microsoft_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Days of History</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.outlook_days_back"
+                                    class="input input-bordered w-32"
+                                    min="1"
+                                    max="365"
+                                />
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Number of days of email history to
+                                        index</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- OneNote Notebook Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:onenote' && form.microsoft_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Notebook (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.onenote_notebook_id"
+                                        @change="onOneNoteNotebookChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingOneNoteNotebooks"
+                                    >
+                                        <option value="">All notebooks</option>
+                                        <template
+                                            x-for="notebook in onenoteNotebooks"
+                                            :key="notebook.id"
+                                        >
+                                            <option
+                                                :value="notebook.id"
+                                                x-text="notebook.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadOneNoteNotebooks()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingOneNoteNotebooks }"
+                                        :disabled="loadingOneNoteNotebooks || !form.microsoft_account_id"
+                                        title="Refresh notebooks"
+                                    >
+                                        <svg
+                                            x-show="!loadingOneNoteNotebooks"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select a specific notebook to index, or
+                                        leave empty for all notebooks</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Teams Team Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:teams' && form.microsoft_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Team (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.teams_team_id"
+                                        @change="onTeamsTeamChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingTeams"
+                                    >
+                                        <option value="">All teams</option>
+                                        <template
+                                            x-for="team in teamsTeams"
+                                            :key="team.id"
+                                        >
+                                            <option
+                                                :value="team.id"
+                                                x-text="team.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadTeams()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingTeams }"
+                                        :disabled="loadingTeams || !form.microsoft_account_id"
+                                        title="Refresh teams"
+                                    >
+                                        <svg
+                                            x-show="!loadingTeams"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select a specific team to index, or
+                                        leave empty for all teams</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Teams Channel Selection -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:teams' && form.microsoft_account_id && form.teams_team_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Channel (optional)</span
+                                    >
+                                </label>
+                                <div class="flex gap-2">
+                                    <select
+                                        x-model="form.teams_channel_id"
+                                        @change="onTeamsChannelChange()"
+                                        class="select select-bordered flex-1"
+                                        :disabled="loadingTeamsChannels"
+                                    >
+                                        <option value="">All channels</option>
+                                        <template
+                                            x-for="channel in teamsChannels"
+                                            :key="channel.id"
+                                        >
+                                            <option
+                                                :value="channel.id"
+                                                x-text="channel.name"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <button
+                                        type="button"
+                                        @click="loadTeamsChannels()"
+                                        class="btn btn-ghost btn-sm"
+                                        :class="{ 'loading': loadingTeamsChannels }"
+                                        :disabled="loadingTeamsChannels || !form.teams_team_id"
+                                        title="Refresh channels"
+                                    >
+                                        <svg
+                                            x-show="!loadingTeamsChannels"
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                            />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select a specific channel to index, or
+                                        leave empty for all channels in the
+                                        team</span
+                                    >
+                                </label>
+                            </div>
+
+                            <!-- Teams Days Back -->
+                            <div
+                                class="form-control"
+                                x-show="form.source_type === 'mcp:teams' && form.microsoft_account_id"
+                            >
+                                <label class="label">
+                                    <span class="label-text"
+                                        >Days of history</span
+                                    >
+                                </label>
+                                <input
+                                    type="number"
+                                    x-model.number="form.teams_days_back"
+                                    class="input input-bordered"
+                                    min="1"
+                                    max="365"
+                                />
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >How many days of message history to
+                                        index (default: 90)</span
+                                    >
+                                </label>
+                            </div>
                         </div>
                     </template>
                 </div>
 
                 <!-- MCP Server Configuration (for mcp sources) -->
                 <div
-                    x-show="form.source_type.startsWith('mcp:') && !['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar'].includes(form.source_type)"
+                    x-show="form.source_type.startsWith('mcp:') && !['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts', 'mcp:onedrive', 'mcp:outlook', 'mcp:onenote', 'mcp:teams'].includes(form.source_type)"
                     class="mt-4 space-y-4"
                 >
                     <!-- Custom MCP Server fields (only shown for mcp:custom) -->
@@ -2112,6 +3372,31 @@ block content %}
                                 </label>
                             </div>
                         </div>
+                        <!-- Crawler Override (website sources only) -->
+                        <div
+                            class="form-control mt-4"
+                            x-show="form.source_type === 'website'"
+                        >
+                            <label class="label">
+                                <span class="label-text">Crawler</span>
+                            </label>
+                            <select
+                                x-model="form.website_crawler_override"
+                                class="select select-bordered select-sm"
+                            >
+                                <option value="">Use global default</option>
+                                <option value="builtin">
+                                    Builtin (trafilatura)
+                                </option>
+                                <option value="jina">Jina Reader API</option>
+                            </select>
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Override the global crawler setting for
+                                    this store</span
+                                >
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -2181,6 +3466,126 @@ block content %}
         </div>
         <div class="modal-backdrop" @click="showDeleteModal = false"></div>
     </div>
+
+    <!-- Preview Modal -->
+    <div class="modal" :class="{ 'modal-open': showPreviewModal }">
+        <div class="modal-box max-w-4xl max-h-[80vh]">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-lg">
+                    Preview:
+                    <span class="font-mono" x-text="previewStore?.name"></span>
+                </h3>
+                <button
+                    @click="showPreviewModal = false"
+                    class="btn btn-ghost btn-sm btn-circle"
+                >
+                    ✕
+                </button>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats stats-horizontal shadow mb-4 w-full">
+                <div class="stat py-2">
+                    <div class="stat-title text-xs">Documents</div>
+                    <div
+                        class="stat-value text-lg"
+                        x-text="previewData?.total_documents || 0"
+                    ></div>
+                </div>
+                <div class="stat py-2">
+                    <div class="stat-title text-xs">Chunks</div>
+                    <div
+                        class="stat-value text-lg"
+                        x-text="previewData?.total_chunks || 0"
+                    ></div>
+                </div>
+                <div class="stat py-2">
+                    <div class="stat-title text-xs">Showing</div>
+                    <div
+                        class="stat-value text-lg"
+                        x-text="previewData?.showing || 0"
+                    ></div>
+                </div>
+            </div>
+
+            <!-- Loading -->
+            <div x-show="previewLoading" class="flex justify-center py-8">
+                <span class="loading loading-spinner loading-lg"></span>
+            </div>
+
+            <!-- Error -->
+            <div x-show="previewError" class="alert alert-error mb-4">
+                <span x-text="previewError"></span>
+            </div>
+
+            <!-- Content -->
+            <div
+                x-show="!previewLoading && !previewError"
+                class="overflow-y-auto max-h-[50vh]"
+            >
+                <div class="space-y-3">
+                    <template
+                        x-for="doc in (previewData?.documents || [])"
+                        :key="doc.id"
+                    >
+                        <div class="card bg-base-200 shadow-sm">
+                            <div class="card-body p-3">
+                                <div
+                                    class="flex justify-between items-start gap-2"
+                                >
+                                    <div
+                                        class="text-xs text-base-content/60 font-mono truncate flex-1"
+                                        x-text="doc.source_name || doc.source_uri"
+                                    ></div>
+                                    <div
+                                        class="badge badge-ghost badge-sm"
+                                        x-text="'Chunk ' + doc.chunk_index"
+                                    ></div>
+                                </div>
+                                <p
+                                    class="text-sm whitespace-pre-wrap break-words mt-1"
+                                    x-text="doc.content"
+                                ></p>
+                                <div
+                                    class="flex justify-between items-center mt-2 text-xs text-base-content/50"
+                                >
+                                    <span
+                                        x-text="doc.full_length + ' chars'"
+                                    ></span>
+                                    <span
+                                        x-show="doc.timestamp"
+                                        x-text="doc.timestamp"
+                                    ></span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- Load More -->
+                <div
+                    x-show="previewData && previewData.showing < previewData.total_chunks"
+                    class="mt-4 text-center"
+                >
+                    <button
+                        @click="loadMorePreview()"
+                        class="btn btn-outline btn-sm"
+                        :class="{ 'loading': previewLoadingMore }"
+                        :disabled="previewLoadingMore"
+                    >
+                        Load More
+                    </button>
+                </div>
+            </div>
+
+            <div class="modal-action">
+                <button @click="showPreviewModal = false" class="btn">
+                    Close
+                </button>
+            </div>
+        </div>
+        <div class="modal-backdrop" @click="showPreviewModal = false"></div>
+    </div>
 </div>
 
 <script>
@@ -2191,12 +3596,119 @@ block content %}
             allStores: [], // Unfiltered stores
             filterMode:
                 new URLSearchParams(window.location.search).get("filter") ||
-                null,
+                "all",
             expandedRows: [],
+
+            // Computed: tab counts
+            get tabCounts() {
+                return {
+                    all: this.allStores.length,
+                    local: this.allStores.filter(
+                        (s) => s.source_type === "local",
+                    ).length,
+                    google: this.allStores.filter((s) =>
+                        [
+                            "mcp:gdrive",
+                            "mcp:gmail",
+                            "mcp:gcalendar",
+                            "mcp:gtasks",
+                            "mcp:gcontacts",
+                        ].includes(s.source_type),
+                    ).length,
+                    microsoft: this.allStores.filter((s) =>
+                        ["mcp:onedrive", "mcp:outlook", "mcp:onenote"].includes(
+                            s.source_type,
+                        ),
+                    ).length,
+                    website: this.allStores.filter(
+                        (s) => s.source_type === "website",
+                    ).length,
+                    other: this.allStores.filter(
+                        (s) =>
+                            ![
+                                "local",
+                                "website",
+                                "mcp:gdrive",
+                                "mcp:gmail",
+                                "mcp:gcalendar",
+                                "mcp:gtasks",
+                                "mcp:gcontacts",
+                                "mcp:onedrive",
+                                "mcp:outlook",
+                                "mcp:onenote",
+                            ].includes(s.source_type),
+                    ).length,
+                };
+            },
+
+            // Computed: filtered stores based on current tab
+            get filteredStores() {
+                if (this.filterMode === "all") return this.allStores;
+                if (this.filterMode === "local")
+                    return this.allStores.filter(
+                        (s) => s.source_type === "local",
+                    );
+                if (this.filterMode === "google")
+                    return this.allStores.filter((s) =>
+                        [
+                            "mcp:gdrive",
+                            "mcp:gmail",
+                            "mcp:gcalendar",
+                            "mcp:gtasks",
+                            "mcp:gcontacts",
+                        ].includes(s.source_type),
+                    );
+                if (this.filterMode === "microsoft")
+                    return this.allStores.filter((s) =>
+                        ["mcp:onedrive", "mcp:outlook", "mcp:onenote"].includes(
+                            s.source_type,
+                        ),
+                    );
+                if (this.filterMode === "website")
+                    return this.allStores.filter(
+                        (s) => s.source_type === "website",
+                    );
+                if (this.filterMode === "other")
+                    return this.allStores.filter(
+                        (s) =>
+                            ![
+                                "local",
+                                "website",
+                                "mcp:gdrive",
+                                "mcp:gmail",
+                                "mcp:gcalendar",
+                                "mcp:gtasks",
+                                "mcp:gcontacts",
+                                "mcp:onedrive",
+                                "mcp:outlook",
+                                "mcp:onenote",
+                            ].includes(s.source_type),
+                    );
+                return this.allStores;
+            },
+
+            // Computed: label for current filter
+            get filterLabel() {
+                const labels = {
+                    all: "All",
+                    local: "Local",
+                    google: "Google",
+                    microsoft: "Microsoft",
+                    website: "Website",
+                    other: "Other",
+                };
+                return labels[this.filterMode] || "All";
+            },
             showModal: false,
             showDeleteModal: false,
+            showPreviewModal: false,
             editingStore: null,
             deleteTarget: null,
+            previewStore: null,
+            previewData: null,
+            previewLoading: false,
+            previewLoadingMore: false,
+            previewError: null,
             saving: false,
             deleting: false,
             indexingStores: [],
@@ -2222,6 +3734,32 @@ block content %}
                 accounts: [],
             },
 
+            // Microsoft OAuth status
+            microsoftOAuth: {
+                configured: false,
+                accounts: [],
+            },
+
+            // OneDrive folders
+            onedriveFolders: [],
+            loadingOneDriveFolders: false,
+            onedriveFolderBreadcrumbs: [],
+            currentOneDriveFolderId: "",
+
+            // Outlook folders
+            outlookFolders: [],
+            loadingOutlookFolders: false,
+
+            // OneNote notebooks
+            onenoteNotebooks: [],
+            loadingOneNoteNotebooks: false,
+
+            // Teams
+            teamsTeams: [],
+            loadingTeams: false,
+            teamsChannels: [],
+            loadingTeamsChannels: false,
+
             // Google Drive folders
             gdriveFolders: [],
             loadingFolders: false,
@@ -2235,6 +3773,14 @@ block content %}
             // Google calendars
             googleCalendars: [],
             loadingCalendars: false,
+
+            // Google task lists
+            googleTaskLists: [],
+            loadingTaskLists: false,
+
+            // Google contact groups
+            googleContactGroups: [],
+            loadingContactGroups: false,
 
             // Notion databases
             notionDatabases: [],
@@ -2259,6 +3805,14 @@ block content %}
             paperlessTags: [],
             loadingPaperlessTags: false,
 
+            // Slack channels
+            slackChannels: [],
+            loadingSlackChannels: false,
+
+            // Todoist projects
+            todoistProjects: [],
+            loadingTodoistProjects: false,
+
             form: {
                 name: "",
                 source_type: "local",
@@ -2278,6 +3832,19 @@ block content %}
                 website_max_pages: 50,
                 website_include_pattern: "",
                 website_exclude_pattern: "",
+                website_crawler_override: "",
+                slack_channel_id: "",
+                slack_channel_types: "public_channel",
+                slack_days_back: 90,
+                todoist_project_id: "",
+                todoist_project_name: "",
+                todoist_filter: "",
+                todoist_include_completed: false,
+                websearch_query: "",
+                websearch_max_results: 10,
+                websearch_pages_to_scrape: 5,
+                websearch_time_range: "",
+                websearch_category: "",
                 mcp_name: "",
                 mcp_transport: "stdio",
                 mcp_command: "",
@@ -2291,6 +3858,23 @@ block content %}
                 gmail_label_name: "",
                 gcalendar_calendar_id: "",
                 gcalendar_calendar_name: "",
+                gtasks_tasklist_id: "",
+                gtasks_tasklist_name: "",
+                gcontacts_group_id: "",
+                gcontacts_group_name: "",
+                microsoft_account_id: "",
+                onedrive_folder_id: "",
+                onedrive_folder_name: "",
+                outlook_folder_id: "",
+                outlook_folder_name: "",
+                outlook_days_back: 90,
+                onenote_notebook_id: "",
+                onenote_notebook_name: "",
+                teams_team_id: "",
+                teams_team_name: "",
+                teams_channel_id: "",
+                teams_channel_name: "",
+                teams_days_back: 90,
                 index_schedule: "",
                 custom_schedule: "",
                 chunk_size: 512,
@@ -2357,8 +3941,117 @@ block content %}
                     this.loadStores(),
                     this.loadMcpStatus(),
                     this.loadGoogleOAuthStatus(),
+                    this.loadMicrosoftOAuthStatus(),
                     this.loadDocumentSources(),
                 ]);
+
+                // Check for saved form state (from OAuth redirect)
+                const savedState = sessionStorage.getItem(
+                    "docstore_form_state",
+                );
+                if (savedState) {
+                    try {
+                        const state = JSON.parse(savedState);
+                        this.form = state.form;
+                        this.editingStore = state.editingStore;
+                        this.showModal = state.showModal;
+                        sessionStorage.removeItem("docstore_form_state");
+
+                        // If we have a Google source type, load the account options
+                        if (
+                            [
+                                "mcp:gdrive",
+                                "mcp:gmail",
+                                "mcp:gcalendar",
+                                "mcp:gtasks",
+                                "mcp:gcontacts",
+                            ].includes(this.form.source_type)
+                        ) {
+                            // Trigger folder/label/list loading if account is set
+                            if (this.form.google_account_id) {
+                                await this.onGoogleAccountChange();
+                            }
+                        }
+
+                        // If we have a Microsoft source type, load the account options
+                        if (
+                            [
+                                "mcp:onedrive",
+                                "mcp:outlook",
+                                "mcp:onenote",
+                            ].includes(this.form.source_type)
+                        ) {
+                            // Trigger folder/notebook loading if account is set
+                            if (this.form.microsoft_account_id) {
+                                await this.onMicrosoftAccountChange();
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Failed to restore form state:", e);
+                        sessionStorage.removeItem("docstore_form_state");
+                    }
+                } else {
+                    // Handle deeplink - expand and scroll to specific store
+                    const params = new URLSearchParams(window.location.search);
+                    const expandId = params.get("expand");
+                    const expandName = params.get("name");
+
+                    if (expandId) {
+                        const storeId = parseInt(expandId);
+                        if (!this.expandedRows.includes(storeId)) {
+                            this.expandedRows.push(storeId);
+                        }
+                        // Scroll to the store after a short delay for DOM update
+                        this.$nextTick(() => {
+                            const row = document.querySelector(
+                                `[data-store-id="${storeId}"]`,
+                            );
+                            if (row) {
+                                row.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "center",
+                                });
+                                row.classList.add("bg-primary/10");
+                                setTimeout(
+                                    () => row.classList.remove("bg-primary/10"),
+                                    2000,
+                                );
+                            }
+                        });
+                    } else if (expandName) {
+                        // Find store by name
+                        const store = this.stores.find(
+                            (s) =>
+                                s.name.toLowerCase() ===
+                                expandName.toLowerCase(),
+                        );
+                        if (store) {
+                            if (!this.expandedRows.includes(store.id)) {
+                                this.expandedRows.push(store.id);
+                            }
+                            this.$nextTick(() => {
+                                const row = document.querySelector(
+                                    `[data-store-id="${store.id}"]`,
+                                );
+                                if (row) {
+                                    row.scrollIntoView({
+                                        behavior: "smooth",
+                                        block: "center",
+                                    });
+                                    row.classList.add("bg-primary/10");
+                                    setTimeout(
+                                        () =>
+                                            row.classList.remove(
+                                                "bg-primary/10",
+                                            ),
+                                        2000,
+                                    );
+                                }
+                            });
+                        }
+                    }
+                }
+
                 // Poll for status updates
                 setInterval(() => this.loadStores(), 5000);
             },
@@ -2374,13 +4067,365 @@ block content %}
                 }
             },
 
+            async loadMicrosoftOAuthStatus() {
+                try {
+                    const response = await fetch("/api/oauth/microsoft/status");
+                    if (response.ok) {
+                        this.microsoftOAuth = await response.json();
+                    }
+                } catch (error) {
+                    console.error(
+                        "Failed to load Microsoft OAuth status:",
+                        error,
+                    );
+                }
+            },
+
+            async startMicrosoftOAuth() {
+                try {
+                    // Save form state before OAuth redirect
+                    sessionStorage.setItem(
+                        "docstore_form_state",
+                        JSON.stringify({
+                            form: this.form,
+                            editingStore: this.editingStore,
+                            showModal: true,
+                        }),
+                    );
+
+                    // Map source type to OAuth scope
+                    const scopeMap = {
+                        "mcp:onedrive": "onedrive",
+                        "mcp:outlook": "outlook",
+                        "mcp:onenote": "onenote",
+                    };
+                    const scope = scopeMap[this.form.source_type] || "full";
+                    const response = await fetch(
+                        `/api/oauth/microsoft/start?scope=${scope}&redirect_uri=/document-stores`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        window.location.href = data.auth_url;
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || "Failed to start OAuth");
+                    }
+                } catch (error) {
+                    console.error("Failed to start Microsoft OAuth:", error);
+                    alert("Failed to start Microsoft OAuth");
+                }
+            },
+
+            async deleteMicrosoftAccount() {
+                if (!this.form.microsoft_account_id) return;
+
+                const account = this.microsoftOAuth.accounts.find(
+                    (a) => a.id == this.form.microsoft_account_id,
+                );
+                const accountName = account
+                    ? account.account_email
+                    : "this account";
+
+                if (
+                    !confirm(
+                        `Are you sure you want to delete ${accountName}? Any document stores using this account will need to be reconfigured.`,
+                    )
+                ) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch(
+                        `/api/oauth/accounts/${this.form.microsoft_account_id}`,
+                        { method: "DELETE" },
+                    );
+                    if (response.ok) {
+                        // Refresh accounts list
+                        await this.loadMicrosoftOAuthStatus();
+                        this.form.microsoft_account_id = "";
+                        this.onedriveFolders = [];
+                        this.form.onedrive_folder_id = "";
+                        this.form.onedrive_folder_name = "";
+                        this.outlookFolders = [];
+                        this.form.outlook_folder_id = "";
+                        this.form.outlook_folder_name = "";
+                        this.onenoteNotebooks = [];
+                        this.form.onenote_notebook_id = "";
+                        this.form.onenote_notebook_name = "";
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || "Failed to delete account");
+                    }
+                } catch (error) {
+                    console.error("Failed to delete account:", error);
+                    alert("Failed to delete account");
+                }
+            },
+
+            async onMicrosoftAccountChange() {
+                // Clear folder/notebook/teams selection when account changes
+                this.form.onedrive_folder_id = "";
+                this.form.onedrive_folder_name = "";
+                this.onedriveFolders = [];
+                this.onedriveFolderBreadcrumbs = [];
+                this.currentOneDriveFolderId = "";
+                this.form.outlook_folder_id = "";
+                this.form.outlook_folder_name = "";
+                this.outlookFolders = [];
+                this.form.onenote_notebook_id = "";
+                this.form.onenote_notebook_name = "";
+                this.onenoteNotebooks = [];
+                this.form.teams_team_id = "";
+                this.form.teams_team_name = "";
+                this.form.teams_channel_id = "";
+                this.form.teams_channel_name = "";
+                this.teamsTeams = [];
+                this.teamsChannels = [];
+
+                // Auto-load folders for OneDrive
+                if (
+                    this.form.source_type === "mcp:onedrive" &&
+                    this.form.microsoft_account_id
+                ) {
+                    await this.loadOneDriveFolders();
+                }
+
+                // Auto-load folders for Outlook
+                if (
+                    this.form.source_type === "mcp:outlook" &&
+                    this.form.microsoft_account_id
+                ) {
+                    await this.loadOutlookFolders();
+                }
+
+                // Auto-load notebooks for OneNote
+                if (
+                    this.form.source_type === "mcp:onenote" &&
+                    this.form.microsoft_account_id
+                ) {
+                    await this.loadOneNoteNotebooks();
+                }
+
+                // Auto-load teams for Teams
+                if (
+                    this.form.source_type === "mcp:teams" &&
+                    this.form.microsoft_account_id
+                ) {
+                    await this.loadTeams();
+                }
+            },
+
+            async loadOneDriveFolders(parentId = "") {
+                if (!this.form.microsoft_account_id) return;
+
+                this.loadingOneDriveFolders = true;
+                this.currentOneDriveFolderId = parentId;
+                try {
+                    let url = `/api/oauth/microsoft/${this.form.microsoft_account_id}/folders`;
+                    if (parentId) {
+                        url += `?parent=${encodeURIComponent(parentId)}`;
+                    }
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.onedriveFolders = data.folders || [];
+                    } else {
+                        const error = await response.json();
+                        console.error(
+                            "Failed to load OneDrive folders:",
+                            error,
+                        );
+                    }
+                } catch (error) {
+                    console.error("Failed to load OneDrive folders:", error);
+                } finally {
+                    this.loadingOneDriveFolders = false;
+                }
+            },
+
+            navigateToOneDriveFolder(folderId, folderName) {
+                // If going to root, clear breadcrumbs
+                if (!folderId) {
+                    this.onedriveFolderBreadcrumbs = [];
+                } else {
+                    // Add to breadcrumbs
+                    this.onedriveFolderBreadcrumbs.push({
+                        id: folderId,
+                        name: folderName,
+                    });
+                }
+                // Load subfolders
+                this.loadOneDriveFolders(folderId);
+            },
+
+            navigateToOneDriveBreadcrumb(index) {
+                // Navigate to a specific breadcrumb level
+                const crumb = this.onedriveFolderBreadcrumbs[index];
+                // Truncate breadcrumbs to this level
+                this.onedriveFolderBreadcrumbs =
+                    this.onedriveFolderBreadcrumbs.slice(0, index + 1);
+                // Load that folder's contents
+                this.loadOneDriveFolders(crumb.id);
+            },
+
+            selectOneDriveFolder(folderId, folderName) {
+                this.form.onedrive_folder_id = folderId;
+                this.form.onedrive_folder_name = folderName;
+            },
+
+            selectCurrentOneDriveFolder() {
+                // Select the current folder we're browsing (last breadcrumb)
+                if (this.onedriveFolderBreadcrumbs.length > 0) {
+                    const current =
+                        this.onedriveFolderBreadcrumbs[
+                            this.onedriveFolderBreadcrumbs.length - 1
+                        ];
+                    this.form.onedrive_folder_id = current.id;
+                    this.form.onedrive_folder_name = current.name;
+                }
+            },
+
+            clearOneDriveFolderSelection() {
+                this.form.onedrive_folder_id = "";
+                this.form.onedrive_folder_name = "";
+            },
+
+            async loadOutlookFolders() {
+                if (!this.form.microsoft_account_id) return;
+
+                this.loadingOutlookFolders = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/microsoft/${this.form.microsoft_account_id}/mail-folders`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.outlookFolders = data.folders || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Outlook folders:", error);
+                } finally {
+                    this.loadingOutlookFolders = false;
+                }
+            },
+
+            onOutlookFolderChange() {
+                // Update folder name when folder is selected
+                const folder = this.outlookFolders.find(
+                    (f) => f.id === this.form.outlook_folder_id,
+                );
+                this.form.outlook_folder_name = folder ? folder.name : "";
+            },
+
+            async loadOneNoteNotebooks() {
+                if (!this.form.microsoft_account_id) return;
+
+                this.loadingOneNoteNotebooks = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/microsoft/${this.form.microsoft_account_id}/notebooks`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.onenoteNotebooks = data.notebooks || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load OneNote notebooks:", error);
+                } finally {
+                    this.loadingOneNoteNotebooks = false;
+                }
+            },
+
+            onOneNoteNotebookChange() {
+                // Update notebook name when notebook is selected
+                const notebook = this.onenoteNotebooks.find(
+                    (n) => n.id === this.form.onenote_notebook_id,
+                );
+                this.form.onenote_notebook_name = notebook ? notebook.name : "";
+            },
+
+            async loadTeams() {
+                if (!this.form.microsoft_account_id) return;
+
+                this.loadingTeams = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/microsoft/${this.form.microsoft_account_id}/teams`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.teamsTeams = data.teams || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Teams:", error);
+                } finally {
+                    this.loadingTeams = false;
+                }
+            },
+
+            async loadTeamsChannels() {
+                if (!this.form.microsoft_account_id || !this.form.teams_team_id)
+                    return;
+
+                this.loadingTeamsChannels = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/microsoft/${this.form.microsoft_account_id}/teams/${this.form.teams_team_id}/channels`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.teamsChannels = data.channels || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Teams channels:", error);
+                } finally {
+                    this.loadingTeamsChannels = false;
+                }
+            },
+
+            onTeamsTeamChange() {
+                // Update team name when team is selected
+                const team = this.teamsTeams.find(
+                    (t) => t.id === this.form.teams_team_id,
+                );
+                this.form.teams_team_name = team ? team.name : "";
+                // Clear channel selection when team changes
+                this.form.teams_channel_id = "";
+                this.form.teams_channel_name = "";
+                this.teamsChannels = [];
+                // Load channels for the selected team
+                if (this.form.teams_team_id) {
+                    this.loadTeamsChannels();
+                }
+            },
+
+            onTeamsChannelChange() {
+                // Update channel name when channel is selected
+                const channel = this.teamsChannels.find(
+                    (c) => c.id === this.form.teams_channel_id,
+                );
+                this.form.teams_channel_name = channel ? channel.name : "";
+            },
+
             async startGoogleOAuth() {
                 try {
+                    // Save form state before OAuth redirect
+                    sessionStorage.setItem(
+                        "docstore_form_state",
+                        JSON.stringify({
+                            form: this.form,
+                            editingStore: this.editingStore,
+                            showModal: true,
+                        }),
+                    );
+
                     // Map source type to OAuth scope
                     const scopeMap = {
                         "mcp:gdrive": "drive",
                         "mcp:gmail": "gmail",
                         "mcp:gcalendar": "calendar",
+                        "mcp:gtasks": "tasks",
+                        "mcp:gcontacts": "contacts",
                     };
                     const scope = scopeMap[this.form.source_type] || "drive";
                     const response = await fetch(
@@ -2452,6 +4497,12 @@ block content %}
                 this.form.gcalendar_calendar_id = "";
                 this.form.gcalendar_calendar_name = "";
                 this.googleCalendars = [];
+                this.form.gtasks_tasklist_id = "";
+                this.form.gtasks_tasklist_name = "";
+                this.googleTaskLists = [];
+                this.form.gcontacts_group_id = "";
+                this.form.gcontacts_group_name = "";
+                this.googleContactGroups = [];
 
                 // Auto-load folders for Google Drive
                 if (
@@ -2475,6 +4526,22 @@ block content %}
                     this.form.google_account_id
                 ) {
                     await this.loadGoogleCalendars();
+                }
+
+                // Auto-load task lists for Google Tasks
+                if (
+                    this.form.source_type === "mcp:gtasks" &&
+                    this.form.google_account_id
+                ) {
+                    await this.loadGoogleTaskLists();
+                }
+
+                // Auto-load contact groups for Google Contacts
+                if (
+                    this.form.source_type === "mcp:gcontacts" &&
+                    this.form.google_account_id
+                ) {
+                    await this.loadGoogleContactGroups();
                 }
             },
 
@@ -2665,6 +4732,91 @@ block content %}
                 this.form.paperless_tag_name = tag ? tag.name : "";
             },
 
+            // Slack channel functions
+            async loadSlackChannels() {
+                if (this.loadingSlackChannels) return;
+                this.loadingSlackChannels = true;
+                try {
+                    const response = await fetch("/api/slack/channels");
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.slackChannels = data.channels || [];
+                    } else {
+                        const error = await response.json();
+                        console.error(
+                            "Failed to load Slack channels:",
+                            error.error,
+                        );
+                    }
+                } catch (error) {
+                    console.error("Failed to load Slack channels:", error);
+                } finally {
+                    this.loadingSlackChannels = false;
+                }
+            },
+
+            toggleSlackChannelType(type) {
+                const types = this.form.slack_channel_types
+                    .split(",")
+                    .filter((t) => t);
+                const idx = types.indexOf(type);
+                if (idx >= 0) {
+                    // Remove if already present (but keep at least one)
+                    if (types.length > 1) {
+                        types.splice(idx, 1);
+                    }
+                } else {
+                    // Add if not present
+                    types.push(type);
+                }
+                this.form.slack_channel_types = types.join(",");
+            },
+
+            // Todoist functions
+            async loadTodoistProjects() {
+                if (this.loadingTodoistProjects) return;
+                this.loadingTodoistProjects = true;
+                try {
+                    const response = await fetch("/api/todoist/projects");
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.todoistProjects = data.projects || [];
+
+                        // Restore saved selection after loading options (Alpine.js fix)
+                        const savedProjectId = this.form.todoist_project_id;
+                        if (savedProjectId) {
+                            setTimeout(() => {
+                                const el = document.querySelector(
+                                    'select[x-model="form.todoist_project_id"]',
+                                );
+                                if (el) {
+                                    el.value = savedProjectId;
+                                    el.dispatchEvent(new Event("change"));
+                                }
+                            }, 100);
+                        }
+                    } else {
+                        const error = await response.json();
+                        console.error(
+                            "Failed to load Todoist projects:",
+                            error.error,
+                        );
+                    }
+                } catch (error) {
+                    console.error("Failed to load Todoist projects:", error);
+                } finally {
+                    this.loadingTodoistProjects = false;
+                }
+            },
+
+            onTodoistProjectChange() {
+                // Update project name when project is selected
+                const project = this.todoistProjects.find(
+                    (p) => p.id === this.form.todoist_project_id,
+                );
+                this.form.todoist_project_name = project ? project.name : "";
+            },
+
             onFolderChange() {
                 // Update folder name when folder is selected
                 const folder = this.gdriveFolders.find(
@@ -2727,6 +4879,63 @@ block content %}
                 this.form.gcalendar_calendar_name = cal ? cal.name : "";
             },
 
+            async loadGoogleTaskLists() {
+                if (!this.form.google_account_id) return;
+
+                this.loadingTaskLists = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/google/${this.form.google_account_id}/tasklists`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.googleTaskLists = data.tasklists || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Google task lists:", error);
+                } finally {
+                    this.loadingTaskLists = false;
+                }
+            },
+
+            onTaskListChange() {
+                // Update task list name when task list is selected
+                const list = this.googleTaskLists.find(
+                    (l) => l.id === this.form.gtasks_tasklist_id,
+                );
+                this.form.gtasks_tasklist_name = list ? list.name : "";
+            },
+
+            async loadGoogleContactGroups() {
+                if (!this.form.google_account_id) return;
+
+                this.loadingContactGroups = true;
+                try {
+                    const response = await fetch(
+                        `/api/oauth/google/${this.form.google_account_id}/contactgroups`,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.googleContactGroups = data.groups || [];
+                    }
+                } catch (error) {
+                    console.error(
+                        "Failed to load Google contact groups:",
+                        error,
+                    );
+                } finally {
+                    this.loadingContactGroups = false;
+                }
+            },
+
+            onContactGroupChange() {
+                // Update contact group name when group is selected
+                const group = this.googleContactGroups.find(
+                    (g) => g.id === this.form.gcontacts_group_id,
+                );
+                this.form.gcontacts_group_name = group ? group.name : "";
+            },
+
             async loadNotionDatabases() {
                 this.loadingNotionDatabases = true;
                 this.notionError = null;
@@ -2759,9 +4968,17 @@ block content %}
                 if (store.source_type === "mcp:gmail") return "badge-secondary";
                 if (store.source_type === "mcp:gcalendar")
                     return "badge-accent";
+                if (store.source_type === "mcp:gtasks") return "badge-info";
+                if (store.source_type === "mcp:gcontacts")
+                    return "badge-warning";
+                if (store.source_type === "mcp:onedrive") return "badge-info";
+                if (store.source_type === "mcp:outlook") return "badge-primary";
+                if (store.source_type === "mcp:onenote")
+                    return "badge-secondary";
                 if (store.source_type === "mcp:notion") return "badge-warning";
                 if (store.source_type === "mcp:github") return "badge-neutral";
-                if (store.source_type === "mcp:slack") return "badge-error";
+                if (store.source_type === "slack") return "badge-warning";
+                if (store.source_type === "todoist") return "badge-error";
                 if (
                     store.source_type === "mcp" ||
                     store.source_type?.startsWith("mcp:")
@@ -2773,15 +4990,23 @@ block content %}
             getSourceBadgeText(store) {
                 if (store.source_type === "local") return "Local";
                 if (store.source_type === "website") return "Website";
+                if (store.source_type === "websearch") return "Web Search";
                 if (store.source_type === "paperless") return "Paperless";
                 if (store.source_type === "nextcloud") return "Nextcloud";
                 if (store.source_type === "notion") return "Notion";
                 if (store.source_type === "mcp:gdrive") return "Drive";
                 if (store.source_type === "mcp:gmail") return "Gmail";
                 if (store.source_type === "mcp:gcalendar") return "Calendar";
+                if (store.source_type === "mcp:gtasks") return "Tasks";
+                if (store.source_type === "mcp:gcontacts") return "Contacts";
+                if (store.source_type === "mcp:onedrive") return "OneDrive";
+                if (store.source_type === "mcp:outlook") return "Outlook";
+                if (store.source_type === "mcp:onenote") return "OneNote";
+                if (store.source_type === "mcp:teams") return "Teams";
                 if (store.source_type === "mcp:notion") return "Notion";
                 if (store.source_type === "mcp:github") return "GitHub";
-                if (store.source_type === "mcp:slack") return "Slack";
+                if (store.source_type === "slack") return "Slack";
+                if (store.source_type === "todoist") return "Todoist";
                 if (
                     store.source_type === "mcp" ||
                     store.source_type?.startsWith("mcp:")
@@ -2795,6 +5020,8 @@ block content %}
                     return store.source_path || "";
                 if (store.source_type === "website")
                     return store.website_url || "";
+                if (store.source_type === "websearch")
+                    return store.websearch_query || "";
                 if (store.source_type === "paperless")
                     return store.paperless_url || "";
                 if (store.source_type === "nextcloud")
@@ -2825,6 +5052,61 @@ block content %}
                 if (store.source_type === "mcp:gcalendar") {
                     const cal = store.gcalendar_calendar_name || "Primary";
                     return acct ? `${acct}: ${cal}` : cal;
+                }
+                if (store.source_type === "mcp:gtasks") {
+                    const list = store.gtasks_tasklist_name || "All lists";
+                    return acct ? `${acct}: ${list}` : list;
+                }
+                if (store.source_type === "mcp:gcontacts") {
+                    const label = store.gcontacts_group_name || "All contacts";
+                    return acct ? `${acct}: ${label}` : label;
+                }
+                // Microsoft sources
+                const msAcct = store.microsoft_account_email || "";
+                if (store.source_type === "mcp:onedrive") {
+                    const folder = store.onedrive_folder_name || "All files";
+                    return msAcct ? `${msAcct}: ${folder}` : folder;
+                }
+                if (store.source_type === "mcp:outlook") {
+                    const folder = store.outlook_folder_name || "Inbox";
+                    const days = store.outlook_days_back || 90;
+                    const detail = `${folder} (${days}d)`;
+                    return msAcct ? `${msAcct}: ${detail}` : detail;
+                }
+                if (store.source_type === "mcp:onenote") {
+                    const notebook =
+                        store.onenote_notebook_name || "All notebooks";
+                    return msAcct ? `${msAcct}: ${notebook}` : notebook;
+                }
+                if (store.source_type === "mcp:teams") {
+                    const days = store.teams_days_back || 90;
+                    let detail = "";
+                    if (store.teams_channel_name) {
+                        detail = `${store.teams_team_name}/${store.teams_channel_name}`;
+                    } else if (store.teams_team_name) {
+                        detail = store.teams_team_name;
+                    } else {
+                        detail = "All teams";
+                    }
+                    detail += ` (${days}d)`;
+                    return msAcct ? `${msAcct}: ${detail}` : detail;
+                }
+                if (store.source_type === "slack") {
+                    const days = store.slack_days_back || 90;
+                    if (store.slack_channel_id) {
+                        return `Channel: ${store.slack_channel_id} (${days}d)`;
+                    }
+                    return `All channels (${days}d)`;
+                }
+                if (store.source_type === "todoist") {
+                    let detail = store.todoist_project_name || "All projects";
+                    if (store.todoist_filter) {
+                        detail += ` (${store.todoist_filter})`;
+                    }
+                    if (store.todoist_include_completed) {
+                        detail += " +completed";
+                    }
+                    return detail;
                 }
                 if (store.source_type === "mcp")
                     return store.mcp_server_config?.name || "Unknown";
@@ -2875,24 +5157,25 @@ block content %}
                     const response = await fetch("/api/document-stores");
                     if (response.ok) {
                         this.allStores = await response.json();
-                        // Apply filter based on mode
-                        if (this.filterMode === "website") {
-                            // Websites page: show only websites
-                            this.stores = this.allStores.filter(
-                                (s) => s.source_type === "website",
-                            );
-                        } else {
-                            // Document Stores page: exclude websites (they have their own nav item)
-                            this.stores = this.allStores.filter(
-                                (s) => s.source_type !== "website",
-                            );
-                        }
+                        // Filtering is now handled by the filteredStores computed property
                     }
                 } catch (error) {
                     console.error("Failed to load stores:", error);
                 } finally {
                     this.loading = false;
                 }
+            },
+
+            setFilter(mode) {
+                this.filterMode = mode;
+                // Update URL without reload
+                const url = new URL(window.location);
+                if (mode === "all") {
+                    url.searchParams.delete("filter");
+                } else {
+                    url.searchParams.set("filter", mode);
+                }
+                window.history.replaceState({}, "", url);
             },
 
             toggleExpand(id) {
@@ -2933,6 +5216,13 @@ block content %}
                 this.currentFolderId = "";
                 this.gmailLabels = [];
                 this.googleCalendars = [];
+                this.slackChannels = [];
+                this.todoistProjects = [];
+                this.onedriveFolders = [];
+                this.onedriveFolderBreadcrumbs = [];
+                this.currentOneDriveFolderId = "";
+                this.outlookFolders = [];
+                this.onenoteNotebooks = [];
                 this.form = {
                     name: "",
                     source_type:
@@ -2943,6 +5233,18 @@ block content %}
                     github_repo: "",
                     github_branch: "",
                     github_path: "",
+                    slack_channel_id: "",
+                    slack_channel_types: "public_channel",
+                    slack_days_back: 90,
+                    todoist_project_id: "",
+                    todoist_project_name: "",
+                    todoist_filter: "",
+                    todoist_include_completed: false,
+                    websearch_query: "",
+                    websearch_max_results: 10,
+                    websearch_pages_to_scrape: 5,
+                    websearch_time_range: "",
+                    websearch_category: "",
                     mcp_name: "",
                     mcp_transport: "stdio",
                     mcp_command: "",
@@ -2956,6 +5258,23 @@ block content %}
                     gmail_label_name: "",
                     gcalendar_calendar_id: "",
                     gcalendar_calendar_name: "",
+                    gtasks_tasklist_id: "",
+                    gtasks_tasklist_name: "",
+                    gcontacts_group_id: "",
+                    gcontacts_group_name: "",
+                    microsoft_account_id: "",
+                    onedrive_folder_id: "",
+                    onedrive_folder_name: "",
+                    outlook_folder_id: "",
+                    outlook_folder_name: "",
+                    outlook_days_back: 90,
+                    onenote_notebook_id: "",
+                    onenote_notebook_name: "",
+                    teams_team_id: "",
+                    teams_team_name: "",
+                    teams_channel_id: "",
+                    teams_channel_name: "",
+                    teams_days_back: 90,
                     index_schedule: "",
                     custom_schedule: "",
                     chunk_size: 512,
@@ -2975,6 +5294,15 @@ block content %}
                 this.currentFolderId = "";
                 this.gmailLabels = [];
                 this.googleCalendars = [];
+                this.slackChannels = [];
+                this.todoistProjects = [];
+                this.onedriveFolders = [];
+                this.onedriveFolderBreadcrumbs = [];
+                this.currentOneDriveFolderId = "";
+                this.teamsTeams = [];
+                this.teamsChannels = [];
+                this.outlookFolders = [];
+                this.onenoteNotebooks = [];
 
                 // Determine source type
                 let sourceType = store.source_type;
@@ -3015,6 +5343,17 @@ block content %}
                         store.website_include_pattern || "",
                     website_exclude_pattern:
                         store.website_exclude_pattern || "",
+                    website_crawler_override:
+                        store.website_crawler_override || "",
+                    slack_channel_id: store.slack_channel_id || "",
+                    slack_channel_types:
+                        store.slack_channel_types || "public_channel",
+                    slack_days_back: store.slack_days_back || 90,
+                    todoist_project_id: store.todoist_project_id || "",
+                    todoist_project_name: store.todoist_project_name || "",
+                    todoist_filter: store.todoist_filter || "",
+                    todoist_include_completed:
+                        store.todoist_include_completed || false,
                     mcp_name: store.mcp_server_config?.name || "",
                     mcp_transport:
                         store.mcp_server_config?.transport || "stdio",
@@ -3032,6 +5371,29 @@ block content %}
                     gcalendar_calendar_id: store.gcalendar_calendar_id || "",
                     gcalendar_calendar_name:
                         store.gcalendar_calendar_name || "",
+                    gtasks_tasklist_id: store.gtasks_tasklist_id || "",
+                    gtasks_tasklist_name: store.gtasks_tasklist_name || "",
+                    gcontacts_group_id: store.gcontacts_group_id || "",
+                    gcontacts_group_name: store.gcontacts_group_name || "",
+                    microsoft_account_id: store.microsoft_account_id || "",
+                    onedrive_folder_id: store.onedrive_folder_id || "",
+                    onedrive_folder_name: store.onedrive_folder_name || "",
+                    outlook_folder_id: store.outlook_folder_id || "",
+                    outlook_folder_name: store.outlook_folder_name || "",
+                    outlook_days_back: store.outlook_days_back || 90,
+                    onenote_notebook_id: store.onenote_notebook_id || "",
+                    onenote_notebook_name: store.onenote_notebook_name || "",
+                    teams_team_id: store.teams_team_id || "",
+                    teams_team_name: store.teams_team_name || "",
+                    teams_channel_id: store.teams_channel_id || "",
+                    teams_channel_name: store.teams_channel_name || "",
+                    teams_days_back: store.teams_days_back || 90,
+                    websearch_query: store.websearch_query || "",
+                    websearch_max_results: store.websearch_max_results || 10,
+                    websearch_pages_to_scrape:
+                        store.websearch_pages_to_scrape || 5,
+                    websearch_time_range: store.websearch_time_range || "",
+                    websearch_category: store.websearch_category || "",
                     index_schedule: store.index_schedule || "",
                     custom_schedule: "",
                     chunk_size: store.chunk_size || 512,
@@ -3046,6 +5408,8 @@ block content %}
                 const savedLabelId = this.form.gmail_label_id;
                 const savedCalendarId = this.form.gcalendar_calendar_id;
                 const savedFolderId = this.form.gdrive_folder_id;
+                const savedTaskListId = this.form.gtasks_tasklist_id;
+                const savedContactGroupId = this.form.gcontacts_group_id;
 
                 if (sourceType === "mcp:gdrive" && store.google_account_id) {
                     await this.loadGdriveFolders();
@@ -3056,13 +5420,141 @@ block content %}
                 if (sourceType === "mcp:gcalendar" && store.google_account_id) {
                     await this.loadGoogleCalendars();
                 }
+                if (sourceType === "mcp:gtasks" && store.google_account_id) {
+                    await this.loadGoogleTaskLists();
+                }
+                if (sourceType === "mcp:gcontacts" && store.google_account_id) {
+                    await this.loadGoogleContactGroups();
+                }
 
-                // Restore selections after a tick to ensure options are rendered
-                this.$nextTick(() => {
-                    this.form.gdrive_folder_id = savedFolderId;
-                    this.form.gmail_label_id = savedLabelId;
-                    this.form.gcalendar_calendar_id = savedCalendarId;
-                });
+                // Load Microsoft folders/notebooks/teams if editing a Microsoft source
+                const savedOneDriveFolderId = this.form.onedrive_folder_id;
+                const savedOutlookFolderId = this.form.outlook_folder_id;
+                const savedOneNoteNotebookId = this.form.onenote_notebook_id;
+                const savedTeamsTeamId = this.form.teams_team_id;
+                const savedTeamsChannelId = this.form.teams_channel_id;
+
+                if (
+                    sourceType === "mcp:onedrive" &&
+                    store.microsoft_account_id
+                ) {
+                    await this.loadOneDriveFolders();
+                }
+                if (
+                    sourceType === "mcp:outlook" &&
+                    store.microsoft_account_id
+                ) {
+                    await this.loadOutlookFolders();
+                }
+                if (
+                    sourceType === "mcp:onenote" &&
+                    store.microsoft_account_id
+                ) {
+                    await this.loadOneNoteNotebooks();
+                }
+                if (sourceType === "mcp:teams" && store.microsoft_account_id) {
+                    await this.loadTeams();
+                    // If a team was selected, also load its channels
+                    if (savedTeamsTeamId) {
+                        await this.loadTeamsChannels();
+                    }
+                }
+
+                // Restore selections after options are rendered
+                // Use setTimeout to ensure x-for templates have fully rendered
+                // Then set via DOM and dispatch input event to sync with Alpine
+                setTimeout(() => {
+                    if (savedFolderId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.gdrive_folder_id"]',
+                        );
+                        if (el) {
+                            el.value = savedFolderId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedLabelId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.gmail_label_id"]',
+                        );
+                        if (el) {
+                            el.value = savedLabelId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedCalendarId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.gcalendar_calendar_id"]',
+                        );
+                        if (el) {
+                            el.value = savedCalendarId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedTaskListId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.gtasks_tasklist_id"]',
+                        );
+                        if (el) {
+                            el.value = savedTaskListId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedContactGroupId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.gcontacts_group_id"]',
+                        );
+                        if (el) {
+                            el.value = savedContactGroupId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedOneDriveFolderId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.onedrive_folder_id"]',
+                        );
+                        if (el) {
+                            el.value = savedOneDriveFolderId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedOutlookFolderId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.outlook_folder_id"]',
+                        );
+                        if (el) {
+                            el.value = savedOutlookFolderId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedOneNoteNotebookId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.onenote_notebook_id"]',
+                        );
+                        if (el) {
+                            el.value = savedOneNoteNotebookId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedTeamsTeamId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.teams_team_id"]',
+                        );
+                        if (el) {
+                            el.value = savedTeamsTeamId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                    if (savedTeamsChannelId) {
+                        const el = document.querySelector(
+                            'select[x-model="form.teams_channel_id"]',
+                        );
+                        if (el) {
+                            el.value = savedTeamsChannelId;
+                            el.dispatchEvent(new Event("change"));
+                        }
+                    }
+                }, 100);
 
                 this.formErrors = {};
                 this.showModal = true;
@@ -3131,10 +5623,33 @@ block content %}
                             this.form.website_include_pattern || null;
                         body.website_exclude_pattern =
                             this.form.website_exclude_pattern || null;
+                        body.website_crawler_override =
+                            this.form.website_crawler_override || null;
+                    } else if (this.form.source_type === "slack") {
+                        body.source_type = "slack";
+                        body.slack_channel_id =
+                            this.form.slack_channel_id || null;
+                        body.slack_channel_types =
+                            this.form.slack_channel_types || "public_channel";
+                        body.slack_days_back =
+                            parseInt(this.form.slack_days_back) || 90;
+                    } else if (this.form.source_type === "todoist") {
+                        body.source_type = "todoist";
+                        body.todoist_project_id =
+                            this.form.todoist_project_id || null;
+                        body.todoist_project_name =
+                            this.form.todoist_project_name || null;
+                        body.todoist_filter = this.form.todoist_filter || null;
+                        body.todoist_include_completed =
+                            this.form.todoist_include_completed || false;
                     } else if (
-                        ["mcp:gdrive", "mcp:gmail", "mcp:gcalendar"].includes(
-                            this.form.source_type,
-                        )
+                        [
+                            "mcp:gdrive",
+                            "mcp:gmail",
+                            "mcp:gcalendar",
+                            "mcp:gtasks",
+                            "mcp:gcontacts",
+                        ].includes(this.form.source_type)
                     ) {
                         // Google sources - use specific source type and OAuth account
                         body.source_type = this.form.source_type;
@@ -3162,6 +5677,78 @@ block content %}
                             body.gcalendar_calendar_name =
                                 this.form.gcalendar_calendar_name || null;
                         }
+                        // Include task list filter for Google Tasks
+                        if (this.form.source_type === "mcp:gtasks") {
+                            body.gtasks_tasklist_id =
+                                this.form.gtasks_tasklist_id || null;
+                            body.gtasks_tasklist_name =
+                                this.form.gtasks_tasklist_name || null;
+                        }
+                        // Include contact group filter for Google Contacts
+                        if (this.form.source_type === "mcp:gcontacts") {
+                            body.gcontacts_group_id =
+                                this.form.gcontacts_group_id || null;
+                            body.gcontacts_group_name =
+                                this.form.gcontacts_group_name || null;
+                        }
+                    } else if (
+                        ["mcp:onedrive", "mcp:outlook", "mcp:onenote"].includes(
+                            this.form.source_type,
+                        )
+                    ) {
+                        // Microsoft sources - use specific source type and OAuth account
+                        body.source_type = this.form.source_type;
+                        body.microsoft_account_id = this.form
+                            .microsoft_account_id
+                            ? parseInt(this.form.microsoft_account_id)
+                            : null;
+                        // Include folder filter for OneDrive
+                        if (this.form.source_type === "mcp:onedrive") {
+                            body.onedrive_folder_id =
+                                this.form.onedrive_folder_id || null;
+                            body.onedrive_folder_name =
+                                this.form.onedrive_folder_name || null;
+                        }
+                        // Include folder filter and days back for Outlook
+                        if (this.form.source_type === "mcp:outlook") {
+                            body.outlook_folder_id =
+                                this.form.outlook_folder_id || null;
+                            body.outlook_folder_name =
+                                this.form.outlook_folder_name || null;
+                            body.outlook_days_back =
+                                parseInt(this.form.outlook_days_back) || 90;
+                        }
+                        // Include notebook filter for OneNote
+                        if (this.form.source_type === "mcp:onenote") {
+                            body.onenote_notebook_id =
+                                this.form.onenote_notebook_id || null;
+                            body.onenote_notebook_name =
+                                this.form.onenote_notebook_name || null;
+                        }
+                        // Include team/channel filter for Teams
+                        if (this.form.source_type === "mcp:teams") {
+                            body.teams_team_id =
+                                this.form.teams_team_id || null;
+                            body.teams_team_name =
+                                this.form.teams_team_name || null;
+                            body.teams_channel_id =
+                                this.form.teams_channel_id || null;
+                            body.teams_channel_name =
+                                this.form.teams_channel_name || null;
+                            body.teams_days_back =
+                                parseInt(this.form.teams_days_back) || 90;
+                        }
+                    } else if (this.form.source_type === "websearch") {
+                        body.source_type = "websearch";
+                        body.websearch_query = this.form.websearch_query;
+                        body.websearch_max_results =
+                            parseInt(this.form.websearch_max_results) || 10;
+                        body.websearch_pages_to_scrape =
+                            parseInt(this.form.websearch_pages_to_scrape) || 5;
+                        body.websearch_time_range =
+                            this.form.websearch_time_range || null;
+                        body.websearch_category =
+                            this.form.websearch_category || null;
                     } else if (this.form.source_type.startsWith("mcp:")) {
                         // Other MCP sources - use generic mcp type with config
                         body.source_type = "mcp";
@@ -3315,6 +5902,63 @@ block content %}
                     this.cancellingStores = this.cancellingStores.filter(
                         (id) => id !== store.id,
                     );
+                }
+            },
+
+            async openPreviewModal(store) {
+                this.previewStore = store;
+                this.previewData = null;
+                this.previewError = null;
+                this.previewLoading = true;
+                this.showPreviewModal = true;
+
+                try {
+                    const response = await fetch(
+                        `/api/document-stores/${store.id}/preview?limit=20`,
+                    );
+
+                    if (!response.ok) {
+                        const result = await response.json();
+                        this.previewError =
+                            result.error || "Failed to load preview";
+                        return;
+                    }
+
+                    this.previewData = await response.json();
+                } catch (error) {
+                    console.error("Preview error:", error);
+                    this.previewError = "Failed to load preview";
+                } finally {
+                    this.previewLoading = false;
+                }
+            },
+
+            async loadMorePreview() {
+                if (!this.previewStore || !this.previewData) return;
+
+                this.previewLoadingMore = true;
+
+                try {
+                    const offset = this.previewData.documents.length;
+                    const response = await fetch(
+                        `/api/document-stores/${this.previewStore.id}/preview?limit=20&offset=${offset}`,
+                    );
+
+                    if (!response.ok) {
+                        const result = await response.json();
+                        alert(result.error || "Failed to load more");
+                        return;
+                    }
+
+                    const moreData = await response.json();
+                    this.previewData.documents.push(...moreData.documents);
+                    this.previewData.showing =
+                        this.previewData.documents.length;
+                } catch (error) {
+                    console.error("Load more error:", error);
+                    alert("Failed to load more");
+                } finally {
+                    this.previewLoadingMore = false;
                 }
             },
 

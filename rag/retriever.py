@@ -28,6 +28,8 @@ def _get_embedding_provider(
     """
     Get an embedding provider based on configuration.
 
+    Uses TTL-cached providers for local embeddings to avoid repeated model loading.
+
     Args:
         embedding_provider: "local", "ollama:<instance>", or provider name
         embedding_model: Model name for embeddings
@@ -37,7 +39,10 @@ def _get_embedding_provider(
         Configured EmbeddingProvider
     """
     if embedding_provider == "local":
-        return LocalEmbeddingProvider(model_name=embedding_model)
+        # Use cached provider to avoid repeated model loading
+        from .embeddings import get_cached_local_embedding_provider
+
+        return get_cached_local_embedding_provider(model_name=embedding_model)
 
     if embedding_provider.startswith("ollama:") or embedding_provider == "ollama":
         # Extract instance name if present
@@ -101,6 +106,7 @@ class RetrievedChunk:
     score: float  # Similarity score (0-1, higher is more similar)
     store_name: Optional[str] = None  # Document store name (for multi-store)
     store_id: Optional[int] = None  # Document store ID (for multi-store)
+    metadata: Optional[dict] = None  # Full metadata from ChromaDB (for actions)
 
 
 @dataclass
@@ -390,6 +396,7 @@ class RAGRetriever:
                             score=similarity,
                             store_name=store_name,
                             store_id=store_id,
+                            metadata=meta,  # Pass full metadata for actions
                         )
                         # Track if this chunk matched the date filter
                         chunk._date_matched = date_matched
@@ -430,6 +437,7 @@ class RAGRetriever:
                         "original_score": c.score,
                         "store_name": c.store_name,
                         "store_id": c.store_id,
+                        "metadata": c.metadata,  # Preserve metadata for actions
                     }
                     for c in semantic_chunks
                 ]
@@ -453,6 +461,7 @@ class RAGRetriever:
                             score=d.get("rerank_score", d.get("original_score", 0)),
                             store_name=d.get("store_name"),
                             store_id=d.get("store_id"),
+                            metadata=d.get("metadata"),  # Preserve metadata for actions
                         )
                         for d in reranked
                     ]
@@ -598,6 +607,7 @@ class RAGRetriever:
                         source_file=meta.get("source_file", "unknown"),
                         chunk_index=meta.get("chunk_index", 0),
                         score=similarity,
+                        metadata=meta,  # Pass full metadata for actions
                     )
                     chunks.append(chunk)
 
@@ -613,6 +623,7 @@ class RAGRetriever:
                         "source_file": c.source_file,
                         "chunk_index": c.chunk_index,
                         "original_score": c.score,
+                        "metadata": c.metadata,  # Preserve metadata for actions
                     }
                     for c in chunks
                 ]
@@ -633,6 +644,7 @@ class RAGRetriever:
                         source_file=d["source_file"],
                         chunk_index=d["chunk_index"],
                         score=d.get("rerank_score", d.get("original_score", 0)),
+                        metadata=d.get("metadata"),  # Preserve metadata for actions
                     )
                     for d in reranked
                 ]
@@ -710,6 +722,22 @@ class RAGRetriever:
                     source_line = f"[{', '.join(parts)}]\n"
                     chunk_tokens += len(source_line) // 4
 
+            # Add action metadata for emails (message_id, account needed for reply/forward)
+            action_metadata_line = ""
+            if chunk.metadata:
+                source_type = chunk.metadata.get("source_type")
+                if source_type == "email":
+                    message_id = chunk.metadata.get("message_id")
+                    account_email = chunk.metadata.get("account_email")
+                    if message_id and account_email:
+                        action_metadata_line = (
+                            f"[ID: {message_id} | Account: {account_email}]\n"
+                        )
+                        chunk_tokens += len(action_metadata_line) // 4
+                elif source_type == "calendar":
+                    # Calendar events may need event IDs for future actions
+                    pass  # TODO: Add when calendar actions are implemented
+
             # Check if we'd exceed limit
             if current_tokens + chunk_tokens > max_tokens:
                 # Try to fit partial chunk
@@ -717,10 +745,14 @@ class RAGRetriever:
                 if remaining_tokens > 100:  # Worth including partial
                     remaining_chars = remaining_tokens * 4
                     truncated = chunk.content[:remaining_chars] + "..."
-                    context_parts.append(f"{source_line}{truncated}\n")
+                    context_parts.append(
+                        f"{source_line}{action_metadata_line}{truncated}\n"
+                    )
                 break
 
-            context_parts.append(f"{source_line}{chunk.content}\n")
+            context_parts.append(
+                f"{source_line}{action_metadata_line}{chunk.content}\n"
+            )
             current_tokens += chunk_tokens
 
         if not context_parts:

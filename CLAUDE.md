@@ -53,6 +53,7 @@ rag/                  # Document processing for RAG
   indexer.py          # Document indexing with Docling
   retriever.py        # ChromaDB semantic search with reranking
   reranker.py         # Cross-encoder reranking (local + Jina)
+  model_cache.py      # GPU model cache with TTL-based eviction
 mcp/                  # Document sources (direct APIs)
   sources.py          # Document source classes for RAG indexing
 docs/                 # Documentation
@@ -103,16 +104,20 @@ Resolution order:
 | **RAG** (`use_rag`) | Inject context from indexed Document Stores |
 | **Web** (`use_web`) | Real-time web search and scraping |
 | **Cache** (`use_cache`) | Semantic response caching (disabled if Web enabled) |
+| **Memory** (`use_memory`) | Persistent memory across sessions (explicit user facts only) |
 | **Smart Tag** (`is_smart_tag`) | Trigger by request tag instead of model name |
 | **Passthrough** (`passthrough_model`) | Honor original model when triggered as Smart Tag |
 | **Context Priority** (`context_priority`) | When both RAG+Web enabled: balanced/prefer_rag/prefer_web |
+| **Smart Source Selection** (`use_smart_source_selection`) | Designator allocates token budget across RAG stores + web |
 
 **Processing pipeline (SmartAliasEngine):**
 1. Cache check (if enabled)
 2. Routing (if enabled) - picks target model
 3. Enrichment (if RAG or Web enabled) - injects context
-4. Forward to target model
-5. Cache store (if enabled)
+4. Memory injection (if enabled) - adds persistent user context
+5. Forward to target model
+6. Cache store (if enabled)
+7. Memory update (if enabled) - extracts explicit user facts from query
 
 **Key fields:**
 - `name` - Alias name (used as model name in requests)
@@ -173,6 +178,8 @@ Indexed document collections for RAG. Documents are parsed, chunked, and embedde
 - `mcp:gdrive` - Google Drive via OAuth
 - `mcp:gmail` - Gmail via OAuth  
 - `mcp:gcalendar` - Google Calendar via OAuth
+- `mcp:gtasks` - Google Tasks via OAuth
+- `mcp:gcontacts` - Google Contacts via OAuth (People API)
 - `paperless` - Paperless-ngx via REST API
 - `notion` - Notion via direct REST API
 - `nextcloud` - Nextcloud via WebDAV
@@ -200,6 +207,23 @@ ChromaDB-based response caching. Cache settings available on Smart Aliases:
 - `cache_ttl_hours` - Entry expiration
 
 **Note:** Caching is not permitted when `use_web=True` (real-time data).
+
+### GPU Model Cache (rag/model_cache.py)
+
+Local GPU models (embeddings, reranker, Docling) are managed by a unified cache with TTL-based eviction:
+
+- Models are loaded once and reused across requests
+- Automatically unloaded after inactivity period (default 5 minutes)
+- Background cleanup thread checks for expired models every 60 seconds
+- Prevents GPU memory leaks from repeated model loading
+
+**Configuration (environment variables):**
+- `GPU_MODEL_TTL_SECONDS` - Time before unused models are unloaded (default: 300)
+- `GPU_MODEL_CLEANUP_INTERVAL` - How often to check for expired models (default: 60)
+
+**Admin API:**
+- `GET /api/gpu-cache` - View cached models and GPU memory usage
+- `POST /api/gpu-cache/clear` - Manually clear all cached models
 
 ## Common Tasks
 
@@ -246,6 +270,24 @@ docker logs -f llm-relay-dev
 2. Use `@require_auth` for page routes, `@require_auth_api` for API routes
 3. Create template in `admin/templates/`
 
+### Alpine.js select dropdown restoration (IMPORTANT)
+When editing forms with select dropdowns populated by async data (e.g., Google calendars, folders, labels), the saved value won't display correctly after loading options. Alpine's `x-model` doesn't sync when options are rendered via `x-for` after the value is set.
+
+**Fix:** After loading options, set the value via DOM and dispatch a `change` event:
+```javascript
+setTimeout(() => {
+    if (savedValue) {
+        const el = document.querySelector('select[x-model="form.fieldName"]');
+        if (el) {
+            el.value = savedValue;
+            el.dispatchEvent(new Event("change"));
+        }
+    }
+}, 100);
+```
+
+This pattern is used in `document_stores.html`, `rag_config.html`, and `web_sources.html`.
+
 ## API Endpoints
 
 **Ollama API** (port 11434):
@@ -270,3 +312,128 @@ docker logs -f llm-relay-dev
 ## Dev vs Production Ports
 - Production: 11434 (API), 8080 (Admin)
 - Development: 11435 (API), 8081 (Admin)
+
+---
+
+## Recent Development Session (2026-01-15/16)
+
+### Live Data Sources - MCP/RapidAPI Integration
+
+**Completed:**
+1. **Agentic tool loop for MCP providers** (`live/sources.py`)
+   - `fetch_agentic()` method enables multi-step API lookups
+   - LLM (designator) orchestrates tool calls when API requires multiple steps (e.g., lookup ID → fetch data)
+   - Auto-fallback: When no `tool_name` specified, MCP sources automatically use agentic mode
+
+2. **Global MCP tools cache** (`live/sources.py`)
+   - Tool listings cached globally by API host (1 hour TTL)
+   - Persists across provider instances - eliminates ~4 second delay on subsequent requests
+   - Cache key: `_mcp_tools_cache[api_host] = (tools_list, timestamp)`
+
+3. **Fixed spurious API calls**
+   - Live sources only queried when designator explicitly selects them via `live_params`
+   - No more fallback querying of all sources with raw query
+   - MCP sources require explicit selection (too expensive for blanket queries)
+
+4. **Designator model passthrough** (`routing/smart_enricher.py:1273`)
+   - `designator_model` now passed to MCP providers for agentic fallback
+   - Uses Smart Alias's configured designator instead of hardcoded Groq default
+
+### Smart Source Selection Changes
+
+**Completed:**
+1. **Removed baseline token allocation**
+   - Previously: 50% baseline to all stores, 50% priority allocation
+   - Now: 100% designator-controlled allocation
+   - Stores with 0 allocation are not queried at all
+   - More focused RAG retrieval, better performance
+
+### Scheduler Fix
+
+**Bug fixed:** `_schedule_all_rags()` was calling non-existent `get_rags_with_schedule()` function, causing ImportError that was misreported as "APScheduler not installed".
+
+**Fix:** Removed the dead code path. Scheduler now works correctly for document stores.
+
+### Key Files Modified This Session
+- `live/sources.py` - Agentic loop, global tools cache, auto-fallback
+- `routing/smart_enricher.py` - Designator allocation, live params handling
+- `rag/indexer.py` - Scheduler fix
+- `docs/PLANNED_FEATURES.md` - Added webhooks and expanded Smart Actions
+
+### Current State
+- Dev container (`llm-relay-dev`) has all changes deployed
+- Production (`llm-relay`) is on older version (1.5.1)
+- Gmail store (ID 31) set to hourly indexing schedule
+
+### Known Issues to Watch
+- Model "thinking" leakage observed once with `gemini-3-pro-preview` - may be transient model behavior, not relay bug
+
+### Roadmap Updates (docs/PLANNED_FEATURES.md)
+Added to v2.0:
+- **Webhooks for Document Stores** - Real-time indexing triggered by external events
+
+Added to v2.1 (Smart Actions):
+- Expanded action categories: email, calendar, scheduled prompts, documents, communication, tasks
+- **Scheduled Prompts** - Proactive agent capability (cron-based prompt execution)
+- Plugin architecture with `ActionHandler` base class for extensibility
+
+---
+
+## Development Session (2026-01-16) - Google Tasks/Contacts & OAuth Fix
+
+### New Document Sources Added
+
+**Google Tasks (`mcp:gtasks`)**
+- Indexes tasks from Google Tasks API
+- Optional filter by task list (`gtasks_tasklist_id`)
+- Documents include: title, notes, due date, status, completion time
+- API endpoint: `GET /api/oauth/google/<account_id>/tasklists`
+
+**Google Contacts (`mcp:gcontacts`)**
+- Indexes contacts from Google People API
+- Optional filter by label (`gcontacts_group_id`) - uses contactGroups endpoint
+- Documents include: names, emails, phones, organizations, addresses, notes, birthdays
+- API endpoint: `GET /api/oauth/google/<account_id>/contactgroups`
+- UI shows "Label" (what users see in Google Contacts) not "Contact Group"
+
+### Files Modified
+- `mcp/sources.py` - Added `GoogleTasksDocumentSource` and `GoogleContactsDocumentSource` classes
+- `db/models.py` - Added columns: `gtasks_tasklist_id`, `gtasks_tasklist_name`, `gcontacts_group_id`, `gcontacts_group_name`
+- `db/document_stores.py` - Updated CRUD operations for new fields
+- `db/connection.py` - Added migrations for new columns
+- `rag/indexer.py` - Pass new parameters to `get_document_source()`
+- `admin/app.py` - Added OAuth scopes (`tasks.readonly`, `contacts.readonly`) and API endpoints
+- `admin/templates/document_stores.html` - Added UI for task list and label selection
+
+### OAuth Refresh Token Bug Fix
+
+**Problem:** Users had to repeatedly reconnect Google accounts because refresh tokens were being lost.
+
+**Root cause:** When re-authorizing an existing account, Google may not return a new `refresh_token` (even with `prompt=consent`). The `store_oauth_token()` function was blindly overwriting the stored token data, losing the existing refresh_token.
+
+**Fix in `db/oauth_tokens.py`:**
+```python
+# In store_oauth_token(), when updating existing token:
+if "refresh_token" not in token_data and "refresh_token" in existing_data:
+    logger.info(f"Preserving existing refresh_token for {provider}/{account_email}")
+    token_data["refresh_token"] = existing_data["refresh_token"]
+```
+
+This ensures the original refresh_token is preserved when Google doesn't return a new one.
+
+### Live Data Cache System (from earlier in session)
+
+**New files:**
+- `db/live_cache.py` - CRUD operations for API response caching
+- `db/models.py` - Added `LiveDataCache` and `LiveEntityCache` models
+
+**Features:**
+- Data cache: Stores MCP API responses with TTL-based expiration
+- Entity cache: Stores name→ID mappings (e.g., "Apple" → "AAPL") with 90-day TTL
+- Historical data detection: Past dates cached forever (TTL=0)
+- Admin UI in Settings page with stats and clear buttons
+
+### Current State
+- Dev container (`llm-relay-dev`) has all changes deployed
+- 4 new database migrations ran successfully for gtasks/gcontacts columns
+- OAuth fix deployed - existing accounts should now maintain their refresh tokens

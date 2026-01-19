@@ -34,14 +34,19 @@ def get_document_converter(
     vision_provider: str = "local",
     vision_model: Optional[str] = None,
     vision_ollama_url: Optional[str] = None,
+    use_cache: bool = True,
 ) -> "DocumentConverter":
     """
     Get a configured Docling DocumentConverter.
+
+    For local processing, the converter is cached with TTL to avoid repeated
+    model loading while still freeing GPU memory after inactivity.
 
     Args:
         vision_provider: "local", "ollama:<instance>", or provider name
         vision_model: Model to use for vision processing
         vision_ollama_url: Ollama URL when using ollama provider
+        use_cache: Whether to use cached converter (default True)
 
     Returns:
         Configured DocumentConverter instance
@@ -49,15 +54,18 @@ def get_document_converter(
     from docling.document_converter import DocumentConverter
 
     # Local processing (default) - use standard DocumentConverter with Tesseract OCR
+    # Cache local converters since they load ML models
     if vision_provider == "local" or not vision_provider:
         logger.debug("Using local Docling processing with Tesseract OCR")
+        if use_cache:
+            return _get_cached_local_converter()
         return _get_local_converter()
 
-    # Ollama instance
+    # Ollama instance - no caching needed (remote API)
     if vision_provider.startswith("ollama:") or vision_provider == "ollama":
         return _get_ollama_converter(vision_provider, vision_model, vision_ollama_url)
 
-    # External provider via OpenAI-compatible API
+    # External provider via OpenAI-compatible API - no caching needed (remote API)
     return _get_provider_converter(vision_provider, vision_model)
 
 
@@ -82,6 +90,21 @@ def _get_local_converter() -> "DocumentConverter":
             "pdf": PdfFormatOption(pipeline_options=pipeline_options),
         }
     )
+
+
+def _get_cached_local_converter() -> "DocumentConverter":
+    """
+    Get a cached local DocumentConverter with TTL-based eviction.
+
+    Docling loads ML models for layout analysis which consume GPU memory.
+    Caching avoids repeated loading while TTL ensures memory is freed after inactivity.
+    """
+    from .model_cache import get_model_cache
+
+    cache_key = "docling:local"
+    cache = get_model_cache()
+
+    return cache.get(cache_key, _get_local_converter)
 
 
 def _get_ollama_converter(

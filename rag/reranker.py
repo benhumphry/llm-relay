@@ -61,7 +61,7 @@ class LocalRerankerProvider(RerankerProvider):
     Local reranker using sentence-transformers CrossEncoder.
 
     Uses cross-encoder/ms-marco-MiniLM-L-6-v2 by default (~80MB).
-    Models are lazy-loaded and cached.
+    Models are cached with TTL-based eviction to free GPU memory after inactivity.
     """
 
     name = "local"
@@ -69,28 +69,31 @@ class LocalRerankerProvider(RerankerProvider):
 
     DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
-    # Cache for loaded models
-    _model_cache: dict = {}
-
     def __init__(self, model_name: Optional[str] = None):
         self.model_name = model_name or self.DEFAULT_MODEL
 
     def _get_model(self):
-        """Lazy-load the cross-encoder model."""
-        if self.model_name not in LocalRerankerProvider._model_cache:
+        """Get cross-encoder model from TTL cache."""
+        from .model_cache import get_model_cache
+
+        cache_key = f"reranker:{self.model_name}"
+        cache = get_model_cache()
+
+        def loader():
             try:
                 from sentence_transformers import CrossEncoder
 
                 logger.info(f"Loading cross-encoder model: {self.model_name}")
                 model = CrossEncoder(self.model_name)
-                LocalRerankerProvider._model_cache[self.model_name] = model
                 logger.info(f"Loaded cross-encoder model: {self.model_name}")
+                return model
             except ImportError:
                 raise ImportError(
                     "sentence-transformers is required for local reranking. "
                     "Install with: pip install sentence-transformers"
                 )
-        return LocalRerankerProvider._model_cache[self.model_name]
+
+        return cache.get(cache_key, loader)
 
     def _clear_cuda_cache(self):
         """Clear CUDA memory cache after inference."""

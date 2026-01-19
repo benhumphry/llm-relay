@@ -81,9 +81,26 @@ def store_oauth_token(
         )
         existing = session.execute(stmt).scalar_one_or_none()
 
-        encrypted_data = _encrypt(json.dumps(token_data))
-
         if existing:
+            # IMPORTANT: Preserve existing refresh_token if new response doesn't include one
+            # Google only returns refresh_token on first authorization or with prompt=consent
+            # If user re-authorizes without revoking, we might not get a new refresh_token
+            try:
+                existing_data = json.loads(_decrypt(existing.token_data_encrypted))
+                if (
+                    "refresh_token" not in token_data
+                    and "refresh_token" in existing_data
+                ):
+                    logger.info(
+                        f"Preserving existing refresh_token for {provider}/{account_email}"
+                    )
+                    token_data["refresh_token"] = existing_data["refresh_token"]
+            except Exception as e:
+                logger.warning(
+                    f"Could not decrypt existing token to preserve refresh_token: {e}"
+                )
+
+            encrypted_data = _encrypt(json.dumps(token_data))
             existing.token_data_encrypted = encrypted_data
             existing.scopes = scopes
             existing.account_name = account_name or existing.account_name
@@ -93,6 +110,7 @@ def store_oauth_token(
             logger.info(f"Updated OAuth token for {provider}/{account_email}")
             return existing.id
         else:
+            encrypted_data = _encrypt(json.dumps(token_data))
             token = OAuthToken(
                 provider=provider,
                 account_email=account_email,
@@ -263,9 +281,13 @@ def update_oauth_token_data(token_id: int, token_data: dict) -> bool:
     """
     Update the token data (e.g., after refresh).
 
+    IMPORTANT: This merges with existing data rather than replacing it,
+    to preserve credentials like client_id, client_secret, refresh_token
+    that may not be included in refresh responses.
+
     Args:
         token_id: Token ID
-        token_data: New token dictionary
+        token_data: Token fields to update (merged with existing)
 
     Returns:
         True if updated, False if not found
@@ -277,7 +299,15 @@ def update_oauth_token_data(token_id: int, token_data: dict) -> bool:
         if not token:
             return False
 
-        token.token_data_encrypted = _encrypt(json.dumps(token_data))
+        # Merge with existing data to preserve credentials
+        try:
+            existing_data = json.loads(_decrypt(token.token_data_encrypted))
+            merged_data = {**existing_data, **token_data}
+        except Exception as e:
+            logger.warning(f"Could not decrypt existing token data: {e}")
+            merged_data = token_data
+
+        token.token_data_encrypted = _encrypt(json.dumps(merged_data))
         token.last_refreshed = datetime.utcnow()
         session.commit()
         logger.info(f"Updated token data for {token_id}")

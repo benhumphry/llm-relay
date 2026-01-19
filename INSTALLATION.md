@@ -27,7 +27,7 @@ Your proxy is now running:
 |-------|----------|----------|----------|
 | [Basic](#basic-setup) | SQLite | Core proxy, tracking, aliases, smart routers | Personal use, testing |
 | [PostgreSQL](#postgresql-setup) | PostgreSQL | Same as Basic + better concurrency | Production, multi-user |
-| [Full Stack](#full-stack-setup) | PostgreSQL | All features including Smart Cache, Augmentor, RAG | Full feature set |
+| [Full Stack](#full-stack-setup) | PostgreSQL | All features including Cache, RAG, Web, Memory | Full feature set |
 
 ---
 
@@ -99,8 +99,8 @@ Includes all optional services for maximum functionality:
 | Service | Purpose | Required For |
 |---------|---------|--------------|
 | PostgreSQL | Database | Production deployments |
-| ChromaDB | Vector storage | Smart Cache, Smart Augmentor, Smart RAG, Model Intelligence |
-| SearXNG | Web search | Smart Augmentor (web context) |
+| ChromaDB | Vector storage | Smart Alias features (Cache, RAG, Web), Model Intelligence |
+| SearXNG | Web search | Smart Alias Web enrichment |
 
 ### Start All Services
 
@@ -139,9 +139,9 @@ SEARXNG_URL=http://searxng:8080
 
 [ChromaDB](https://www.trychroma.com/) is an open-source vector database used for:
 
-- **Smart Cache**: Semantic response caching - returns cached answers for similar queries
-- **Smart Augmentor**: Caches web search results and scraped content
-- **Smart RAG**: Stores document embeddings for semantic retrieval
+- **Semantic Caching**: Returns cached answers for similar queries (Smart Alias with Cache enabled)
+- **RAG**: Stores document embeddings for semantic retrieval (Smart Alias with RAG enabled)
+- **Web Enrichment**: Caches web search results and scraped content (Smart Alias with Web enabled)
 - **Model Intelligence**: Caches comparative model assessments for smart routing
 
 **Resource requirements**: ~500MB RAM minimum, more for large collections
@@ -154,10 +154,10 @@ SEARXNG_URL=http://searxng:8080
 
 [SearXNG](https://docs.searxng.org/) is a privacy-respecting metasearch engine used for:
 
-- **Smart Augmentor**: Web search to inject current information into LLM context
+- **Web Enrichment**: Web search to inject current information into LLM context (Smart Alias with Web enabled)
 - **Model Intelligence**: Searching for model reviews and benchmarks
 
-**Alternative**: You can use Perplexity API instead of SearXNG by setting `PERPLEXITY_API_KEY` and configuring Smart Augmentors to use the "perplexity" search provider.
+**Alternative**: You can use Perplexity API or Jina Search instead of SearXNG by setting `PERPLEXITY_API_KEY` or `JINA_API_KEY` and configuring the search provider in Web Config.
 
 **First-time setup**:
 1. Start SearXNG: `docker compose -f docker-compose.full.yml up -d searxng`

@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Table,
@@ -247,6 +248,28 @@ class Setting(Base):
     KEY_TRACKING_ENABLED = "tracking_enabled"
     KEY_DNS_RESOLUTION_ENABLED = "dns_resolution_enabled"
     KEY_RETENTION_DAYS = "retention_days"
+
+    # Live Data Cache settings (TTLs in seconds, 0 = never expires)
+    KEY_LIVE_CACHE_TTL_PRICE = (
+        "live_cache_ttl_price"  # Stock prices, default 900 (15 min)
+    )
+    KEY_LIVE_CACHE_TTL_WEATHER_CURRENT = (
+        "live_cache_ttl_weather_current"  # Default 3600 (1 hour)
+    )
+    KEY_LIVE_CACHE_TTL_WEATHER_FORECAST = (
+        "live_cache_ttl_weather_forecast"  # Default 21600 (6 hours)
+    )
+    KEY_LIVE_CACHE_TTL_SCORE_LIVE = "live_cache_ttl_score_live"  # Default 120 (2 min)
+    KEY_LIVE_CACHE_TTL_DEFAULT = "live_cache_ttl_default"  # Default 3600 (1 hour)
+    KEY_LIVE_CACHE_ENTITY_TTL_DAYS = (
+        "live_cache_entity_ttl_days"  # Entity cache, default 90 days
+    )
+    KEY_LIVE_CACHE_ENABLED = (
+        "live_cache_enabled"  # Enable/disable caching, default true
+    )
+    KEY_LIVE_CACHE_MAX_SIZE_MB = (
+        "live_cache_max_size_mb"  # Max cache size, default 100MB
+    )
 
 
 class ModelOverride(Base):
@@ -890,6 +913,72 @@ class DocumentStore(Base):
         String(255), nullable=True
     )  # For display purposes
 
+    # Google Tasks filter (optional - if set, only index tasks from this task list)
+    gtasks_tasklist_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    gtasks_tasklist_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+
+    # Google Contacts filter (optional - if set, only index contacts from this group)
+    gcontacts_group_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    gcontacts_group_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+
+    # Microsoft OAuth account (for mcp:onedrive, mcp:outlook, mcp:onenote sources)
+    microsoft_account_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("oauth_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # OneDrive folder filter (optional - if set, only index files from this folder)
+    # Microsoft Graph API uses very long IDs (can be 150+ chars)
+    onedrive_folder_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    onedrive_folder_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+
+    # Outlook folder filter (optional - e.g., "inbox", "sentitems")
+    # Microsoft Graph API uses very long IDs (can be 150+ chars)
+    outlook_folder_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    outlook_folder_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+    outlook_days_back: Mapped[int] = mapped_column(
+        Integer, default=90
+    )  # Days of email history to index
+
+    # OneNote notebook filter (optional - if set, only index pages from this notebook)
+    # Microsoft Graph API uses very long IDs (can be 150+ chars)
+    onenote_notebook_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    onenote_notebook_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+
+    # Microsoft Teams configuration (for source_type="mcp:teams")
+    teams_team_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Team ID to filter (None = all teams)
+    teams_team_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+    teams_channel_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Channel ID to filter (None = all channels in team)
+    teams_channel_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display purposes
+    teams_days_back: Mapped[int] = mapped_column(
+        Integer, default=90
+    )  # Days of message history to fetch
+
     # Paperless-ngx configuration (for source_type="paperless")
     paperless_url: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
@@ -903,6 +992,20 @@ class DocumentStore(Base):
     paperless_tag_name: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True
     )  # Tag name for display
+
+    # Todoist configuration (for source_type="todoist")
+    todoist_project_id: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )  # Filter by project ID (optional)
+    todoist_project_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Project name for display
+    todoist_filter: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Todoist filter expression (e.g., "today", "priority 1")
+    todoist_include_completed: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Whether to include completed tasks
 
     # GitHub configuration (for source_type="mcp:github")
     github_repo: Mapped[Optional[str]] = mapped_column(
@@ -944,6 +1047,37 @@ class DocumentStore(Base):
     website_exclude_pattern: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
     )  # Regex pattern - skip URLs matching this
+    website_crawler_override: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )  # Override global crawler: None (use default), "builtin", or "jina"
+
+    # Slack configuration (for source_type="slack")
+    slack_channel_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )  # Specific channel ID to index (None = all accessible channels)
+    slack_channel_types: Mapped[str] = mapped_column(
+        String(100), default="public_channel"
+    )  # Comma-separated: public_channel, private_channel
+    slack_days_back: Mapped[int] = mapped_column(
+        Integer, default=90
+    )  # Days of history to fetch (max 90 for free plan)
+
+    # Web Search configuration (for source_type="websearch")
+    websearch_query: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Search query string
+    websearch_max_results: Mapped[int] = mapped_column(
+        Integer, default=10
+    )  # Max search results to fetch
+    websearch_pages_to_scrape: Mapped[int] = mapped_column(
+        Integer, default=5
+    )  # How many results to actually scrape
+    websearch_time_range: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )  # Time filter: day, week, month, year
+    websearch_category: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )  # Search category: news, general, etc.
 
     # Embedding configuration
     embedding_provider: Mapped[str] = mapped_column(String(100), default="local")
@@ -1046,10 +1180,31 @@ class DocumentStore(Base):
             "gmail_label_name": self.gmail_label_name,
             "gcalendar_calendar_id": self.gcalendar_calendar_id,
             "gcalendar_calendar_name": self.gcalendar_calendar_name,
+            "gtasks_tasklist_id": self.gtasks_tasklist_id,
+            "gtasks_tasklist_name": self.gtasks_tasklist_name,
+            "gcontacts_group_id": self.gcontacts_group_id,
+            "gcontacts_group_name": self.gcontacts_group_name,
+            "microsoft_account_id": self.microsoft_account_id,
+            "onedrive_folder_id": self.onedrive_folder_id,
+            "onedrive_folder_name": self.onedrive_folder_name,
+            "outlook_folder_id": self.outlook_folder_id,
+            "outlook_folder_name": self.outlook_folder_name,
+            "outlook_days_back": self.outlook_days_back,
+            "onenote_notebook_id": self.onenote_notebook_id,
+            "onenote_notebook_name": self.onenote_notebook_name,
+            "teams_team_id": self.teams_team_id,
+            "teams_team_name": self.teams_team_name,
+            "teams_channel_id": self.teams_channel_id,
+            "teams_channel_name": self.teams_channel_name,
+            "teams_days_back": self.teams_days_back,
             "paperless_url": self.paperless_url,
             "paperless_token": self.paperless_token,
             "paperless_tag_id": self.paperless_tag_id,
             "paperless_tag_name": self.paperless_tag_name,
+            "todoist_project_id": self.todoist_project_id,
+            "todoist_project_name": self.todoist_project_name,
+            "todoist_filter": self.todoist_filter,
+            "todoist_include_completed": self.todoist_include_completed,
             "github_repo": self.github_repo,
             "github_branch": self.github_branch,
             "github_path": self.github_path,
@@ -1061,6 +1216,15 @@ class DocumentStore(Base):
             "website_max_pages": self.website_max_pages,
             "website_include_pattern": self.website_include_pattern,
             "website_exclude_pattern": self.website_exclude_pattern,
+            "website_crawler_override": self.website_crawler_override,
+            "slack_channel_id": self.slack_channel_id,
+            "slack_channel_types": self.slack_channel_types,
+            "slack_days_back": self.slack_days_back,
+            "websearch_query": self.websearch_query,
+            "websearch_max_results": self.websearch_max_results,
+            "websearch_pages_to_scrape": self.websearch_pages_to_scrape,
+            "websearch_time_range": self.websearch_time_range,
+            "websearch_category": self.websearch_category,
             "embedding_provider": self.embedding_provider,
             "embedding_model": self.embedding_model,
             "ollama_url": self.ollama_url,
@@ -1117,6 +1281,24 @@ smart_alias_stores = Table(
     ),
 )
 
+# Association table for SmartAlias <-> LiveDataSource many-to-many relationship
+smart_alias_live_sources = Table(
+    "smart_alias_live_sources",
+    Base.metadata,
+    Column(
+        "smart_alias_id",
+        Integer,
+        ForeignKey("smart_aliases.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "live_data_source_id",
+        Integer,
+        ForeignKey("live_data_sources.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
 
 class SmartAlias(Base):
     """
@@ -1143,6 +1325,7 @@ class SmartAlias(Base):
     use_routing: Mapped[bool] = mapped_column(Boolean, default=False)
     use_rag: Mapped[bool] = mapped_column(Boolean, default=False)
     use_web: Mapped[bool] = mapped_column(Boolean, default=False)
+    use_live_data: Mapped[bool] = mapped_column(Boolean, default=False)
     use_cache: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # ===== SMART TAG SETTINGS =====
@@ -1179,6 +1362,9 @@ class SmartAlias(Base):
     # When enabled, uses designator_model to decide which document stores
     # and whether web search should be used for each query
     use_smart_source_selection: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Two-pass retrieval: first retrieve sample chunks from each store,
+    # then let designator see actual content before allocating tokens
+    use_two_pass_retrieval: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # ===== WEB SETTINGS (when use_web=True) =====
     max_search_results: Mapped[int] = mapped_column(Integer, default=5)
@@ -1240,6 +1426,70 @@ class SmartAlias(Base):
         DateTime, nullable=True
     )
 
+    # ===== ACTIONS SETTINGS =====
+    # Enable LLM to perform actions (create drafts, etc.)
+    use_actions: Mapped[bool] = mapped_column(Boolean, default=False)
+    # JSON array of allowed action patterns, e.g., ["email:draft_*", "calendar:*"]
+    # Empty array means no actions allowed even if use_actions=True
+    allowed_actions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Default accounts/resources for each action category
+    # When set, LLM doesn't need to specify account/resource in action blocks
+
+    # Email: default account for email actions (draft_new, draft_reply, draft_forward)
+    action_email_account_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("oauth_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Calendar: default account and calendar for calendar actions
+    action_calendar_account_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("oauth_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+    action_calendar_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # e.g., "primary" or specific calendar ID
+
+    # Tasks: default account and task list for task actions
+    # For OAuth providers (google, microsoft): use action_tasks_account_id
+    # For API key providers (todoist): set action_tasks_provider="todoist", account_id=NULL
+    action_tasks_account_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("oauth_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+    action_tasks_provider: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True
+    )  # "todoist" for API key providers, NULL for OAuth
+    action_tasks_list_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Task list ID or Todoist project ID
+
+    # Notification: Apprise URL(s) for notification actions
+    # JSON array of Apprise URLs, e.g., ["gotify://host/token", "slack://token"]
+    action_notification_urls_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+
+    # ===== SCHEDULED PROMPTS SETTINGS =====
+    # Calendar-based scheduled prompts: events in this calendar are executed as LLM prompts
+    # The event title becomes the prompt, description provides additional context
+    scheduled_prompts_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # OAuth account for accessing the prompts calendar
+    scheduled_prompts_account_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("oauth_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+    # Calendar ID containing prompt events (user creates dedicated calendar manually)
+    scheduled_prompts_calendar_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    scheduled_prompts_calendar_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # For display
+    # How far ahead to look for upcoming prompts (minutes)
+    scheduled_prompts_lookahead: Mapped[int] = mapped_column(Integer, default=15)
+    # Whether to store full response in execution log
+    scheduled_prompts_store_response: Mapped[bool] = mapped_column(
+        Boolean, default=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -1249,6 +1499,11 @@ class SmartAlias(Base):
     document_stores: Mapped[list["DocumentStore"]] = relationship(
         "DocumentStore",
         secondary=smart_alias_stores,
+        backref="smart_aliases",
+    )
+    live_data_sources: Mapped[list["LiveDataSource"]] = relationship(
+        "LiveDataSource",
+        secondary=smart_alias_live_sources,
         backref="smart_aliases",
     )
 
@@ -1285,6 +1540,36 @@ class SmartAlias(Base):
         self.candidates_json = json.dumps(value) if value else None
 
     @property
+    def allowed_actions(self) -> list[str]:
+        """Get allowed actions as a list."""
+        if not self.allowed_actions_json:
+            return []
+        try:
+            return json.loads(self.allowed_actions_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @allowed_actions.setter
+    def allowed_actions(self, value: list[str]) -> None:
+        """Set allowed actions from a list."""
+        self.allowed_actions_json = json.dumps(value) if value else None
+
+    @property
+    def action_notification_urls(self) -> list[str]:
+        """Get notification URLs as a list."""
+        if not self.action_notification_urls_json:
+            return []
+        try:
+            return json.loads(self.action_notification_urls_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @action_notification_urls.setter
+    def action_notification_urls(self, value: list[str]) -> None:
+        """Set notification URLs from a list."""
+        self.action_notification_urls_json = json.dumps(value) if value else None
+
+    @property
     def cache_enabled(self) -> bool:
         """
         Check if caching is actually enabled.
@@ -1305,6 +1590,8 @@ class SmartAlias(Base):
             features.append("rag")
         if self.use_web:
             features.append("web")
+        if self.use_live_data:
+            features.append("live")
         if self.cache_enabled:
             features.append("cache")
         return "+".join(features) if features else "simple"
@@ -1320,6 +1607,11 @@ class SmartAlias(Base):
         """Convert to dictionary for API responses."""
         # Get stores from either relationship or detached stores
         stores = getattr(self, "_detached_stores", None) or self.document_stores or []
+        live_sources = (
+            getattr(self, "_detached_live_sources", None)
+            or self.live_data_sources
+            or []
+        )
 
         return {
             "id": self.id,
@@ -1328,6 +1620,7 @@ class SmartAlias(Base):
             "use_routing": self.use_routing,
             "use_rag": self.use_rag,
             "use_web": self.use_web,
+            "use_live_data": self.use_live_data,
             "use_cache": self.use_cache,
             "is_smart_tag": self.is_smart_tag,
             "passthrough_model": self.passthrough_model,
@@ -1349,6 +1642,7 @@ class SmartAlias(Base):
             "similarity_threshold": self.similarity_threshold,
             # Smart source selection
             "use_smart_source_selection": self.use_smart_source_selection,
+            "use_two_pass_retrieval": self.use_two_pass_retrieval,
             # Web settings
             "max_search_results": self.max_search_results,
             "max_scrape_urls": self.max_scrape_urls,
@@ -1391,6 +1685,23 @@ class SmartAlias(Base):
             "memory_updated_at": self.memory_updated_at.isoformat()
             if self.memory_updated_at
             else None,
+            # Actions
+            "use_actions": self.use_actions,
+            "allowed_actions": self.allowed_actions,
+            "action_email_account_id": self.action_email_account_id,
+            "action_calendar_account_id": self.action_calendar_account_id,
+            "action_calendar_id": self.action_calendar_id,
+            "action_tasks_account_id": self.action_tasks_account_id,
+            "action_tasks_provider": self.action_tasks_provider,
+            "action_tasks_list_id": self.action_tasks_list_id,
+            "action_notification_urls": self.action_notification_urls,
+            # Scheduled prompts
+            "scheduled_prompts_enabled": self.scheduled_prompts_enabled,
+            "scheduled_prompts_account_id": self.scheduled_prompts_account_id,
+            "scheduled_prompts_calendar_id": self.scheduled_prompts_calendar_id,
+            "scheduled_prompts_calendar_name": self.scheduled_prompts_calendar_name,
+            "scheduled_prompts_lookahead": self.scheduled_prompts_lookahead,
+            "scheduled_prompts_store_response": self.scheduled_prompts_store_response,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             # Document stores
@@ -1407,6 +1718,22 @@ class SmartAlias(Base):
                 for s in stores
             ]
             if stores
+            else [],
+            # Live data sources
+            "live_data_source_ids": [s.id for s in live_sources]
+            if live_sources
+            else [],
+            "live_data_sources": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "source_type": s.source_type,
+                    "enabled": s.enabled,
+                    "data_type": s.data_type,
+                }
+                for s in live_sources
+            ]
+            if live_sources
             else [],
         }
 
@@ -1477,4 +1804,545 @@ class OAuthToken(Base):
             if self.last_refreshed
             else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ============================================================================
+# Live Data Source Model (real-time API data)
+# ============================================================================
+
+
+class LiveDataSource(Base):
+    """
+    Live Data Source - real-time API queries for current data.
+
+    Unlike Document Stores (which index and embed documents), Live Data Sources
+    query external APIs at request time to inject real-time data like weather,
+    transport status, stock prices, etc.
+
+    The designator model decides which live sources to query based on the
+    user's question, similar to smart source selection for document stores.
+    """
+
+    __tablename__ = "live_data_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+
+    # Source type: "rest_api", "builtin_weather", "builtin_stocks", "builtin_transport"
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ===== CONNECTION SETTINGS (for rest_api type) =====
+    endpoint_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    http_method: Mapped[str] = mapped_column(String(10), default="GET")
+    headers_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Auth configuration
+    auth_type: Mapped[str] = mapped_column(
+        String(20), default="none"
+    )  # none, api_key, bearer, basic
+    auth_config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ===== REQUEST CONFIGURATION =====
+    # Template for request body/params with {{query}} placeholder
+    request_template_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    query_params_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ===== RESPONSE PROCESSING =====
+    # JSONPath to extract data from response
+    response_path: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Template for formatting response for LLM context
+    response_format_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ===== BEHAVIOR =====
+    cache_ttl_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=10)
+    retry_count: Mapped[int] = mapped_column(Integer, default=1)
+    rate_limit_rpm: Mapped[int] = mapped_column(Integer, default=60)
+
+    # ===== INTELLIGENCE (for smart source selection) =====
+    # Category for quick filtering: weather, transport, finance, sports, etc.
+    data_type: Mapped[str] = mapped_column(String(50), default="general")
+    # Example response for designator to understand the data format
+    sample_response_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Description of what queries this source is good for
+    best_for: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ===== STATUS =====
+    last_success: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    tool_count: Mapped[int] = mapped_column(Integer, default=0)  # MCP tools discovered
+
+    # ===== USAGE STATS =====
+    total_calls: Mapped[int] = mapped_column(Integer, default=0)
+    successful_calls: Mapped[int] = mapped_column(Integer, default=0)
+    failed_calls: Mapped[int] = mapped_column(Integer, default=0)
+    total_latency_ms: Mapped[int] = mapped_column(
+        Integer, default=0
+    )  # For avg calculation
+
+    # ===== TIMESTAMPS =====
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    @property
+    def headers(self) -> dict:
+        """Get headers as a dict."""
+        if not self.headers_json:
+            return {}
+        try:
+            return json.loads(self.headers_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @headers.setter
+    def headers(self, value: dict) -> None:
+        """Set headers from a dict."""
+        self.headers_json = json.dumps(value) if value else None
+
+    @property
+    def auth_config(self) -> dict:
+        """Get auth config as a dict."""
+        if not self.auth_config_json:
+            return {}
+        try:
+            return json.loads(self.auth_config_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @auth_config.setter
+    def auth_config(self, value: dict) -> None:
+        """Set auth config from a dict."""
+        self.auth_config_json = json.dumps(value) if value else None
+
+    @property
+    def request_template(self) -> dict:
+        """Get request template as a dict."""
+        if not self.request_template_json:
+            return {}
+        try:
+            return json.loads(self.request_template_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @request_template.setter
+    def request_template(self, value: dict) -> None:
+        """Set request template from a dict."""
+        self.request_template_json = json.dumps(value) if value else None
+
+    @property
+    def query_params(self) -> dict:
+        """Get query params as a dict."""
+        if not self.query_params_json:
+            return {}
+        try:
+            return json.loads(self.query_params_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @query_params.setter
+    def query_params(self, value: dict) -> None:
+        """Set query params from a dict."""
+        self.query_params_json = json.dumps(value) if value else None
+
+    @property
+    def sample_response(self) -> dict:
+        """Get sample response as a dict."""
+        if not self.sample_response_json:
+            return {}
+        try:
+            return json.loads(self.sample_response_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @sample_response.setter
+    def sample_response(self, value: dict) -> None:
+        """Set sample response from a dict."""
+        self.sample_response_json = json.dumps(value) if value else None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "source_type": self.source_type,
+            "enabled": self.enabled,
+            "description": self.description,
+            # Connection
+            "endpoint_url": self.endpoint_url,
+            "http_method": self.http_method,
+            "headers": self.headers,
+            "auth_type": self.auth_type,
+            "auth_config": self.auth_config,
+            # Request
+            "request_template": self.request_template,
+            "query_params": self.query_params,
+            # Response
+            "response_path": self.response_path,
+            "response_format_template": self.response_format_template,
+            # Behavior
+            "cache_ttl_seconds": self.cache_ttl_seconds,
+            "timeout_seconds": self.timeout_seconds,
+            "retry_count": self.retry_count,
+            "rate_limit_rpm": self.rate_limit_rpm,
+            # Intelligence
+            "data_type": self.data_type,
+            "sample_response": self.sample_response,
+            "best_for": self.best_for,
+            # Status
+            "last_success": self.last_success.isoformat()
+            if self.last_success
+            else None,
+            "last_error": self.last_error,
+            "error_count": self.error_count,
+            "tool_count": self.tool_count,
+            # Usage stats
+            "total_calls": self.total_calls,
+            "successful_calls": self.successful_calls,
+            "failed_calls": self.failed_calls,
+            "total_latency_ms": self.total_latency_ms,
+            "avg_latency_ms": (
+                self.total_latency_ms // self.total_calls if self.total_calls > 0 else 0
+            ),
+            # Timestamps
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class LiveDataSourceEndpointStats(Base):
+    """
+    Per-endpoint/tool statistics for Live Data Sources.
+
+    Tracks usage at the endpoint level for MCP tools or REST endpoints.
+    """
+
+    __tablename__ = "live_data_source_endpoint_stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("live_data_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    endpoint_name: Mapped[str] = mapped_column(
+        String(200), nullable=False
+    )  # Tool name or endpoint path
+
+    # Stats
+    total_calls: Mapped[int] = mapped_column(Integer, default=0)
+    successful_calls: Mapped[int] = mapped_column(Integer, default=0)
+    failed_calls: Mapped[int] = mapped_column(Integer, default=0)
+    total_latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    last_called: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Broken tool tracking - tool is marked broken when it returns 404 or similar
+    # "doesn't exist" errors. Broken tools are filtered from designator tool lists.
+    is_broken: Mapped[bool] = mapped_column(Boolean, default=False)
+    broken_reason: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True
+    )  # e.g., "404: Endpoint does not exist"
+    broken_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Composite unique constraint
+    __table_args__ = (
+        Index("ix_endpoint_stats_source_endpoint", "source_id", "endpoint_name"),
+        {"sqlite_autoincrement": True},
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "source_id": self.source_id,
+            "endpoint_name": self.endpoint_name,
+            "total_calls": self.total_calls,
+            "successful_calls": self.successful_calls,
+            "failed_calls": self.failed_calls,
+            "total_latency_ms": self.total_latency_ms,
+            "avg_latency_ms": (
+                self.total_latency_ms // self.total_calls if self.total_calls > 0 else 0
+            ),
+            "last_called": self.last_called.isoformat() if self.last_called else None,
+            "last_error": self.last_error,
+            "is_broken": self.is_broken,
+            "broken_reason": self.broken_reason,
+            "broken_at": self.broken_at.isoformat() if self.broken_at else None,
+        }
+
+
+class LiveDataCache(Base):
+    """
+    Cache for live data API responses.
+
+    Stores API responses with TTL-based expiration. Different data types
+    have different TTLs:
+    - Current prices/quotes: 15 minutes
+    - Historical data: Forever (immutable)
+    - Weather current: 1 hour
+    - Weather forecast: 6 hours
+    - Default: 1 hour
+    """
+
+    __tablename__ = "live_data_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Cache key components
+    source_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # e.g., "stocks", "weather"
+    tool_name: Mapped[str] = mapped_column(
+        String(200), nullable=False
+    )  # API tool/endpoint name
+    args_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False
+    )  # SHA256 of normalized args JSON
+
+    # The cached data
+    response_data: Mapped[str] = mapped_column(Text, nullable=False)  # JSON response
+    response_summary: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Human-readable summary
+
+    # TTL and timestamps
+    ttl_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )  # 0 = never expires
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )  # NULL = never expires
+
+    # Metadata
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_hit_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Indexes for efficient lookup
+    __table_args__ = (
+        Index(
+            "ix_live_cache_lookup", "source_type", "tool_name", "args_hash", unique=True
+        ),
+        Index("ix_live_cache_expires", "expires_at"),
+        {"sqlite_autoincrement": True},
+    )
+
+    def is_expired(self) -> bool:
+        """Check if this cache entry has expired."""
+        if self.expires_at is None:
+            return False  # Never expires
+        return datetime.utcnow() > self.expires_at
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "source_type": self.source_type,
+            "tool_name": self.tool_name,
+            "args_hash": self.args_hash,
+            "response_summary": self.response_summary,
+            "ttl_seconds": self.ttl_seconds,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "hit_count": self.hit_count,
+            "last_hit_at": self.last_hit_at.isoformat() if self.last_hit_at else None,
+            "is_expired": self.is_expired(),
+        }
+
+
+class LiveEntityCache(Base):
+    """
+    Cache for entity resolution (names -> API identifiers).
+
+    Stores mappings like:
+    - "Apple" -> "AAPL" (stocks:symbol)
+    - "London" -> "328328" (weather:location)
+    - "Kings Cross" -> "KGX" (transport:station)
+
+    Uses SQLite/PostgreSQL instead of ChromaDB for simpler exact matching.
+    Long TTL since entities rarely change.
+    """
+
+    __tablename__ = "live_entity_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Entity identification
+    source_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # e.g., "stocks", "weather"
+    entity_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # e.g., "symbol", "location"
+    query_text: Mapped[str] = mapped_column(
+        String(500), nullable=False
+    )  # Original query (lowercase)
+    resolved_value: Mapped[str] = mapped_column(
+        String(500), nullable=False
+    )  # Resolved API value
+
+    # Additional context for disambiguation
+    display_name: Mapped[Optional[str]] = mapped_column(
+        String(200), nullable=True
+    )  # e.g., "Apple Inc."
+    metadata_json: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # Additional metadata
+
+    # TTL and timestamps
+    ttl_days: Mapped[int] = mapped_column(
+        Integer, default=90
+    )  # Default 90 days, 0 = never expires
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Usage stats
+    hit_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_hit_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Indexes
+    __table_args__ = (
+        Index(
+            "ix_entity_cache_lookup",
+            "source_type",
+            "entity_type",
+            "query_text",
+            unique=True,
+        ),
+        Index("ix_entity_cache_expires", "expires_at"),
+        {"sqlite_autoincrement": True},
+    )
+
+    def is_expired(self) -> bool:
+        """Check if this cache entry has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.utcnow() > self.expires_at
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "source_type": self.source_type,
+            "entity_type": self.entity_type,
+            "query_text": self.query_text,
+            "resolved_value": self.resolved_value,
+            "display_name": self.display_name,
+            "ttl_days": self.ttl_days,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "hit_count": self.hit_count,
+            "last_hit_at": self.last_hit_at.isoformat() if self.last_hit_at else None,
+            "is_expired": self.is_expired(),
+        }
+
+
+# ============================================================================
+# Scheduled Prompts Model (calendar-based LLM prompt execution)
+# ============================================================================
+
+
+class ScheduledPromptExecution(Base):
+    """
+    Tracks execution of calendar-based scheduled prompts.
+
+    Each Smart Alias can be linked to a dedicated calendar containing
+    prompt events. The scheduler polls these calendars and executes
+    prompts at their scheduled times. For recurring events, this table
+    tracks the last execution to avoid duplicate runs.
+
+    The event_id is the Google Calendar event ID. For recurring events,
+    the iCalUID is used to identify the master event, and we track
+    which instances have been executed.
+    """
+
+    __tablename__ = "scheduled_prompt_executions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Link to Smart Alias that owns this calendar
+    smart_alias_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("smart_aliases.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Calendar event identification
+    # event_id: The Google Calendar event ID (unique per instance for recurring)
+    event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # ical_uid: The iCalendar UID (same for all instances of a recurring event)
+    ical_uid: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # For recurring events, this is the start time of the specific instance
+    instance_start: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Event details (cached from calendar for display/debugging)
+    event_title: Mapped[str] = mapped_column(String(500), nullable=False)
+    event_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    scheduled_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    # Execution tracking
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # pending, running, completed, failed, skipped
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    execution_duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Response tracking
+    response_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )  # Model that handled the request
+    response_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    response_preview: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # First ~500 chars of response
+    response_full: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )  # Full response (optional)
+
+    # Error tracking
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Indexes for efficient queries
+    __table_args__ = (
+        # Fast lookup by alias + event for deduplication
+        Index("ix_scheduled_exec_alias_event", "smart_alias_id", "event_id"),
+        # Fast lookup for recurring event instances
+        Index("ix_scheduled_exec_ical_uid", "ical_uid"),
+        # Fast lookup for pending executions
+        Index("ix_scheduled_exec_status", "status", "scheduled_time"),
+        {"sqlite_autoincrement": True},
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "smart_alias_id": self.smart_alias_id,
+            "event_id": self.event_id,
+            "ical_uid": self.ical_uid,
+            "instance_start": self.instance_start.isoformat()
+            if self.instance_start
+            else None,
+            "event_title": self.event_title,
+            "event_description": self.event_description,
+            "scheduled_time": self.scheduled_time.isoformat()
+            if self.scheduled_time
+            else None,
+            "status": self.status,
+            "executed_at": self.executed_at.isoformat() if self.executed_at else None,
+            "execution_duration_ms": self.execution_duration_ms,
+            "response_model": self.response_model,
+            "response_tokens": self.response_tokens,
+            "response_preview": self.response_preview,
+            "error_message": self.error_message,
+            "retry_count": self.retry_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

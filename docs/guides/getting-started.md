@@ -174,7 +174,7 @@ Point the Ollama URL to your LLM Relay instance.
 
 LLM Relay's smart features require additional services:
 
-### ChromaDB (for Smart Cache, Smart RAG, Model Intelligence)
+### ChromaDB (for Cache, RAG, Web, Model Intelligence)
 
 Add to your `docker-compose.yml`:
 
@@ -197,7 +197,7 @@ Add to `.env`:
 CHROMA_URL=http://chroma:8000
 ```
 
-### SearXNG (for Smart Augmentor web search)
+### SearXNG (for Web enrichment)
 
 Add to your `docker-compose.yml`:
 
@@ -217,11 +217,8 @@ Add to `.env`:
 SEARXNG_URL=http://searxng:8080
 ```
 
-See [INSTALLATION.md](../INSTALLATION.md) for complete production setup.
+See [INSTALLATION.md](../../INSTALLATION.md) for complete production setup.
 
 ## Next Steps
 
-- [Smart Routers](smart-routers.md) - Intelligent model routing
-- [Smart Caches](smart-caches.md) - Semantic response caching
-- [Smart Augmentors](smart-augmentors.md) - Web search augmentation
-- [Smart RAGs](smart-rags.md) - Document-based context
+- [Smart Aliases](smart-aliases.md) - Unified routing, caching, RAG, web, and memory features

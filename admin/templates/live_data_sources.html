@@ -1,0 +1,2676 @@
+{% extends "base.html" %} {% block title %}Live Data Sources{% endblock %} {%
+block content %}
+<div x-data="liveDataSourcesPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex justify-between items-start mb-6">
+        <div>
+            <h1 class="text-2xl font-bold">Live Data Sources</h1>
+            <p class="text-base-content/60">
+                Real-time API data sources for Smart Alias enrichment. Add
+                custom APIs or use built-in integrations.
+            </p>
+        </div>
+        <button @click="openCreateModal()" class="btn btn-primary">
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5 mr-1"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                />
+            </svg>
+            Add API Source
+        </button>
+    </div>
+
+    <!-- RapidAPI Info Banner -->
+    <div class="alert alert-info mb-6" x-show="!hasRapidApiKey">
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+        >
+            <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+        </svg>
+        <div>
+            <strong>RapidAPI Integration:</strong> Set
+            <code class="bg-base-300 px-1 rounded">RAPIDAPI_KEY</code> to access
+            1000s of APIs from
+            <a href="https://rapidapi.com" target="_blank" class="link"
+                >RapidAPI.com</a
+            >
+            with a single key.
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <template x-if="loading">
+        <div class="flex justify-center py-12">
+            <span class="loading loading-spinner loading-lg"></span>
+        </div>
+    </template>
+
+    <!-- No Sources Configured -->
+    <template x-if="!loading && sources.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-base-content/30"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium">No Live Data Sources</h3>
+                <p class="mt-2 text-base-content/60 max-w-lg mx-auto">
+                    Add custom API sources or configure built-in integrations
+                    via environment variables.
+                </p>
+                <div class="mt-6 text-left max-w-md mx-auto">
+                    <h4 class="font-medium mb-2">
+                        Built-in integrations (auto-configured):
+                    </h4>
+                    <ul class="text-sm text-base-content/70 space-y-2">
+                        <li class="flex items-center gap-2">
+                            <span class="badge badge-sm badge-outline"
+                                >Stocks (US)</span
+                            >
+                            <code class="text-xs bg-base-200 px-1 rounded"
+                                >FINNHUB_API_KEY</code
+                            >
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="badge badge-sm badge-outline"
+                                >Stocks (UK/Intl)</span
+                            >
+                            <code class="text-xs bg-base-200 px-1 rounded"
+                                >ALPHA_VANTAGE_API_KEY</code
+                            >
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="badge badge-sm badge-outline"
+                                >Weather</span
+                            >
+                            <code class="text-xs bg-base-200 px-1 rounded"
+                                >ACCUWEATHER_API_KEY</code
+                            >
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="badge badge-sm badge-outline"
+                                >Transport</span
+                            >
+                            <code class="text-xs bg-base-200 px-1 rounded"
+                                >TRANSPORTAPI_APP_ID</code
+                            >
+                            +
+                            <code class="text-xs bg-base-200 px-1 rounded"
+                                >TRANSPORTAPI_APP_KEY</code
+                            >
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="badge badge-sm badge-outline"
+                                >Google Maps</span
+                            >
+                            <code class="text-xs bg-base-200 px-1 rounded"
+                                >GOOGLE_MAPS_API_KEY</code
+                            >
+                        </li>
+                        <li class="flex items-center gap-2">
+                            <span class="badge badge-sm badge-outline"
+                                >RapidAPI (1000s)</span
+                            >
+                            <code class="text-xs bg-base-200 px-1 rounded"
+                                >RAPIDAPI_KEY</code
+                            >
+                        </li>
+                    </ul>
+                </div>
+                <button @click="openCreateModal()" class="btn btn-primary mt-6">
+                    Add Custom API Source
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Sources Table -->
+    <template x-if="!loading && sources.length > 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th class="w-8"></th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Data Type</th>
+                            <th>API Calls</th>
+                            <th>Status</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <template x-for="source in sources" :key="source.id">
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
+                                @click="toggleExpand(source.id)"
+                                class="cursor-pointer hover:bg-base-200 transition-colors"
+                                :data-source-id="source.id"
+                            >
+                                <td class="w-8">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 transition-transform"
+                                        :class="{'rotate-90': expandedRows.includes(source.id)}"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
+                                </td>
+                                <td>
+                                    <div class="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            class="toggle toggle-sm toggle-success"
+                                            :checked="source.enabled"
+                                            @change="toggleEnabled(source)"
+                                            @click.stop
+                                        />
+                                        <div>
+                                            <div
+                                                class="font-medium"
+                                                x-text="source.name"
+                                            ></div>
+                                            <div
+                                                class="text-xs text-base-content/50"
+                                                x-text="source.description || 'No description'"
+                                            ></div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span
+                                        class="badge badge-sm"
+                                        :class="getTypeBadgeClass(source.source_type)"
+                                        x-text="getTypeLabel(source.source_type)"
+                                    ></span>
+                                </td>
+                                <td>
+                                    <span
+                                        class="text-sm"
+                                        x-text="source.data_type || '-'"
+                                    ></span>
+                                </td>
+                                <td>
+                                    <template x-if="source.total_calls > 0">
+                                        <div class="text-sm">
+                                            <span
+                                                x-text="source.total_calls.toLocaleString()"
+                                            ></span>
+                                            <span
+                                                class="text-xs text-base-content/50"
+                                                x-text="'(' + Math.round(source.successful_calls / source.total_calls * 100) + '%)'"
+                                            ></span>
+                                        </div>
+                                    </template>
+                                    <template
+                                        x-if="!source.total_calls || source.total_calls === 0"
+                                    >
+                                        <span
+                                            class="text-xs text-base-content/40"
+                                            >-</span
+                                        >
+                                    </template>
+                                </td>
+                                <td>
+                                    <template x-if="source.last_success">
+                                        <div class="flex items-center gap-1">
+                                            <div
+                                                class="w-2 h-2 rounded-full bg-success"
+                                            ></div>
+                                            <span
+                                                class="text-xs text-base-content/60"
+                                                x-text="source.tool_count ? source.tool_count + ' tools' : 'OK'"
+                                            ></span>
+                                        </div>
+                                    </template>
+                                    <template
+                                        x-if="source.error_count > 0 && !source.last_success"
+                                    >
+                                        <div class="flex items-center gap-1">
+                                            <div
+                                                class="w-2 h-2 rounded-full bg-error"
+                                            ></div>
+                                            <span
+                                                class="text-xs text-error"
+                                                x-text="source.error_count + ' errors'"
+                                            ></span>
+                                        </div>
+                                    </template>
+                                    <template
+                                        x-if="!source.last_success && source.error_count === 0"
+                                    >
+                                        <span
+                                            class="text-xs text-base-content/40"
+                                            >Not tested</span
+                                        >
+                                    </template>
+                                </td>
+                                <td class="text-right" @click.stop>
+                                    <div class="flex justify-end gap-1">
+                                        <button
+                                            @click="testSource(source)"
+                                            class="btn btn-ghost btn-xs"
+                                            :class="{ 'loading': testingId === source.id }"
+                                            :disabled="testingId === source.id"
+                                            title="Test"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                                x-show="testingId !== source.id"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="openEditModal(source)"
+                                            class="btn btn-ghost btn-xs"
+                                            title="Edit"
+                                            x-show="!source.source_type.startsWith('builtin_')"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                />
+                                            </svg>
+                                        </button>
+                                        <button
+                                            @click="deleteSource(source)"
+                                            class="btn btn-ghost btn-xs text-error"
+                                            title="Delete"
+                                            x-show="!source.source_type.startsWith('builtin_')"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                                />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <!-- Expanded Details Row -->
+                            <tr
+                                x-show="expandedRows.includes(source.id)"
+                                x-transition
+                            >
+                                <td colspan="7" class="bg-base-200 p-0">
+                                    <div class="p-4">
+                                        <!-- Description and Best For -->
+                                        <div
+                                            class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4"
+                                            x-show="source.description || source.best_for"
+                                        >
+                                            <div x-show="source.description">
+                                                <div
+                                                    class="text-xs text-base-content/50 uppercase mb-1"
+                                                >
+                                                    Description
+                                                </div>
+                                                <div
+                                                    class="text-sm"
+                                                    x-text="source.description"
+                                                ></div>
+                                            </div>
+                                            <div x-show="source.best_for">
+                                                <div
+                                                    class="text-xs text-base-content/50 uppercase mb-1"
+                                                >
+                                                    Best For
+                                                </div>
+                                                <div
+                                                    class="text-sm"
+                                                    x-text="source.best_for"
+                                                ></div>
+                                            </div>
+                                        </div>
+
+                                        <!-- MCP Tools Section -->
+                                        <template
+                                            x-if="source.source_type === 'mcp_server'"
+                                        >
+                                            <div>
+                                                <div
+                                                    class="text-xs text-base-content/50 uppercase mb-2"
+                                                >
+                                                    Available Tools
+                                                </div>
+                                                <template
+                                                    x-if="loadingTools[source.id]"
+                                                >
+                                                    <div
+                                                        class="flex items-center gap-2 text-sm text-base-content/60"
+                                                    >
+                                                        <span
+                                                            class="loading loading-spinner loading-xs"
+                                                        ></span>
+                                                        Loading tools...
+                                                    </div>
+                                                </template>
+                                                <template
+                                                    x-if="!loadingTools[source.id] && sourceTools[source.id]"
+                                                >
+                                                    <div
+                                                        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2"
+                                                    >
+                                                        <template
+                                                            x-for="tool in sourceTools[source.id]"
+                                                            :key="tool.name"
+                                                        >
+                                                            <div
+                                                                class="bg-base-100 rounded-lg p-3 border border-base-300"
+                                                            >
+                                                                <div
+                                                                    class="font-mono text-xs font-medium text-primary"
+                                                                    x-text="tool.name"
+                                                                ></div>
+                                                                <div
+                                                                    class="text-xs text-base-content/70 mt-1 line-clamp-2"
+                                                                    x-text="tool.description"
+                                                                ></div>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                                <template
+                                                    x-if="!loadingTools[source.id] && (!sourceTools[source.id] || sourceTools[source.id].length === 0)"
+                                                >
+                                                    <div
+                                                        class="text-sm text-base-content/50"
+                                                    >
+                                                        No tools loaded. Click
+                                                        "Test" to discover
+                                                        available tools.
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+
+                                        <!-- REST API Info -->
+                                        <template
+                                            x-if="source.source_type === 'rest_api'"
+                                        >
+                                            <div
+                                                class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
+                                            >
+                                                <div>
+                                                    <div
+                                                        class="text-xs text-base-content/50 uppercase mb-1"
+                                                    >
+                                                        Endpoint
+                                                    </div>
+                                                    <div
+                                                        class="font-mono text-xs break-all"
+                                                        x-text="source.endpoint_url || '-'"
+                                                    ></div>
+                                                </div>
+                                                <div>
+                                                    <div
+                                                        class="text-xs text-base-content/50 uppercase mb-1"
+                                                    >
+                                                        Method
+                                                    </div>
+                                                    <div
+                                                        class="font-mono text-xs"
+                                                        x-text="source.http_method || 'GET'"
+                                                    ></div>
+                                                </div>
+                                                <div>
+                                                    <div
+                                                        class="text-xs text-base-content/50 uppercase mb-1"
+                                                    >
+                                                        Auth
+                                                    </div>
+                                                    <div
+                                                        class="text-xs"
+                                                        x-text="source.auth_type || 'none'"
+                                                    ></div>
+                                                </div>
+                                                <div>
+                                                    <div
+                                                        class="text-xs text-base-content/50 uppercase mb-1"
+                                                    >
+                                                        Cache TTL
+                                                    </div>
+                                                    <div
+                                                        class="text-xs"
+                                                        x-text="source.cache_ttl_seconds + 's'"
+                                                    ></div>
+                                                </div>
+                                            </div>
+                                        </template>
+
+                                        <!-- Endpoint/Tool Stats -->
+                                        <template x-if="source.total_calls > 0">
+                                            <div class="mt-4">
+                                                <div
+                                                    class="text-xs text-base-content/50 uppercase mb-2"
+                                                >
+                                                    Endpoint Statistics
+                                                </div>
+                                                <template
+                                                    x-if="loadingEndpointStats[source.id]"
+                                                >
+                                                    <div
+                                                        class="flex items-center gap-2 text-sm text-base-content/60"
+                                                    >
+                                                        <span
+                                                            class="loading loading-spinner loading-xs"
+                                                        ></span>
+                                                        Loading stats...
+                                                    </div>
+                                                </template>
+                                                <template
+                                                    x-if="!loadingEndpointStats[source.id] && endpointStats[source.id] && endpointStats[source.id].length > 0"
+                                                >
+                                                    <div
+                                                        class="overflow-x-auto"
+                                                    >
+                                                        <table
+                                                            class="table table-xs"
+                                                        >
+                                                            <thead>
+                                                                <tr
+                                                                    class="text-xs"
+                                                                >
+                                                                    <th>
+                                                                        Endpoint/Tool
+                                                                    </th>
+                                                                    <th
+                                                                        class="text-right"
+                                                                    >
+                                                                        Calls
+                                                                    </th>
+                                                                    <th
+                                                                        class="text-right"
+                                                                    >
+                                                                        Success
+                                                                    </th>
+                                                                    <th
+                                                                        class="text-right"
+                                                                    >
+                                                                        Avg
+                                                                        Latency
+                                                                    </th>
+                                                                    <th>
+                                                                        Last
+                                                                        Called
+                                                                    </th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                <template
+                                                                    x-for="stat in endpointStats[source.id]"
+                                                                    :key="stat.endpoint_name"
+                                                                >
+                                                                    <tr>
+                                                                        <td
+                                                                            class="font-mono text-xs"
+                                                                            x-text="stat.endpoint_name"
+                                                                        ></td>
+                                                                        <td
+                                                                            class="text-right"
+                                                                            x-text="stat.total_calls"
+                                                                        ></td>
+                                                                        <td
+                                                                            class="text-right"
+                                                                        >
+                                                                            <span
+                                                                                :class="stat.total_calls > 0 && stat.successful_calls / stat.total_calls >= 0.9 ? 'text-success' : (stat.total_calls > 0 && stat.successful_calls / stat.total_calls < 0.5 ? 'text-error' : '')"
+                                                                                x-text="stat.total_calls > 0 ? Math.round(stat.successful_calls / stat.total_calls * 100) + '%' : '-'"
+                                                                            ></span>
+                                                                        </td>
+                                                                        <td
+                                                                            class="text-right"
+                                                                            x-text="stat.avg_latency_ms + 'ms'"
+                                                                        ></td>
+                                                                        <td
+                                                                            class="text-xs text-base-content/60"
+                                                                            x-text="stat.last_called ? new Date(stat.last_called).toLocaleString() : '-'"
+                                                                        ></td>
+                                                                    </tr>
+                                                                </template>
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </template>
+                                                <template
+                                                    x-if="!loadingEndpointStats[source.id] && (!endpointStats[source.id] || endpointStats[source.id].length === 0)"
+                                                >
+                                                    <div
+                                                        class="text-sm text-base-content/50"
+                                                    >
+                                                        No endpoint statistics
+                                                        recorded yet.
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+
+                                        <!-- Last Success/Error Info -->
+                                        <div
+                                            class="flex gap-4 mt-4 pt-4 border-t border-base-300 text-xs text-base-content/50"
+                                        >
+                                            <div x-show="source.last_success">
+                                                Last tested:
+                                                <span
+                                                    x-text="new Date(source.last_success).toLocaleString()"
+                                                ></span>
+                                            </div>
+                                            <div
+                                                x-show="source.last_error"
+                                                class="text-error"
+                                            >
+                                                Last error:
+                                                <span
+                                                    x-text="source.last_error"
+                                                ></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+                </table>
+            </div>
+        </div>
+    </template>
+
+    <!-- Create/Edit Modal -->
+    <dialog
+        id="editModal"
+        class="modal"
+        :class="{ 'modal-open': showEditModal }"
+    >
+        <div class="modal-box max-w-3xl">
+            <h3
+                class="font-bold text-lg mb-4"
+                x-text="editingSource ? 'Edit API Source' : 'Add API Source'"
+            ></h3>
+
+            <form @submit.prevent="saveSource()">
+                <!-- Source Type Selection - FIRST -->
+                <div class="form-control mb-4">
+                    <label class="label"
+                        ><span class="label-text">Source Type</span></label
+                    >
+                    <select
+                        x-model="form.source_type"
+                        class="select select-bordered"
+                        @change="onSourceTypeChange()"
+                    >
+                        <optgroup label="Google (OAuth)">
+                            <option value="google_calendar_live">
+                                Google Calendar (real-time)
+                            </option>
+                            <option value="google_tasks_live">
+                                Google Tasks (real-time)
+                            </option>
+                            <option value="google_gmail_live">
+                                Gmail (real-time)
+                            </option>
+                        </optgroup>
+                        <optgroup label="Health & Fitness (OAuth)">
+                            <option value="oura_live">
+                                Oura Ring (sleep, readiness, activity)
+                            </option>
+                            <option value="withings_live">
+                                Withings (weight, body composition, sleep)
+                            </option>
+                        </optgroup>
+                        <optgroup label="External APIs">
+                            <option value="mcp_server">
+                                MCP API (RapidAPI auto-discovery)
+                            </option>
+                            <option value="rest_api">
+                                Legacy REST API (manual config)
+                            </option>
+                        </optgroup>
+                    </select>
+                    <label class="label"
+                        ><span
+                            class="label-text-alt"
+                            x-text="form.source_type.startsWith('google_') ? 'Requires connected Google account' : (form.source_type === 'oura_live' ? 'Requires connected Oura account' : (form.source_type === 'withings_live' ? 'Requires connected Withings account' : 'MCP sources auto-discover API endpoints'))"
+                        ></span
+                    ></label>
+                </div>
+
+                <!-- Quick Start: RapidAPI MCP Import (only for MCP sources) -->
+                <template
+                    x-if="!editingSource && form.source_type === 'mcp_server'"
+                >
+                    <div class="bg-base-200 rounded-lg p-4 mb-4">
+                        <div class="flex items-center gap-2 mb-3">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5 text-primary"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                                />
+                            </svg>
+                            <span class="font-medium"
+                                >Quick Start - RapidAPI MCP</span
+                            >
+                        </div>
+                        <p class="text-sm text-base-content/70 mb-3">
+                            Paste a RapidAPI URL to auto-configure. Tools are
+                            discovered automatically.
+                        </p>
+                        <div class="form-control">
+                            <div class="join">
+                                <input
+                                    type="text"
+                                    x-model="rapidapiImportUrl"
+                                    class="input input-bordered input-sm join-item w-full"
+                                    placeholder="https://rapidapi.com/user/api/name"
+                                />
+                                <button
+                                    type="button"
+                                    @click="importFromRapidApi()"
+                                    class="btn btn-sm btn-primary join-item"
+                                >
+                                    Import
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Basic Info -->
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div class="form-control">
+                        <label class="label"
+                            ><span class="label-text">Name *</span></label
+                        >
+                        <input
+                            type="text"
+                            x-model="form.name"
+                            class="input input-bordered"
+                            placeholder="my-source"
+                            required
+                            :disabled="editingSource"
+                        />
+                        <label class="label"
+                            ><span class="label-text-alt"
+                                >Unique identifier (lowercase)</span
+                            ></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label"
+                            ><span class="label-text">Data Type *</span></label
+                        >
+                        <select
+                            x-model="form.data_type"
+                            class="select select-bordered"
+                            required
+                        >
+                            <option value="health">Health</option>
+                            <option value="finance">Finance</option>
+                            <option value="calendar">Calendar</option>
+                            <option value="email">Email</option>
+                            <option value="tasks">Tasks</option>
+                            <option value="weather">Weather</option>
+                            <option value="sports">Sports</option>
+                            <option value="news">News</option>
+                            <option value="transport">Transport</option>
+                            <option value="entertainment">Entertainment</option>
+                            <option value="general">General</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-control mb-4">
+                    <label class="label"
+                        ><span class="label-text">Description</span></label
+                    >
+                    <input
+                        type="text"
+                        x-model="form.description"
+                        class="input input-bordered"
+                        placeholder="Brief description of this data source"
+                    />
+                </div>
+
+                <div class="form-control mb-4">
+                    <label class="label"
+                        ><span class="label-text"
+                            >Best For (helps designator pick this source)</span
+                        ></label
+                    >
+                    <textarea
+                        x-model="form.best_for"
+                        class="textarea textarea-bordered"
+                        rows="2"
+                        placeholder="e.g., Sleep scores, weight tracking, calendar events..."
+                    ></textarea>
+                </div>
+
+                <!-- Google OAuth Configuration -->
+                <template x-if="form.source_type.startsWith('google_')">
+                    <div class="bg-base-200 rounded-lg p-4 mb-4">
+                        <div class="divider mt-0">Google Account</div>
+                        <template
+                            x-if="!googleAccounts || googleAccounts.length === 0"
+                        >
+                            <div class="alert alert-warning">
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                    />
+                                </svg>
+                                <div>
+                                    <div class="font-medium">
+                                        No Google accounts connected
+                                    </div>
+                                    <div class="text-sm">
+                                        Go to
+                                        <a href="/document-stores" class="link"
+                                            >Document Stores</a
+                                        >
+                                        to connect a Google account first.
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <template
+                            x-if="googleAccounts && googleAccounts.length > 0"
+                        >
+                            <div class="form-control">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Google Account *</span
+                                    ></label
+                                >
+                                <select
+                                    x-model="form.google_account_id"
+                                    class="select select-bordered"
+                                    required
+                                >
+                                    <option value="">
+                                        Select an account...
+                                    </option>
+                                    <template
+                                        x-for="account in googleAccounts"
+                                        :key="account.id"
+                                    >
+                                        <option
+                                            :value="account.id"
+                                            x-text="account.account_email + (account.account_name ? ' (' + account.account_name + ')' : '')"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <label class="label"
+                                    ><span class="label-text-alt"
+                                        >Select the Google account to use for
+                                        this source</span
+                                    ></label
+                                >
+                            </div>
+                        </template>
+                        <div class="alert alert-info mt-4">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <span
+                                class="text-sm"
+                                x-text="getGoogleSourceDescription(form.source_type)"
+                            ></span>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Oura OAuth Configuration -->
+                <template x-if="form.source_type === 'oura_live'">
+                    <div class="bg-base-200 rounded-lg p-4 mb-4">
+                        <div class="divider mt-0">Oura Account</div>
+                        <template x-if="!ouraConfigured">
+                            <div class="alert alert-warning">
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                    />
+                                </svg>
+                                <div>
+                                    <div class="font-medium">
+                                        Oura OAuth not configured
+                                    </div>
+                                    <div class="text-sm">
+                                        Set
+                                        <code class="bg-base-300 px-1 rounded"
+                                            >OURA_CLIENT_ID</code
+                                        >
+                                        and
+                                        <code class="bg-base-300 px-1 rounded"
+                                            >OURA_CLIENT_SECRET</code
+                                        >
+                                        environment variables to enable Oura
+                                        integration.
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <template
+                            x-if="ouraConfigured && (!ouraAccounts || ouraAccounts.length === 0)"
+                        >
+                            <div>
+                                <div class="alert alert-info mb-4">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-5 w-5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        />
+                                    </svg>
+                                    <span
+                                        >No Oura accounts connected yet. Click
+                                        below to connect your Oura Ring.</span
+                                    >
+                                </div>
+                                <button
+                                    type="button"
+                                    @click="connectOura()"
+                                    class="btn btn-primary"
+                                    :disabled="ouraConnecting"
+                                >
+                                    <template x-if="ouraConnecting">
+                                        <span
+                                            class="loading loading-spinner loading-sm"
+                                        ></span>
+                                    </template>
+                                    <template x-if="!ouraConnecting">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5 mr-1"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                                            />
+                                        </svg>
+                                    </template>
+                                    Connect Oura Ring
+                                </button>
+                            </div>
+                        </template>
+                        <template
+                            x-if="ouraConfigured && ouraAccounts && ouraAccounts.length > 0"
+                        >
+                            <div class="form-control">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Oura Account *</span
+                                    ></label
+                                >
+                                <select
+                                    x-model="form.oura_account_id"
+                                    class="select select-bordered"
+                                    required
+                                >
+                                    <option value="">
+                                        Select an account...
+                                    </option>
+                                    <template
+                                        x-for="account in ouraAccounts"
+                                        :key="account.id"
+                                    >
+                                        <option
+                                            :value="account.id"
+                                            x-text="account.account_email + (account.account_name ? ' (' + account.account_name + ')' : '')"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select the Oura account to use</span
+                                    >
+                                    <button
+                                        type="button"
+                                        @click="connectOura()"
+                                        class="link link-primary text-xs"
+                                    >
+                                        Connect another account
+                                    </button>
+                                </label>
+                            </div>
+                        </template>
+                        <div class="alert alert-info mt-4">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <span class="text-sm">
+                                Provides sleep scores, readiness scores,
+                                activity data, and heart rate from your Oura
+                                Ring.
+                            </span>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Withings OAuth Configuration -->
+                <template x-if="form.source_type === 'withings_live'">
+                    <div class="bg-base-200 rounded-lg p-4 mb-4">
+                        <div class="divider mt-0">Withings Account</div>
+                        <template x-if="!withingsConfigured">
+                            <div class="alert alert-warning">
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    class="h-5 w-5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                >
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                    />
+                                </svg>
+                                <div>
+                                    <div class="font-medium">
+                                        Withings OAuth not configured
+                                    </div>
+                                    <div class="text-sm">
+                                        Set
+                                        <code class="bg-base-300 px-1 rounded"
+                                            >WITHINGS_CLIENT_ID</code
+                                        >
+                                        and
+                                        <code class="bg-base-300 px-1 rounded"
+                                            >WITHINGS_CLIENT_SECRET</code
+                                        >
+                                        environment variables to enable Withings
+                                        integration.
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <template
+                            x-if="withingsConfigured && (!withingsAccounts || withingsAccounts.length === 0)"
+                        >
+                            <div>
+                                <div class="alert alert-info mb-4">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-5 w-5"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        />
+                                    </svg>
+                                    <span
+                                        >No Withings accounts connected yet.
+                                        Click below to connect your Withings
+                                        devices.</span
+                                    >
+                                </div>
+                                <button
+                                    type="button"
+                                    @click="connectWithings()"
+                                    class="btn btn-primary"
+                                    :disabled="withingsConnecting"
+                                >
+                                    <template x-if="withingsConnecting">
+                                        <span
+                                            class="loading loading-spinner loading-sm"
+                                        ></span>
+                                    </template>
+                                    <template x-if="!withingsConnecting">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-5 w-5 mr-1"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                                            />
+                                        </svg>
+                                    </template>
+                                    Connect Withings
+                                </button>
+                            </div>
+                        </template>
+                        <template
+                            x-if="withingsConfigured && withingsAccounts && withingsAccounts.length > 0"
+                        >
+                            <div class="form-control">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Withings Account *</span
+                                    ></label
+                                >
+                                <select
+                                    x-model="form.withings_account_id"
+                                    class="select select-bordered"
+                                    required
+                                >
+                                    <option value="">
+                                        Select an account...
+                                    </option>
+                                    <template
+                                        x-for="account in withingsAccounts"
+                                        :key="account.id"
+                                    >
+                                        <option
+                                            :value="account.id"
+                                            x-text="account.account_name || account.account_email"
+                                        ></option>
+                                    </template>
+                                </select>
+                                <label class="label">
+                                    <span class="label-text-alt"
+                                        >Select the Withings account to
+                                        use</span
+                                    >
+                                    <button
+                                        type="button"
+                                        @click="connectWithings()"
+                                        class="link link-primary text-xs"
+                                    >
+                                        Connect another account
+                                    </button>
+                                </label>
+                            </div>
+                        </template>
+                        <div class="alert alert-info mt-4">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <span class="text-sm">
+                                Provides weight, body composition (fat %, muscle
+                                mass, bone mass), sleep data, and activity from
+                                your Withings devices.
+                            </span>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- MCP Configuration (simplified) -->
+                <template x-if="form.source_type === 'mcp_server'">
+                    <div class="bg-base-200 rounded-lg p-4 mb-4">
+                        <div class="divider mt-0">MCP Configuration</div>
+                        <div class="form-control mb-4">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >RapidAPI Host *</span
+                                ></label
+                            >
+                            <input
+                                type="text"
+                                x-model="form.mcp_api_host"
+                                class="input input-bordered font-mono text-sm"
+                                placeholder="yahoo-finance15.p.rapidapi.com"
+                                required
+                            />
+                            <label class="label"
+                                ><span class="label-text-alt"
+                                    >The API host (from RapidAPI endpoint
+                                    page)</span
+                                ></label
+                            >
+                        </div>
+                        <div class="form-control">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >API Key (optional)</span
+                                ></label
+                            >
+                            <input
+                                type="password"
+                                x-model="form.mcp_api_key"
+                                class="input input-bordered font-mono text-sm"
+                                placeholder="Leave empty to use RAPIDAPI_KEY env var"
+                            />
+                            <label class="label"
+                                ><span class="label-text-alt"
+                                    >Override key for this source (defaults to
+                                    RAPIDAPI_KEY)</span
+                                ></label
+                            >
+                        </div>
+                        <div class="alert alert-info mt-4">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                            </svg>
+                            <span class="text-sm"
+                                >Tools will be auto-discovered via MCP. No
+                                manual endpoint configuration needed.</span
+                            >
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Legacy REST API Configuration -->
+                <template
+                    x-if="form.source_type !== 'mcp_server' && !form.source_type.startsWith('google_') && form.source_type !== 'oura_live' && form.source_type !== 'withings_live'"
+                >
+                    <div>
+                        <div class="divider">API Configuration</div>
+
+                        <div class="grid grid-cols-3 gap-4 mb-4">
+                            <div class="form-control col-span-2">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Endpoint URL *</span
+                                    ></label
+                                >
+                                <input
+                                    type="text"
+                                    x-model="form.endpoint_url"
+                                    class="input input-bordered font-mono text-sm"
+                                    placeholder="https://api.example.com/v1/quote"
+                                />
+                                <label class="label"
+                                    ><span class="label-text-alt"
+                                        >Use {% raw %}{{param}}{% endraw %} for
+                                        placeholders</span
+                                    ></label
+                                >
+                            </div>
+                            <div class="form-control">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Method</span
+                                    ></label
+                                >
+                                <select
+                                    x-model="form.http_method"
+                                    class="select select-bordered"
+                                >
+                                    <option value="GET">GET</option>
+                                    <option value="POST">POST</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Auth Type -->
+                        <div class="form-control mb-4">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >Authentication</span
+                                ></label
+                            >
+                            <select
+                                x-model="form.auth_type"
+                                class="select select-bordered"
+                                @change="onAuthTypeChange()"
+                            >
+                                <option value="none">None</option>
+                                <option value="rapidapi">
+                                    RapidAPI (uses RAPIDAPI_KEY env var)
+                                </option>
+                                <option value="api_key">API Key</option>
+                                <option value="bearer">Bearer Token</option>
+                            </select>
+                        </div>
+
+                        <!-- RapidAPI Auth -->
+                        <template x-if="form.auth_type === 'rapidapi'">
+                            <div class="form-control mb-4">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >RapidAPI Host *</span
+                                    ></label
+                                >
+                                <input
+                                    type="text"
+                                    x-model="form.rapidapi_host"
+                                    class="input input-bordered font-mono text-sm"
+                                    placeholder="yahoo-finance15.p.rapidapi.com"
+                                />
+                                <label class="label"
+                                    ><span class="label-text-alt"
+                                        >From RapidAPI endpoint page
+                                        (X-RapidAPI-Host header)</span
+                                    ></label
+                                >
+                            </div>
+                        </template>
+
+                        <!-- API Key Auth -->
+                        <template x-if="form.auth_type === 'api_key'">
+                            <div class="grid grid-cols-3 gap-4 mb-4">
+                                <div class="form-control">
+                                    <label class="label"
+                                        ><span class="label-text"
+                                            >Key Name</span
+                                        ></label
+                                    >
+                                    <input
+                                        type="text"
+                                        x-model="form.api_key_name"
+                                        class="input input-bordered"
+                                        placeholder="X-API-Key"
+                                    />
+                                </div>
+                                <div class="form-control">
+                                    <label class="label"
+                                        ><span class="label-text"
+                                            >Key Value</span
+                                        ></label
+                                    >
+                                    <input
+                                        type="text"
+                                        x-model="form.api_key_value"
+                                        class="input input-bordered"
+                                        placeholder="${MY_API_KEY}"
+                                    />
+                                    <label class="label"
+                                        ><span class="label-text-alt"
+                                            >Use ${ENV_VAR} for env vars</span
+                                        ></label
+                                    >
+                                </div>
+                                <div class="form-control">
+                                    <label class="label"
+                                        ><span class="label-text"
+                                            >Location</span
+                                        ></label
+                                    >
+                                    <select
+                                        x-model="form.api_key_location"
+                                        class="select select-bordered"
+                                    >
+                                        <option value="header">Header</option>
+                                        <option value="query">
+                                            Query Param
+                                        </option>
+                                    </select>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Bearer Auth -->
+                        <template x-if="form.auth_type === 'bearer'">
+                            <div class="form-control mb-4">
+                                <label class="label"
+                                    ><span class="label-text"
+                                        >Bearer Token</span
+                                    ></label
+                                >
+                                <input
+                                    type="text"
+                                    x-model="form.bearer_token"
+                                    class="input input-bordered"
+                                    placeholder="${MY_TOKEN}"
+                                />
+                                <label class="label"
+                                    ><span class="label-text-alt"
+                                        >Use ${ENV_VAR} for env vars</span
+                                    ></label
+                                >
+                            </div>
+                        </template>
+
+                        <!-- Query Parameters -->
+                        <div class="form-control mb-4">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >Query Parameters (JSON)</span
+                                ></label
+                            >
+                            <textarea
+                                x-model="form.query_params_json"
+                                class="textarea textarea-bordered font-mono text-sm"
+                                rows="2"
+                                placeholder='{"symbol": "{{symbol}}", "interval": "1d"}'
+                            ></textarea>
+                            <label class="label"
+                                ><span class="label-text-alt"
+                                    >Use {% raw %}{{param}}{% endraw %} for
+                                    dynamic values from designator</span
+                                ></label
+                            >
+                        </div>
+
+                        <!-- Response Configuration (legacy only) -->
+                        <div class="divider">Response Extraction</div>
+
+                        <div class="form-control mb-4">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >JSONPath to Extract Data</span
+                                ></label
+                            >
+                            <input
+                                type="text"
+                                x-model="form.response_path"
+                                class="input input-bordered font-mono text-sm"
+                                placeholder="$.body[0]"
+                            />
+                            <label class="label"
+                                ><span class="label-text-alt"
+                                    >e.g., $.data.quote or
+                                    $.results[0].price</span
+                                ></label
+                            >
+                        </div>
+
+                        <div class="form-control mb-4">
+                            <label class="label"
+                                ><span class="label-text"
+                                    >Response Format Template</span
+                                ></label
+                            >
+                            <textarea
+                                x-model="form.response_format_template"
+                                class="textarea textarea-bordered font-mono text-sm"
+                                rows="3"
+                                placeholder="### {{symbol}} Stock Price&#10;Price: ${{regularMarketPrice}}&#10;Change: {{regularMarketChangePercent}}%"
+                            ></textarea>
+                            <label class="label"
+                                ><span class="label-text-alt"
+                                    >Template for LLM context. Use {% raw
+                                    %}{{field}}{% endraw %} for data
+                                    fields</span
+                                ></label
+                            >
+                        </div>
+                    </div>
+                </template>
+
+                <!-- Behavior (shared by all source types) -->
+                <div class="divider">Behavior</div>
+
+                <div class="grid grid-cols-4 gap-4 mb-4">
+                    <div class="form-control">
+                        <label class="label"
+                            ><span class="label-text">Cache TTL</span></label
+                        >
+                        <input
+                            type="number"
+                            x-model="form.cache_ttl_seconds"
+                            class="input input-bordered"
+                            min="0"
+                        />
+                        <label class="label"
+                            ><span class="label-text-alt">seconds</span></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label"
+                            ><span class="label-text">Timeout</span></label
+                        >
+                        <input
+                            type="number"
+                            x-model="form.timeout_seconds"
+                            class="input input-bordered"
+                            min="1"
+                            max="120"
+                        />
+                        <label class="label"
+                            ><span class="label-text-alt">seconds</span></label
+                        >
+                    </div>
+                    <div class="form-control">
+                        <label class="label"
+                            ><span class="label-text">Retries</span></label
+                        >
+                        <input
+                            type="number"
+                            x-model="form.retry_count"
+                            class="input input-bordered"
+                            min="0"
+                            max="5"
+                        />
+                    </div>
+                    <div class="form-control">
+                        <label class="label"
+                            ><span class="label-text">Rate Limit</span></label
+                        >
+                        <input
+                            type="number"
+                            x-model="form.rate_limit_rpm"
+                            class="input input-bordered"
+                            min="1"
+                        />
+                        <label class="label"
+                            ><span class="label-text-alt">req/min</span></label
+                        >
+                    </div>
+                </div>
+
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="showEditModal = false"
+                        class="btn btn-ghost"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="button"
+                        @click="testCurrentConfig()"
+                        class="btn btn-outline"
+                        :class="{ 'loading': testing }"
+                        :disabled="testing"
+                    >
+                        Test
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :disabled="saving"
+                    >
+                        <span
+                            x-show="saving"
+                            class="loading loading-spinner loading-sm"
+                        ></span>
+                        <span
+                            x-text="editingSource ? 'Save Changes' : 'Create Source'"
+                        ></span>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button @click="showEditModal = false">close</button>
+        </form>
+    </dialog>
+
+    <!-- Details Modal (read-only for built-in) -->
+    <dialog
+        id="detailsModal"
+        class="modal"
+        :class="{ 'modal-open': showDetailsModal }"
+    >
+        <div class="modal-box max-w-xl">
+            <h3
+                class="font-bold text-lg mb-4"
+                x-text="selectedSource?.name + ' Details'"
+            ></h3>
+
+            <template x-if="selectedSource">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-xs text-base-content/50 uppercase">
+                                Source Type
+                            </div>
+                            <div
+                                class="font-medium"
+                                x-text="getTypeLabel(selectedSource.source_type)"
+                            ></div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-base-content/50 uppercase">
+                                Data Type
+                            </div>
+                            <div
+                                class="font-medium"
+                                x-text="selectedSource.data_type || '-'"
+                            ></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="text-xs text-base-content/50 uppercase">
+                            Description
+                        </div>
+                        <div
+                            x-text="selectedSource.description || 'No description'"
+                        ></div>
+                    </div>
+
+                    <div>
+                        <div class="text-xs text-base-content/50 uppercase">
+                            Best For
+                        </div>
+                        <div
+                            x-text="selectedSource.best_for || 'Not specified'"
+                        ></div>
+                    </div>
+
+                    <template x-if="selectedSource.endpoint_url">
+                        <div>
+                            <div class="text-xs text-base-content/50 uppercase">
+                                Endpoint
+                            </div>
+                            <div
+                                class="font-mono text-sm break-all"
+                                x-text="selectedSource.endpoint_url"
+                            ></div>
+                        </div>
+                    </template>
+
+                    <div class="divider text-xs text-base-content/50">
+                        Settings
+                    </div>
+                    <div class="grid grid-cols-4 gap-4 text-sm">
+                        <div>
+                            <div class="text-xs text-base-content/50">
+                                Cache TTL
+                            </div>
+                            <div
+                                x-text="selectedSource.cache_ttl_seconds + 's'"
+                            ></div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-base-content/50">
+                                Timeout
+                            </div>
+                            <div
+                                x-text="selectedSource.timeout_seconds + 's'"
+                            ></div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-base-content/50">
+                                Retries
+                            </div>
+                            <div x-text="selectedSource.retry_count"></div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-base-content/50">
+                                Rate Limit
+                            </div>
+                            <div
+                                x-text="selectedSource.rate_limit_rpm + '/min'"
+                            ></div>
+                        </div>
+                    </div>
+
+                    <div class="divider text-xs text-base-content/50">
+                        Status
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <div class="text-xs text-base-content/50">
+                                Last Success
+                            </div>
+                            <div
+                                x-text="selectedSource.last_success ? new Date(selectedSource.last_success).toLocaleString() : 'Never'"
+                            ></div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-base-content/50">
+                                Error Count
+                            </div>
+                            <div x-text="selectedSource.error_count || 0"></div>
+                        </div>
+                    </div>
+                    <template x-if="selectedSource.last_error">
+                        <div>
+                            <div class="text-xs text-base-content/50">
+                                Last Error
+                            </div>
+                            <div
+                                class="text-error text-sm"
+                                x-text="selectedSource.last_error"
+                            ></div>
+                        </div>
+                    </template>
+                </div>
+            </template>
+
+            <div class="modal-action">
+                <button @click="showDetailsModal = false" class="btn btn-ghost">
+                    Close
+                </button>
+                <button
+                    @click="testSource(selectedSource); showDetailsModal = false;"
+                    class="btn btn-primary btn-sm"
+                >
+                    Test Connection
+                </button>
+            </div>
+        </div>
+        <form method="dialog" class="modal-backdrop">
+            <button @click="showDetailsModal = false">close</button>
+        </form>
+    </dialog>
+
+    <!-- Test Result Toast -->
+    <div x-show="testResult" x-transition class="toast toast-end">
+        <div
+            class="alert"
+            :class="testResult?.success ? 'alert-success' : 'alert-error'"
+        >
+            <span x-text="testResult?.message"></span>
+        </div>
+    </div>
+</div>
+
+<script>
+    function liveDataSourcesPage() {
+        return {
+            loading: true,
+            sources: [],
+            showEditModal: false,
+            showDetailsModal: false,
+            selectedSource: null,
+            editingSource: null,
+            testingId: null,
+            testResult: null,
+            testing: false,
+            saving: false,
+            expandedRows: [],
+            sourceTools: {},
+            loadingTools: {},
+            endpointStats: {},
+            loadingEndpointStats: {},
+            hasRapidApiKey: false,
+            rapidapiImportUrl: "",
+            selectedPreset: "",
+            form: {
+                name: "",
+                description: "",
+                data_type: "finance",
+                best_for: "",
+                endpoint_url: "",
+                http_method: "GET",
+                auth_type: "none",
+                rapidapi_host: "",
+                api_key_name: "X-API-Key",
+                api_key_value: "",
+                api_key_location: "header",
+                bearer_token: "",
+                query_params_json: "",
+                response_path: "",
+                response_format_template: "",
+                cache_ttl_seconds: 60,
+                timeout_seconds: 10,
+                retry_count: 1,
+                rate_limit_rpm: 60,
+                test_params_json: "",
+            },
+
+            // RapidAPI presets with full configuration
+            {% raw %}
+            presets: {
+                "yahoo-finance": {
+                    name: "yahoo-finance",
+                    description: "Real-time stock quotes from Yahoo Finance",
+                    data_type: "finance",
+                    best_for:
+                        "Stock prices, market quotes, ETFs, mutual funds, company data",
+                    endpoint_url:
+                        "https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes",
+                    http_method: "GET",
+                    auth_type: "rapidapi",
+                    rapidapi_host: "yahoo-finance15.p.rapidapi.com",
+                    query_params_json:
+                        '{"ticker": "{{symbol}}"}',
+                    response_path: "$.body[0]",
+                    response_format_template:
+                        "### {{symbol}} Stock Quote\nPrice: ${{regularMarketPrice}}\nChange: {{regularMarketChangePercent}}%\nPrevious Close: ${{regularMarketPreviousClose}}\nDay Range: ${{regularMarketDayLow}} - ${{regularMarketDayHigh}}",
+                    cache_ttl_seconds: 60,
+                    test_params_json: '{"symbol": "AAPL"}',
+                },
+                "yahoo-finance-news": {
+                    name: "yahoo-finance-news",
+                    description: "Financial news from Yahoo Finance",
+                    data_type: "news",
+                    best_for:
+                        "Stock news, market news, company announcements, financial headlines",
+                    endpoint_url:
+                        "https://yahoo-finance15.p.rapidapi.com/api/v1/markets/news",
+                    http_method: "GET",
+                    auth_type: "rapidapi",
+                    rapidapi_host: "yahoo-finance15.p.rapidapi.com",
+                    query_params_json:
+                        '{"tickers": "{{symbol}}"}',
+                    response_path: "$.body",
+                    response_format_template:
+                        "### Latest News\nNews articles returned as JSON array",
+                    cache_ttl_seconds: 300,
+                    test_params_json: '{"symbol": "AAPL"}',
+                },
+                "crypto-prices": {
+                    name: "crypto-prices",
+                    description: "Cryptocurrency prices and market data",
+                    data_type: "finance",
+                    best_for:
+                        "Bitcoin price, Ethereum price, crypto market data, coin prices",
+                    endpoint_url:
+                        "https://coinranking1.p.rapidapi.com/coin/{{coinId}}/price",
+                    http_method: "GET",
+                    auth_type: "rapidapi",
+                    rapidapi_host: "coinranking1.p.rapidapi.com",
+                    query_params_json: "{}",
+                    response_path: "$.data",
+                    response_format_template:
+                        "### Crypto Price\nPrice: ${{price}}\n24h Change: {{change}}%",
+                    cache_ttl_seconds: 60,
+                    test_params_json: '{"coinId": "Qwsogvtv82FCd"}',
+                },
+                "weather-api": {
+                    name: "weather-rapidapi",
+                    description: "Weather conditions by city from WeatherAPI",
+                    data_type: "weather",
+                    best_for:
+                        "Current weather, temperature, conditions, humidity, wind",
+                    endpoint_url:
+                        "https://weatherapi-com.p.rapidapi.com/current.json",
+                    http_method: "GET",
+                    auth_type: "rapidapi",
+                    rapidapi_host: "weatherapi-com.p.rapidapi.com",
+                    query_params_json:
+                        '{"q": "{{location}}"}',
+                    response_path: "$",
+                    response_format_template:
+                        "### Weather in {{location.name}}, {{location.country}}\nTemperature: {{current.temp_c}}°C ({{current.temp_f}}°F)\nCondition: {{current.condition.text}}\nHumidity: {{current.humidity}}%\nWind: {{current.wind_kph}} km/h {{current.wind_dir}}",
+                    cache_ttl_seconds: 600,
+                    test_params_json: '{"location": "London"}',
+                },
+                "football-scores": {
+                    name: "football-scores",
+                    description: "Live football scores from API-Football",
+                    data_type: "sports",
+                    best_for:
+                        "Football scores, soccer matches, live scores, Premier League, Champions League",
+                    endpoint_url:
+                        "https://api-football-v1.p.rapidapi.com/v3/fixtures",
+                    http_method: "GET",
+                    auth_type: "rapidapi",
+                    rapidapi_host: "api-football-v1.p.rapidapi.com",
+                    query_params_json: '{"live": "all"}',
+                    response_path: "$.response",
+                    response_format_template:
+                        "### Live Football Scores\nMatches returned as JSON array with teams, goals, and status",
+                    cache_ttl_seconds: 60,
+                    test_params_json: "{}",
+                },
+                "google-news": {
+                    name: "google-news",
+                    description: "Latest news from Google News",
+                    data_type: "news",
+                    best_for:
+                        "Breaking news, headlines, current events, topic news",
+                    endpoint_url: "https://google-news13.p.rapidapi.com/search",
+                    http_method: "GET",
+                    auth_type: "rapidapi",
+                    rapidapi_host: "google-news13.p.rapidapi.com",
+                    query_params_json:
+                        '{"keyword": "{{query}}", "lr": "en-US"}',
+                    response_path: "$.items",
+                    response_format_template:
+                        "### News Results\nArticles returned as JSON array with title and source",
+                    cache_ttl_seconds: 300,
+                    test_params_json: '{"query": "technology"}',
+                },
+            },
+            {% endraw %}
+
+            googleAccounts: [],
+            ouraAccounts: [],
+            ouraConfigured: false,
+            ouraConnecting: false,
+            withingsAccounts: [],
+            withingsConfigured: false,
+            withingsConnecting: false,
+
+            async init() {
+                await this.loadSources();
+                await this.checkRapidApiKey();
+                await this.loadGoogleAccounts();
+                await this.loadOuraAccounts();
+                await this.loadWithingsAccounts();
+            },
+
+            async loadGoogleAccounts() {
+                try {
+                    const response = await fetch("/api/oauth/google/status");
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.googleAccounts = data.accounts || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Google accounts:", error);
+                }
+            },
+
+            getGoogleSourceDescription(sourceType) {
+                const descriptions = {
+                    google_calendar_live: "Real-time calendar queries: today's schedule, next meeting, upcoming events",
+                    google_tasks_live: "Real-time task queries: pending tasks, due today, overdue items",
+                    google_gmail_live: "Real-time email queries: unread messages, today's emails, search",
+                };
+                return descriptions[sourceType] || "Real-time Google data access";
+            },
+
+            async loadOuraAccounts() {
+                try {
+                    const response = await fetch("/api/oauth/oura/status");
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.ouraConfigured = data.configured;
+                        this.ouraAccounts = data.accounts || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Oura accounts:", error);
+                }
+            },
+
+            async connectOura() {
+                this.ouraConnecting = true;
+                try {
+                    const response = await fetch("/api/oauth/oura/start?redirect_uri=/live-data-sources");
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.auth_url) {
+                            window.location.href = data.auth_url;
+                        }
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || "Failed to start Oura OAuth");
+                    }
+                } catch (error) {
+                    console.error("Failed to connect Oura:", error);
+                    alert("Failed to connect Oura: " + error.message);
+                } finally {
+                    this.ouraConnecting = false;
+                }
+            },
+
+            async loadWithingsAccounts() {
+                try {
+                    const response = await fetch("/api/oauth/withings/status");
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.withingsConfigured = data.configured;
+                        this.withingsAccounts = data.accounts || [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load Withings accounts:", error);
+                }
+            },
+
+            async connectWithings() {
+                this.withingsConnecting = true;
+                try {
+                    const response = await fetch("/api/oauth/withings/start?redirect_uri=/live-data-sources");
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.auth_url) {
+                            window.location.href = data.auth_url;
+                        }
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || "Failed to start Withings OAuth");
+                    }
+                } catch (error) {
+                    console.error("Failed to connect Withings:", error);
+                    alert("Failed to connect Withings: " + error.message);
+                } finally {
+                    this.withingsConnecting = false;
+                }
+            },
+
+            onSourceTypeChange() {
+                // Set appropriate defaults for Google sources
+                if (this.form.source_type === "google_calendar_live") {
+                    this.form.data_type = "calendar";
+                    this.form.best_for = "Today's schedule, next meeting, calendar events, free/busy status";
+                } else if (this.form.source_type === "google_tasks_live") {
+                    this.form.data_type = "tasks";
+                    this.form.best_for = "Pending tasks, due today, overdue items, task lists";
+                } else if (this.form.source_type === "google_gmail_live") {
+                    this.form.data_type = "email";
+                    this.form.best_for = "Unread emails, today's messages, recent emails, email search";
+                } else if (this.form.source_type === "oura_live") {
+                    this.form.data_type = "health";
+                    this.form.best_for = "Sleep scores, readiness scores, activity data, heart rate, HRV";
+                } else if (this.form.source_type === "withings_live") {
+                    this.form.data_type = "health";
+                    this.form.best_for = "Weight, body composition (fat %, muscle, bone), sleep data, activity";
+                }
+            },
+
+            async loadSources() {
+                this.loading = true;
+                try {
+                    const response = await fetch("/api/live-data-sources");
+                    if (response.ok) {
+                        this.sources = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load live data sources:", error);
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            async checkRapidApiKey() {
+                try {
+                    const response = await fetch(
+                        "/api/live-data-sources/rapidapi-status",
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.hasRapidApiKey = data.configured;
+                    }
+                } catch (error) {
+                    this.hasRapidApiKey = false;
+                }
+            },
+
+            getTypeLabel(type) {
+                const labels = {
+                    mcp_server: "MCP API",
+                    rest_api: "REST API",
+                    rapidapi: "RapidAPI",
+                    builtin_stocks: "Stocks (US)",
+                    builtin_alpha_vantage: "Stocks (UK/Intl)",
+                    builtin_weather: "Weather",
+                    builtin_transport: "Transport",
+                    builtin_google_maps: "Google Maps",
+                    google_calendar_live: "Google Calendar",
+                    google_tasks_live: "Google Tasks",
+                    google_gmail_live: "Gmail",
+                    oura_live: "Oura Ring",
+                    withings_live: "Withings",
+                };
+                return labels[type] || type;
+            },
+
+            getTypeBadgeClass(type) {
+                if (type.startsWith("builtin_")) return "badge-primary";
+                if (type.startsWith("google_") && type.endsWith("_live")) return "badge-info";
+                if (type === "oura_live") return "badge-success";
+                if (type === "withings_live") return "badge-success";
+                if (type === "mcp_server") return "badge-accent";
+                if (type === "rapidapi") return "badge-secondary";
+                return "badge-ghost";
+            },
+
+            resetForm() {
+                this.form = {
+                    name: "",
+                    description: "",
+                    source_type: "mcp_server",  // Default to MCP for new sources
+                    data_type: "general",
+                    best_for: "",
+                    // Google OAuth settings
+                    google_account_id: "",
+                    // Oura OAuth settings
+                    oura_account_id: "",
+                    // Withings OAuth settings
+                    withings_account_id: "",
+                    // MCP settings (new approach)
+                    mcp_api_host: "",
+                    mcp_api_key: "",  // Optional - uses RAPIDAPI_KEY env var if empty
+                    // Legacy REST API settings (for existing sources)
+                    endpoint_url: "",
+                    http_method: "GET",
+                    auth_type: "none",
+                    rapidapi_host: "",
+                    api_key_name: "X-API-Key",
+                    api_key_value: "",
+                    api_key_location: "header",
+                    bearer_token: "",
+                    query_params_json: "",
+                    response_path: "",
+                    response_format_template: "",
+                    // Behavior
+                    cache_ttl_seconds: 60,
+                    timeout_seconds: 30,
+                    retry_count: 1,
+                    rate_limit_rpm: 60,
+                    test_params_json: "",
+                };
+            },
+
+            openCreateModal() {
+                this.editingSource = null;
+                this.resetForm();
+                this.rapidapiImportUrl = "";
+                this.selectedPreset = "";
+                this.showEditModal = true;
+            },
+
+            // Import from RapidAPI URL - creates MCP source with auto-discovery
+            importFromRapidApi() {
+                const url = this.rapidapiImportUrl.trim();
+                if (!url) return;
+
+                // Parse URL: https://rapidapi.com/user/api/api-name or https://rapidapi.com/api-name
+                const patterns = [
+                    /rapidapi\.com\/[^\/]+\/api\/([^\/\?#]+)/i, // /user/api/name
+                    /rapidapi\.com\/hub\/([^\/\?#]+)/i, // /hub/name
+                    /rapidapi\.com\/([^\/\?#]+)\/api/i, // /name/api
+                ];
+
+                let apiSlug = null;
+                for (const pattern of patterns) {
+                    const match = url.match(pattern);
+                    if (match) {
+                        apiSlug = match[1].toLowerCase();
+                        break;
+                    }
+                }
+
+                if (!apiSlug) {
+                    this.testResult = {
+                        success: false,
+                        message:
+                            "Could not parse RapidAPI URL. Expected format: https://rapidapi.com/user/api/api-name",
+                    };
+                    setTimeout(() => (this.testResult = null), 4000);
+                    return;
+                }
+
+                // Detect data type from API name
+                const slugLower = apiSlug.toLowerCase();
+                let dataType = "general";
+                if (slugLower.includes("finance") || slugLower.includes("stock") || slugLower.includes("crypto")) {
+                    dataType = "finance";
+                } else if (slugLower.includes("weather")) {
+                    dataType = "weather";
+                } else if (slugLower.includes("news")) {
+                    dataType = "news";
+                } else if (slugLower.includes("sport") || slugLower.includes("football") || slugLower.includes("soccer")) {
+                    dataType = "sports";
+                } else if (slugLower.includes("transport") || slugLower.includes("train") || slugLower.includes("flight")) {
+                    dataType = "transport";
+                } else if (slugLower.includes("movie") || slugLower.includes("music") || slugLower.includes("entertainment")) {
+                    dataType = "entertainment";
+                }
+
+                // Set up form for MCP source (simpler than old REST API approach)
+                this.form.name = apiSlug;
+                this.form.source_type = "mcp_server";
+                this.form.mcp_api_host = apiSlug + ".p.rapidapi.com";
+                this.form.description = `RapidAPI: ${apiSlug} (MCP auto-discovery)`;
+                this.form.data_type = dataType;
+
+                this.testResult = {
+                    success: true,
+                    message: `Imported: ${apiSlug}. Check the API host matches RapidAPI (may need a number suffix like -15).`,
+                };
+                setTimeout(() => (this.testResult = null), 6000);
+                this.rapidapiImportUrl = "";
+            },
+
+            // Apply a preset configuration
+            applyPreset() {
+                const presetKey = this.selectedPreset;
+                if (!presetKey || !this.presets[presetKey]) return;
+
+                const preset = this.presets[presetKey];
+
+                // Copy preset values to form
+                this.form.name = preset.name;
+                this.form.description = preset.description;
+                this.form.data_type = preset.data_type;
+                this.form.best_for = preset.best_for;
+                this.form.endpoint_url = preset.endpoint_url;
+                this.form.http_method = preset.http_method;
+                this.form.auth_type = preset.auth_type;
+                this.form.rapidapi_host = preset.rapidapi_host || "";
+                this.form.query_params_json = preset.query_params_json || "";
+                this.form.response_path = preset.response_path || "";
+                this.form.response_format_template =
+                    preset.response_format_template || "";
+                this.form.cache_ttl_seconds = preset.cache_ttl_seconds || 60;
+                this.form.test_params_json = preset.test_params_json || "";
+
+                this.testResult = {
+                    success: true,
+                    message: `Applied preset: ${preset.name}`,
+                };
+                setTimeout(() => (this.testResult = null), 3000);
+                this.selectedPreset = "";
+            },
+
+            openEditModal(source) {
+                this.editingSource = source;
+                // Get auth config - API returns it as object (auth_config), not string
+                let authConfig = source.auth_config || {};
+                // Fallback: try parsing auth_config_json if auth_config is empty
+                if (Object.keys(authConfig).length === 0 && source.auth_config_json) {
+                    try {
+                        authConfig = JSON.parse(source.auth_config_json);
+                    } catch (e) {}
+                }
+
+                // Get query params - API returns as object (query_params)
+                let queryParamsJson = "";
+                if (source.query_params && Object.keys(source.query_params).length > 0) {
+                    queryParamsJson = JSON.stringify(source.query_params, null, 2);
+                } else if (source.query_params_json) {
+                    queryParamsJson = source.query_params_json;
+                }
+
+                // Determine account_id based on source type
+                const isOura = source.source_type === "oura_live";
+                const isWithings = source.source_type === "withings_live";
+                const isGoogle = source.source_type?.startsWith("google_") && source.source_type?.endsWith("_live");
+
+                this.form = {
+                    name: source.name,
+                    description: source.description || "",
+                    source_type: source.source_type || "mcp_server",
+                    data_type: source.data_type || "general",
+                    best_for: source.best_for || "",
+                    // Google OAuth settings
+                    google_account_id: isGoogle && authConfig.account_id ? String(authConfig.account_id) : "",
+                    // Oura OAuth settings
+                    oura_account_id: isOura && authConfig.account_id ? String(authConfig.account_id) : "",
+                    // Withings OAuth settings
+                    withings_account_id: isWithings && authConfig.account_id ? String(authConfig.account_id) : "",
+                    // MCP settings
+                    mcp_api_host: authConfig.mcp_api_host || "",
+                    mcp_api_key: authConfig.mcp_api_key || "",
+                    // Legacy REST API settings
+                    endpoint_url: source.endpoint_url || "",
+                    http_method: source.http_method || "GET",
+                    auth_type: source.auth_type || "none",
+                    rapidapi_host: authConfig.host || "",
+                    api_key_name: authConfig.key_name || "X-API-Key",
+                    api_key_value: authConfig.key_value || "",
+                    api_key_location: authConfig.location || "header",
+                    bearer_token: authConfig.token || "",
+                    query_params_json: queryParamsJson,
+                    response_path: source.response_path || "",
+                    response_format_template:
+                        source.response_format_template || "",
+                    // Behavior
+                    cache_ttl_seconds: source.cache_ttl_seconds || 60,
+                    timeout_seconds: source.timeout_seconds || 30,
+                    retry_count: source.retry_count || 1,
+                    rate_limit_rpm: source.rate_limit_rpm || 60,
+                    test_params_json: authConfig.test_params
+                        ? JSON.stringify(authConfig.test_params)
+                        : "",
+                };
+                this.showEditModal = true;
+            },
+
+            openDetailsModal(source) {
+                this.selectedSource = source;
+                this.showDetailsModal = true;
+            },
+
+            onAuthTypeChange() {
+                // Reset auth-specific fields when type changes
+            },
+
+            buildAuthConfig() {
+                const config = {};
+                if (this.form.auth_type === "rapidapi") {
+                    config.host = this.form.rapidapi_host;
+                } else if (this.form.auth_type === "api_key") {
+                    config.key_name = this.form.api_key_name;
+                    config.key_value = this.form.api_key_value;
+                    config.location = this.form.api_key_location;
+                } else if (this.form.auth_type === "bearer") {
+                    config.token = this.form.bearer_token;
+                }
+                // Add test params
+                if (this.form.test_params_json) {
+                    try {
+                        config.test_params = JSON.parse(
+                            this.form.test_params_json,
+                        );
+                    } catch (e) {}
+                }
+                return config;
+            },
+
+            async saveSource() {
+                this.saving = true;
+                try {
+                    // Determine source type
+                    let sourceType = this.form.source_type || "mcp_server";
+
+                    // Check for OAuth sources
+                    const isGoogleSource = sourceType.startsWith("google_") && sourceType.endsWith("_live");
+                    const isOuraSource = sourceType === "oura_live";
+                    const isWithingsSource = sourceType === "withings_live";
+
+                    if (!isGoogleSource && !isOuraSource && !isWithingsSource && sourceType !== "mcp_server") {
+                        // Legacy: determine from auth_type for older sources
+                        sourceType = this.form.auth_type === "rapidapi" ? "rapidapi" : "rest_api";
+                    }
+
+                    // Build auth config based on source type
+                    let authConfig;
+                    if (isGoogleSource) {
+                        // Google OAuth sources need account_id
+                        if (!this.form.google_account_id) {
+                            this.testResult = {
+                                success: false,
+                                message: "Please select a Google account",
+                            };
+                            this.saving = false;
+                            setTimeout(() => (this.testResult = null), 3000);
+                            return;
+                        }
+                        authConfig = {
+                            account_id: parseInt(this.form.google_account_id),
+                        };
+                    } else if (isOuraSource) {
+                        // Oura OAuth sources need account_id
+                        if (!this.form.oura_account_id) {
+                            this.testResult = {
+                                success: false,
+                                message: "Please select an Oura account",
+                            };
+                            this.saving = false;
+                            setTimeout(() => (this.testResult = null), 3000);
+                            return;
+                        }
+                        authConfig = {
+                            account_id: parseInt(this.form.oura_account_id),
+                        };
+                    } else if (isWithingsSource) {
+                        // Withings OAuth sources need account_id
+                        if (!this.form.withings_account_id) {
+                            this.testResult = {
+                                success: false,
+                                message: "Please select a Withings account",
+                            };
+                            this.saving = false;
+                            setTimeout(() => (this.testResult = null), 3000);
+                            return;
+                        }
+                        authConfig = {
+                            account_id: parseInt(this.form.withings_account_id),
+                        };
+                    } else if (sourceType === "mcp_server") {
+                        // MCP sources just need host and optional key
+                        authConfig = {
+                            mcp_api_host: this.form.mcp_api_host,
+                            mcp_api_key: this.form.mcp_api_key || "",  // Empty = use RAPIDAPI_KEY env
+                        };
+                    } else {
+                        // Legacy REST API auth config
+                        authConfig = this.buildAuthConfig();
+                    }
+
+                    const payload = {
+                        name: this.form.name.toLowerCase().replace(/\s+/g, "-"),
+                        source_type: sourceType,
+                        description: this.form.description,
+                        data_type: this.form.data_type,
+                        best_for: this.form.best_for,
+                        auth_config_json: JSON.stringify(authConfig),
+                        cache_ttl_seconds:
+                            parseInt(this.form.cache_ttl_seconds) || 60,
+                        timeout_seconds:
+                            parseInt(this.form.timeout_seconds) || 30,
+                        retry_count: parseInt(this.form.retry_count) || 1,
+                        rate_limit_rpm:
+                            parseInt(this.form.rate_limit_rpm) || 60,
+                        enabled: true,
+                    };
+
+                    // Add legacy fields only for non-MCP sources
+                    if (sourceType !== "mcp_server") {
+                        payload.endpoint_url = this.form.endpoint_url;
+                        payload.http_method = this.form.http_method;
+                        payload.auth_type = this.form.auth_type;
+                        payload.query_params_json = this.form.query_params_json;
+                        payload.response_path = this.form.response_path;
+                        payload.response_format_template = this.form.response_format_template;
+                    }
+
+                    const url = this.editingSource
+                        ? `/api/live-data-sources/${this.editingSource.id}`
+                        : "/api/live-data-sources";
+                    const method = this.editingSource ? "PUT" : "POST";
+
+                    const response = await fetch(url, {
+                        method,
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+
+                    if (response.ok) {
+                        this.showEditModal = false;
+                        await this.loadSources();
+                        this.testResult = {
+                            success: true,
+                            message: "Source saved successfully",
+                        };
+                    } else {
+                        const error = await response.json();
+                        this.testResult = {
+                            success: false,
+                            message: error.error || "Failed to save",
+                        };
+                    }
+                } catch (error) {
+                    this.testResult = {
+                        success: false,
+                        message: "Failed to save: " + error.message,
+                    };
+                } finally {
+                    this.saving = false;
+                    setTimeout(() => (this.testResult = null), 3000);
+                }
+            },
+
+            async testCurrentConfig() {
+                this.testing = true;
+                try {
+                    let payload;
+                    if (this.form.source_type === "mcp_server") {
+                        // MCP source test
+                        payload = {
+                            source_type: "mcp_server",
+                            auth_config_json: JSON.stringify({
+                                mcp_api_host: this.form.mcp_api_host,
+                                mcp_api_key: this.form.mcp_api_key || "",
+                            }),
+                        };
+                    } else {
+                        // Legacy REST API test
+                        payload = {
+                            source_type: "rest_api",
+                            endpoint_url: this.form.endpoint_url,
+                            http_method: this.form.http_method,
+                            auth_type: this.form.auth_type,
+                            auth_config_json: JSON.stringify(
+                                this.buildAuthConfig(),
+                            ),
+                            query_params_json: this.form.query_params_json,
+                            response_path: this.form.response_path,
+                        };
+                    }
+
+                    const response = await fetch(
+                        "/api/live-data-sources/test-config",
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(payload),
+                        },
+                    );
+
+                    const result = await response.json();
+                    this.testResult = result;
+                } catch (error) {
+                    this.testResult = {
+                        success: false,
+                        message: "Test failed: " + error.message,
+                    };
+                } finally {
+                    this.testing = false;
+                    setTimeout(() => (this.testResult = null), 5000);
+                }
+            },
+
+            async toggleEnabled(source) {
+                try {
+                    await fetch(`/api/live-data-sources/${source.id}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ enabled: !source.enabled }),
+                    });
+                    await this.loadSources();
+                } catch (error) {
+                    console.error("Failed to toggle:", error);
+                }
+            },
+
+            toggleExpand(id) {
+                const idx = this.expandedRows.indexOf(id);
+                if (idx >= 0) {
+                    this.expandedRows.splice(idx, 1);
+                } else {
+                    this.expandedRows.push(id);
+                    const source = this.sources.find(s => s.id === id);
+                    // Load tools for MCP sources when expanded
+                    if (source && source.source_type === 'mcp_server' && !this.sourceTools[id]) {
+                        this.loadTools(source);
+                    }
+                    // Load endpoint stats if source has calls
+                    if (source && source.total_calls > 0 && !this.endpointStats[id]) {
+                        this.loadEndpointStats(source);
+                    }
+                }
+            },
+
+            async loadTools(source) {
+                this.loadingTools[source.id] = true;
+                try {
+                    const response = await fetch(`/api/live-data-sources/${source.id}/tools`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.sourceTools[source.id] = data.tools || [];
+                    } else {
+                        this.sourceTools[source.id] = [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load tools:", error);
+                    this.sourceTools[source.id] = [];
+                } finally {
+                    this.loadingTools[source.id] = false;
+                }
+            },
+
+            async loadEndpointStats(source) {
+                this.loadingEndpointStats[source.id] = true;
+                try {
+                    const response = await fetch(`/api/live-data-sources/${source.id}/endpoint-stats`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.endpointStats[source.id] = data.stats || [];
+                    } else {
+                        this.endpointStats[source.id] = [];
+                    }
+                } catch (error) {
+                    console.error("Failed to load endpoint stats:", error);
+                    this.endpointStats[source.id] = [];
+                } finally {
+                    this.loadingEndpointStats[source.id] = false;
+                }
+            },
+
+            async testSource(source) {
+                this.testingId = source.id;
+                this.testResult = null;
+                try {
+                    const response = await fetch(
+                        `/api/live-data-sources/${source.id}/test`,
+                        { method: "POST" },
+                    );
+                    const result = await response.json();
+                    this.testResult = result;
+
+                    // Tool count is now stored in database and returned via loadSources()
+
+                    setTimeout(() => (this.testResult = null), 3000);
+                    await this.loadSources();
+                } catch (error) {
+                    this.testResult = {
+                        success: false,
+                        message: "Test failed: " + error.message,
+                    };
+                    setTimeout(() => (this.testResult = null), 3000);
+                } finally {
+                    this.testingId = null;
+                }
+            },
+
+            async deleteSource(source) {
+                if (!confirm(`Delete "${source.name}"? This cannot be undone.`))
+                    return;
+                try {
+                    const response = await fetch(
+                        `/api/live-data-sources/${source.id}`,
+                        { method: "DELETE" },
+                    );
+                    if (response.ok) {
+                        await this.loadSources();
+                        this.testResult = {
+                            success: true,
+                            message: "Source deleted",
+                        };
+                    } else {
+                        const error = await response.json();
+                        this.testResult = {
+                            success: false,
+                            message: error.error || "Failed to delete",
+                        };
+                    }
+                } catch (error) {
+                    this.testResult = {
+                        success: false,
+                        message: "Failed to delete: " + error.message,
+                    };
+                }
+                setTimeout(() => (this.testResult = null), 3000);
+            },
+        };
+    }
+</script>
+{% endblock %}

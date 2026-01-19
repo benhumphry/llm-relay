@@ -11,6 +11,8 @@ Smart Aliases are the unified feature for intelligent model handling in LLM Rela
 | **RAG** | Inject context from indexed Document Stores |
 | **Web** | Real-time web search and scraping |
 | **Cache** | Semantic response caching |
+| **Memory** | Persistent memory that remembers explicit user facts across sessions |
+| **Smart Source Selection** | Designator allocates token budget across RAG stores and web |
 | **Smart Tag** | Trigger by request tag instead of model name |
 
 ## Creating a Smart Alias
@@ -102,6 +104,55 @@ Requires: ChromaDB.
 
 **Match Last Message Only**: Enable for OpenWebUI-style clients where conversation history varies but the last question is what matters.
 
+### Persistent Memory
+
+Remember explicit user facts across sessions:
+
+| Setting | Value |
+|---------|-------|
+| Name | `assistant` |
+| Target Model | `anthropic/claude-sonnet-4-20250514` |
+| **Memory** | ✓ Enabled |
+
+**How it works:**
+1. After each response, the system analyzes the user's query (not the response)
+2. Only **explicitly stated facts** about the user are extracted and stored
+3. Memory is injected into future requests as context
+4. Memory persists across sessions until manually cleared
+
+**Important:** Memory only captures what users directly say about themselves, not inferences. For example:
+- "I work at Acme Corp" → Stored
+- Asking about "Acme Corp products" → **Not** stored (asking about ≠ interest in)
+
+View and clear memory from the expanded alias row in the Admin UI.
+
+### Smart Source Selection
+
+When using RAG with multiple Document Stores, let the designator allocate token budget:
+
+| Setting | Value |
+|---------|-------|
+| Name | `research` |
+| Target Model | `anthropic/claude-sonnet-4-20250514` |
+| **RAG** | ✓ Enabled |
+| Document Stores | Multiple stores selected |
+| **Smart Source Selection** | ✓ Enabled |
+| Designator | `openai/gpt-4o-mini` |
+
+**How it works:**
+1. Each Document Store has intelligence metadata (themes, best_for, summary)
+2. The designator analyzes the query and store intelligence
+3. Budget is split: 50% baseline to all sources, 50% priority-allocated to most relevant
+4. All sources return results, but relevant ones get more token budget
+5. Final results are reranked by relevance
+
+**Benefits:**
+- Ensures all sources contribute (no blind spots)
+- Prioritizes most relevant sources for the query
+- Works with Web as an additional "source"
+
+Generate store intelligence from **Data Sources → Document Stores** by expanding a store and clicking "Generate Intelligence".
+
 ### Combined Features
 
 Enable multiple features together:
@@ -111,6 +162,8 @@ Enable multiple features together:
 | `research` | Routing + RAG + Web | Best model + all context |
 | `cached-docs` | RAG + Cache | Document Q&A with caching |
 | `smart-cached` | Routing + Cache | Best model with caching |
+| `assistant` | Memory + RAG | Personal assistant with docs |
+| `smart-research` | RAG + Web + Smart Source Selection | Multi-source research |
 
 ### Context Priority (Hybrid RAG + Web)
 
@@ -240,6 +293,8 @@ Reset statistics from the expanded row in the aliases table.
 | RAG | ChromaDB + Document Stores |
 | Web | Search provider + ChromaDB |
 | Cache | ChromaDB |
+| Memory | Nothing (stores in database) |
+| Smart Source Selection | RAG enabled + Document Store intelligence |
 
 ## Tips
 

@@ -135,6 +135,14 @@ def create_api_app():
     # Register providers AFTER seeding so YAML overrides are applied first
     register_all_providers()
 
+    # Load action handlers for Smart Actions
+    try:
+        from actions import load_action_handlers
+
+        load_action_handlers()
+    except Exception as e:
+        logger.warning(f"Failed to load action handlers: {e}")
+
     return application
 
 
@@ -308,12 +316,17 @@ def track_completion(
     )
 
 
-def log_designator_usage(resolved, endpoint: str):
+def log_designator_usage(resolved, endpoint: str, tag: str = ""):
     """
     Log designator usage for smart router requests.
 
     This logs the designator LLM call separately from the main request,
     allowing tracking of routing overhead costs and failures.
+
+    Args:
+        resolved: The resolved model with routing information
+        endpoint: The API endpoint being called
+        tag: Request tags to attribute the designator cost to
     """
     if not resolved.has_router or not resolved.designator_usage:
         return
@@ -349,7 +362,7 @@ def log_designator_usage(resolved, endpoint: str):
         timestamp=datetime.now(timezone.utc),
         client_ip=client_ip,
         hostname=hostname,
-        tag="",
+        tag=tag,
         provider_id=des_provider,
         model_id=des_model,
         endpoint=endpoint,
@@ -600,20 +613,23 @@ def build_source_attribution(enrichment_result) -> str | None:
     web_budget = enrichment_result.web_budget
 
     if store_budgets and store_id_to_name:
-        # Smart source selection with budgets - show percentages using ID->name mapping
+        # Smart source selection with budgets - only show stores that actually
+        # had chunks retrieved (are in stores_queried)
+        queried_names = set(stores_queried)
+
         # Sort by budget descending so highest priority sources appear first
         sorted_stores = sorted(store_budgets.items(), key=lambda x: x[1], reverse=True)
         for store_id, store_budget in sorted_stores:
             store_name = store_id_to_name.get(store_id, f"store_{store_id}")
-            pct = int((store_budget / total_budget) * 100) if total_budget > 0 else 0
-            parts.append(f"{store_name} ({pct}%)")
+            # Only include if store actually had chunks retrieved
+            if store_name in queried_names:
+                parts.append(f"{store_name} ({store_budget})")
     elif stores_queried:
         # No budgets (legacy mode) - just list stores
         parts.extend(stores_queried)
 
     if web_budget and web_budget > 0:
-        pct = int((web_budget / total_budget) * 100) if total_budget > 0 else 0
-        parts.append(f"web ({pct}%)")
+        parts.append(f"web ({web_budget})")
     elif enrichment_result.scraped_urls:
         # Web was used but no budget info
         parts.append("web")
@@ -622,6 +638,81 @@ def build_source_attribution(enrichment_result) -> str | None:
         return None
 
     return f"\n\n---\nSources: {', '.join(parts)}"
+
+
+class ActionStreamFilter:
+    """
+    Filters smart_action blocks from streaming responses.
+
+    Buffers content when it detects the start of an action block (<smart_action)
+    and holds it until the block is complete (</smart_action>). Non-action content
+    is passed through immediately.
+    """
+
+    def __init__(self, strip_actions: bool = False):
+        self.strip_actions = strip_actions
+        self.buffer = ""
+        self.in_action_block = False
+        self.action_blocks = []  # Collected complete action blocks
+
+    def process(self, text: str) -> str:
+        """
+        Process incoming text chunk.
+
+        Returns text that should be sent to client (may be empty if buffering).
+        """
+        if not self.strip_actions:
+            return text
+
+        self.buffer += text
+        output = ""
+
+        while True:
+            if not self.in_action_block:
+                # Look for start of action block
+                start_idx = self.buffer.find("<smart_action")
+                if start_idx == -1:
+                    # No action start found - but keep last 20 chars in case
+                    # "<smart_action" is split across chunks
+                    safe_len = max(0, len(self.buffer) - 20)
+                    output += self.buffer[:safe_len]
+                    self.buffer = self.buffer[safe_len:]
+                    break
+                else:
+                    # Found start - output everything before it
+                    output += self.buffer[:start_idx]
+                    self.buffer = self.buffer[start_idx:]
+                    self.in_action_block = True
+            else:
+                # Look for end of action block
+                end_idx = self.buffer.find("</smart_action>")
+                if end_idx == -1:
+                    # End not found yet - keep buffering
+                    break
+                else:
+                    # Found end - extract and store the action block
+                    end_pos = end_idx + len("</smart_action>")
+                    action_block = self.buffer[:end_pos]
+                    self.action_blocks.append(action_block)
+                    self.buffer = self.buffer[end_pos:]
+                    self.in_action_block = False
+
+        return output
+
+    def flush(self) -> str:
+        """
+        Flush any remaining buffer at end of stream.
+
+        Returns remaining content (may include incomplete action block if malformed).
+        """
+        if not self.strip_actions:
+            return ""
+
+        # If we're still in an action block, the LLM output was malformed
+        # Include it in output so nothing is silently lost
+        remaining = self.buffer
+        self.buffer = ""
+        return remaining
 
 
 def _stream_response_base(
@@ -637,6 +728,7 @@ def _stream_response_base(
     on_complete: callable = None,
     input_char_count: int = 0,
     source_attribution: str | None = None,
+    strip_actions: bool = False,
 ) -> Generator[str, None, None]:
     """
     Base streaming function with shared logic.
@@ -647,17 +739,29 @@ def _stream_response_base(
         format_error: (error_msg) -> str - Format error response
         debug_endpoint: Endpoint name for debug logging
         source_attribution: Optional text to append at end of response (e.g., "Sources: doc1, doc2")
+        strip_actions: If True, filter out <smart_action> blocks from client stream
     """
     output_chars = 0
     llm_chunks = []
     client_chunks = []
+    action_filter = ActionStreamFilter(strip_actions=strip_actions)
 
     try:
         for text in provider.chat_completion_stream(model, messages, system, options):
             output_chars += len(text)
             llm_chunks.append(text)
-            client_chunks.append(text)
-            yield format_chunk(text)
+
+            # Filter actions if enabled
+            filtered_text = action_filter.process(text)
+            if filtered_text:
+                client_chunks.append(filtered_text)
+                yield format_chunk(filtered_text)
+
+        # Flush any remaining buffered content
+        remaining = action_filter.flush()
+        if remaining:
+            client_chunks.append(remaining)
+            yield format_chunk(remaining)
 
         # Append source attribution if provided
         if source_attribution:
@@ -679,7 +783,7 @@ def _stream_response_base(
         if hasattr(provider, "get_last_stream_result"):
             stream_result = provider.get_last_stream_result()
 
-        # Call completion callback
+        # Call completion callback with full LLM content (includes action blocks)
         if on_complete:
             input_tokens = (
                 stream_result.get("input_tokens")
@@ -698,6 +802,7 @@ def _stream_response_base(
                 cost=cost,
                 stream_result=stream_result,
                 full_content=llm_full,
+                action_blocks=action_filter.action_blocks if strip_actions else None,
             )
 
     except Exception as e:
@@ -716,6 +821,7 @@ def stream_ollama_response(
     on_complete: callable = None,
     input_char_count: int = 0,
     source_attribution: str | None = None,
+    strip_actions: bool = False,
 ) -> Generator[str, None, None]:
     """Stream response in Ollama NDJSON format."""
 
@@ -766,6 +872,7 @@ def stream_ollama_response(
         on_complete,
         input_char_count,
         source_attribution,
+        strip_actions,
     )
 
 
@@ -779,6 +886,7 @@ def stream_openai_response(
     on_complete: callable = None,
     input_char_count: int = 0,
     source_attribution: str | None = None,
+    strip_actions: bool = False,
 ) -> Generator[str, None, None]:
     """Stream response in OpenAI SSE format."""
     response_id = generate_openai_id()
@@ -824,6 +932,7 @@ def stream_openai_response(
         on_complete,
         input_char_count,
         source_attribution,
+        strip_actions,
     )
 
 
@@ -1079,7 +1188,7 @@ def chat():
             )
 
     # Log designator usage for smart routers (v3.2)
-    log_designator_usage(resolved, "/api/chat")
+    log_designator_usage(resolved, "/api/chat", tag)
 
     # Merge alias/enricher tags with request tags
     all_entity_tags = alias_tags + enricher_tags
@@ -1214,6 +1323,7 @@ def chat():
                 cost=None,
                 stream_result=None,
                 full_content=None,
+                action_blocks=None,
             ):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
@@ -1290,8 +1400,81 @@ def chat():
                     except Exception as mem_err:
                         logger.warning(f"Failed to update memory: {mem_err}")
 
+                # Execute actions if enabled and actions were detected
+                if (
+                    captured_enrichment_result
+                    and getattr(captured_enrichment_result, "actions_enabled", False)
+                    and full_content
+                    and not error
+                ):
+                    try:
+                        from actions import execute_actions
+
+                        allowed = getattr(
+                            captured_enrichment_result, "allowed_actions", []
+                        )
+                        results, _ = execute_actions(
+                            response_text=full_content,
+                            alias_name=captured_enrichment_result.enricher_name,
+                            allowed_actions=allowed,
+                            session_key=getattr(
+                                captured_enrichment_result, "session_key", None
+                            ),
+                            default_email_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_email_account_id",
+                                None,
+                            ),
+                            default_calendar_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_calendar_account_id",
+                                None,
+                            ),
+                            default_calendar_id=getattr(
+                                captured_enrichment_result,
+                                "action_calendar_id",
+                                None,
+                            ),
+                            default_tasks_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_tasks_account_id",
+                                None,
+                            ),
+                            default_tasks_list_id=getattr(
+                                captured_enrichment_result,
+                                "action_tasks_list_id",
+                                None,
+                            ),
+                            default_notification_urls=getattr(
+                                captured_enrichment_result,
+                                "action_notification_urls",
+                                None,
+                            ),
+                            scheduled_prompts_account_id=getattr(
+                                captured_enrichment_result,
+                                "scheduled_prompts_account_id",
+                                None,
+                            ),
+                            scheduled_prompts_calendar_id=getattr(
+                                captured_enrichment_result,
+                                "scheduled_prompts_calendar_id",
+                                None,
+                            ),
+                        )
+                        if results:
+                            logger.info(
+                                f"Executed {len(results)} actions for alias '{captured_enrichment_result.enricher_name}'"
+                            )
+                    except Exception as action_err:
+                        logger.warning(f"Failed to execute actions: {action_err}")
+
             # Build source attribution if enabled
             source_attribution = build_source_attribution(enrichment_result)
+
+            # Check if actions are enabled for stripping from response
+            strip_actions = enrichment_result and getattr(
+                enrichment_result, "actions_enabled", False
+            )
 
             return Response(
                 stream_ollama_response(
@@ -1303,6 +1486,7 @@ def chat():
                     on_complete=on_stream_complete,
                     input_char_count=input_chars,
                     source_attribution=source_attribution,
+                    strip_actions=strip_actions,
                 ),
                 mimetype="application/x-ndjson",
             )
@@ -1378,6 +1562,55 @@ def chat():
                         )
                 except Exception as mem_err:
                     logger.warning(f"Failed to update memory: {mem_err}")
+
+            # Execute actions if enabled (non-streaming)
+            if (
+                enrichment_result
+                and getattr(enrichment_result, "actions_enabled", False)
+                and llm_content
+            ):
+                try:
+                    from actions import execute_actions, strip_actions
+
+                    allowed = getattr(enrichment_result, "allowed_actions", [])
+                    results, cleaned_content = execute_actions(
+                        response_text=llm_content,
+                        alias_name=enrichment_result.enricher_name,
+                        allowed_actions=allowed,
+                        session_key=getattr(enrichment_result, "session_key", None),
+                        default_email_account_id=getattr(
+                            enrichment_result, "action_email_account_id", None
+                        ),
+                        default_calendar_account_id=getattr(
+                            enrichment_result, "action_calendar_account_id", None
+                        ),
+                        default_calendar_id=getattr(
+                            enrichment_result, "action_calendar_id", None
+                        ),
+                        default_tasks_account_id=getattr(
+                            enrichment_result, "action_tasks_account_id", None
+                        ),
+                        default_tasks_list_id=getattr(
+                            enrichment_result, "action_tasks_list_id", None
+                        ),
+                        default_notification_urls=getattr(
+                            enrichment_result, "action_notification_urls", None
+                        ),
+                        scheduled_prompts_account_id=getattr(
+                            enrichment_result, "scheduled_prompts_account_id", None
+                        ),
+                        scheduled_prompts_calendar_id=getattr(
+                            enrichment_result, "scheduled_prompts_calendar_id", None
+                        ),
+                    )
+                    if results:
+                        logger.info(
+                            f"Executed {len(results)} actions for alias '{enrichment_result.enricher_name}'"
+                        )
+                    # Update response with cleaned content (action blocks removed)
+                    response_obj["message"]["content"] = cleaned_content
+                except Exception as action_err:
+                    logger.warning(f"Failed to execute actions: {action_err}")
 
             return jsonify(response_obj)
 
@@ -1461,7 +1694,7 @@ def generate():
         return jsonify({"error": str(e)}), 400
 
     # Log designator usage for smart routers (v3.2)
-    log_designator_usage(resolved, "/api/generate")
+    log_designator_usage(resolved, "/api/generate", tag)
 
     # Merge alias tags with request tags (v3.1)
     if alias_tags:
@@ -1871,7 +2104,7 @@ def openai_chat_completions():
             )
 
     # Log designator usage for smart routers (v3.2)
-    log_designator_usage(resolved, "/v1/chat/completions")
+    log_designator_usage(resolved, "/v1/chat/completions", tag)
 
     # Merge alias/enricher tags with request tags
     all_entity_tags = alias_tags + enricher_tags
@@ -2027,6 +2260,7 @@ def openai_chat_completions():
                 cost=None,
                 stream_result=None,
                 full_content=None,
+                action_blocks=None,
             ):
                 response_time_ms = int((time.time() - start_time) * 1000)
                 logger.info(
@@ -2103,8 +2337,81 @@ def openai_chat_completions():
                     except Exception as mem_err:
                         logger.warning(f"Failed to update memory: {mem_err}")
 
+                # Execute actions if enabled and actions were detected
+                if (
+                    captured_enrichment_result
+                    and getattr(captured_enrichment_result, "actions_enabled", False)
+                    and full_content
+                    and not error
+                ):
+                    try:
+                        from actions import execute_actions
+
+                        allowed = getattr(
+                            captured_enrichment_result, "allowed_actions", []
+                        )
+                        results, _ = execute_actions(
+                            response_text=full_content,
+                            alias_name=captured_enrichment_result.enricher_name,
+                            allowed_actions=allowed,
+                            session_key=getattr(
+                                captured_enrichment_result, "session_key", None
+                            ),
+                            default_email_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_email_account_id",
+                                None,
+                            ),
+                            default_calendar_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_calendar_account_id",
+                                None,
+                            ),
+                            default_calendar_id=getattr(
+                                captured_enrichment_result,
+                                "action_calendar_id",
+                                None,
+                            ),
+                            default_tasks_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_tasks_account_id",
+                                None,
+                            ),
+                            default_tasks_list_id=getattr(
+                                captured_enrichment_result,
+                                "action_tasks_list_id",
+                                None,
+                            ),
+                            default_notification_urls=getattr(
+                                captured_enrichment_result,
+                                "action_notification_urls",
+                                None,
+                            ),
+                            scheduled_prompts_account_id=getattr(
+                                captured_enrichment_result,
+                                "scheduled_prompts_account_id",
+                                None,
+                            ),
+                            scheduled_prompts_calendar_id=getattr(
+                                captured_enrichment_result,
+                                "scheduled_prompts_calendar_id",
+                                None,
+                            ),
+                        )
+                        if results:
+                            logger.info(
+                                f"Executed {len(results)} actions for alias '{captured_enrichment_result.enricher_name}'"
+                            )
+                    except Exception as action_err:
+                        logger.warning(f"Failed to execute actions: {action_err}")
+
             # Build source attribution if enabled
             source_attribution = build_source_attribution(enrichment_result)
+
+            # Check if actions are enabled for stripping from response
+            strip_actions = enrichment_result and getattr(
+                enrichment_result, "actions_enabled", False
+            )
 
             return Response(
                 stream_openai_response(
@@ -2117,6 +2424,7 @@ def openai_chat_completions():
                     on_complete=on_stream_complete,
                     input_char_count=input_chars,
                     source_attribution=source_attribution,
+                    strip_actions=strip_actions,
                 ),
                 mimetype="text/event-stream",
                 headers={
@@ -2208,6 +2516,55 @@ def openai_chat_completions():
                         )
                 except Exception as mem_err:
                     logger.warning(f"Failed to update memory: {mem_err}")
+
+            # Execute actions if enabled (non-streaming)
+            if (
+                enrichment_result
+                and getattr(enrichment_result, "actions_enabled", False)
+                and llm_content
+            ):
+                try:
+                    from actions import execute_actions
+
+                    allowed = getattr(enrichment_result, "allowed_actions", [])
+                    results, cleaned_content = execute_actions(
+                        response_text=llm_content,
+                        alias_name=enrichment_result.enricher_name,
+                        allowed_actions=allowed,
+                        session_key=getattr(enrichment_result, "session_key", None),
+                        default_email_account_id=getattr(
+                            enrichment_result, "action_email_account_id", None
+                        ),
+                        default_calendar_account_id=getattr(
+                            enrichment_result, "action_calendar_account_id", None
+                        ),
+                        default_calendar_id=getattr(
+                            enrichment_result, "action_calendar_id", None
+                        ),
+                        default_tasks_account_id=getattr(
+                            enrichment_result, "action_tasks_account_id", None
+                        ),
+                        default_tasks_list_id=getattr(
+                            enrichment_result, "action_tasks_list_id", None
+                        ),
+                        default_notification_urls=getattr(
+                            enrichment_result, "action_notification_urls", None
+                        ),
+                        scheduled_prompts_account_id=getattr(
+                            enrichment_result, "scheduled_prompts_account_id", None
+                        ),
+                        scheduled_prompts_calendar_id=getattr(
+                            enrichment_result, "scheduled_prompts_calendar_id", None
+                        ),
+                    )
+                    if results:
+                        logger.info(
+                            f"Executed {len(results)} actions for alias '{enrichment_result.enricher_name}'"
+                        )
+                    # Update response with cleaned content (action blocks removed)
+                    response_obj["choices"][0]["message"]["content"] = cleaned_content
+                except Exception as action_err:
+                    logger.warning(f"Failed to execute actions: {action_err}")
 
             return jsonify(response_obj)
 
@@ -2302,7 +2659,7 @@ def openai_completions():
         ), 400
 
     # Log designator usage for smart routers (v3.2)
-    log_designator_usage(resolved, "/v1/completions")
+    log_designator_usage(resolved, "/v1/completions", tag)
 
     # Merge alias tags with request tags (v3.1)
     if alias_tags:
@@ -2642,6 +2999,14 @@ if __name__ == "__main__":
         start_indexer()
     except Exception as e:
         logger.warning(f"Failed to start RAG indexer: {e}")
+
+    # Start scheduled prompts scheduler
+    try:
+        from scheduling import start_prompt_scheduler
+
+        start_prompt_scheduler()
+    except Exception as e:
+        logger.warning(f"Failed to start prompt scheduler: {e}")
 
     # Run API server in main thread
     app.run(host=api_host, port=api_port, debug=debug, threaded=True)

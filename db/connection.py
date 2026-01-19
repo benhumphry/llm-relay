@@ -170,6 +170,17 @@ def run_migrations() -> None:
 
     engine = get_engine()
     _run_migrations(engine)
+
+    # Seed built-in live data sources if API keys are configured
+    try:
+        from db.live_data_sources import seed_builtin_sources
+
+        created = seed_builtin_sources()
+        if created:
+            logger.info(f"Seeded built-in live data sources: {created}")
+    except Exception as e:
+        logger.warning(f"Failed to seed built-in live data sources: {e}")
+
     _migrations_run = True
 
 
@@ -1059,6 +1070,34 @@ def _run_migrations(engine) -> None:
                     "ALTER TABLE document_stores ADD COLUMN gcalendar_calendar_name VARCHAR(255)",
                 )
             )
+        if "gtasks_tasklist_id" not in existing_columns:
+            migrations.append(
+                (
+                    "gtasks_tasklist_id",
+                    "ALTER TABLE document_stores ADD COLUMN gtasks_tasklist_id VARCHAR(255)",
+                )
+            )
+        if "gtasks_tasklist_name" not in existing_columns:
+            migrations.append(
+                (
+                    "gtasks_tasklist_name",
+                    "ALTER TABLE document_stores ADD COLUMN gtasks_tasklist_name VARCHAR(255)",
+                )
+            )
+        if "gcontacts_group_id" not in existing_columns:
+            migrations.append(
+                (
+                    "gcontacts_group_id",
+                    "ALTER TABLE document_stores ADD COLUMN gcontacts_group_id VARCHAR(255)",
+                )
+            )
+        if "gcontacts_group_name" not in existing_columns:
+            migrations.append(
+                (
+                    "gcontacts_group_name",
+                    "ALTER TABLE document_stores ADD COLUMN gcontacts_group_name VARCHAR(255)",
+                )
+            )
         if "paperless_url" not in existing_columns:
             migrations.append(
                 (
@@ -1315,6 +1354,494 @@ def _run_migrations(engine) -> None:
                 conn.execute(
                     text(
                         "ALTER TABLE smart_aliases ADD COLUMN show_sources BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.commit()
+
+        # v1.9.4: Slack document source fields
+        if "slack_channel_id" not in ds_columns:
+            logger.info("Adding Slack fields to document_stores table (v1.9.4)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN slack_channel_id VARCHAR(100)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN slack_channel_types VARCHAR(100) DEFAULT 'public_channel'"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN slack_days_back INTEGER DEFAULT 90"
+                    )
+                )
+                conn.commit()
+
+        # v1.9.5: Microsoft document source fields (OneDrive, Outlook, OneNote)
+        if "microsoft_account_id" not in ds_columns:
+            logger.info("Adding Microsoft fields to document_stores table (v1.9.5)")
+            with engine.connect() as conn:
+                # Microsoft OAuth account reference
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN microsoft_account_id INTEGER REFERENCES oauth_tokens(id) ON DELETE SET NULL"
+                    )
+                )
+                # OneDrive folder filter
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN onedrive_folder_id VARCHAR(100)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN onedrive_folder_name VARCHAR(255)"
+                    )
+                )
+                # Outlook folder filter and days back
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN outlook_folder_id VARCHAR(100)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN outlook_folder_name VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN outlook_days_back INTEGER DEFAULT 90"
+                    )
+                )
+                # OneNote notebook filter
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN onenote_notebook_id VARCHAR(100)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN onenote_notebook_name VARCHAR(255)"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add Web Search fields to document_stores table (v1.9.7)
+    if "document_stores" in inspector.get_table_names():
+        if "websearch_query" not in ds_columns:
+            logger.info("Adding Web Search fields to document_stores table (v1.9.7)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN websearch_query VARCHAR(500)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN websearch_max_results INTEGER DEFAULT 10"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN websearch_pages_to_scrape INTEGER DEFAULT 5"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN websearch_time_range VARCHAR(20)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN websearch_category VARCHAR(50)"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add website_crawler_override field to document_stores table (v1.9.8)
+    if "document_stores" in inspector.get_table_names():
+        if "website_crawler_override" not in ds_columns:
+            logger.info(
+                "Adding website_crawler_override field to document_stores table (v1.9.8)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN website_crawler_override VARCHAR(20)"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add use_two_pass_retrieval field to smart_aliases table (v1.9.9)
+    if "smart_aliases" in inspector.get_table_names():
+        sa_columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+        if "use_two_pass_retrieval" not in sa_columns:
+            logger.info(
+                "Adding use_two_pass_retrieval field to smart_aliases table (v1.9.9)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN use_two_pass_retrieval BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add Microsoft Teams fields to document_stores table (v1.9.10)
+    if "document_stores" in inspector.get_table_names():
+        if "teams_team_id" not in ds_columns:
+            logger.info(
+                "Adding Microsoft Teams fields to document_stores table (v1.9.10)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN teams_team_id VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN teams_team_name VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN teams_channel_id VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN teams_channel_name VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN teams_days_back INTEGER DEFAULT 90"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Alter Microsoft ID columns to VARCHAR(255) for long Graph API IDs (v1.9.6)
+    # Microsoft Graph API returns folder/notebook IDs that can be 150+ characters
+    if "document_stores" in inspector.get_table_names():
+        db_url = get_database_url()
+        if "postgresql" in db_url:
+            with engine.connect() as conn:
+                # Check current column size for outlook_folder_id
+                result = conn.execute(
+                    text("""
+                        SELECT character_maximum_length
+                        FROM information_schema.columns
+                        WHERE table_name = 'document_stores' AND column_name = 'outlook_folder_id'
+                    """)
+                )
+                row = result.fetchone()
+                if row and row[0] and row[0] < 255:
+                    logger.info(
+                        "Expanding Microsoft ID columns to VARCHAR(255) (v1.9.6)"
+                    )
+                    # Expand all Microsoft ID columns that might have long IDs
+                    conn.execute(
+                        text(
+                            "ALTER TABLE document_stores ALTER COLUMN outlook_folder_id TYPE VARCHAR(255)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE document_stores ALTER COLUMN onedrive_folder_id TYPE VARCHAR(255)"
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE document_stores ALTER COLUMN onenote_notebook_id TYPE VARCHAR(255)"
+                        )
+                    )
+                    conn.commit()
+
+    # Migration: Add use_live_data field to smart_aliases table (v1.9.11)
+    if "smart_aliases" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+        if "use_live_data" not in columns:
+            logger.info("Adding use_live_data field to smart_aliases table (v1.9.11)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN use_live_data BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add tool_count field to live_data_sources table (v1.9.12)
+    if "live_data_sources" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("live_data_sources")]
+        if "tool_count" not in columns:
+            logger.info("Adding tool_count field to live_data_sources table (v1.9.12)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE live_data_sources ADD COLUMN tool_count INTEGER DEFAULT 0"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add usage stats fields to live_data_sources table (v1.9.13)
+    if "live_data_sources" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("live_data_sources")]
+        if "total_calls" not in columns:
+            logger.info(
+                "Adding usage stats fields to live_data_sources table (v1.9.13)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE live_data_sources ADD COLUMN total_calls INTEGER DEFAULT 0"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE live_data_sources ADD COLUMN successful_calls INTEGER DEFAULT 0"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE live_data_sources ADD COLUMN failed_calls INTEGER DEFAULT 0"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE live_data_sources ADD COLUMN total_latency_ms INTEGER DEFAULT 0"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add Todoist fields to document_stores table (v1.9.15)
+    if "document_stores" in inspector.get_table_names():
+        if "todoist_project_id" not in ds_columns:
+            logger.info("Adding Todoist fields to document_stores table (v1.9.15)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN todoist_project_id VARCHAR(50)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN todoist_project_name VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN todoist_filter VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN todoist_include_completed BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add broken tool tracking to live_data_source_endpoint_stats (v1.9.14)
+    if "live_data_source_endpoint_stats" in inspector.get_table_names():
+        columns = [
+            c["name"] for c in inspector.get_columns("live_data_source_endpoint_stats")
+        ]
+        # Use TIMESTAMP for PostgreSQL compatibility (SQLite treats it the same as DATETIME)
+        db_url = get_database_url()
+        datetime_type = "TIMESTAMP" if "postgresql" in db_url else "DATETIME"
+
+        migrations = []
+        if "is_broken" not in columns:
+            migrations.append(
+                "ALTER TABLE live_data_source_endpoint_stats ADD COLUMN is_broken BOOLEAN DEFAULT FALSE"
+            )
+        if "broken_reason" not in columns:
+            migrations.append(
+                "ALTER TABLE live_data_source_endpoint_stats ADD COLUMN broken_reason VARCHAR(200)"
+            )
+        if "broken_at" not in columns:
+            migrations.append(
+                f"ALTER TABLE live_data_source_endpoint_stats ADD COLUMN broken_at {datetime_type}"
+            )
+
+        if migrations:
+            logger.info(
+                f"Adding broken tool tracking to live_data_source_endpoint_stats (v1.9.14) - {len(migrations)} columns"
+            )
+            with engine.connect() as conn:
+                for sql in migrations:
+                    conn.execute(text(sql))
+                conn.commit()
+
+    # Migration: Add actions fields to smart_aliases table (v1.9.16)
+    if "smart_aliases" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+        if "use_actions" not in columns:
+            logger.info("Adding actions fields to smart_aliases table (v1.9.16)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN use_actions BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN allowed_actions_json TEXT"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add action default fields to smart_aliases table (v1.9.18)
+    # Replaces provider-based defaults (v1.9.17) with action-category defaults
+    if "smart_aliases" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+
+        # Drop old provider-based columns if they exist
+        if "action_google_account_id" in columns:
+            logger.info("Dropping legacy action_google_account_id column (v1.9.18)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases DROP COLUMN action_google_account_id"
+                    )
+                )
+                conn.commit()
+        if "action_microsoft_account_id" in columns:
+            logger.info("Dropping legacy action_microsoft_account_id column (v1.9.18)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases DROP COLUMN action_microsoft_account_id"
+                    )
+                )
+                conn.commit()
+
+        # Refresh columns list after drops
+        columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+
+        # Add new action-category default fields
+        if "action_email_account_id" not in columns:
+            logger.info("Adding action default fields to smart_aliases table (v1.9.18)")
+            with engine.connect() as conn:
+                # Email default
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_email_account_id INTEGER REFERENCES oauth_tokens(id) ON DELETE SET NULL"
+                    )
+                )
+                # Calendar defaults
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_calendar_account_id INTEGER REFERENCES oauth_tokens(id) ON DELETE SET NULL"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_calendar_id VARCHAR(255)"
+                    )
+                )
+                # Tasks defaults
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_tasks_account_id INTEGER REFERENCES oauth_tokens(id) ON DELETE SET NULL"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_tasks_list_id VARCHAR(255)"
+                    )
+                )
+                conn.commit()
+
+        # Add action_tasks_provider column (v1.9.19) for non-OAuth providers like Todoist
+        if "action_tasks_provider" not in columns:
+            logger.info(
+                "Adding action_tasks_provider column to smart_aliases (v1.9.19)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_tasks_provider VARCHAR(50)"
+                    )
+                )
+                conn.commit()
+
+    # Data migration: Update Gmail live source descriptions (v1.9.20)
+    # Add search instructions to help designator find specific emails for actions
+    if "live_data_sources" in inspector.get_table_names():
+        new_gmail_desc = "Gmail (real-time). Use action=search with Gmail query syntax (e.g. from:sender subject:keyword) to find specific emails. Returns message IDs needed for reply/forward actions."
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    "SELECT id FROM live_data_sources WHERE source_type = 'google_gmail_live' AND description NOT LIKE '%action=search%'"
+                )
+            )
+            gmail_sources = result.fetchall()
+            if gmail_sources:
+                logger.info(
+                    f"Updating {len(gmail_sources)} Gmail live source description(s) (v1.9.20)"
+                )
+                for (source_id,) in gmail_sources:
+                    conn.execute(
+                        text(
+                            "UPDATE live_data_sources SET description = :desc WHERE id = :id"
+                        ),
+                        {"desc": new_gmail_desc, "id": source_id},
+                    )
+                conn.commit()
+
+    # Migration: Add notification and scheduled prompts fields to smart_aliases (v1.9.21)
+    if "smart_aliases" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+
+        if "action_notification_urls_json" not in columns:
+            logger.info(
+                "Adding notification URLs field to smart_aliases table (v1.9.21)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_notification_urls_json TEXT"
+                    )
+                )
+                conn.commit()
+
+        if "scheduled_prompts_enabled" not in columns:
+            logger.info(
+                "Adding scheduled prompts fields to smart_aliases table (v1.9.21)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN scheduled_prompts_enabled BOOLEAN DEFAULT FALSE"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN scheduled_prompts_account_id INTEGER REFERENCES oauth_tokens(id) ON DELETE SET NULL"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN scheduled_prompts_calendar_id VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN scheduled_prompts_calendar_name VARCHAR(255)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN scheduled_prompts_lookahead INTEGER DEFAULT 15"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN scheduled_prompts_store_response BOOLEAN DEFAULT TRUE"
                     )
                 )
                 conn.commit()
