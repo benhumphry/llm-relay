@@ -29,33 +29,6 @@ block content %}
         </button>
     </div>
 
-    <!-- RapidAPI Info Banner -->
-    <div class="alert alert-info mb-6" x-show="!hasRapidApiKey">
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-        >
-            <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-        </svg>
-        <div>
-            <strong>RapidAPI Integration:</strong> Set
-            <code class="bg-base-300 px-1 rounded">RAPIDAPI_KEY</code> to access
-            1000s of APIs from
-            <a href="https://rapidapi.com" target="_blank" class="link"
-                >RapidAPI.com</a
-            >
-            with a single key.
-        </div>
-    </div>
-
     <!-- Loading State -->
     <template x-if="loading">
         <div class="flex justify-center py-12">
@@ -396,121 +369,6 @@ block content %}
                                                 ></div>
                                             </div>
                                         </div>
-
-                                        <!-- MCP Tools Section -->
-                                        <template
-                                            x-if="source.source_type === 'mcp_server'"
-                                        >
-                                            <div>
-                                                <div
-                                                    class="text-xs text-base-content/50 uppercase mb-2"
-                                                >
-                                                    Available Tools
-                                                </div>
-                                                <template
-                                                    x-if="loadingTools[source.id]"
-                                                >
-                                                    <div
-                                                        class="flex items-center gap-2 text-sm text-base-content/60"
-                                                    >
-                                                        <span
-                                                            class="loading loading-spinner loading-xs"
-                                                        ></span>
-                                                        Loading tools...
-                                                    </div>
-                                                </template>
-                                                <template
-                                                    x-if="!loadingTools[source.id] && sourceTools[source.id]"
-                                                >
-                                                    <div
-                                                        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2"
-                                                    >
-                                                        <template
-                                                            x-for="tool in sourceTools[source.id]"
-                                                            :key="tool.name"
-                                                        >
-                                                            <div
-                                                                class="bg-base-100 rounded-lg p-3 border border-base-300"
-                                                            >
-                                                                <div
-                                                                    class="font-mono text-xs font-medium text-primary"
-                                                                    x-text="tool.name"
-                                                                ></div>
-                                                                <div
-                                                                    class="text-xs text-base-content/70 mt-1 line-clamp-2"
-                                                                    x-text="tool.description"
-                                                                ></div>
-                                                            </div>
-                                                        </template>
-                                                    </div>
-                                                </template>
-                                                <template
-                                                    x-if="!loadingTools[source.id] && (!sourceTools[source.id] || sourceTools[source.id].length === 0)"
-                                                >
-                                                    <div
-                                                        class="text-sm text-base-content/50"
-                                                    >
-                                                        No tools loaded. Click
-                                                        "Test" to discover
-                                                        available tools.
-                                                    </div>
-                                                </template>
-                                            </div>
-                                        </template>
-
-                                        <!-- REST API Info -->
-                                        <template
-                                            x-if="source.source_type === 'rest_api'"
-                                        >
-                                            <div
-                                                class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"
-                                            >
-                                                <div>
-                                                    <div
-                                                        class="text-xs text-base-content/50 uppercase mb-1"
-                                                    >
-                                                        Endpoint
-                                                    </div>
-                                                    <div
-                                                        class="font-mono text-xs break-all"
-                                                        x-text="source.endpoint_url || '-'"
-                                                    ></div>
-                                                </div>
-                                                <div>
-                                                    <div
-                                                        class="text-xs text-base-content/50 uppercase mb-1"
-                                                    >
-                                                        Method
-                                                    </div>
-                                                    <div
-                                                        class="font-mono text-xs"
-                                                        x-text="source.http_method || 'GET'"
-                                                    ></div>
-                                                </div>
-                                                <div>
-                                                    <div
-                                                        class="text-xs text-base-content/50 uppercase mb-1"
-                                                    >
-                                                        Auth
-                                                    </div>
-                                                    <div
-                                                        class="text-xs"
-                                                        x-text="source.auth_type || 'none'"
-                                                    ></div>
-                                                </div>
-                                                <div>
-                                                    <div
-                                                        class="text-xs text-base-content/50 uppercase mb-1"
-                                                    >
-                                                        Cache TTL
-                                                    </div>
-                                                    <div
-                                                        class="text-xs"
-                                                        x-text="source.cache_ttl_seconds + 's'"
-                                                    ></div>
-                                                </div>
-                                            </div>
-                                        </template>
 
                                         <!-- Endpoint/Tool Stats -->
                                         <template x-if="source.total_calls > 0">
@@ -1304,174 +1162,28 @@ block content %}
             testing: false,
             saving: false,
             expandedRows: [],
-            sourceTools: {},
-            loadingTools: {},
             endpointStats: {},
             loadingEndpointStats: {},
-            hasRapidApiKey: false,
-            configuredEnvVars: {},  // Which env vars are set (for hiding fields)
-            rapidapiImportUrl: "",
-            selectedPreset: "",
+            configuredEnvVars: {}, // Which env vars are set (for hiding fields)
             form: {
                 name: "",
                 description: "",
-                data_type: "finance",
+                source_type: "",
+                data_type: "general",
                 best_for: "",
-                endpoint_url: "",
-                http_method: "GET",
-                auth_type: "none",
-                rapidapi_host: "",
-                api_key_name: "X-API-Key",
-                api_key_value: "",
-                api_key_location: "header",
-                bearer_token: "",
-                query_params_json: "",
-                response_path: "",
-                response_format_template: "",
-                cache_ttl_seconds: 60,
-                timeout_seconds: 10,
-                retry_count: 1,
-                rate_limit_rpm: 60,
-                test_params_json: "",
             },
-
-            // RapidAPI presets with full configuration
-            {% raw %}
-            presets: {
-                "yahoo-finance": {
-                    name: "yahoo-finance",
-                    description: "Real-time stock quotes from Yahoo Finance",
-                    data_type: "finance",
-                    best_for:
-                        "Stock prices, market quotes, ETFs, mutual funds, company data",
-                    endpoint_url:
-                        "https://yahoo-finance15.p.rapidapi.com/api/v1/markets/stock/quotes",
-                    http_method: "GET",
-                    auth_type: "rapidapi",
-                    rapidapi_host: "yahoo-finance15.p.rapidapi.com",
-                    query_params_json:
-                        '{"ticker": "{{symbol}}"}',
-                    response_path: "$.body[0]",
-                    response_format_template:
-                        "### {{symbol}} Stock Quote\nPrice: ${{regularMarketPrice}}\nChange: {{regularMarketChangePercent}}%\nPrevious Close: ${{regularMarketPreviousClose}}\nDay Range: ${{regularMarketDayLow}} - ${{regularMarketDayHigh}}",
-                    cache_ttl_seconds: 60,
-                    test_params_json: '{"symbol": "AAPL"}',
-                },
-                "yahoo-finance-news": {
-                    name: "yahoo-finance-news",
-                    description: "Financial news from Yahoo Finance",
-                    data_type: "news",
-                    best_for:
-                        "Stock news, market news, company announcements, financial headlines",
-                    endpoint_url:
-                        "https://yahoo-finance15.p.rapidapi.com/api/v1/markets/news",
-                    http_method: "GET",
-                    auth_type: "rapidapi",
-                    rapidapi_host: "yahoo-finance15.p.rapidapi.com",
-                    query_params_json:
-                        '{"tickers": "{{symbol}}"}',
-                    response_path: "$.body",
-                    response_format_template:
-                        "### Latest News\nNews articles returned as JSON array",
-                    cache_ttl_seconds: 300,
-                    test_params_json: '{"symbol": "AAPL"}',
-                },
-                "crypto-prices": {
-                    name: "crypto-prices",
-                    description: "Cryptocurrency prices and market data",
-                    data_type: "finance",
-                    best_for:
-                        "Bitcoin price, Ethereum price, crypto market data, coin prices",
-                    endpoint_url:
-                        "https://coinranking1.p.rapidapi.com/coin/{{coinId}}/price",
-                    http_method: "GET",
-                    auth_type: "rapidapi",
-                    rapidapi_host: "coinranking1.p.rapidapi.com",
-                    query_params_json: "{}",
-                    response_path: "$.data",
-                    response_format_template:
-                        "### Crypto Price\nPrice: ${{price}}\n24h Change: {{change}}%",
-                    cache_ttl_seconds: 60,
-                    test_params_json: '{"coinId": "Qwsogvtv82FCd"}',
-                },
-                "weather-api": {
-                    name: "weather-rapidapi",
-                    description: "Weather conditions by city from WeatherAPI",
-                    data_type: "weather",
-                    best_for:
-                        "Current weather, temperature, conditions, humidity, wind",
-                    endpoint_url:
-                        "https://weatherapi-com.p.rapidapi.com/current.json",
-                    http_method: "GET",
-                    auth_type: "rapidapi",
-                    rapidapi_host: "weatherapi-com.p.rapidapi.com",
-                    query_params_json:
-                        '{"q": "{{location}}"}',
-                    response_path: "$",
-                    response_format_template:
-                        "### Weather in {{location.name}}, {{location.country}}\nTemperature: {{current.temp_c}}°C ({{current.temp_f}}°F)\nCondition: {{current.condition.text}}\nHumidity: {{current.humidity}}%\nWind: {{current.wind_kph}} km/h {{current.wind_dir}}",
-                    cache_ttl_seconds: 600,
-                    test_params_json: '{"location": "London"}',
-                },
-                "football-scores": {
-                    name: "football-scores",
-                    description: "Live football scores from API-Football",
-                    data_type: "sports",
-                    best_for:
-                        "Football scores, soccer matches, live scores, Premier League, Champions League",
-                    endpoint_url:
-                        "https://api-football-v1.p.rapidapi.com/v3/fixtures",
-                    http_method: "GET",
-                    auth_type: "rapidapi",
-                    rapidapi_host: "api-football-v1.p.rapidapi.com",
-                    query_params_json: '{"live": "all"}',
-                    response_path: "$.response",
-                    response_format_template:
-                        "### Live Football Scores\nMatches returned as JSON array with teams, goals, and status",
-                    cache_ttl_seconds: 60,
-                    test_params_json: "{}",
-                },
-                "google-news": {
-                    name: "google-news",
-                    description: "Latest news from Google News",
-                    data_type: "news",
-                    best_for:
-                        "Breaking news, headlines, current events, topic news",
-                    endpoint_url: "https://google-news13.p.rapidapi.com/search",
-                    http_method: "GET",
-                    auth_type: "rapidapi",
-                    rapidapi_host: "google-news13.p.rapidapi.com",
-                    query_params_json:
-                        '{"keyword": "{{query}}", "lr": "en-US"}',
-                    response_path: "$.items",
-                    response_format_template:
-                        "### News Results\nArticles returned as JSON array with title and source",
-                    cache_ttl_seconds: 300,
-                    test_params_json: '{"query": "technology"}',
-                },
-            },
-            {% endraw %}
-
-            googleAccounts: [],
-            ouraAccounts: [],
-            ouraConfigured: false,
-            ouraConnecting: false,
-            withingsAccounts: [],
-            withingsConfigured: false,
-            withingsConnecting: false,
 
             // Plugin system
             plugins: [],
             pluginsByType: {},
-            oauthAccounts: {},  // Keyed by provider: {google: [], oura: [], withings: [], ...}
-            oauthStatus: {},    // Keyed by provider: {google: {configured: true}, ...}
-            oauthConnecting: {},  // Keyed by provider
-            pluginConfig: {},   // Dynamic plugin field values
+            oauthAccounts: {}, // Keyed by provider: {google: [], oura: [], withings: [], ...}
+            oauthStatus: {}, // Keyed by provider: {google: {configured: true}, ...}
+            oauthConnecting: {}, // Keyed by provider
+            pluginConfig: {}, // Dynamic plugin field values
 
             async init() {
                 await this.loadPlugins();
                 await this.loadSources();
-                await this.checkRapidApiKey();
                 await this.loadEnvVarStatus();
                 await this.loadAllOAuthAccounts();
             },
@@ -1486,7 +1198,9 @@ block content %}
                         for (const plugin of this.plugins) {
                             this.pluginsByType[plugin.source_type] = plugin;
                         }
-                        console.log(`Loaded ${this.plugins.length} live source plugins`);
+                        console.log(
+                            `Loaded ${this.plugins.length} live source plugins`,
+                        );
                     }
                 } catch (error) {
                     console.error("Failed to load plugins:", error);
@@ -1498,13 +1212,16 @@ block content %}
                 const providers = new Set();
                 for (const plugin of this.plugins) {
                     for (const field of plugin.fields || []) {
-                        if (field.field_type === 'oauth_account' && field.picker_options?.provider) {
+                        if (
+                            field.field_type === "oauth_account" &&
+                            field.picker_options?.provider
+                        ) {
                             providers.add(field.picker_options.provider);
                         }
                     }
                 }
                 // Always include google for legacy sources
-                providers.add('google');
+                providers.add("google");
 
                 // Load accounts for each provider
                 for (const provider of providers) {
@@ -1514,14 +1231,21 @@ block content %}
 
             async loadOAuthAccountsForProvider(provider) {
                 try {
-                    const response = await fetch(`/api/oauth/${provider}/status`);
+                    const response = await fetch(
+                        `/api/oauth/${provider}/status`,
+                    );
                     if (response.ok) {
                         const data = await response.json();
                         this.oauthAccounts[provider] = data.accounts || [];
-                        this.oauthStatus[provider] = { configured: data.configured };
+                        this.oauthStatus[provider] = {
+                            configured: data.configured,
+                        };
                     }
                 } catch (error) {
-                    console.error(`Failed to load ${provider} accounts:`, error);
+                    console.error(
+                        `Failed to load ${provider} accounts:`,
+                        error,
+                    );
                     this.oauthAccounts[provider] = [];
                     this.oauthStatus[provider] = { configured: false };
                 }
@@ -1530,7 +1254,9 @@ block content %}
             async connectOAuthProvider(provider) {
                 this.oauthConnecting[provider] = true;
                 try {
-                    const response = await fetch(`/api/oauth/${provider}/start?redirect_uri=/live-data-sources`);
+                    const response = await fetch(
+                        `/api/oauth/${provider}/start?redirect_uri=/live-data-sources`,
+                    );
                     if (response.ok) {
                         const data = await response.json();
                         if (data.auth_url) {
@@ -1538,7 +1264,9 @@ block content %}
                         }
                     } else {
                         const error = await response.json();
-                        alert(error.error || `Failed to start ${provider} OAuth`);
+                        alert(
+                            error.error || `Failed to start ${provider} OAuth`,
+                        );
                     }
                 } catch (error) {
                     console.error(`Failed to connect ${provider}:`, error);
@@ -1552,7 +1280,7 @@ block content %}
                 // Group plugins by category for dropdown
                 const categories = {};
                 for (const plugin of this.plugins) {
-                    const cat = plugin.category || 'other';
+                    const cat = plugin.category || "other";
                     if (!categories[cat]) {
                         categories[cat] = [];
                     }
@@ -1563,15 +1291,18 @@ block content %}
 
             getCategoryLabel(category) {
                 const labels = {
-                    'smart': 'Smart Providers',
-                    'google': 'Google (OAuth)',
-                    'health': 'Health & Fitness',
-                    'weather': 'Weather',
-                    'finance': 'Finance',
-                    'transport': 'Transport',
-                    'other': 'Other Integrations',
+                    smart: "Smart Providers",
+                    google: "Google (OAuth)",
+                    health: "Health & Fitness",
+                    weather: "Weather",
+                    finance: "Finance",
+                    transport: "Transport",
+                    other: "Other Integrations",
                 };
-                return labels[category] || category.charAt(0).toUpperCase() + category.slice(1);
+                return (
+                    labels[category] ||
+                    category.charAt(0).toUpperCase() + category.slice(1)
+                );
             },
 
             getCurrentPlugin() {
@@ -1591,16 +1322,18 @@ block content %}
 
             getOAuthNotConfiguredMessage(provider) {
                 const envVars = {
-                    'google': 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET',
-                    'oura': 'OURA_CLIENT_ID and OURA_CLIENT_SECRET',
-                    'withings': 'WITHINGS_CLIENT_ID and WITHINGS_CLIENT_SECRET',
+                    google: "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET",
+                    oura: "OURA_CLIENT_ID and OURA_CLIENT_SECRET",
+                    withings: "WITHINGS_CLIENT_ID and WITHINGS_CLIENT_SECRET",
                 };
-                const vars = envVars[provider] || `${provider?.toUpperCase()}_CLIENT_ID and ${provider?.toUpperCase()}_CLIENT_SECRET`;
-                return `${this.capitalizeFirst(provider || 'OAuth')} not configured. Set ${vars} environment variables.`;
+                const vars =
+                    envVars[provider] ||
+                    `${provider?.toUpperCase()}_CLIENT_ID and ${provider?.toUpperCase()}_CLIENT_SECRET`;
+                return `${this.capitalizeFirst(provider || "OAuth")} not configured. Set ${vars} environment variables.`;
             },
 
             capitalizeFirst(str) {
-                if (!str) return '';
+                if (!str) return "";
                 return str.charAt(0).toUpperCase() + str.slice(1);
             },
 
@@ -1610,10 +1343,15 @@ block content %}
                     return false;
                 }
                 // Check depends_on conditions
-                if (!field.depends_on || Object.keys(field.depends_on).length === 0) {
+                if (
+                    !field.depends_on ||
+                    Object.keys(field.depends_on).length === 0
+                ) {
                     return true;
                 }
-                for (const [fieldName, expectedValue] of Object.entries(field.depends_on)) {
+                for (const [fieldName, expectedValue] of Object.entries(
+                    field.depends_on,
+                )) {
                     if (this.pluginConfig[fieldName] !== expectedValue) {
                         return false;
                     }
@@ -1627,15 +1365,18 @@ block content %}
                     // Initialize pluginConfig with defaults from plugin fields
                     this.pluginConfig = {};
                     for (const field of plugin.fields || []) {
-                        if (field.default !== undefined && field.default !== null) {
+                        if (
+                            field.default !== undefined &&
+                            field.default !== null
+                        ) {
                             this.pluginConfig[field.name] = field.default;
                         } else {
-                            this.pluginConfig[field.name] = '';
+                            this.pluginConfig[field.name] = "";
                         }
                     }
                     // Set data_type and best_for from plugin metadata
-                    this.form.data_type = plugin.data_type || '';
-                    this.form.best_for = plugin.best_for || '';
+                    this.form.data_type = plugin.data_type || "";
+                    this.form.best_for = plugin.best_for || "";
                 } else {
                     // Fallback defaults for non-plugin source types
                     this.pluginConfig = {};
@@ -1656,11 +1397,16 @@ block content %}
 
             getGoogleSourceDescription(sourceType) {
                 const descriptions = {
-                    google_calendar_live: "Real-time calendar queries: today's schedule, next meeting, upcoming events",
-                    google_tasks_live: "Real-time task queries: pending tasks, due today, overdue items",
-                    google_gmail_live: "Real-time email queries: unread messages, today's emails, search",
+                    google_calendar_live:
+                        "Real-time calendar queries: today's schedule, next meeting, upcoming events",
+                    google_tasks_live:
+                        "Real-time task queries: pending tasks, due today, overdue items",
+                    google_gmail_live:
+                        "Real-time email queries: unread messages, today's emails, search",
                 };
-                return descriptions[sourceType] || "Real-time Google data access";
+                return (
+                    descriptions[sourceType] || "Real-time Google data access"
+                );
             },
 
             async loadOuraAccounts() {
@@ -1679,7 +1425,9 @@ block content %}
             async connectOura() {
                 this.ouraConnecting = true;
                 try {
-                    const response = await fetch("/api/oauth/oura/start?redirect_uri=/live-data-sources");
+                    const response = await fetch(
+                        "/api/oauth/oura/start?redirect_uri=/live-data-sources",
+                    );
                     if (response.ok) {
                         const data = await response.json();
                         if (data.auth_url) {
@@ -1713,7 +1461,9 @@ block content %}
             async connectWithings() {
                 this.withingsConnecting = true;
                 try {
-                    const response = await fetch("/api/oauth/withings/start?redirect_uri=/live-data-sources");
+                    const response = await fetch(
+                        "/api/oauth/withings/start?redirect_uri=/live-data-sources",
+                    );
                     if (response.ok) {
                         const data = await response.json();
                         if (data.auth_url) {
@@ -1745,23 +1495,11 @@ block content %}
                 }
             },
 
-            async checkRapidApiKey() {
-                try {
-                    const response = await fetch(
-                        "/api/live-data-sources/rapidapi-status",
-                    );
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.hasRapidApiKey = data.configured;
-                    }
-                } catch (error) {
-                    this.hasRapidApiKey = false;
-                }
-            },
-
             async loadEnvVarStatus() {
                 try {
-                    const response = await fetch("/api/live-data-sources/env-var-status");
+                    const response = await fetch(
+                        "/api/live-data-sources/env-var-status",
+                    );
                     if (response.ok) {
                         this.configuredEnvVars = await response.json();
                     }
@@ -1776,117 +1514,52 @@ block content %}
             },
 
             getDisplayName(source) {
-                // Get friendly display name for a source
-                // First check auth_config for stored name (plugin sources)
-                if (source.auth_config?.name) {
-                    return source.auth_config.name;
+                // Get friendly display name from plugin config
+                if (source.config?.name) {
+                    return source.config.name;
                 }
-                // Convert slug to title case: "smart-health" -> "Smart Health"
+                // Fallback: convert slug to title case
                 return source.name
-                    .split('-')
-                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                    .join(' ');
+                    .split("-")
+                    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(" ");
             },
 
             getTypeLabel(type) {
-                // First check if we have a plugin for this type
                 const plugin = this.pluginsByType[type];
                 if (plugin && plugin.display_name) {
                     return plugin.display_name;
                 }
-                // Fallback labels for legacy types
-                const labels = {
-                    mcp_server: "MCP API",
-                    rest_api: "REST API",
-                    rapidapi: "RapidAPI",
-                    builtin_stocks: "Stocks (US)",
-                    builtin_alpha_vantage: "Stocks (UK/Intl)",
-                    builtin_weather: "Weather",
-                    builtin_transport: "Transport",
-                    builtin_google_maps: "Google Maps",
-                    builtin_routes: "Routes (Smart)",
-                    google_calendar_live: "Google Calendar",
-                    google_tasks_live: "Google Tasks",
-                    google_gmail_live: "Gmail",
-                    oura_live: "Oura Ring",
-                    withings_live: "Withings",
-                };
-                return labels[type] || type;
+                return type;
             },
 
             getTypeBadgeClass(type) {
-                // First check if we have a plugin with a category for this type
                 const plugin = this.pluginsByType[type];
                 if (plugin) {
-                    // Use category to determine badge class
                     const categoryClasses = {
-                        'health': 'badge-success',
-                        'productivity': 'badge-info',
-                        'finance': 'badge-warning',
-                        'location': 'badge-primary',
-                        'other': 'badge-ghost',
+                        health: "badge-success",
+                        productivity: "badge-info",
+                        finance: "badge-warning",
+                        location: "badge-primary",
+                        other: "badge-ghost",
                     };
-                    return categoryClasses[plugin.category] || 'badge-ghost';
+                    return categoryClasses[plugin.category] || "badge-ghost";
                 }
-                // Fallback for legacy types
-                if (type.startsWith("builtin_")) return "badge-primary";
-                if (type.startsWith("google_") && type.endsWith("_live")) return "badge-info";
-                if (type === "oura_live") return "badge-success";
-                if (type === "withings_live") return "badge-success";
-                if (type === "mcp_server") return "badge-accent";
-                if (type === "rapidapi") return "badge-secondary";
                 return "badge-ghost";
             },
 
             getPluginIcon(type) {
-                // Get icon from plugin metadata
                 const plugin = this.pluginsByType[type];
-                if (plugin && plugin.icon) {
-                    return plugin.icon;
-                }
-                // Fallback icons for legacy types
-                const fallbackIcons = {
-                    mcp_server: "",
-                    rest_api: "",
-                    rapidapi: "",
-                    builtin_stocks: "",
-                    builtin_alpha_vantage: "",
-                    builtin_weather: "",
-                    builtin_transport: "",
-                    builtin_google_maps: "",
-                    builtin_routes: "",
-                };
-                return fallbackIcons[type] || "";
+                return plugin?.icon || "";
             },
 
             resetForm() {
                 this.form = {
                     name: "",
                     description: "",
-                    source_type: "mcp_server",  // Default to MCP for new sources
+                    source_type: "",
                     data_type: "general",
                     best_for: "",
-                    // Google OAuth settings
-                    google_account_id: "",
-                    // Oura OAuth settings
-                    oura_account_id: "",
-                    // Withings OAuth settings
-                    withings_account_id: "",
-                    // MCP settings (new approach)
-                    mcp_api_host: "",
-                    mcp_api_key: "",  // Optional - uses RAPIDAPI_KEY env var if empty
-                    // Legacy REST API settings (for existing sources)
-                    endpoint_url: "",
-                    http_method: "GET",
-                    auth_type: "none",
-                    rapidapi_host: "",
-                    api_key_name: "X-API-Key",
-                    api_key_value: "",
-                    api_key_location: "header",
-                    bearer_token: "",
-                    query_params_json: "",
-                    response_path: "",
-                    response_format_template: "",
                     // Behavior
                     cache_ttl_seconds: 60,
                     timeout_seconds: 30,
@@ -1899,183 +1572,59 @@ block content %}
             openCreateModal() {
                 this.editingSource = null;
                 this.resetForm();
-                this.rapidapiImportUrl = "";
-                this.selectedPreset = "";
                 this.showEditModal = true;
-            },
-
-            // Import from RapidAPI URL - creates MCP source with auto-discovery
-            importFromRapidApi() {
-                const url = this.rapidapiImportUrl.trim();
-                if (!url) return;
-
-                // Parse URL: https://rapidapi.com/user/api/api-name or https://rapidapi.com/api-name
-                const patterns = [
-                    /rapidapi\.com\/[^\/]+\/api\/([^\/\?#]+)/i, // /user/api/name
-                    /rapidapi\.com\/hub\/([^\/\?#]+)/i, // /hub/name
-                    /rapidapi\.com\/([^\/\?#]+)\/api/i, // /name/api
-                ];
-
-                let apiSlug = null;
-                for (const pattern of patterns) {
-                    const match = url.match(pattern);
-                    if (match) {
-                        apiSlug = match[1].toLowerCase();
-                        break;
-                    }
-                }
-
-                if (!apiSlug) {
-                    this.testResult = {
-                        success: false,
-                        message:
-                            "Could not parse RapidAPI URL. Expected format: https://rapidapi.com/user/api/api-name",
-                    };
-                    setTimeout(() => (this.testResult = null), 4000);
-                    return;
-                }
-
-                // Detect data type from API name
-                const slugLower = apiSlug.toLowerCase();
-                let dataType = "general";
-                if (slugLower.includes("finance") || slugLower.includes("stock") || slugLower.includes("crypto")) {
-                    dataType = "finance";
-                } else if (slugLower.includes("weather")) {
-                    dataType = "weather";
-                } else if (slugLower.includes("news")) {
-                    dataType = "news";
-                } else if (slugLower.includes("sport") || slugLower.includes("football") || slugLower.includes("soccer")) {
-                    dataType = "sports";
-                } else if (slugLower.includes("transport") || slugLower.includes("train") || slugLower.includes("flight")) {
-                    dataType = "transport";
-                } else if (slugLower.includes("movie") || slugLower.includes("music") || slugLower.includes("entertainment")) {
-                    dataType = "entertainment";
-                }
-
-                // Set up form for MCP source (simpler than old REST API approach)
-                this.form.name = apiSlug;
-                this.form.source_type = "mcp_server";
-                this.form.mcp_api_host = apiSlug + ".p.rapidapi.com";
-                this.form.description = `RapidAPI: ${apiSlug} (MCP auto-discovery)`;
-                this.form.data_type = dataType;
-
-                this.testResult = {
-                    success: true,
-                    message: `Imported: ${apiSlug}. Check the API host matches RapidAPI (may need a number suffix like -15).`,
-                };
-                setTimeout(() => (this.testResult = null), 6000);
-                this.rapidapiImportUrl = "";
-            },
-
-            // Apply a preset configuration
-            applyPreset() {
-                const presetKey = this.selectedPreset;
-                if (!presetKey || !this.presets[presetKey]) return;
-
-                const preset = this.presets[presetKey];
-
-                // Copy preset values to form
-                this.form.name = preset.name;
-                this.form.description = preset.description;
-                this.form.data_type = preset.data_type;
-                this.form.best_for = preset.best_for;
-                this.form.endpoint_url = preset.endpoint_url;
-                this.form.http_method = preset.http_method;
-                this.form.auth_type = preset.auth_type;
-                this.form.rapidapi_host = preset.rapidapi_host || "";
-                this.form.query_params_json = preset.query_params_json || "";
-                this.form.response_path = preset.response_path || "";
-                this.form.response_format_template =
-                    preset.response_format_template || "";
-                this.form.cache_ttl_seconds = preset.cache_ttl_seconds || 60;
-                this.form.test_params_json = preset.test_params_json || "";
-
-                this.testResult = {
-                    success: true,
-                    message: `Applied preset: ${preset.name}`,
-                };
-                setTimeout(() => (this.testResult = null), 3000);
-                this.selectedPreset = "";
             },
 
             openEditModal(source) {
                 this.editingSource = source;
-                // Get auth config - API returns it as object (auth_config), not string
-                let authConfig = source.auth_config || {};
-                // Fallback: try parsing auth_config_json if auth_config is empty
-                if (Object.keys(authConfig).length === 0 && source.auth_config_json) {
-                    try {
-                        authConfig = JSON.parse(source.auth_config_json);
-                    } catch (e) {}
-                }
-
-                // Get query params - API returns as object (query_params)
-                let queryParamsJson = "";
-                if (source.query_params && Object.keys(source.query_params).length > 0) {
-                    queryParamsJson = JSON.stringify(source.query_params, null, 2);
-                } else if (source.query_params_json) {
-                    queryParamsJson = source.query_params_json;
-                }
 
                 this.form = {
                     name: source.name,
                     description: source.description || "",
-                    source_type: source.source_type || "mcp_server",
+                    source_type: source.source_type,
                     data_type: source.data_type || "general",
                     best_for: source.best_for || "",
-                    // MCP settings (for non-plugin MCP sources)
-                    mcp_api_host: authConfig.mcp_api_host || "",
-                    mcp_api_key: authConfig.mcp_api_key || "",
-                    // Legacy REST API settings
-                    endpoint_url: source.endpoint_url || "",
-                    http_method: source.http_method || "GET",
-                    auth_type: source.auth_type || "none",
-                    rapidapi_host: authConfig.host || "",
-                    api_key_name: authConfig.key_name || "X-API-Key",
-                    api_key_value: authConfig.key_value || "",
-                    api_key_location: authConfig.location || "header",
-                    bearer_token: authConfig.token || "",
-                    query_params_json: queryParamsJson,
-                    response_path: source.response_path || "",
-                    response_format_template:
-                        source.response_format_template || "",
-                    // Behavior
-                    cache_ttl_seconds: source.cache_ttl_seconds || 60,
-                    timeout_seconds: source.timeout_seconds || 30,
-                    retry_count: source.retry_count || 1,
-                    rate_limit_rpm: source.rate_limit_rpm || 60,
-                    test_params_json: authConfig.test_params
-                        ? JSON.stringify(authConfig.test_params)
-                        : "",
                 };
 
-                // Populate pluginConfig from config (preferred) or authConfig (legacy) for plugin-based sources
+                // Populate pluginConfig from config (preferred) or auth_config (legacy fallback)
                 const plugin = this.pluginsByType[source.source_type];
                 const selectFieldsToRestore = [];
-                // Plugin config is stored in source.config, with authConfig as legacy fallback
-                const pluginConfigSource = (source.config && Object.keys(source.config).length > 0)
-                    ? source.config
-                    : authConfig;
+                const pluginConfigSource =
+                    source.config && Object.keys(source.config).length > 0
+                        ? source.config
+                        : source.auth_config || {};
+
                 if (plugin && plugin.fields) {
                     this.pluginConfig = {};
                     for (const field of plugin.fields) {
-                        // Get value from config, falling back to default
                         let value = pluginConfigSource[field.name];
                         if (value === undefined || value === null) {
-                            value = field.default !== undefined ? field.default : '';
+                            value =
+                                field.default !== undefined
+                                    ? field.default
+                                    : "";
                         }
                         // Convert to string for form binding (except booleans)
-                        if (field.field_type === 'oauth_account' || field.field_type === 'integer') {
-                            this.pluginConfig[field.name] = value ? String(value) : '';
-                            // Track OAuth fields for DOM restoration
-                            if (field.field_type === 'oauth_account' && value) {
-                                selectFieldsToRestore.push({ name: field.name, value: String(value) });
+                        if (
+                            field.field_type === "oauth_account" ||
+                            field.field_type === "integer"
+                        ) {
+                            this.pluginConfig[field.name] = value
+                                ? String(value)
+                                : "";
+                            if (field.field_type === "oauth_account" && value) {
+                                selectFieldsToRestore.push({
+                                    name: field.name,
+                                    value: String(value),
+                                });
                             }
                         } else {
                             this.pluginConfig[field.name] = value;
-                            // Track select fields for DOM restoration (options rendered via x-for)
-                            if (field.field_type === 'select' && value) {
-                                selectFieldsToRestore.push({ name: field.name, value: String(value) });
+                            if (field.field_type === "select" && value) {
+                                selectFieldsToRestore.push({
+                                    name: field.name,
+                                    value: String(value),
+                                });
                             }
                         }
                     }
@@ -2085,19 +1634,19 @@ block content %}
 
                 this.showEditModal = true;
 
-                // Fix Alpine.js select dropdown restoration for OAuth and select fields
-                // When options are rendered via x-for after value is set, x-model doesn't sync
+                // Fix Alpine.js select dropdown restoration
                 if (selectFieldsToRestore.length > 0) {
                     setTimeout(() => {
                         for (const { name, value } of selectFieldsToRestore) {
-                            // Try a general approach - find all selects in the modal
-                            const selects = document.querySelectorAll('#editModal select');
+                            const selects =
+                                document.querySelectorAll("#editModal select");
                             for (const sel of selects) {
-                                // Check if this select has the value we're looking for as an option
-                                const option = sel.querySelector(`option[value="${value}"]`);
+                                const option = sel.querySelector(
+                                    `option[value="${value}"]`,
+                                );
                                 if (option && sel.value !== value) {
                                     sel.value = value;
-                                    sel.dispatchEvent(new Event('change'));
+                                    sel.dispatchEvent(new Event("change"));
                                 }
                             }
                         }
@@ -2110,109 +1659,67 @@ block content %}
                 this.showDetailsModal = true;
             },
 
-            onAuthTypeChange() {
-                // Reset auth-specific fields when type changes
-            },
-
-            buildAuthConfig() {
-                const config = {};
-                if (this.form.auth_type === "rapidapi") {
-                    config.host = this.form.rapidapi_host;
-                } else if (this.form.auth_type === "api_key") {
-                    config.key_name = this.form.api_key_name;
-                    config.key_value = this.form.api_key_value;
-                    config.location = this.form.api_key_location;
-                } else if (this.form.auth_type === "bearer") {
-                    config.token = this.form.bearer_token;
-                }
-                // Add test params
-                if (this.form.test_params_json) {
-                    try {
-                        config.test_params = JSON.parse(
-                            this.form.test_params_json,
-                        );
-                    } catch (e) {}
-                }
-                return config;
-            },
-
             async saveSource() {
                 this.saving = true;
                 try {
-                    // Determine source type
-                    let sourceType = this.form.source_type || "mcp_server";
                     const plugin = this.getCurrentPlugin();
-
-                    // Build config based on source type
-                    // Plugin sources use config_json, legacy sources use auth_config_json
-                    let authConfig = {};
-                    let pluginConfigData = {};
-                    const isPluginSource = plugin && plugin.fields && plugin.fields.length > 0;
-
-                    if (isPluginSource) {
-                        // Plugin-based source: build config from pluginConfig
-                        // Store the display name in config for getDisplayName()
-                        if (this.pluginConfig.name) {
-                            pluginConfigData.name = this.pluginConfig.name;
-                        }
-
-                        for (const field of plugin.fields) {
-                            // Skip 'name' field - already handled above, used as both display name and slug
-                            if (field.name === 'name') continue;
-
-                            const value = this.pluginConfig[field.name];
-
-                            // Only validate required OAuth account fields (can't have env var fallback)
-                            // Other required fields (API keys, etc.) may have env var fallbacks
-                            if (field.required && field.field_type === 'oauth_account' && !value) {
-                                this.testResult = {
-                                    success: false,
-                                    message: `Please fill in required field: ${field.label}`,
-                                };
-                                this.saving = false;
-                                setTimeout(() => (this.testResult = null), 3000);
-                                return;
-                            }
-
-                            // Convert oauth_account values to integers
-                            if (field.field_type === 'oauth_account' && value) {
-                                pluginConfigData[field.name] = parseInt(value);
-                            } else if (field.field_type === 'integer' && value) {
-                                pluginConfigData[field.name] = parseInt(value);
-                            } else if (field.field_type === 'number' && value) {
-                                pluginConfigData[field.name] = parseFloat(value);
-                            } else if (field.field_type === 'boolean') {
-                                pluginConfigData[field.name] = !!value;
-                            } else if (value !== undefined && value !== '') {
-                                pluginConfigData[field.name] = value;
-                            }
-                        }
-                    } else if (sourceType === "mcp_server") {
-                        // MCP sources just need host and optional key
-                        authConfig = {
-                            mcp_api_host: this.form.mcp_api_host,
-                            mcp_api_key: this.form.mcp_api_key || "",  // Empty = use RAPIDAPI_KEY env
+                    if (!plugin) {
+                        this.testResult = {
+                            success: false,
+                            message: "Please select a source type",
                         };
-                    } else if (sourceType !== "rest_api" && sourceType !== "rapidapi") {
-                        // Legacy: determine from auth_type for older sources
-                        sourceType = this.form.auth_type === "rapidapi" ? "rapidapi" : "rest_api";
-                        authConfig = this.buildAuthConfig();
-                    } else {
-                        // Legacy REST API auth config
-                        authConfig = this.buildAuthConfig();
+                        this.saving = false;
+                        setTimeout(() => (this.testResult = null), 3000);
+                        return;
                     }
 
-                    // Use plugin metadata for description, data_type, best_for
-                    const description = plugin?.description || this.form.description || '';
-                    const dataType = plugin?.data_type || this.form.data_type || 'general';
-                    const bestFor = plugin?.best_for || this.form.best_for || '';
+                    // Build config from pluginConfig
+                    let pluginConfigData = {};
+                    if (this.pluginConfig.name) {
+                        pluginConfigData.name = this.pluginConfig.name;
+                    }
 
-                    // For plugin sources, get name from pluginConfig; otherwise use form.name
-                    const sourceName = (plugin && this.pluginConfig.name)
-                        ? this.pluginConfig.name.toLowerCase().replace(/\s+/g, "-")
-                        : this.form.name.toLowerCase().replace(/\s+/g, "-");
+                    for (const field of plugin.fields) {
+                        if (field.name === "name") continue;
 
-                    // Validate name is provided
+                        const value = this.pluginConfig[field.name];
+
+                        // Validate required OAuth account fields
+                        if (
+                            field.required &&
+                            field.field_type === "oauth_account" &&
+                            !value
+                        ) {
+                            this.testResult = {
+                                success: false,
+                                message: `Please fill in required field: ${field.label}`,
+                            };
+                            this.saving = false;
+                            setTimeout(() => (this.testResult = null), 3000);
+                            return;
+                        }
+
+                        // Convert values to appropriate types
+                        if (field.field_type === "oauth_account" && value) {
+                            pluginConfigData[field.name] = parseInt(value);
+                        } else if (field.field_type === "integer" && value) {
+                            pluginConfigData[field.name] = parseInt(value);
+                        } else if (field.field_type === "number" && value) {
+                            pluginConfigData[field.name] = parseFloat(value);
+                        } else if (field.field_type === "boolean") {
+                            pluginConfigData[field.name] = !!value;
+                        } else if (value !== undefined && value !== "") {
+                            pluginConfigData[field.name] = value;
+                        }
+                    }
+
+                    // Get source name from pluginConfig
+                    const sourceName = this.pluginConfig.name
+                        ? this.pluginConfig.name
+                              .toLowerCase()
+                              .replace(/\s+/g, "-")
+                        : "";
+
                     if (!sourceName) {
                         this.testResult = {
                             success: false,
@@ -2225,33 +1732,17 @@ block content %}
 
                     const payload = {
                         name: sourceName,
-                        source_type: sourceType,
-                        description: description,
-                        data_type: dataType,
-                        best_for: bestFor,
-                        cache_ttl_seconds: 300,  // Default, plugins can override
+                        source_type: this.form.source_type,
+                        description: plugin.description || "",
+                        data_type: plugin.data_type || "general",
+                        best_for: plugin.best_for || "",
+                        config_json: JSON.stringify(pluginConfigData),
+                        cache_ttl_seconds: 300,
                         timeout_seconds: 30,
                         retry_count: 1,
                         rate_limit_rpm: 60,
                         enabled: true,
                     };
-
-                    // Plugin sources use config_json, legacy sources use auth_config_json
-                    if (isPluginSource) {
-                        payload.config_json = JSON.stringify(pluginConfigData);
-                    } else {
-                        payload.auth_config_json = JSON.stringify(authConfig);
-                    }
-
-                    // Add legacy fields only for non-MCP sources
-                    if (sourceType !== "mcp_server") {
-                        payload.endpoint_url = this.form.endpoint_url;
-                        payload.http_method = this.form.http_method;
-                        payload.auth_type = this.form.auth_type;
-                        payload.query_params_json = this.form.query_params_json;
-                        payload.response_path = this.form.response_path;
-                        payload.response_format_template = this.form.response_format_template;
-                    }
 
                     const url = this.editingSource
                         ? `/api/live-data-sources/${this.editingSource.id}`
@@ -2289,56 +1780,6 @@ block content %}
                 }
             },
 
-            async testCurrentConfig() {
-                this.testing = true;
-                try {
-                    let payload;
-                    if (this.form.source_type === "mcp_server") {
-                        // MCP source test
-                        payload = {
-                            source_type: "mcp_server",
-                            auth_config_json: JSON.stringify({
-                                mcp_api_host: this.form.mcp_api_host,
-                                mcp_api_key: this.form.mcp_api_key || "",
-                            }),
-                        };
-                    } else {
-                        // Legacy REST API test
-                        payload = {
-                            source_type: "rest_api",
-                            endpoint_url: this.form.endpoint_url,
-                            http_method: this.form.http_method,
-                            auth_type: this.form.auth_type,
-                            auth_config_json: JSON.stringify(
-                                this.buildAuthConfig(),
-                            ),
-                            query_params_json: this.form.query_params_json,
-                            response_path: this.form.response_path,
-                        };
-                    }
-
-                    const response = await fetch(
-                        "/api/live-data-sources/test-config",
-                        {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(payload),
-                        },
-                    );
-
-                    const result = await response.json();
-                    this.testResult = result;
-                } catch (error) {
-                    this.testResult = {
-                        success: false,
-                        message: "Test failed: " + error.message,
-                    };
-                } finally {
-                    this.testing = false;
-                    setTimeout(() => (this.testResult = null), 5000);
-                }
-            },
-
             async toggleEnabled(source) {
                 try {
                     await fetch(`/api/live-data-sources/${source.id}`, {
@@ -2358,40 +1799,24 @@ block content %}
                     this.expandedRows.splice(idx, 1);
                 } else {
                     this.expandedRows.push(id);
-                    const source = this.sources.find(s => s.id === id);
-                    // Load tools for MCP sources when expanded
-                    if (source && source.source_type === 'mcp_server' && !this.sourceTools[id]) {
-                        this.loadTools(source);
-                    }
+                    const source = this.sources.find((s) => s.id === id);
                     // Load endpoint stats if source has calls
-                    if (source && source.total_calls > 0 && !this.endpointStats[id]) {
+                    if (
+                        source &&
+                        source.total_calls > 0 &&
+                        !this.endpointStats[id]
+                    ) {
                         this.loadEndpointStats(source);
                     }
-                }
-            },
-
-            async loadTools(source) {
-                this.loadingTools[source.id] = true;
-                try {
-                    const response = await fetch(`/api/live-data-sources/${source.id}/tools`);
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.sourceTools[source.id] = data.tools || [];
-                    } else {
-                        this.sourceTools[source.id] = [];
-                    }
-                } catch (error) {
-                    console.error("Failed to load tools:", error);
-                    this.sourceTools[source.id] = [];
-                } finally {
-                    this.loadingTools[source.id] = false;
                 }
             },
 
             async loadEndpointStats(source) {
                 this.loadingEndpointStats[source.id] = true;
                 try {
-                    const response = await fetch(`/api/live-data-sources/${source.id}/endpoint-stats`);
+                    const response = await fetch(
+                        `/api/live-data-sources/${source.id}/endpoint-stats`,
+                    );
                     if (response.ok) {
                         const data = await response.json();
                         this.endpointStats[source.id] = data.stats || [];

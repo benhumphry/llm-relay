@@ -91,8 +91,14 @@ class SmartStocksLiveSource(PluginLiveSource):
         "apple": "AAPL",
         "microsoft": "MSFT",
         "amazon": "AMZN",
+        # Alphabet/Google: GOOGL = Class A (voting), GOOG = Class C (non-voting)
+        # Default to GOOGL as it's more commonly traded
         "google": "GOOGL",
         "alphabet": "GOOGL",
+        "alphabet class a": "GOOGL",
+        "alphabet class c": "GOOG",
+        "googl": "GOOGL",
+        "goog": "GOOG",
         "meta": "META",
         "facebook": "META",
         "nvidia": "NVDA",
@@ -373,6 +379,16 @@ class SmartStocksLiveSource(PluginLiveSource):
             ),
         ]
 
+    @classmethod
+    def get_designator_hint(cls) -> str:
+        """Provide guidance for the designator on how to use this source."""
+        return (
+            "Parameters: company (use simple company name like 'Apple', 'Tesla', 'Nvidia' - "
+            "NOT 'Alphabet (GOOGL)' format); query_type (quote|profile|news|recommendations|earnings|history). "
+            "For UK stocks use Alpha Vantage names like 'Tesco', 'Lloyds', 'BP'. "
+            "For portfolio queries, use 'companies' param with comma-separated names."
+        )
+
     def __init__(self, config: dict):
         """Initialize with configuration."""
         self.name = config.get("name", "smart-finance")
@@ -552,19 +568,39 @@ class SmartStocksLiveSource(PluginLiveSource):
         Checks known mappings first, then searches via Finnhub API.
         Results cached for 30 days.
         """
-        company_lower = company.lower().strip()
+        original = company.strip()
+        company_lower = original.lower()
+
+        # Handle annotated names like "Alphabet (GOOGL)" or "Apple - AAPL"
+        # Extract the symbol from parentheses or after dash if present
+        symbol_match = re.search(r"\(([A-Z]{1,5})\)|\s-\s([A-Z]{1,5})$", original)
+        if symbol_match:
+            extracted_symbol = symbol_match.group(1) or symbol_match.group(2)
+            logger.debug(
+                f"Extracted symbol from annotation: '{original}' -> {extracted_symbol}"
+            )
+            return extracted_symbol
+
+        # Also extract and try just the company name part (before parentheses)
+        name_only = re.sub(r"\s*\([^)]*\)\s*$", "", company_lower).strip()
+        name_only = re.sub(
+            r"\s*-\s*[A-Z]{1,5}\s*$", "", name_only, flags=re.IGNORECASE
+        ).strip()
 
         # Check known mappings FIRST - handles cases like "UNITY" -> "U"
         # where the company name looks like a ticker but isn't
+        if name_only in self.KNOWN_SYMBOLS:
+            return self.KNOWN_SYMBOLS[name_only]
         if company_lower in self.KNOWN_SYMBOLS:
             return self.KNOWN_SYMBOLS[company_lower]
 
         # Check if it's already a valid symbol (not in known mappings)
         # US: all caps, 1-5 chars | UK: includes .LON suffix
-        if company.isupper() and (
-            (1 <= len(company) <= 5 and "." not in company) or company.endswith(".LON")
+        if original.isupper() and (
+            (1 <= len(original) <= 5 and "." not in original)
+            or original.endswith(".LON")
         ):
-            return company
+            return original
 
         # Check cache
         cache_key = f"symbol:{company_lower}"
