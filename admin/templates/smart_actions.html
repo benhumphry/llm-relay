@@ -1,0 +1,438 @@
+{% extends "base.html" %} {% block title %}Smart Actions{% endblock %} {% block
+content %}
+<div x-data="smartActionsPage()" x-init="init()">
+    <!-- Header -->
+    <div class="flex justify-between items-start mb-6">
+        <div>
+            <h1 class="text-2xl font-bold">Smart Actions</h1>
+            <p class="text-base-content/60">
+                Action handlers that allow the LLM to perform tasks like sending
+                emails, creating calendar events, and managing notifications.
+            </p>
+        </div>
+    </div>
+
+    <!-- Loading State -->
+    <div x-show="loading" class="flex justify-center py-12">
+        <span class="loading loading-spinner loading-lg"></span>
+    </div>
+
+    <!-- Empty State -->
+    <template x-if="!loading && handlers.length === 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body text-center py-12">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="h-16 w-16 mx-auto text-base-content/30"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                    />
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                </svg>
+                <h3 class="mt-4 text-lg font-medium">
+                    No Action Handlers Found
+                </h3>
+                <p class="mt-2 text-base-content/60 max-w-lg mx-auto">
+                    Action handlers are loaded automatically on startup. Check
+                    the server logs for any loading errors.
+                </p>
+            </div>
+        </div>
+    </template>
+
+    <!-- Handlers Table -->
+    <template x-if="!loading && handlers.length > 0">
+        <div class="card bg-base-100 shadow-lg">
+            <div class="overflow-x-auto">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th class="w-8"></th>
+                            <th>Handler</th>
+                            <th>Actions</th>
+                            <th>Connected Accounts</th>
+                            <th>Status</th>
+                            <th class="text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <template
+                        x-for="handler in handlers"
+                        :key="handler.action_type"
+                    >
+                        <tbody>
+                            <!-- Main Row -->
+                            <tr
+                                @click="toggleExpand(handler.action_type)"
+                                class="cursor-pointer hover:bg-base-200 transition-colors"
+                            >
+                                <td class="w-8">
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        class="h-4 w-4 transition-transform"
+                                        :class="{'rotate-90': expandedRows.includes(handler.action_type)}"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                    >
+                                        <path
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            stroke-width="2"
+                                            d="M9 5l7 7-7 7"
+                                        />
+                                    </svg>
+                                </td>
+                                <td>
+                                    <div class="flex items-center gap-3">
+                                        <span
+                                            class="text-xl"
+                                            x-text="getIcon(handler.action_type)"
+                                        ></span>
+                                        <div>
+                                            <div
+                                                class="font-medium capitalize"
+                                                x-text="handler.action_type"
+                                            ></div>
+                                            <div
+                                                class="text-xs text-base-content/50"
+                                                x-text="getDescription(handler.action_type)"
+                                            ></div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="flex flex-wrap gap-1">
+                                        <template
+                                            x-for="action in handler.supported_actions.slice(0, 3)"
+                                            :key="action"
+                                        >
+                                            <span
+                                                class="badge badge-ghost badge-sm"
+                                                x-text="action.replace('_', ' ')"
+                                            ></span>
+                                        </template>
+                                        <template
+                                            x-if="handler.supported_actions.length > 3"
+                                        >
+                                            <span
+                                                class="badge badge-ghost badge-sm"
+                                                x-text="'+' + (handler.supported_actions.length - 3)"
+                                            ></span>
+                                        </template>
+                                    </div>
+                                </td>
+                                <td>
+                                    <template x-if="handler.requires_oauth">
+                                        <template
+                                            x-if="handler.available_accounts.length > 0"
+                                        >
+                                            <div class="flex flex-wrap gap-1">
+                                                <template
+                                                    x-for="account in handler.available_accounts.slice(0, 2)"
+                                                    :key="account.id"
+                                                >
+                                                    <span
+                                                        class="badge badge-outline badge-sm"
+                                                        x-text="account.account_email.split('@')[0]"
+                                                    ></span>
+                                                </template>
+                                                <template
+                                                    x-if="handler.available_accounts.length > 2"
+                                                >
+                                                    <span
+                                                        class="badge badge-outline badge-sm"
+                                                        x-text="'+' + (handler.available_accounts.length - 2)"
+                                                    ></span>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <template
+                                            x-if="handler.available_accounts.length === 0"
+                                        >
+                                            <span class="text-xs text-warning"
+                                                >None connected</span
+                                            >
+                                        </template>
+                                    </template>
+                                    <template x-if="!handler.requires_oauth">
+                                        <span
+                                            class="text-xs text-base-content/50"
+                                            >Not required</span
+                                        >
+                                    </template>
+                                </td>
+                                <td>
+                                    <template x-if="handler.is_configured">
+                                        <div class="flex items-center gap-1">
+                                            <div
+                                                class="w-2 h-2 rounded-full bg-success"
+                                            ></div>
+                                            <span
+                                                class="text-xs text-base-content/60"
+                                                >Ready</span
+                                            >
+                                        </div>
+                                    </template>
+                                    <template x-if="!handler.is_configured">
+                                        <div class="flex items-center gap-1">
+                                            <div
+                                                class="w-2 h-2 rounded-full bg-warning"
+                                            ></div>
+                                            <span class="text-xs text-warning"
+                                                >Setup needed</span
+                                            >
+                                        </div>
+                                    </template>
+                                </td>
+                                <td class="text-right" @click.stop>
+                                    <template
+                                        x-if="handler.requires_oauth && handler.oauth_providers.length > 0"
+                                    >
+                                        <div class="dropdown dropdown-end">
+                                            <label
+                                                tabindex="0"
+                                                class="btn btn-ghost btn-xs"
+                                            >
+                                                Connect
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    class="h-3 w-3"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                >
+                                                    <path
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        stroke-width="2"
+                                                        d="M19 9l-7 7-7-7"
+                                                    />
+                                                </svg>
+                                            </label>
+                                            <ul
+                                                tabindex="0"
+                                                class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52"
+                                            >
+                                                <template
+                                                    x-for="provider in handler.oauth_providers"
+                                                    :key="provider"
+                                                >
+                                                    <li>
+                                                        <a
+                                                            :href="'/oauth/' + provider + '?redirect_uri=/smart-actions'"
+                                                            class="capitalize"
+                                                        >
+                                                            <span
+                                                                x-text="getProviderIcon(provider)"
+                                                            ></span>
+                                                            <span
+                                                                x-text="provider"
+                                                            ></span>
+                                                        </a>
+                                                    </li>
+                                                </template>
+                                            </ul>
+                                        </div>
+                                    </template>
+                                </td>
+                            </tr>
+                            <!-- Expanded Row -->
+                            <tr
+                                x-show="expandedRows.includes(handler.action_type)"
+                                x-collapse
+                            >
+                                <td colspan="6" class="bg-base-200/50 p-0">
+                                    <div class="p-4">
+                                        <div class="grid md:grid-cols-2 gap-6">
+                                            <!-- Supported Actions -->
+                                            <div>
+                                                <h4
+                                                    class="text-sm font-semibold mb-2"
+                                                >
+                                                    Supported Actions
+                                                </h4>
+                                                <div class="overflow-x-auto">
+                                                    <table
+                                                        class="table table-xs"
+                                                    >
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Action</th>
+                                                                <th>
+                                                                    Description
+                                                                </th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <template
+                                                                x-for="action in handler.supported_actions"
+                                                                :key="action"
+                                                            >
+                                                                <tr>
+                                                                    <td
+                                                                        class="font-mono text-xs"
+                                                                        x-text="action"
+                                                                    ></td>
+                                                                    <td
+                                                                        class="text-xs"
+                                                                        x-text="getActionDescription(handler.action_type, action)"
+                                                                    ></td>
+                                                                </tr>
+                                                            </template>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <!-- Connected Accounts -->
+                                            <template
+                                                x-if="handler.requires_oauth && handler.available_accounts.length > 0"
+                                            >
+                                                <div>
+                                                    <h4
+                                                        class="text-sm font-semibold mb-2"
+                                                    >
+                                                        Connected Accounts
+                                                    </h4>
+                                                    <div
+                                                        class="flex flex-wrap gap-2"
+                                                    >
+                                                        <template
+                                                            x-for="account in handler.available_accounts"
+                                                            :key="account.id"
+                                                        >
+                                                            <span
+                                                                class="badge badge-outline"
+                                                                x-text="account.account_email"
+                                                            ></span>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </template>
+                </table>
+            </div>
+        </div>
+    </template>
+</div>
+
+<script>
+    function smartActionsPage() {
+        return {
+            loading: true,
+            handlers: [],
+            oauthAccounts: {},
+            expandedRows: [],
+
+            async init() {
+                await this.loadHandlers();
+                this.loading = false;
+            },
+
+            async loadHandlers() {
+                try {
+                    const response = await fetch("/api/smart-actions");
+                    const data = await response.json();
+                    this.handlers = data.handlers || [];
+                    this.oauthAccounts = data.oauth_accounts || {};
+                } catch (error) {
+                    console.error("Failed to load handlers:", error);
+                }
+            },
+
+            toggleExpand(actionType) {
+                const idx = this.expandedRows.indexOf(actionType);
+                if (idx >= 0) {
+                    this.expandedRows.splice(idx, 1);
+                } else {
+                    this.expandedRows.push(actionType);
+                }
+            },
+
+            getIcon(actionType) {
+                const icons = {
+                    email: "📧",
+                    calendar: "📅",
+                    notification: "🔔",
+                    schedule: "⏰",
+                    task: "✅",
+                };
+                return icons[actionType] || "🎬";
+            },
+
+            getProviderIcon(provider) {
+                const icons = {
+                    google: "🔵",
+                    microsoft: "🟦",
+                };
+                return icons[provider] || "🔗";
+            },
+
+            getDescription(actionType) {
+                const descriptions = {
+                    email: "Draft and send emails via Gmail or Outlook",
+                    calendar: "Create, update, and delete calendar events",
+                    notification: "Send push notifications via webhooks",
+                    schedule: "Schedule recurring or one-time prompts",
+                    task: "Create and manage tasks",
+                };
+                return (
+                    descriptions[actionType] ||
+                    "Action handler for " + actionType
+                );
+            },
+
+            getActionDescription(actionType, action) {
+                const descriptions = {
+                    email: {
+                        draft_new: "Create a new email draft",
+                        draft_reply:
+                            "Create a reply draft to an existing email",
+                        draft_forward:
+                            "Create a forward draft of an existing email",
+                        send_new: "Send a new email immediately",
+                        send_reply: "Send a reply immediately",
+                        send_forward: "Forward an email immediately",
+                        label: "Add or remove labels from an email",
+                        archive: "Archive an email",
+                        mark_read: "Mark an email as read",
+                        mark_unread: "Mark an email as unread",
+                    },
+                    calendar: {
+                        create: "Create a new calendar event",
+                        update: "Update an existing calendar event",
+                        delete: "Delete a calendar event",
+                    },
+                    notification: {
+                        push: "Send a push notification",
+                    },
+                    schedule: {
+                        prompt: "Schedule a recurring or one-time prompt",
+                        cancel: "Cancel a scheduled prompt",
+                    },
+                };
+                return (
+                    descriptions[actionType]?.[action] ||
+                    action.replace(/_/g, " ")
+                );
+            },
+        };
+    }
+</script>
+{% endblock %}

@@ -8,13 +8,28 @@ Supports RAG-only, web-only, or hybrid (both) modes.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from db.models import SmartAlias
     from providers.registry import ProviderRegistry, ResolvedModel
 
 logger = logging.getLogger(__name__)
+
+
+def _get_live_source_to_unified_map() -> dict[str, str]:
+    """
+    Get mapping from legacy live source types to unified source types.
+
+    Uses dynamic plugin lookup so custom plugins are automatically included.
+    """
+    try:
+        from plugin_base.loader import get_live_source_to_unified_map
+
+        return get_live_source_to_unified_map()
+    except ImportError:
+        logger.warning("Plugin loader not available for dynamic live source lookup")
+        return {}
 
 
 @dataclass
@@ -151,6 +166,144 @@ class SmartEnricherEngine:
         from db import get_all_live_data_sources
 
         return [s for s in get_all_live_data_sources() if s.enabled]
+
+    def _get_unified_source_for_live(self, source: Any) -> Optional[Any]:
+        """
+        Check if a unified source plugin exists for this live source.
+
+        Unified sources combine RAG + Live into a single plugin with smart routing.
+        When available, they provide better results by intelligently combining
+        historical (RAG) and real-time (Live) data.
+
+        Args:
+            source: LiveDataSource or DetachedLiveDataSource
+
+        Returns:
+            Instantiated unified source plugin if available, None otherwise
+        """
+        source_type = getattr(source, "source_type", "")
+
+        # Map legacy live source type to unified source type using dynamic lookup
+        live_to_unified = _get_live_source_to_unified_map()
+        unified_type = live_to_unified.get(source_type)
+        if not unified_type:
+            return None
+
+        try:
+            from plugin_base.loader import get_unified_source_plugin
+
+            plugin_class = get_unified_source_plugin(unified_type)
+            if not plugin_class:
+                return None
+
+            # Build config from the live source attributes
+            config = {}
+
+            # Google OAuth sources need account ID
+            google_account_id = getattr(source, "google_account_id", None)
+            if google_account_id:
+                config["oauth_account_id"] = google_account_id
+
+            # Add any other relevant config from the source
+            # The unified source will use these for both RAG and Live operations
+
+            return plugin_class(config)
+
+        except Exception as e:
+            logger.debug(f"Could not instantiate unified source for {source_type}: {e}")
+            return None
+
+    def _get_rag_search_fn_for_unified(self, source: Any) -> Optional[callable]:
+        """
+        Create a RAG search function for unified source smart routing.
+
+        This function allows unified sources to query the RAG index as part of
+        their smart routing logic. It searches linked document stores that
+        correspond to the same data source (e.g., Gmail live + Gmail docs).
+
+        Args:
+            source: LiveDataSource being queried
+
+        Returns:
+            Callable (query, limit) -> list[str], or None if no matching stores
+        """
+        source_type = getattr(source, "source_type", "")
+
+        # Map legacy live source type to unified source type using dynamic lookup
+        live_to_unified = _get_live_source_to_unified_map()
+        unified_type = live_to_unified.get(source_type)
+        if not unified_type:
+            return None
+
+        # Get the document store source types this unified source handles
+        try:
+            from plugin_base.loader import get_unified_source_plugin
+
+            plugin_class = get_unified_source_plugin(unified_type)
+            if not plugin_class:
+                return None
+            doc_source_types = plugin_class.get_handled_doc_source_types()
+        except ImportError:
+            return None
+
+        if not doc_source_types:
+            return None
+
+        # Find linked document stores that match any of this unified source's doc types
+        linked_stores = self._get_linked_stores()
+        matching_stores = [
+            s
+            for s in linked_stores
+            if getattr(s, "source_type", "") in doc_source_types
+            and getattr(s, "enabled", True)
+            and getattr(s, "index_status", "") == "ready"
+            and getattr(s, "collection_name", None)
+        ]
+
+        if not matching_stores:
+            logger.debug(
+                f"No matching document stores for unified source {unified_type} "
+                f"(looking for {doc_source_types})"
+            )
+            return None
+
+        def rag_search(query: str, limit: int = 10) -> list[str]:
+            """Search matching RAG collections."""
+            results = []
+            try:
+                from context.chroma import get_chroma_client
+                from rag.retriever import RetrievalEngine
+
+                chroma_client = get_chroma_client()
+
+                for store in matching_stores:
+                    collection_name = store.collection_name
+                    if not collection_name:
+                        continue
+
+                    try:
+                        collection = chroma_client.get_collection(collection_name)
+                        # Simple semantic search
+                        search_results = collection.query(
+                            query_texts=[query],
+                            n_results=min(limit, 5),  # Cap per store
+                            include=["documents", "metadatas"],
+                        )
+
+                        if search_results and search_results.get("documents"):
+                            for doc in search_results["documents"][0]:
+                                if doc:
+                                    results.append(doc)
+
+                    except Exception as e:
+                        logger.debug(f"RAG search failed for {collection_name}: {e}")
+
+            except Exception as e:
+                logger.debug(f"RAG search initialization failed: {e}")
+
+            return results[:limit]
+
+        return rag_search
 
     def enrich(
         self,
@@ -731,23 +884,41 @@ class SmartEnricherEngine:
                     continue
 
                 # Parameter hints based on source type (non-MCP)
+                # First check if there's a plugin that can provide hints
                 param_hints = ""
-                if source_type == "builtin_weather":
-                    param_hints = (
-                        "Parameters: location (city name), type (current|forecast)"
-                    )
-                elif source_type == "builtin_stocks":
-                    param_hints = "Parameters: symbol (US stock ticker like AAPL, MSFT, NVDA). For portfolio queries, extract ALL stock symbols from user context and create separate entries for each."
-                elif source_type == "builtin_alpha_vantage":
-                    param_hints = "Parameters: symbol (UK stock ticker like LGEN.LON, TSCO.LON, or fund name like 'L&G Global Technology'), period (optional: 1W, 1M, 3M, 6M, 1Y for historical data)"
-                elif source_type == "builtin_transport":
-                    param_hints = "Parameters: station (DEPARTURE station - use user's home location from context), destination (optional), type (departures|arrivals). UK train departures ONLY - for full journey planning with connections, use 'routes' with mode=transit instead."
-                elif source_type == "gmail":
-                    param_hints = "Parameters: action (today|unread|recent|search). Use action='today' for today's emails, action='unread' for unread, action='search' with query for specific searches (e.g. from:sender subject:topic)"
-                elif source_type == "builtin_routes":
-                    param_hints = "Parameters: origin, destination, mode (drive|walk|bicycle|transit). Optional: arrival_time (ARRIVE BY - for events like '3pm kick off') OR departure_time (LEAVE AT) - use one, the other, or neither. PREFER THIS for all journey planning."
-                elif source_type == "builtin_google_maps":
-                    param_hints = "Parameters: action (search|details|nearby|directions), query (search term), location (lat,lng or address), place_id (for details). Use for places search, business info, nearby POIs. For directions between cities, prefer 'routes' source instead."
+                try:
+                    from plugin_base.loader import get_live_source_plugin
+
+                    plugin_class = get_live_source_plugin(source_type)
+                    if plugin_class:
+                        # Use plugin's designator hint (includes params and best_for)
+                        param_hints = plugin_class.get_designator_hint()
+                        # Also update data_type and best_for from plugin if not set
+                        if not data_type:
+                            data_type = getattr(plugin_class, "data_type", "")
+                        if not best_for:
+                            best_for = getattr(plugin_class, "best_for", "")
+                except ImportError:
+                    pass
+
+                # Fall back to hardcoded hints for non-plugin sources
+                if not param_hints:
+                    if source_type == "builtin_weather":
+                        param_hints = (
+                            "Parameters: location (city name), type (current|forecast)"
+                        )
+                    elif source_type == "builtin_stocks":
+                        param_hints = "Parameters: symbol (US stock ticker like AAPL, MSFT, NVDA). For portfolio queries, extract ALL stock symbols from user context and create separate entries for each."
+                    elif source_type == "builtin_alpha_vantage":
+                        param_hints = "Parameters: symbol (UK stock ticker like LGEN.LON, TSCO.LON, or fund name like 'L&G Global Technology'), period (optional: 1W, 1M, 3M, 6M, 1Y for historical data)"
+                    elif source_type == "builtin_transport":
+                        param_hints = "Parameters: station (DEPARTURE station - use user's home location from context), destination (optional), type (departures|arrivals). UK train departures ONLY - for full journey planning with connections, use 'routes' with mode=transit instead."
+                    elif source_type == "gmail":
+                        param_hints = "Parameters: action (today|unread|recent|search). Use action='today' for today's emails, action='unread' for unread, action='search' with query for specific searches (e.g. from:sender subject:topic)"
+                    elif source_type == "builtin_routes":
+                        param_hints = "Parameters: origin, destination, mode (drive|walk|bicycle|transit). Optional: arrival_time (ARRIVE BY - for events like '3pm kick off') OR departure_time (LEAVE AT) - use one, the other, or neither. PREFER THIS for all journey planning."
+                    elif source_type == "builtin_google_maps":
+                        param_hints = "Parameters: action (search|details|nearby|directions), query (search term), location (lat,lng or address), place_id (for details). Use for places search, business info, nearby POIs. For directions between cities, prefer 'routes' source instead."
 
                 live_source_info.append(
                     {
@@ -1449,6 +1620,59 @@ Respond with ONLY the JSON object."""
                     sources_already_logged.add(source_name)
 
                 try:
+                    # Check if a unified source plugin exists for this live source
+                    # Unified sources combine RAG + Live with smart routing
+                    unified_source = self._get_unified_source_for_live(source)
+                    if unified_source:
+                        # Use unified source's query() method with smart routing
+                        logger.debug(
+                            f"Using unified source for {source_name} ({getattr(source, 'source_type', '')})"
+                        )
+
+                        # Build a RAG search function if we have linked document stores
+                        # that match this unified source type
+                        rag_search_fn = self._get_rag_search_fn_for_unified(source)
+
+                        import time
+
+                        start_time = time.time()
+                        unified_result = unified_source.query(
+                            query=params.get("query", query),
+                            params=params,
+                            rag_search_fn=rag_search_fn,
+                        )
+                        latency_ms = int((time.time() - start_time) * 1000)
+
+                        if unified_result.success and unified_result.formatted:
+                            context_parts.append(unified_result.formatted)
+                            # Log unified source usage
+                            logger.info(
+                                f"Unified source {source_name}: "
+                                f"routing={unified_result.routing_used.value if unified_result.routing_used else 'n/a'}, "
+                                f"rag={unified_result.rag_count}, live={unified_result.live_count}, "
+                                f"dedupe={unified_result.dedupe_count}, time={latency_ms}ms"
+                            )
+                            # Update source status
+                            from db.live_data_sources import (
+                                record_live_data_call,
+                                update_live_data_source_status,
+                            )
+
+                            update_live_data_source_status(source.id, success=True)
+                            record_live_data_call(
+                                source.id,
+                                "unified_query",
+                                success=True,
+                                latency_ms=latency_ms,
+                            )
+                        elif unified_result.error:
+                            metadata["errors"].append(
+                                f"{source_name}: {unified_result.error}"
+                            )
+
+                        continue  # Skip legacy provider path
+
+                    # Fall back to legacy provider
                     provider = get_provider_for_source(source)
                     if not provider.is_available():
                         metadata["errors"].append(f"{source_name}: Not available")

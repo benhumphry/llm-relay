@@ -11,9 +11,10 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 logger = logging.getLogger(__name__)
+
 
 # Supported file extensions (Docling capabilities)
 SUPPORTED_EXTENSIONS = {
@@ -72,6 +73,43 @@ class RAGIndexer:
             pass
         except Exception as e:
             logger.warning(f"Failed to clear GPU memory: {e}")
+
+    def _get_unified_source_for_store(self, store: Any) -> Optional[Any]:
+        """
+        Check if a unified source plugin exists for this document store.
+
+        Unified sources combine RAG + Live into a single plugin. When available,
+        they provide the document enumeration and reading capabilities needed
+        for indexing.
+
+        Args:
+            store: DocumentStore model instance
+
+        Returns:
+            Instantiated unified source plugin if available, None otherwise
+        """
+        source_type = getattr(store, "source_type", "")
+
+        try:
+            from plugin_base.loader import get_unified_source_for_doc_type
+
+            # Dynamic lookup - find unified source that handles this doc store type
+            plugin_class = get_unified_source_for_doc_type(source_type)
+            if not plugin_class:
+                return None
+
+            # Use the plugin's own method to build config from store
+            # This checks PluginConfig first, then falls back to legacy columns
+            config = plugin_class.get_config_for_store(store)
+
+            logger.info(
+                f"Using unified source plugin '{plugin_class.source_type}' for store '{store.name}'"
+            )
+            return plugin_class(config)
+
+        except Exception as e:
+            logger.debug(f"Could not instantiate unified source for {source_type}: {e}")
+            return None
 
     def _get_existing_doc_metadata(self, collection) -> dict[str, Optional[str]]:
         """
@@ -695,69 +733,74 @@ SUMMARY: <content type description>"""
         update_document_store_index_status(store_id, "indexing")
 
         try:
-            # Get document source based on source_type
-            from mcp.sources import get_document_source
+            # Check if a unified source plugin exists for this store type
+            # Unified sources combine RAG + Live into a single plugin
+            source = self._get_unified_source_for_store(store)
 
-            # Always use global vision settings
-            from .vision import get_vision_config_from_settings
+            if not source:
+                # Fall back to legacy document source
+                from mcp.sources import get_document_source
 
-            global_vision = get_vision_config_from_settings()
-            vision_provider = global_vision.provider_type or "local"
-            vision_model = global_vision.model_name
-            vision_ollama_url = global_vision.base_url
-            if vision_provider != "local":
-                logger.info(
-                    f"Using global vision settings: {vision_provider}/{vision_model}"
+                # Always use global vision settings
+                from .vision import get_vision_config_from_settings
+
+                global_vision = get_vision_config_from_settings()
+                vision_provider = global_vision.provider_type or "local"
+                vision_model = global_vision.model_name
+                vision_ollama_url = global_vision.base_url
+                if vision_provider != "local":
+                    logger.info(
+                        f"Using global vision settings: {vision_provider}/{vision_model}"
+                    )
+
+                source = get_document_source(
+                    source_type=store.source_type,
+                    source_path=store.source_path,
+                    mcp_config=store.mcp_server_config,
+                    google_account_id=store.google_account_id,
+                    gdrive_folder_id=store.gdrive_folder_id,
+                    gmail_label_id=store.gmail_label_id,
+                    gcalendar_calendar_id=store.gcalendar_calendar_id,
+                    gtasks_tasklist_id=store.gtasks_tasklist_id,
+                    gcontacts_group_id=store.gcontacts_group_id,
+                    microsoft_account_id=store.microsoft_account_id,
+                    onedrive_folder_id=store.onedrive_folder_id,
+                    outlook_folder_id=store.outlook_folder_id,
+                    outlook_days_back=store.outlook_days_back,
+                    onenote_notebook_id=store.onenote_notebook_id,
+                    teams_team_id=store.teams_team_id,
+                    teams_channel_id=store.teams_channel_id,
+                    teams_days_back=store.teams_days_back,
+                    paperless_url=store.paperless_url,
+                    paperless_token=store.paperless_token,
+                    paperless_tag_id=store.paperless_tag_id,
+                    github_repo=store.github_repo,
+                    github_branch=store.github_branch,
+                    github_path=store.github_path,
+                    notion_database_id=store.notion_database_id,
+                    notion_page_id=store.notion_page_id,
+                    nextcloud_folder=store.nextcloud_folder,
+                    website_url=store.website_url,
+                    website_crawl_depth=store.website_crawl_depth,
+                    website_max_pages=store.website_max_pages,
+                    website_include_pattern=store.website_include_pattern,
+                    website_exclude_pattern=store.website_exclude_pattern,
+                    website_crawler_override=store.website_crawler_override,
+                    slack_channel_id=store.slack_channel_id,
+                    slack_channel_types=store.slack_channel_types,
+                    slack_days_back=store.slack_days_back,
+                    todoist_project_id=store.todoist_project_id,
+                    todoist_filter=store.todoist_filter,
+                    todoist_include_completed=store.todoist_include_completed,
+                    websearch_query=store.websearch_query,
+                    websearch_max_results=store.websearch_max_results,
+                    websearch_pages_to_scrape=store.websearch_pages_to_scrape,
+                    websearch_time_range=store.websearch_time_range,
+                    websearch_category=store.websearch_category,
+                    vision_provider=vision_provider,
+                    vision_model=vision_model,
+                    vision_ollama_url=vision_ollama_url,
                 )
-
-            source = get_document_source(
-                source_type=store.source_type,
-                source_path=store.source_path,
-                mcp_config=store.mcp_server_config,
-                google_account_id=store.google_account_id,
-                gdrive_folder_id=store.gdrive_folder_id,
-                gmail_label_id=store.gmail_label_id,
-                gcalendar_calendar_id=store.gcalendar_calendar_id,
-                gtasks_tasklist_id=store.gtasks_tasklist_id,
-                gcontacts_group_id=store.gcontacts_group_id,
-                microsoft_account_id=store.microsoft_account_id,
-                onedrive_folder_id=store.onedrive_folder_id,
-                outlook_folder_id=store.outlook_folder_id,
-                outlook_days_back=store.outlook_days_back,
-                onenote_notebook_id=store.onenote_notebook_id,
-                teams_team_id=store.teams_team_id,
-                teams_channel_id=store.teams_channel_id,
-                teams_days_back=store.teams_days_back,
-                paperless_url=store.paperless_url,
-                paperless_token=store.paperless_token,
-                paperless_tag_id=store.paperless_tag_id,
-                github_repo=store.github_repo,
-                github_branch=store.github_branch,
-                github_path=store.github_path,
-                notion_database_id=store.notion_database_id,
-                notion_page_id=store.notion_page_id,
-                nextcloud_folder=store.nextcloud_folder,
-                website_url=store.website_url,
-                website_crawl_depth=store.website_crawl_depth,
-                website_max_pages=store.website_max_pages,
-                website_include_pattern=store.website_include_pattern,
-                website_exclude_pattern=store.website_exclude_pattern,
-                website_crawler_override=store.website_crawler_override,
-                slack_channel_id=store.slack_channel_id,
-                slack_channel_types=store.slack_channel_types,
-                slack_days_back=store.slack_days_back,
-                todoist_project_id=store.todoist_project_id,
-                todoist_filter=store.todoist_filter,
-                todoist_include_completed=store.todoist_include_completed,
-                websearch_query=store.websearch_query,
-                websearch_max_results=store.websearch_max_results,
-                websearch_pages_to_scrape=store.websearch_pages_to_scrape,
-                websearch_time_range=store.websearch_time_range,
-                websearch_category=store.websearch_category,
-                vision_provider=vision_provider,
-                vision_model=vision_model,
-                vision_ollama_url=vision_ollama_url,
-            )
 
             if not source.is_available():
                 raise ValueError(f"Document source not available: {source_desc}")

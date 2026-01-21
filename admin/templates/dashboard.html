@@ -978,81 +978,96 @@ content %}
         </div>
     </div>
 
-    <!-- System Status -->
-    <div class="card bg-base-100 shadow-lg">
-        <div class="card-body py-4">
-            <h2 class="text-lg font-semibold mb-4">System Status</h2>
+    <!-- Action Plugins & System Status -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        <!-- Action Plugins -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body py-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Action Plugins</h2>
+                    <span
+                        class="badge badge-primary"
+                        x-text="Object.keys(plugins).length + ' loaded'"
+                    ></span>
+                </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <!-- Infrastructure Column -->
-                <div>
-                    <h3
-                        class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
-                    >
-                        Infrastructure
-                    </h3>
-                    <ul class="space-y-2">
-                        <!-- Providers -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-4 w-4 text-success"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M5 13l4 4L19 7"
-                                    />
-                                </svg>
-                                <span class="text-sm">LLM Providers</span>
-                            </div>
-                            <span class="text-xs text-base-content/50">
-                                <span
-                                    x-text="stats.providers?.configured || 0"
-                                ></span>
-                                configured
-                            </span>
-                        </li>
+                <template x-if="Object.keys(plugins).length === 0">
+                    <p class="text-sm text-base-content/50">
+                        No action plugins loaded
+                    </p>
+                </template>
 
-                        <!-- Database -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-4 w-4 text-success"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M5 13l4 4L19 7"
-                                    />
-                                </svg>
+                <div class="space-y-3">
+                    <template x-for="(plugin, key) in plugins" :key="key">
+                        <div class="bg-base-200 rounded-lg p-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2">
+                                    <span
+                                        x-show="plugin.icon"
+                                        x-text="plugin.icon"
+                                        class="text-lg"
+                                    ></span>
+                                    <span
+                                        class="font-medium text-sm"
+                                        x-text="plugin.display_name"
+                                    ></span>
+                                </div>
                                 <span
-                                    class="text-sm"
-                                    x-text="featureStatus.dependencies?.database?.type || 'Database'"
+                                    class="badge badge-sm"
+                                    :class="{
+                                        'badge-primary': plugin.category === 'communication',
+                                        'badge-secondary': plugin.category === 'calendar',
+                                        'badge-accent': plugin.category === 'notification',
+                                        'badge-info': plugin.category === 'scheduling',
+                                        'badge-ghost': !['communication', 'calendar', 'notification', 'scheduling'].includes(plugin.category)
+                                    }"
+                                    x-text="plugin.category"
                                 ></span>
                             </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.dependencies?.database?.display || ''"
-                            ></span>
-                        </li>
+                            <p
+                                class="text-xs text-base-content/60 mb-2"
+                                x-text="plugin.description"
+                            ></p>
+                            <div
+                                class="flex items-center gap-2 text-xs text-base-content/50"
+                            >
+                                <span
+                                    x-text="plugin.actions?.length + ' actions'"
+                                ></span>
+                                <template x-if="plugin.is_builtin">
+                                    <span class="badge badge-xs badge-ghost"
+                                        >Built-in</span
+                                    >
+                                </template>
+                                <template x-if="plugin.fields?.some(f => f.field_type === 'oauth_account')">
+                                    <span class="badge badge-xs badge-warning"
+                                        >OAuth</span
+                                    >
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
 
-                        <!-- ChromaDB -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.dependencies?.chromadb?.available"
-                                >
+        <!-- System Status -->
+        <div class="card bg-base-100 shadow-lg">
+            <div class="card-body py-4">
+                <h2 class="text-lg font-semibold mb-4">System Status</h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Infrastructure Column -->
+                    <div>
+                        <h3
+                            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
+                        >
+                            Infrastructure
+                        </h3>
+                        <ul class="space-y-2">
+                            <!-- Providers -->
+                            <li class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
                                         class="h-4 w-4 text-success"
@@ -1067,13 +1082,22 @@ content %}
                                             d="M5 13l4 4L19 7"
                                         />
                                     </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.dependencies?.chromadb?.available"
-                                >
+                                    <span class="text-sm">LLM Providers</span>
+                                </div>
+                                <span class="text-xs text-base-content/50">
+                                    <span
+                                        x-text="stats.providers?.configured || 0"
+                                    ></span>
+                                    configured
+                                </span>
+                            </li>
+
+                            <!-- Database -->
+                            <li class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
+                                        class="h-4 w-4 text-success"
                                         fill="none"
                                         viewBox="0 0 24 24"
                                         stroke="currentColor"
@@ -1082,26 +1106,26 @@ content %}
                                             stroke-linecap="round"
                                             stroke-linejoin="round"
                                             stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
+                                            d="M5 13l4 4L19 7"
                                         />
                                     </svg>
-                                </template>
-                                <span class="text-sm">ChromaDB</span>
-                            </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.dependencies?.chromadb?.url || featureStatus.dependencies?.chromadb?.reason || 'Not configured'"
-                            ></span>
-                        </li>
+                                    <span
+                                        class="text-sm"
+                                        x-text="featureStatus.dependencies?.database?.type || 'Database'"
+                                    ></span>
+                                </div>
+                                <span
+                                    class="text-xs text-base-content/50"
+                                    x-text="featureStatus.dependencies?.database?.display || ''"
+                                ></span>
+                            </li>
 
-                        <!-- Search Providers -->
-                        <template
-                            x-for="provider in featureStatus.dependencies?.search_providers || []"
-                            :key="provider.name"
-                        >
+                            <!-- ChromaDB -->
                             <li class="flex items-center justify-between">
                                 <div class="flex items-center gap-2">
-                                    <template x-if="provider.configured">
+                                    <template
+                                        x-if="featureStatus.dependencies?.chromadb?.available"
+                                    >
                                         <svg
                                             xmlns="http://www.w3.org/2000/svg"
                                             class="h-4 w-4 text-success"
@@ -1117,7 +1141,9 @@ content %}
                                             />
                                         </svg>
                                     </template>
-                                    <template x-if="!provider.configured">
+                                    <template
+                                        x-if="!featureStatus.dependencies?.chromadb?.available"
+                                    >
                                         <svg
                                             xmlns="http://www.w3.org/2000/svg"
                                             class="h-4 w-4 text-base-content/30"
@@ -1133,386 +1159,456 @@ content %}
                                             />
                                         </svg>
                                     </template>
-                                    <span
-                                        class="text-sm capitalize"
-                                        x-text="provider.name"
-                                    ></span>
+                                    <span class="text-sm">ChromaDB</span>
                                 </div>
                                 <span
                                     class="text-xs text-base-content/50"
-                                    x-text="provider.configured ? 'Configured' : (provider.requires_api_key ? 'API key not set' : 'URL not set')"
+                                    x-text="featureStatus.dependencies?.chromadb?.url || featureStatus.dependencies?.chromadb?.reason || 'Not configured'"
                                 ></span>
                             </li>
-                        </template>
-                    </ul>
-                </div>
 
-                <!-- Features Column -->
-                <div>
-                    <h3
-                        class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
-                    >
-                        Feature Availability
-                    </h3>
-                    <ul class="space-y-2">
-                        <!-- RAG -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.dependencies?.chromadb?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-success"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.dependencies?.chromadb?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Document RAG</span>
-                            </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
-                            ></span>
-                        </li>
+                            <!-- Search Providers -->
+                            <template
+                                x-for="provider in featureStatus.dependencies?.search_providers || []"
+                                :key="provider.name"
+                            >
+                                <li class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <template x-if="provider.configured">
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4 text-success"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M5 13l4 4L19 7"
+                                                />
+                                            </svg>
+                                        </template>
+                                        <template x-if="!provider.configured">
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4 text-base-content/30"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M6 18L18 6M6 6l12 12"
+                                                />
+                                            </svg>
+                                        </template>
+                                        <span
+                                            class="text-sm capitalize"
+                                            x-text="provider.name"
+                                        ></span>
+                                    </div>
+                                    <span
+                                        class="text-xs text-base-content/50"
+                                        x-text="provider.configured ? 'Configured' : (provider.requires_api_key ? 'API key not set' : 'URL not set')"
+                                    ></span>
+                                </li>
+                            </template>
+                        </ul>
+                    </div>
 
-                        <!-- Web Enrichment -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.features?.smart_enrichers?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-success"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
+                    <!-- Features Column -->
+                    <div>
+                        <h3
+                            class="text-xs font-semibold text-base-content/50 uppercase tracking-wider mb-3"
+                        >
+                            Feature Availability
+                        </h3>
+                        <ul class="space-y-2">
+                            <!-- RAG -->
+                            <li class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <template
+                                        x-if="featureStatus.dependencies?.chromadb?.available"
                                     >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.features?.smart_enrichers?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-success"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M5 13l4 4L19 7"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <template
+                                        x-if="!featureStatus.dependencies?.chromadb?.available"
                                     >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Web Enrichment</span>
-                            </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.features?.smart_enrichers?.reason || 'Available'"
-                            ></span>
-                        </li>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-base-content/30"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <span class="text-sm">Document RAG</span>
+                                </div>
+                                <span
+                                    class="text-xs text-base-content/50"
+                                    x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
+                                ></span>
+                            </li>
 
-                        <!-- Semantic Caching -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.dependencies?.chromadb?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-success"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
+                            <!-- Web Enrichment -->
+                            <li class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <template
+                                        x-if="featureStatus.features?.smart_enrichers?.available"
                                     >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.dependencies?.chromadb?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-success"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M5 13l4 4L19 7"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <template
+                                        x-if="!featureStatus.features?.smart_enrichers?.available"
                                     >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Semantic Caching</span>
-                            </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
-                            ></span>
-                        </li>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-base-content/30"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <span class="text-sm">Web Enrichment</span>
+                                </div>
+                                <span
+                                    class="text-xs text-base-content/50"
+                                    x-text="featureStatus.features?.smart_enrichers?.reason || 'Available'"
+                                ></span>
+                            </li>
 
-                        <!-- Model Intelligence -->
-                        <li class="flex items-center justify-between">
-                            <div class="flex items-center gap-2">
-                                <template
-                                    x-if="featureStatus.features?.model_intelligence?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-success"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
+                            <!-- Semantic Caching -->
+                            <li class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <template
+                                        x-if="featureStatus.dependencies?.chromadb?.available"
                                     >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M5 13l4 4L19 7"
-                                        />
-                                    </svg>
-                                </template>
-                                <template
-                                    x-if="!featureStatus.features?.model_intelligence?.available"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-4 w-4 text-base-content/30"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-success"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M5 13l4 4L19 7"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <template
+                                        x-if="!featureStatus.dependencies?.chromadb?.available"
                                     >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M6 18L18 6M6 6l12 12"
-                                        />
-                                    </svg>
-                                </template>
-                                <span class="text-sm">Model Intelligence</span>
-                            </div>
-                            <span
-                                class="text-xs text-base-content/50"
-                                x-text="featureStatus.features?.model_intelligence?.reason || 'Available'"
-                            ></span>
-                        </li>
-                    </ul>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-base-content/30"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <span class="text-sm"
+                                        >Semantic Caching</span
+                                    >
+                                </div>
+                                <span
+                                    class="text-xs text-base-content/50"
+                                    x-text="featureStatus.dependencies?.chromadb?.available ? 'Available' : 'Requires ChromaDB'"
+                                ></span>
+                            </li>
+
+                            <!-- Model Intelligence -->
+                            <li class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <template
+                                        x-if="featureStatus.features?.model_intelligence?.available"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-success"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M5 13l4 4L19 7"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <template
+                                        x-if="!featureStatus.features?.model_intelligence?.available"
+                                    >
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            class="h-4 w-4 text-base-content/30"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                        >
+                                            <path
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                stroke-width="2"
+                                                d="M6 18L18 6M6 6l12 12"
+                                            />
+                                        </svg>
+                                    </template>
+                                    <span class="text-sm"
+                                        >Model Intelligence</span
+                                    >
+                                </div>
+                                <span
+                                    class="text-xs text-base-content/50"
+                                    x-text="featureStatus.features?.model_intelligence?.reason || 'Available'"
+                                ></span>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Toast notifications -->
-    <div class="toast toast-end">
-        <template x-for="toast in toasts" :key="toast.id">
-            <div
-                class="alert"
-                :class="toast.type === 'error' ? 'alert-error' : 'alert-success'"
-            >
-                <span x-text="toast.message"></span>
-            </div>
-        </template>
+        <div class="toast toast-end">
+            <template x-for="toast in toasts" :key="toast.id">
+                <div
+                    class="alert"
+                    :class="toast.type === 'error' ? 'alert-error' : 'alert-success'"
+                >
+                    <span x-text="toast.message"></span>
+                </div>
+            </template>
+        </div>
     </div>
-</div>
 
-<script>
-    function dashboard() {
-        return {
-            stats: {},
-            smartStats: {},
-            periodStats: null,
-            topProviders: [],
-            topModels: [],
-            topClients: [],
-            topTags: [],
-            topLiveDataSources: [],
-            liveDataSummary: {},
-            toasts: [],
-            period: "today",
-            featureStatus: {},
+    <script>
+        function dashboard() {
+            return {
+                stats: {},
+                smartStats: {},
+                periodStats: null,
+                topProviders: [],
+                topModels: [],
+                topClients: [],
+                topTags: [],
+                topLiveDataSources: [],
+                liveDataSummary: {},
+                toasts: [],
+                period: "today",
+                featureStatus: {},
+                plugins: {},
 
-            async init() {
-                await Promise.all([
-                    this.loadStats(),
-                    this.loadSmartStats(),
-                    this.loadFeatureStatus(),
-                    this.loadLiveDataStats(),
-                ]);
-            },
-
-            async loadSmartStats() {
-                try {
-                    const response = await fetch("/api/dashboard/smart-stats");
-                    if (response.ok) {
-                        this.smartStats = await response.json();
-                    }
-                } catch (err) {
-                    console.error("Failed to load smart stats:", err);
-                }
-            },
-
-            async loadLiveDataStats() {
-                try {
-                    const response = await fetch(
-                        "/api/dashboard/live-data-stats",
-                    );
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.topLiveDataSources = data.top_sources || [];
-                        this.liveDataSummary = data.summary || {};
-                    }
-                } catch (err) {
-                    console.error("Failed to load live data stats:", err);
-                }
-            },
-
-            async loadFeatureStatus() {
-                try {
-                    const response = await fetch("/api/feature-status");
-                    if (response.ok) {
-                        this.featureStatus = await response.json();
-                    }
-                } catch (err) {
-                    console.error("Failed to load feature status:", err);
-                }
-            },
-
-            get periodLabel() {
-                const labels = {
-                    today: "Today's",
-                    "7d": "7 Day",
-                    "30d": "30 Day",
-                    "90d": "90 Day",
-                };
-                return labels[this.period] || "Today's";
-            },
-
-            getDateParams() {
-                if (this.period === "today") {
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    return `start_date=${today.toISOString().split("T")[0]}`;
-                } else {
-                    const days = parseInt(this.period);
-                    return `days=${days}`;
-                }
-            },
-
-            async setPeriod(newPeriod) {
-                this.period = newPeriod;
-                await this.loadStats();
-            },
-
-            async loadStats() {
-                try {
-                    const dateParams = this.getDateParams();
-
-                    const [
-                        statsRes,
-                        summaryRes,
-                        providersRes,
-                        modelsRes,
-                        clientsRes,
-                        tagsRes,
-                    ] = await Promise.all([
-                        fetch("/api/stats"),
-                        fetch(`/api/usage/summary?${dateParams}`),
-                        fetch(`/api/usage/by-provider?${dateParams}`),
-                        fetch(`/api/usage/by-model?${dateParams}`),
-                        fetch(`/api/usage/by-client?${dateParams}`),
-                        fetch(`/api/usage/by-tag?${dateParams}`),
+                async init() {
+                    await Promise.all([
+                        this.loadStats(),
+                        this.loadSmartStats(),
+                        this.loadFeatureStatus(),
+                        this.loadLiveDataStats(),
+                        this.loadPlugins(),
                     ]);
+                },
 
-                    if (statsRes.ok) this.stats = await statsRes.json();
-                    if (summaryRes.ok) {
-                        const summary = await summaryRes.json();
-                        this.periodStats = {
-                            requests: summary.total_requests || 0,
-                            tokens: summary.total_tokens || 0,
-                            cost: summary.estimated_cost || 0,
-                            cache_hits: summary.cache_hits || 0,
-                            cache_tokens_saved: summary.cache_tokens_saved || 0,
-                            cache_cost_saved: summary.cache_cost_saved || 0,
-                        };
+                async loadPlugins() {
+                    try {
+                        const response = await fetch("/api/plugins/actions");
+                        if (response.ok) {
+                            this.plugins = await response.json();
+                        }
+                    } catch (err) {
+                        console.error("Failed to load plugins:", err);
                     }
-                    if (providersRes.ok)
-                        this.topProviders = await providersRes.json();
-                    if (modelsRes.ok) this.topModels = await modelsRes.json();
-                    if (clientsRes.ok)
-                        this.topClients = await clientsRes.json();
-                    if (tagsRes.ok) this.topTags = await tagsRes.json();
-                } catch (err) {
-                    this.showToast("Failed to load data", "error");
-                }
-            },
+                },
 
-            formatTokens(tokens) {
-                if (tokens >= 1000000)
-                    return (tokens / 1000000).toFixed(1) + "M";
-                if (tokens >= 1000) return (tokens / 1000).toFixed(1) + "K";
-                return tokens.toString();
-            },
+                async loadSmartStats() {
+                    try {
+                        const response = await fetch(
+                            "/api/dashboard/smart-stats",
+                        );
+                        if (response.ok) {
+                            this.smartStats = await response.json();
+                        }
+                    } catch (err) {
+                        console.error("Failed to load smart stats:", err);
+                    }
+                },
 
-            formatNumber(num) {
-                if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
-                if (num >= 1000) return (num / 1000).toFixed(1) + "K";
-                return num.toString();
-            },
+                async loadLiveDataStats() {
+                    try {
+                        const response = await fetch(
+                            "/api/dashboard/live-data-stats",
+                        );
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.topLiveDataSources = data.top_sources || [];
+                            this.liveDataSummary = data.summary || {};
+                        }
+                    } catch (err) {
+                        console.error("Failed to load live data stats:", err);
+                    }
+                },
 
-            showToast(message, type = "success") {
-                const id = Date.now();
-                this.toasts.push({ id, message, type });
-                setTimeout(() => {
-                    this.toasts = this.toasts.filter((t) => t.id !== id);
-                }, 3000);
-            },
-        };
-    }
-</script>
-{% endblock %}
+                async loadFeatureStatus() {
+                    try {
+                        const response = await fetch("/api/feature-status");
+                        if (response.ok) {
+                            this.featureStatus = await response.json();
+                        }
+                    } catch (err) {
+                        console.error("Failed to load feature status:", err);
+                    }
+                },
+
+                get periodLabel() {
+                    const labels = {
+                        today: "Today's",
+                        "7d": "7 Day",
+                        "30d": "30 Day",
+                        "90d": "90 Day",
+                    };
+                    return labels[this.period] || "Today's";
+                },
+
+                getDateParams() {
+                    if (this.period === "today") {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        return `start_date=${today.toISOString().split("T")[0]}`;
+                    } else {
+                        const days = parseInt(this.period);
+                        return `days=${days}`;
+                    }
+                },
+
+                async setPeriod(newPeriod) {
+                    this.period = newPeriod;
+                    await this.loadStats();
+                },
+
+                async loadStats() {
+                    try {
+                        const dateParams = this.getDateParams();
+
+                        const [
+                            statsRes,
+                            summaryRes,
+                            providersRes,
+                            modelsRes,
+                            clientsRes,
+                            tagsRes,
+                        ] = await Promise.all([
+                            fetch("/api/stats"),
+                            fetch(`/api/usage/summary?${dateParams}`),
+                            fetch(`/api/usage/by-provider?${dateParams}`),
+                            fetch(`/api/usage/by-model?${dateParams}`),
+                            fetch(`/api/usage/by-client?${dateParams}`),
+                            fetch(`/api/usage/by-tag?${dateParams}`),
+                        ]);
+
+                        if (statsRes.ok) this.stats = await statsRes.json();
+                        if (summaryRes.ok) {
+                            const summary = await summaryRes.json();
+                            this.periodStats = {
+                                requests: summary.total_requests || 0,
+                                tokens: summary.total_tokens || 0,
+                                cost: summary.estimated_cost || 0,
+                                cache_hits: summary.cache_hits || 0,
+                                cache_tokens_saved:
+                                    summary.cache_tokens_saved || 0,
+                                cache_cost_saved: summary.cache_cost_saved || 0,
+                            };
+                        }
+                        if (providersRes.ok)
+                            this.topProviders = await providersRes.json();
+                        if (modelsRes.ok)
+                            this.topModels = await modelsRes.json();
+                        if (clientsRes.ok)
+                            this.topClients = await clientsRes.json();
+                        if (tagsRes.ok) this.topTags = await tagsRes.json();
+                    } catch (err) {
+                        this.showToast("Failed to load data", "error");
+                    }
+                },
+
+                formatTokens(tokens) {
+                    if (tokens >= 1000000)
+                        return (tokens / 1000000).toFixed(1) + "M";
+                    if (tokens >= 1000) return (tokens / 1000).toFixed(1) + "K";
+                    return tokens.toString();
+                },
+
+                formatNumber(num) {
+                    if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+                    if (num >= 1000) return (num / 1000).toFixed(1) + "K";
+                    return num.toString();
+                },
+
+                showToast(message, type = "success") {
+                    const id = Date.now();
+                    this.toasts.push({ id, message, type });
+                    setTimeout(() => {
+                        this.toasts = this.toasts.filter((t) => t.id !== id);
+                    }, 3000);
+                },
+            };
+        }
+    </script>
+    {% endblock %}
+</div>

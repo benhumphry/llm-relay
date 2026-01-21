@@ -65,6 +65,7 @@ def get_document_store_by_id(store_id: int, db=None) -> Optional[DocumentStore]:
 def create_document_store(
     name: str,
     source_type: str = "local",
+    plugin_config_id: Optional[int] = None,
     source_path: Optional[str] = None,
     mcp_server_config: Optional[dict] = None,
     google_account_id: Optional[int] = None,
@@ -144,6 +145,7 @@ def create_document_store(
         store = DocumentStore(
             name=name.lower().strip(),
             source_type=source_type,
+            plugin_config_id=plugin_config_id,
             source_path=source_path,
             mcp_server_config_json=json.dumps(mcp_server_config)
             if mcp_server_config
@@ -235,6 +237,7 @@ def update_document_store(
     store_id: int,
     name: Optional[str] = None,
     source_type: Optional[str] = None,
+    plugin_config_id: Optional[int] = None,
     source_path: Optional[str] = None,
     mcp_server_config: Optional[dict] = None,
     google_account_id: Optional[int] = None,
@@ -316,6 +319,8 @@ def update_document_store(
             store.name = name.lower().strip()
         if source_type is not None:
             store.source_type = source_type
+        if plugin_config_id is not None:
+            store.plugin_config_id = plugin_config_id if plugin_config_id else None
         if source_path is not None:
             store.source_path = source_path
         if mcp_server_config is not None:
@@ -657,6 +662,7 @@ def _store_to_detached(
         id=store.id,
         name=store.name,
         source_type=store.source_type,
+        plugin_config_id=store.plugin_config_id,
         source_path=store.source_path,
         mcp_server_config_json=store.mcp_server_config_json,
         google_account_id=store.google_account_id,

@@ -68,6 +68,7 @@ from .models import (
     Model,
     ModelOverride,
     OllamaInstance,
+    PluginConfig,
     Provider,
     Redirect,
     RequestLog,
@@ -75,6 +76,18 @@ from .models import (
     Setting,
     SmartAlias,
     smart_alias_stores,
+)
+from .plugin_configs import (
+    create_plugin_config,
+    delete_plugin_config,
+    get_action_configs,
+    get_all_plugin_configs,
+    get_document_source_configs,
+    get_live_source_configs,
+    get_plugin_config,
+    get_plugin_config_by_name,
+    get_plugin_configs_by_type,
+    update_plugin_config,
 )
 from .redirects import (
     create_redirect,
@@ -248,4 +261,16 @@ __all__ = [
     "cleanup_old_executions",
     "get_execution_stats",
     "event_already_scheduled",
+    # Plugin Configs
+    "PluginConfig",
+    "get_plugin_config",
+    "get_plugin_config_by_name",
+    "get_plugin_configs_by_type",
+    "get_all_plugin_configs",
+    "create_plugin_config",
+    "update_plugin_config",
+    "delete_plugin_config",
+    "get_action_configs",
+    "get_document_source_configs",
+    "get_live_source_configs",
 ]

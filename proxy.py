@@ -617,6 +617,119 @@ def generate_openai_id(prefix: str = "chatcmpl") -> str:
 
 
 # ============================================================================
+# Anthropic Message Conversion
+# ============================================================================
+
+
+def convert_anthropic_messages(
+    anthropic_messages: list, system: str | None = None
+) -> tuple[str | None, list]:
+    """
+    Convert Anthropic message format to provider-agnostic format.
+
+    Anthropic format differences:
+    - System prompt is a separate field, not in messages array
+    - Content can be string or array of content blocks
+    - Images use {"type": "image", "source": {"type": "base64", ...}}
+
+    Returns (system_prompt, messages) tuple.
+    """
+    messages = []
+
+    for msg in anthropic_messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        if role in ("user", "assistant"):
+            if isinstance(content, str):
+                messages.append({"role": role, "content": content})
+            elif isinstance(content, list):
+                # Anthropic content blocks - handle each type
+                content_blocks = []
+                for block in content:
+                    block_type = block.get("type", "text")
+                    if block_type == "text":
+                        content_blocks.append(
+                            {"type": "text", "text": block.get("text", "")}
+                        )
+                    elif block_type == "image":
+                        # Already in correct internal format
+                        content_blocks.append(block)
+                    elif block_type == "tool_use":
+                        # Pass through for tool support
+                        content_blocks.append(block)
+                    elif block_type == "tool_result":
+                        content_blocks.append(block)
+                if content_blocks:
+                    messages.append({"role": role, "content": content_blocks})
+
+    return system, messages
+
+
+def generate_anthropic_id(prefix: str = "msg") -> str:
+    """Generate an Anthropic-style message ID."""
+    chars = string.ascii_letters + string.digits
+    suffix = "".join(random.choices(chars, k=24))
+    return f"{prefix}_{suffix}"
+
+
+def map_finish_reason_to_anthropic(finish_reason: str | None) -> str:
+    """Map internal/OpenAI finish_reason to Anthropic stop_reason."""
+    mapping = {
+        "stop": "end_turn",
+        "length": "max_tokens",
+        "tool_calls": "tool_use",
+        "content_filter": "end_turn",  # Best approximation
+        None: "end_turn",
+    }
+    return mapping.get(finish_reason, "end_turn")
+
+
+def build_anthropic_response(
+    message_id: str,
+    model: str,
+    content: str,
+    stop_reason: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> dict:
+    """Build non-streaming Anthropic response."""
+    return {
+        "id": message_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": content}],
+        "model": model,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        },
+    }
+
+
+def anthropic_error_response(
+    error_type: str,
+    message: str,
+    status_code: int = 400,
+) -> tuple[Response, int]:
+    """Return error in Anthropic format."""
+    return (
+        jsonify(
+            {
+                "type": "error",
+                "error": {
+                    "type": error_type,
+                    "message": message,
+                },
+            }
+        ),
+        status_code,
+    )
+
+
+# ============================================================================
 # Response Formatters
 # ============================================================================
 
@@ -982,6 +1095,189 @@ def stream_openai_response(
         source_attribution,
         strip_actions,
     )
+
+
+def stream_anthropic_response(
+    provider,
+    model: str,
+    messages: list,
+    system: str | None,
+    options: dict,
+    request_model: str,
+    on_complete: callable = None,
+    input_char_count: int = 0,
+    source_attribution: str | None = None,
+    strip_actions: bool = False,
+) -> Generator[str, None, None]:
+    """
+    Stream response in Anthropic SSE format with named events.
+
+    Anthropic streaming uses named events in this sequence:
+    1. message_start - Initial message metadata
+    2. content_block_start - Start of content block
+    3. content_block_delta - Text chunks (multiple)
+    4. content_block_stop - End of content block
+    5. message_delta - Final metadata (stop_reason, usage)
+    6. message_stop - Stream termination
+    """
+    message_id = generate_anthropic_id()
+    output_chars = 0
+    llm_chunks = []
+    client_chunks = []
+    action_filter = ActionStreamFilter(strip_actions=strip_actions)
+    content_started = False
+
+    try:
+        # message_start event
+        message_start = {
+            "type": "message_start",
+            "message": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": request_model,
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": input_char_count // 4,
+                    "output_tokens": 0,
+                },
+            },
+        }
+        yield f"event: message_start\ndata: {json.dumps(message_start)}\n\n"
+
+        # Stream content from provider
+        for text in provider.chat_completion_stream(model, messages, system, options):
+            output_chars += len(text)
+            llm_chunks.append(text)
+
+            # Filter actions if enabled
+            filtered_text = action_filter.process(text)
+            if filtered_text:
+                # Start content block on first text
+                if not content_started:
+                    content_block_start = {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""},
+                    }
+                    yield f"event: content_block_start\ndata: {json.dumps(content_block_start)}\n\n"
+                    content_started = True
+
+                client_chunks.append(filtered_text)
+                delta = {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": filtered_text},
+                }
+                yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+
+        # Flush any remaining buffered content
+        remaining = action_filter.flush()
+        if remaining:
+            if not content_started:
+                content_block_start = {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""},
+                }
+                yield f"event: content_block_start\ndata: {json.dumps(content_block_start)}\n\n"
+                content_started = True
+            client_chunks.append(remaining)
+            delta = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": remaining},
+            }
+            yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+
+        # Append source attribution if provided
+        if source_attribution:
+            if not content_started:
+                content_block_start = {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""},
+                }
+                yield f"event: content_block_start\ndata: {json.dumps(content_block_start)}\n\n"
+                content_started = True
+            output_chars += len(source_attribution)
+            client_chunks.append(source_attribution)
+            delta = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": source_attribution},
+            }
+            yield f"event: content_block_delta\ndata: {json.dumps(delta)}\n\n"
+
+        # Ensure we started content block (even for empty response)
+        if not content_started:
+            content_block_start = {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            }
+            yield f"event: content_block_start\ndata: {json.dumps(content_block_start)}\n\n"
+
+        # content_block_stop event
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+
+        # Get streaming result (cost, tokens) if provider supports it
+        stream_result = None
+        if hasattr(provider, "get_last_stream_result"):
+            stream_result = provider.get_last_stream_result()
+
+        # Calculate tokens
+        input_tokens = (
+            stream_result.get("input_tokens")
+            if stream_result and stream_result.get("input_tokens")
+            else input_char_count // 4
+        )
+        output_tokens = (
+            stream_result.get("output_tokens")
+            if stream_result and stream_result.get("output_tokens")
+            else output_chars // 4
+        )
+
+        # message_delta event (with stop_reason and usage)
+        message_delta = {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "usage": {"output_tokens": output_tokens},
+        }
+        yield f"event: message_delta\ndata: {json.dumps(message_delta)}\n\n"
+
+        # message_stop event
+        yield f"event: message_stop\ndata: {json.dumps({'type': 'message_stop'})}\n\n"
+
+        # Debug comparison
+        llm_full = "".join(llm_chunks)
+        client_full = "".join(client_chunks)
+        debug_compare_response("/v1/messages (stream)", llm_full, client_full)
+
+        # Call completion callback with full LLM content
+        if on_complete:
+            cost = stream_result.get("cost") if stream_result else None
+            on_complete(
+                input_tokens,
+                output_tokens,
+                cost=cost,
+                stream_result=stream_result,
+                full_content=llm_full,
+                action_blocks=action_filter.action_blocks if strip_actions else None,
+            )
+
+    except Exception as e:
+        logger.error(f"Provider error during Anthropic streaming: {e}")
+        # Emit error event
+        error_event = {
+            "type": "error",
+            "error": {"type": "api_error", "message": str(e)},
+        }
+        yield f"event: error\ndata: {json.dumps(error_event)}\n\n"
+        if on_complete:
+            on_complete(0, 0, error=str(e), stream_result=None)
 
 
 # ============================================================================
@@ -3017,6 +3313,640 @@ def openai_completions():
         ), 500
 
 
+# ============================================================================
+# Anthropic API Endpoint
+# ============================================================================
+
+
+@app.route("/v1/messages", methods=["POST"])
+def anthropic_messages():
+    """Anthropic-compatible messages endpoint."""
+    data = request.get_json() or {}
+
+    model_name = data.get("model", "claude-sonnet")
+
+    # Extract tag early so we use clean model name for resolution
+    tag, clean_model_name = extract_tag(request, model_name)
+
+    # Log inbound request (before resolution/processing)
+    log_inbound_request(model_name, "/v1/messages", tag)
+
+    # Anthropic API has system as separate field
+    anthropic_system = data.get("system")
+    anthropic_messages = data.get("messages", [])
+
+    # Convert messages - system is already separate in Anthropic API
+    system_prompt, messages = convert_anthropic_messages(
+        anthropic_messages, anthropic_system
+    )
+
+    # Extract @relay commands from messages and get cleaned messages
+    messages, relay_commands, relay_tags = extract_relay_commands_from_messages(
+        messages
+    )
+    if relay_commands:
+        logger.info(
+            f"Extracted @relay commands: {[c.command + ':' + c.raw_value for c in relay_commands]}"
+        )
+
+    # Merge relay tags with existing tags
+    if relay_tags:
+        all_tags = tag.split(",") if tag else []
+        all_tags.extend(relay_tags)
+        tag = normalize_tags(",".join(all_tags))
+
+    # Generate session key for smart router caching
+    from flask import g
+
+    client_ip = getattr(g, "client_ip", get_client_ip(request))
+    user_agent = request.headers.get("User-Agent", "")
+    session_key = get_session_key(client_ip, user_agent)
+
+    try:
+        resolved = registry.resolve_model(
+            clean_model_name,
+            messages=messages,
+            system=system_prompt,
+            session_key=session_key,
+            tags=tag,
+        )
+        provider, model_id = resolved.provider, resolved.model_id
+        alias_name = resolved.alias_name
+        alias_tags = resolved.alias_tags or []
+        router_name = resolved.router_name
+    except ValueError as e:
+        return anthropic_error_response("not_found_error", str(e), 404)
+
+    # Handle Smart Enricher context injection (unified RAG + Web)
+    enricher_name = None
+    enricher_tags = []
+    enricher_type = None
+    enricher_query = None
+    enricher_urls = None
+    enrichment_result = None
+    original_messages = messages.copy()
+    if getattr(resolved, "has_enrichment", False):
+        enrichment_result = resolved.enrichment_result
+        enricher_name = enrichment_result.enricher_name
+        enricher_tags = enrichment_result.enricher_tags or []
+
+        enricher_type = enrichment_result.enrichment_type
+        enricher_query = enrichment_result.search_query
+        enricher_urls = enrichment_result.scraped_urls or None
+
+        if enrichment_result.augmented_system is not None:
+            system_prompt = enrichment_result.augmented_system
+        if enrichment_result.augmented_messages:
+            messages = enrichment_result.augmented_messages
+
+        if enrichment_result.context_injected:
+            logger.info(
+                f"Enricher '{enricher_name}' applied {enricher_type} enrichment "
+                f"(RAG: {enrichment_result.chunks_retrieved} chunks, Web: {len(enrichment_result.scraped_urls)} URLs)"
+            )
+
+        from db import get_smart_alias_by_name, update_smart_alias_stats
+
+        smart_alias = get_smart_alias_by_name(enricher_name)
+        if smart_alias:
+            is_routing = smart_alias.use_routing
+            if is_routing:
+                router_name = enricher_name
+            update_smart_alias_stats(
+                alias_id=enrichment_result.enricher_id,
+                increment_requests=1,
+                increment_routing=1 if is_routing else 0,
+                increment_injections=1 if enrichment_result.context_injected else 0,
+                increment_search=1 if enrichment_result.search_query else 0,
+                increment_scrape=1 if enrichment_result.scraped_urls else 0,
+            )
+
+        # Log designator usage for enricher
+        designator_calls = getattr(enrichment_result, "designator_calls", [])
+        if designator_calls:
+            designator_model = enrichment_result.designator_model or "unknown"
+            designator_tag = tag
+            if enricher_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + enricher_tags))
+                designator_tag = ",".join(all_tags)
+
+            for call in designator_calls:
+                track_completion(
+                    provider_id=designator_model.split("/")[0]
+                    if "/" in designator_model
+                    else "unknown",
+                    model_id=designator_model.split("/")[1]
+                    if "/" in designator_model
+                    else designator_model,
+                    model_name=designator_model,
+                    endpoint="/v1/messages",
+                    input_tokens=call.get("prompt_tokens", 0),
+                    output_tokens=call.get("completion_tokens", 0),
+                    status_code=200,
+                    tag=designator_tag,
+                    is_designator=True,
+                    request_type="designator",
+                )
+        elif enrichment_result.designator_usage:
+            designator_model = enrichment_result.designator_model or "unknown"
+            designator_usage = enrichment_result.designator_usage
+            designator_tag = tag
+            if enricher_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + enricher_tags))
+                designator_tag = ",".join(all_tags)
+
+            track_completion(
+                provider_id=designator_model.split("/")[0]
+                if "/" in designator_model
+                else "unknown",
+                model_id=designator_model.split("/")[1]
+                if "/" in designator_model
+                else designator_model,
+                model_name=designator_model,
+                endpoint="/v1/messages",
+                input_tokens=designator_usage.get("prompt_tokens", 0),
+                output_tokens=designator_usage.get("completion_tokens", 0),
+                status_code=200,
+                tag=designator_tag,
+                is_designator=True,
+                request_type="designator",
+            )
+
+        # Log embedding usage for paid providers (OpenAI)
+        if (
+            enrichment_result.embedding_usage
+            and enrichment_result.embedding_provider == "openai"
+        ):
+            embed_model = enrichment_result.embedding_model or "text-embedding-3-small"
+            embed_usage = enrichment_result.embedding_usage
+            embed_tag = tag
+            if enricher_tags:
+                existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+                all_tags = list(set(existing_tags + enricher_tags))
+                embed_tag = ",".join(all_tags)
+
+            track_completion(
+                provider_id="openai",
+                model_id=embed_model,
+                model_name=f"openai/{embed_model}",
+                endpoint="/v1/embeddings",
+                input_tokens=embed_usage.get("prompt_tokens", 0),
+                output_tokens=0,
+                status_code=200,
+                tag=embed_tag,
+                request_type="embedding",
+            )
+
+    # Log designator usage for smart routers
+    log_designator_usage(resolved, "/v1/messages", tag)
+
+    # Merge alias/enricher tags with request tags
+    all_entity_tags = alias_tags + enricher_tags
+    if all_entity_tags:
+        existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
+        all_tags = list(set(existing_tags + all_entity_tags))
+        tag = ",".join(all_tags)
+
+    # Filter out images if provider doesn't support vision
+    if not provider_supports_vision(provider, model_id):
+        has_images = any(isinstance(m.get("content"), list) for m in messages)
+        if has_images:
+            messages = filter_images_from_messages(messages)
+            logger.warning(
+                f"Model {model_id} doesn't support vision - images removed from request"
+            )
+
+    # Check for cache hit
+    cache_engine = None
+    if resolved.has_cache:
+        from context.chroma import is_chroma_available
+        from routing.smart_cache import SmartCacheEngine
+
+        if is_chroma_available():
+            try:
+                cache_engine = SmartCacheEngine(resolved.cache_config, registry)
+                cache_result = cache_engine.lookup(messages, system_prompt)
+
+                if cache_result.is_cache_hit:
+                    cached_response = cache_result.cached_response
+                    cached_content = cached_response.get("content", "")
+                    cached_tokens = cache_result.cached_tokens
+                    cached_cost_saved = cache_result.cached_cost
+
+                    logger.info(
+                        f"Cache hit for '{cache_result.cache_name}' "
+                        f"(similarity={cache_result.similarity_score:.4f}, "
+                        f"tokens={cached_tokens}, cost_saved=${cached_cost_saved:.4f})"
+                    )
+
+                    config = resolved.cache_config
+                    if hasattr(config, "id"):
+                        from db import update_smart_alias_stats
+
+                        update_smart_alias_stats(
+                            alias_id=config.id,
+                            increment_cache_hits=1,
+                            increment_tokens_saved=cached_tokens,
+                            increment_cost_saved=cached_cost_saved,
+                        )
+
+                    # Build Anthropic-format response for cache hit
+                    response_obj = build_anthropic_response(
+                        message_id=generate_anthropic_id(),
+                        model=model_name,
+                        content=cached_content,
+                        stop_reason="end_turn",
+                        input_tokens=0,
+                        output_tokens=cached_tokens,
+                    )
+
+                    track_completion(
+                        provider_id=provider.name,
+                        model_id=model_id,
+                        model_name=model_name,
+                        endpoint="/v1/messages",
+                        input_tokens=0,
+                        output_tokens=0,
+                        status_code=200,
+                        tag=tag,
+                        alias=alias_name,
+                        router_name=router_name,
+                        is_cache_hit=True,
+                        cache_name=cache_result.cache_name,
+                        cache_tokens_saved=cached_tokens,
+                        cache_cost_saved=cached_cost_saved,
+                    )
+
+                    return jsonify(response_obj)
+            except Exception as cache_err:
+                logger.warning(f"Cache lookup failed: {cache_err}")
+                cache_engine = None
+
+    # Build options - note max_tokens is required in Anthropic API
+    options = {}
+    max_tokens = data.get("max_tokens")
+    if max_tokens is None:
+        # Default to a reasonable value if not provided
+        options["max_tokens"] = 4096
+    else:
+        options["max_tokens"] = max_tokens
+
+    if "temperature" in data:
+        options["temperature"] = data["temperature"]
+    if "top_p" in data:
+        options["top_p"] = data["top_p"]
+    if "top_k" in data:
+        options["top_k"] = data["top_k"]
+    if "stop_sequences" in data:
+        options["stop"] = data["stop_sequences"]
+
+    stream = data.get("stream", False)
+
+    logger.info(
+        f"Anthropic messages request: provider={provider.name}, model={model_id}, "
+        f"messages={len(messages)}, stream={stream}"
+    )
+
+    try:
+        if stream:
+            input_chars = estimate_input_chars(messages, system_prompt)
+
+            from flask import g
+
+            start_time = getattr(g, "start_time", time.time())
+            client_ip = getattr(g, "client_ip", "unknown")
+            hostname = resolve_hostname(client_ip)
+            prov_name = provider.name
+            captured_alias = alias_name
+            captured_router = router_name
+            captured_cache_engine = cache_engine
+            captured_messages = messages
+            captured_system = system_prompt
+            captured_enrichment_result = enrichment_result
+            captured_original_messages = original_messages
+
+            def on_stream_complete(
+                input_tokens,
+                output_tokens,
+                error=None,
+                cost=None,
+                stream_result=None,
+                full_content=None,
+                action_blocks=None,
+            ):
+                response_time_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    f"Track: {prov_name}/{model_id} - {response_time_ms}ms, streaming=True"
+                )
+                tracker.log_request(
+                    timestamp=datetime.now(timezone.utc),
+                    client_ip=client_ip,
+                    hostname=hostname,
+                    tag=tag,
+                    provider_id=prov_name,
+                    model_id=model_id,
+                    endpoint="/v1/messages",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    response_time_ms=response_time_ms,
+                    status_code=200 if not error else 500,
+                    error_message=error,
+                    is_streaming=True,
+                    cost=cost,
+                    reasoning_tokens=stream_result.get("reasoning_tokens")
+                    if stream_result
+                    else None,
+                    cached_input_tokens=stream_result.get("cached_input_tokens")
+                    if stream_result
+                    else None,
+                    cache_creation_tokens=stream_result.get("cache_creation_tokens")
+                    if stream_result
+                    else None,
+                    cache_read_tokens=stream_result.get("cache_read_tokens")
+                    if stream_result
+                    else None,
+                    alias=captured_alias,
+                    router_name=captured_router,
+                )
+
+                # Store streaming response in cache
+                if captured_cache_engine and full_content and not error:
+                    try:
+                        captured_cache_engine.store_response(
+                            messages=captured_messages,
+                            system=captured_system,
+                            response={"content": full_content},
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            cost=cost or 0.0,
+                        )
+                    except Exception as cache_err:
+                        logger.warning(
+                            f"Failed to store streaming response in cache: {cache_err}"
+                        )
+
+                # Update memory if enabled
+                if (
+                    captured_enrichment_result
+                    and getattr(
+                        captured_enrichment_result, "memory_update_pending", False
+                    )
+                    and full_content
+                    and not error
+                ):
+                    try:
+                        from db import get_smart_alias_by_name
+                        from routing.smart_enricher import SmartEnricherEngine
+
+                        alias = get_smart_alias_by_name(
+                            captured_enrichment_result.enricher_name
+                        )
+                        if alias:
+                            engine = SmartEnricherEngine(alias, registry)
+                            engine.update_memory_after_response(
+                                captured_original_messages, full_content
+                            )
+                    except Exception as mem_err:
+                        logger.warning(f"Failed to update memory: {mem_err}")
+
+                # Execute actions if enabled
+                if (
+                    captured_enrichment_result
+                    and getattr(captured_enrichment_result, "actions_enabled", False)
+                    and full_content
+                    and not error
+                ):
+                    try:
+                        from actions import execute_actions
+
+                        allowed = getattr(
+                            captured_enrichment_result, "allowed_actions", []
+                        )
+                        results, _ = execute_actions(
+                            response_text=full_content,
+                            alias_name=captured_enrichment_result.enricher_name,
+                            allowed_actions=allowed,
+                            session_key=getattr(
+                                captured_enrichment_result, "session_key", None
+                            ),
+                            default_email_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_email_account_id",
+                                None,
+                            ),
+                            default_calendar_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_calendar_account_id",
+                                None,
+                            ),
+                            default_calendar_id=getattr(
+                                captured_enrichment_result,
+                                "action_calendar_id",
+                                None,
+                            ),
+                            default_tasks_account_id=getattr(
+                                captured_enrichment_result,
+                                "action_tasks_account_id",
+                                None,
+                            ),
+                            default_tasks_list_id=getattr(
+                                captured_enrichment_result,
+                                "action_tasks_list_id",
+                                None,
+                            ),
+                            default_notification_urls=getattr(
+                                captured_enrichment_result,
+                                "action_notification_urls",
+                                None,
+                            ),
+                            scheduled_prompts_account_id=getattr(
+                                captured_enrichment_result,
+                                "scheduled_prompts_account_id",
+                                None,
+                            ),
+                            scheduled_prompts_calendar_id=getattr(
+                                captured_enrichment_result,
+                                "scheduled_prompts_calendar_id",
+                                None,
+                            ),
+                        )
+                        if results:
+                            logger.info(
+                                f"Executed {len(results)} actions for alias '{captured_enrichment_result.enricher_name}'"
+                            )
+                    except Exception as action_err:
+                        logger.warning(f"Failed to execute actions: {action_err}")
+
+            source_attribution = build_source_attribution(enrichment_result)
+            strip_actions = enrichment_result and getattr(
+                enrichment_result, "actions_enabled", False
+            )
+
+            return Response(
+                stream_anthropic_response(
+                    provider,
+                    model_id,
+                    messages,
+                    system_prompt,
+                    options,
+                    model_name,
+                    on_complete=on_stream_complete,
+                    input_char_count=input_chars,
+                    source_attribution=source_attribution,
+                    strip_actions=strip_actions,
+                ),
+                mimetype="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        else:
+            # Non-streaming response
+            result = provider.chat_completion(
+                model_id, messages, system_prompt, options
+            )
+
+            llm_content = result.get("content", "")
+            finish_reason = result.get("finish_reason", "stop")
+            stop_reason = map_finish_reason_to_anthropic(finish_reason)
+
+            response_obj = build_anthropic_response(
+                message_id=generate_anthropic_id(),
+                model=model_name,
+                content=llm_content,
+                stop_reason=stop_reason,
+                input_tokens=result.get("input_tokens", 0),
+                output_tokens=result.get("output_tokens", 0),
+            )
+
+            debug_compare_response(
+                "/v1/messages", llm_content, response_obj["content"][0]["text"]
+            )
+
+            track_completion(
+                provider_id=provider.name,
+                model_id=model_id,
+                model_name=model_name,
+                endpoint="/v1/messages",
+                input_tokens=result.get("input_tokens", 0),
+                output_tokens=result.get("output_tokens", 0),
+                status_code=200,
+                cost=result.get("cost"),
+                reasoning_tokens=result.get("reasoning_tokens"),
+                cached_input_tokens=result.get("cached_input_tokens"),
+                cache_creation_tokens=result.get("cache_creation_tokens"),
+                cache_read_tokens=result.get("cache_read_tokens"),
+                tag=tag,
+                alias=alias_name,
+                router_name=router_name,
+            )
+
+            # Store response in cache
+            if cache_engine:
+                try:
+                    cache_engine.store_response(
+                        messages=messages,
+                        system=system_prompt,
+                        response={"content": llm_content},
+                        input_tokens=result.get("input_tokens", 0),
+                        output_tokens=result.get("output_tokens", 0),
+                        cost=result.get("cost", 0.0) or 0.0,
+                    )
+                except Exception as cache_err:
+                    logger.warning(f"Failed to store response in cache: {cache_err}")
+
+            # Update memory if enabled
+            if (
+                enrichment_result
+                and getattr(enrichment_result, "memory_update_pending", False)
+                and llm_content
+            ):
+                try:
+                    from db import get_smart_alias_by_name
+                    from routing.smart_enricher import SmartEnricherEngine
+
+                    alias = get_smart_alias_by_name(enrichment_result.enricher_name)
+                    if alias:
+                        engine = SmartEnricherEngine(alias, registry)
+                        engine.update_memory_after_response(
+                            original_messages, llm_content
+                        )
+                except Exception as mem_err:
+                    logger.warning(f"Failed to update memory: {mem_err}")
+
+            # Execute actions if enabled
+            if (
+                enrichment_result
+                and getattr(enrichment_result, "actions_enabled", False)
+                and llm_content
+            ):
+                try:
+                    from actions import execute_actions
+
+                    allowed = getattr(enrichment_result, "allowed_actions", [])
+                    results, cleaned_content = execute_actions(
+                        response_text=llm_content,
+                        alias_name=enrichment_result.enricher_name,
+                        allowed_actions=allowed,
+                        session_key=getattr(enrichment_result, "session_key", None),
+                        default_email_account_id=getattr(
+                            enrichment_result, "action_email_account_id", None
+                        ),
+                        default_calendar_account_id=getattr(
+                            enrichment_result, "action_calendar_account_id", None
+                        ),
+                        default_calendar_id=getattr(
+                            enrichment_result, "action_calendar_id", None
+                        ),
+                        default_tasks_account_id=getattr(
+                            enrichment_result, "action_tasks_account_id", None
+                        ),
+                        default_tasks_list_id=getattr(
+                            enrichment_result, "action_tasks_list_id", None
+                        ),
+                        default_notification_urls=getattr(
+                            enrichment_result, "action_notification_urls", None
+                        ),
+                        scheduled_prompts_account_id=getattr(
+                            enrichment_result, "scheduled_prompts_account_id", None
+                        ),
+                        scheduled_prompts_calendar_id=getattr(
+                            enrichment_result, "scheduled_prompts_calendar_id", None
+                        ),
+                    )
+                    if results:
+                        logger.info(
+                            f"Executed {len(results)} actions for alias '{enrichment_result.enricher_name}'"
+                        )
+                    # Update response with cleaned content
+                    response_obj["content"][0]["text"] = cleaned_content
+                except Exception as action_err:
+                    logger.warning(f"Failed to execute actions: {action_err}")
+
+            return jsonify(response_obj)
+
+    except Exception as e:
+        logger.error(f"Provider error: {e}")
+        track_completion(
+            provider_id=provider.name,
+            model_id=model_id,
+            model_name=model_name,
+            endpoint="/v1/messages",
+            input_tokens=0,
+            output_tokens=0,
+            status_code=500,
+            error_message=str(e),
+            tag=tag,
+            alias=alias_name,
+            router_name=router_name,
+        )
+        return anthropic_error_response("api_error", str(e), 500)
+
+
 @app.route("/v1/embeddings", methods=["POST"])
 def openai_embeddings():
     """OpenAI-compatible embeddings endpoint - not supported."""
@@ -3077,6 +4007,34 @@ if __name__ == "__main__":
         )
 
     provider_names = [p.name for p in configured]
+
+    # Discover and register plugins
+    try:
+        from plugin_base import discover_plugins
+
+        plugin_counts = discover_plugins()
+        total_plugins = sum(plugin_counts.values())
+        if total_plugins > 0:
+            logger.info(
+                f"Loaded {total_plugins} plugins: "
+                f"{plugin_counts['document_sources']} document sources, "
+                f"{plugin_counts['live_sources']} live sources, "
+                f"{plugin_counts['actions']} actions"
+            )
+
+            # Seed database entries for live source plugins
+            # (must happen AFTER plugin discovery so registry is populated)
+            if plugin_counts["live_sources"] > 0:
+                try:
+                    from db.live_data_sources import seed_plugin_sources
+
+                    created = seed_plugin_sources()
+                    if created:
+                        logger.info(f"Seeded plugin live data sources: {created}")
+                except Exception as e:
+                    logger.warning(f"Failed to seed plugin sources: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to discover plugins: {e}")
 
     from version import VERSION
 

@@ -146,6 +146,65 @@ These were considered but lack viable API access:
 
 ## v2.0: Major Release
 
+### Anthropic API Endpoint (Implemented)
+
+Native support for Anthropic's `/v1/messages` API format, enabling Anthropic-native clients (like Claude Code) to use LLM Relay's full feature set.
+
+**Endpoint:**
+| Endpoint | Description |
+|----------|-------------|
+| `POST /v1/messages` | Anthropic-format chat completions |
+
+**Features:**
+- Full Smart Alias support (routing, RAG, web enrichment, caching, memory, actions)
+- Transparent provider switching (route Anthropic requests to OpenAI, Google, etc.)
+- Streaming with proper Anthropic SSE format (named events: `message_start`, `content_block_delta`, etc.)
+- System prompt handling (Anthropic's separate `system` parameter)
+- Tag attribution (`X-Proxy-Tag` header, `model@tag` suffix)
+- Usage tracking and cost attribution
+- Proper Anthropic-style error responses (`not_found_error`, `api_error`, etc.)
+
+**Configuration for Claude Code:**
+```bash
+export ANTHROPIC_BASE_URL=http://your-relay-host:11434
+```
+
+**Request Translation:**
+```
+Anthropic format → Internal format → Target provider format
+/v1/messages     → Unified         → OpenAI/Ollama/Google/etc.
+```
+
+**Use Cases:**
+- Claude Code with RAG enrichment from your document stores
+- Claude Code with access to alternative models (GPT-4, Gemini) via Smart Aliases
+- Unified proxy for mixed Anthropic/OpenAI environments
+- Cost optimization by routing to cheaper providers
+
+### Plugin System (Implemented)
+
+Modular plugin architecture for extending LLM Relay without modifying core code.
+
+**Completed Phases:**
+- **Phase 1:** Plugin infrastructure (loader, registry, base classes, 64 tests)
+- **Phase 2:** Action plugins (email, calendar, notification, schedule, todoist - 374 tests)
+- **Phase 3:** Live source plugins (weather, sports, stocks, health, transport, places, routes, news, amazon)
+- **Phase 4a:** Unified source infrastructure (base class, routing, 46 tests)
+- **Phase 4b:** Google unified sources (Gmail, Calendar, Drive, Contacts, Tasks, Todoist)
+
+**Plugin Types:**
+| Type | Purpose | Examples |
+|------|---------|----------|
+| Document Sources | RAG indexing | Google Drive, Notion, Paperless |
+| Live Sources | Real-time data | Weather, stocks, news, Amazon |
+| Actions | LLM side effects | Email, calendar, notifications |
+| Unified Sources | RAG + Live combined | Gmail, Calendar, Tasks |
+
+**Key Files:**
+- `plugin_base/` - Core framework (common.py, loader.py, action.py, live_source.py, etc.)
+- `builtin_plugins/` - Built-in plugins shipped with app
+- `plugins/` - User plugins (can override builtins)
+
 ### Webhooks for Document Stores
 
 Real-time indexing triggered by external system events:
@@ -399,7 +458,11 @@ class ActionHandler(ABC):
 - [x] Smart Actions - Scheduled Prompts (calendar-triggered prompt execution)
 - [x] Live Data Sources (real-time API queries for Gmail, Calendar, Stocks, Weather, Transport, etc.)
 - [x] OAuth write scopes for Google (gmail.modify, calendar full access)
-- [x] Smart Routes Provider (journey planning with geocoding, arrival/departure times, transit support)
+- [x] Plugin system for live sources (Phase 3 complete)
+- [x] Smart News Plugin (RapidAPI Real-Time News Data API)
+- [x] Smart Amazon Plugin (RapidAPI Real-Time Amazon Data API with country code normalization)
+- [x] Smart Sports Plugin enhancements (comprehensive UK league tournament IDs)
+- [x] Anthropic API endpoint (`/v1/messages` with full Smart Alias support, streaming)
 
 ## Next Up (v1.9)
 - [x] Slack integration (Document Store)

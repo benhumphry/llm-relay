@@ -65,6 +65,20 @@ def get_live_data_source_by_id(source_id: int, db=None) -> Optional[LiveDataSour
         return _source_to_detached(source) if source else None
 
 
+def get_live_data_source_by_type(source_type: str, db=None) -> Optional[LiveDataSource]:
+    """Get the first live data source with a given source_type."""
+
+    def _query(session) -> Optional[LiveDataSource]:
+        stmt = select(LiveDataSource).where(LiveDataSource.source_type == source_type)
+        return session.execute(stmt).scalar_one_or_none()
+
+    if db:
+        return _query(db)
+    with get_db_context() as session:
+        source = _query(session)
+        return _source_to_detached(source) if source else None
+
+
 def create_live_data_source(
     name: str,
     source_type: str,
@@ -86,6 +100,7 @@ def create_live_data_source(
     sample_response: Optional[dict] = None,
     best_for: Optional[str] = None,
     enabled: bool = True,
+    config: Optional[dict] = None,
     db: Optional[Session] = None,
 ) -> LiveDataSource:
     """Create a new live data source."""
@@ -116,6 +131,7 @@ def create_live_data_source(
             else None,
             best_for=best_for,
             enabled=enabled,
+            config_json=json.dumps(config) if config else None,
         )
         session.add(source)
         session.commit()
@@ -152,6 +168,7 @@ def update_live_data_source(
     sample_response: Optional[dict] = None,
     best_for: Optional[str] = None,
     enabled: Optional[bool] = None,
+    config: Optional[dict] = None,
     db: Optional[Session] = None,
 ) -> Optional[LiveDataSource]:
     """Update a live data source."""
@@ -210,6 +227,8 @@ def update_live_data_source(
             source.best_for = best_for if best_for else None
         if enabled is not None:
             source.enabled = enabled
+        if config is not None:
+            source.config_json = json.dumps(config) if config else None
 
         source.updated_at = datetime.utcnow()
         session.commit()
@@ -365,6 +384,7 @@ def _source_to_detached(
         data_type=source.data_type,
         sample_response_json=source.sample_response_json,
         best_for=source.best_for,
+        config_json=source.config_json,  # Plugin config
         last_success=source.last_success,
         last_error=source.last_error,
         error_count=source.error_count,
@@ -385,120 +405,110 @@ def seed_builtin_sources() -> list[str]:
     Auto-create built-in live data sources if API keys are configured.
 
     Returns list of created source names.
+
+    NOTE: All live data sources are now handled by the plugin system via
+    seed_plugin_sources(). This function is deprecated and returns empty list.
+
+    The plugin system (builtin_plugins/live_sources/) automatically creates
+    sources for registered plugins when API keys are available.
+    """
+    # All live data sources now come from plugins - see seed_plugin_sources()
+    return []
+
+
+def seed_plugin_sources() -> list[str]:
+    """
+    Auto-create live data sources from registered live source plugins.
+
+    Iterates through all registered live source plugins and creates
+    database entries for those that don't already exist. This allows
+    plugin-based sources (like smart_weather, smart_sports) to appear
+    in the admin UI automatically.
+
+    Returns list of created source names.
     """
     import os
 
     created = []
 
-    # Check for Finnhub (Stocks)
-    if os.environ.get("FINNHUB_API_KEY"):
-        existing = get_live_data_source_by_name("stocks")
-        if not existing:
-            create_live_data_source(
-                name="stocks",
-                source_type="builtin_stocks",
-                description="Real-time stock quotes from Finnhub",
-                data_type="finance",
-                best_for="Stock prices, market data, company quotes",
-                cache_ttl_seconds=60,
-                enabled=True,
-            )
-            created.append("stocks")
-            logger.info("Created built-in 'stocks' live data source")
+    try:
+        from plugin_base.loader import live_source_registry
+    except ImportError:
+        logger.warning("Plugin loader not available, skipping plugin source seeding")
+        return created
 
-    # Check for AccuWeather
-    if os.environ.get("ACCUWEATHER_API_KEY"):
-        existing = get_live_data_source_by_name("weather")
-        if not existing:
-            create_live_data_source(
-                name="weather",
-                source_type="builtin_weather",
-                description="Current weather conditions from AccuWeather",
-                data_type="weather",
-                best_for="Current weather, temperature, conditions",
-                cache_ttl_seconds=300,  # 5 minutes
-                enabled=True,
-            )
-            created.append("weather")
-            logger.info("Created built-in 'weather' live data source")
+    plugins = live_source_registry.get_all()
 
-    # Check for TransportAPI
-    if os.environ.get("TRANSPORTAPI_APP_KEY") and os.environ.get("TRANSPORTAPI_APP_ID"):
-        existing = get_live_data_source_by_name("transport")
-        if not existing:
-            create_live_data_source(
-                name="transport",
-                source_type="builtin_transport",
-                description="UK train departures from TransportAPI",
-                data_type="transport",
-                best_for="Train times, departures, transport status",
-                cache_ttl_seconds=60,
-                enabled=True,
-            )
-            created.append("transport")
-            logger.info("Created built-in 'transport' live data source")
+    for source_type, plugin_class in plugins.items():
+        # Generate a default name from the source_type (e.g., smart_weather -> smart-weather)
+        default_name = source_type.replace("_", "-")
 
-    # Check for Alpha Vantage (UK/International stocks, historical data)
-    if os.environ.get("ALPHA_VANTAGE_API_KEY"):
-        existing = get_live_data_source_by_name("stocks-uk")
-        if not existing:
-            create_live_data_source(
-                name="stocks-uk",
-                source_type="builtin_alpha_vantage",
-                description="UK/International stocks and historical data from Alpha Vantage",
-                data_type="finance",
-                best_for="UK stocks (LSE), international stocks, historical prices, UK funds (via web)",
-                cache_ttl_seconds=300,  # 5 minutes (rate limit is 25/day)
-                enabled=True,
-            )
-            created.append("stocks-uk")
-            logger.info("Created built-in 'stocks-uk' live data source")
+        # Check if a source with this source_type already exists (by name or type)
+        existing = get_live_data_source_by_name(default_name)
+        if existing:
+            continue
 
-    # Check for Google Maps API
-    if os.environ.get("GOOGLE_MAPS_API_KEY"):
-        existing = get_live_data_source_by_name("google-maps")
-        if not existing:
-            create_live_data_source(
-                name="google-maps",
-                source_type="builtin_google_maps",
-                description="Google Maps Places and Routes APIs",
-                data_type="location",
-                best_for="Places search, business info, directions, travel time, nearby locations",
-                cache_ttl_seconds=300,  # 5 minutes
-                enabled=True,
-            )
-            created.append("google-maps")
-            logger.info("Created built-in 'google-maps' live data source")
+        # Also check if any source with this source_type exists (user may have renamed it)
+        existing_by_type = get_live_data_source_by_type(source_type)
+        if existing_by_type:
+            continue
 
-        # Routes (Smart) - higher-level interface with geocoding
-        existing = get_live_data_source_by_name("routes")
-        if not existing:
-            create_live_data_source(
-                name="routes",
-                source_type="builtin_routes",
-                description="Smart route planning with automatic geocoding and natural time parsing",
-                data_type="location",
-                best_for="Driving directions, travel time between cities, route planning, commute estimates",
-                cache_ttl_seconds=300,  # 5 minutes for routes (traffic changes)
-                enabled=True,
-            )
-            created.append("routes")
-            logger.info("Created built-in 'routes' live data source")
+        # Get plugin metadata
+        display_name = getattr(plugin_class, "display_name", source_type)
+        description = getattr(plugin_class, "description", "")
+        data_type = getattr(plugin_class, "data_type", "general")
+        best_for = getattr(plugin_class, "best_for", "")
+        default_cache_ttl = getattr(plugin_class, "default_cache_ttl", 300)
 
-    # Open-Meteo (always available - no API key required)
-    existing = get_live_data_source_by_name("open-meteo")
-    if not existing:
-        create_live_data_source(
-            name="open-meteo",
-            source_type="builtin_open_meteo",
-            description="Free weather forecasts from Open-Meteo (no API key required)",
-            data_type="weather",
-            best_for="Weather forecasts, temperature, conditions, 3-day forecast",
-            cache_ttl_seconds=600,  # 10 minutes
-            enabled=True,
-        )
-        created.append("open-meteo")
-        logger.info("Created built-in 'open-meteo' live data source")
+        # Check if plugin requires specific configuration (API keys, OAuth)
+        # that we can't auto-provide. For these, we'll create a disabled entry.
+        # Exception: if RAPIDAPI_KEY is set, plugins with api_key fields can use it.
+        requires_config = False
+        config_fields = []
+        try:
+            config_fields = plugin_class.get_config_fields()
+        except Exception:
+            pass
+
+        has_rapidapi_key = bool(os.environ.get("RAPIDAPI_KEY"))
+
+        for field in config_fields:
+            # Check for required fields that need user input
+            if field.required:
+                field_type = (
+                    field.field_type.value
+                    if hasattr(field.field_type, "value")
+                    else str(field.field_type)
+                )
+                # OAuth accounts always require manual configuration
+                if field_type == "oauth_account":
+                    requires_config = True
+                    break
+                # API keys can use RAPIDAPI_KEY as fallback if available
+                if field_type == "password":
+                    field_name = getattr(field, "name", "").lower()
+                    if "api_key" in field_name and has_rapidapi_key:
+                        # RAPIDAPI_KEY available, plugin can use it as fallback
+                        continue
+                    requires_config = True
+                    break
+
+        # Create the source (disabled if it requires manual config)
+        try:
+            create_live_data_source(
+                name=default_name,
+                source_type=source_type,
+                description=description,
+                data_type=data_type,
+                best_for=best_for,
+                cache_ttl_seconds=default_cache_ttl,
+                enabled=not requires_config,  # Enabled only if no manual config needed
+            )
+            created.append(default_name)
+            status = "disabled (needs config)" if requires_config else "enabled"
+            logger.info(f"Created plugin live data source: {default_name} ({status})")
+        except Exception as e:
+            logger.error(f"Failed to create plugin source {default_name}: {e}")
 
     return created
 
@@ -765,27 +775,19 @@ def get_top_live_data_sources(
         return _query(session)
 
 
-# Mapping from document store source types to live source types
-DOCUMENT_STORE_TO_LIVE_SOURCE_MAP = {
-    "mcp:gcalendar": {
-        "live_type": "google_calendar_live",
-        "data_type": "calendar",
-        "description": "Google Calendar (real-time)",
-        "best_for": "Today's schedule, next meeting, calendar events, free/busy status",
-    },
-    "mcp:gtasks": {
-        "live_type": "google_tasks_live",
-        "data_type": "tasks",
-        "description": "Google Tasks (real-time)",
-        "best_for": "Pending tasks, due today, overdue items, task lists",
-    },
-    "mcp:gmail": {
-        "live_type": "google_gmail_live",
-        "data_type": "email",
-        "description": "Gmail (real-time). Use action=search with Gmail query syntax (e.g. from:sender subject:keyword) to find specific emails. Returns message IDs needed for reply/forward actions.",
-        "best_for": "Unread emails, today's messages, email search by sender/subject/date",
-    },
-}
+def _get_live_source_info_for_doc_type(doc_source_type: str) -> Optional[dict]:
+    """
+    Get live source info for a document store type using dynamic plugin lookup.
+
+    Returns dict with live_type, data_type, description, best_for - or None if no mapping.
+    """
+    try:
+        from plugin_base.loader import get_doc_to_live_source_info
+
+        return get_doc_to_live_source_info(doc_source_type)
+    except ImportError:
+        logger.warning("Plugin loader not available for dynamic live source lookup")
+        return None
 
 
 def sync_live_source_for_document_store(
@@ -797,14 +799,14 @@ def sync_live_source_for_document_store(
     db: Optional[Session] = None,
 ) -> Optional[LiveDataSource]:
     """
-    Auto-create or update a live data source when a Google document store is created/updated.
+    Auto-create or update a live data source when a document store is created/updated.
 
-    Maps document store types (mcp:gcalendar, mcp:gtasks, mcp:gmail) to their
-    corresponding live source types (google_calendar_live, google_tasks_live, google_gmail_live).
+    Uses dynamic plugin lookup to map document store types to their corresponding
+    live source types. Custom plugins can register their own mappings.
 
     Returns the created/updated live source, or None if not applicable.
     """
-    mapping = DOCUMENT_STORE_TO_LIVE_SOURCE_MAP.get(doc_store_source_type)
+    mapping = _get_live_source_info_for_doc_type(doc_store_source_type)
     if not mapping:
         return None  # Not a Google source type that has a live equivalent
 
@@ -868,10 +870,12 @@ def delete_live_source_for_document_store(
 
 def sync_all_google_live_sources() -> list[str]:
     """
-    Create live sources for all existing Google Calendar/Tasks/Gmail document stores.
+    Create live sources for all existing document stores that have live equivalents.
 
     This is a one-time migration utility to backfill live sources for stores
     created before the auto-sync feature was added.
+
+    Uses dynamic plugin lookup - works with both builtin and custom plugins.
 
     Returns list of created live source names.
     """
@@ -882,8 +886,9 @@ def sync_all_google_live_sources() -> list[str]:
     stores = get_all_document_stores()
 
     for store in stores:
-        # Only process Google Calendar/Tasks/Gmail stores
-        if store.source_type not in ("mcp:gcalendar", "mcp:gtasks", "mcp:gmail"):
+        # Check if this doc store type has a live equivalent via dynamic lookup
+        mapping = _get_live_source_info_for_doc_type(store.source_type)
+        if not mapping:
             continue
 
         if not store.google_account_id:

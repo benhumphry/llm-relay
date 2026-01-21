@@ -5521,9 +5521,30 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/document-stores", methods=["GET"])
     @require_auth_api
     def list_document_stores():
-        """List all document stores with Google account info."""
+        """List all document stores with Google account info and unified source status."""
         from db import get_all_document_stores
         from db.oauth_tokens import get_oauth_token_info
+
+        # Get unified source info dynamically from registry
+        unified_plugins = {}
+        try:
+            from plugin_base.loader import (
+                get_unified_source_for_doc_type,
+                unified_source_registry,
+            )
+
+            for source_type, plugin_class in unified_source_registry.get_all().items():
+                unified_plugins[source_type] = {
+                    "display_name": getattr(plugin_class, "display_name", source_type),
+                    "supports_rag": getattr(plugin_class, "supports_rag", True),
+                    "supports_live": getattr(plugin_class, "supports_live", False),
+                    "supports_actions": getattr(
+                        plugin_class, "supports_actions", False
+                    ),
+                    "icon": getattr(plugin_class, "icon", "📦"),
+                }
+        except Exception:
+            get_unified_source_for_doc_type = None
 
         stores = get_all_document_stores()
         result = []
@@ -5536,6 +5557,18 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     store_dict["google_account_email"] = token_info.get(
                         "account_email", ""
                     )
+
+            # Add unified source info if available (dynamic lookup)
+            store_dict["unified_source"] = None
+            if get_unified_source_for_doc_type:
+                plugin_class = get_unified_source_for_doc_type(s.source_type)
+                if plugin_class:
+                    unified_type = plugin_class.source_type
+                    store_dict["unified_source"] = {
+                        "type": unified_type,
+                        **unified_plugins.get(unified_type, {}),
+                    }
+
             result.append(store_dict)
         return jsonify(result)
 
@@ -6061,6 +6094,62 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             logger.error(f"Failed to clear store contents: {e}")
             return jsonify({"error": str(e)}), 500
 
+    @admin.route("/api/document-stores/<int:store_id>/test-unified", methods=["POST"])
+    @require_auth_api
+    def test_unified_source(store_id: int):
+        """
+        Test the unified source for a document store.
+
+        Tests both the RAG (document listing) and Live (API query) sides
+        if the store has a unified source available.
+        """
+        from db import get_document_store_by_id
+
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        try:
+            from plugin_base.loader import get_unified_source_for_doc_type
+
+            # Dynamic lookup - find unified source that handles this doc store type
+            plugin_class = get_unified_source_for_doc_type(store.source_type)
+            if not plugin_class:
+                return jsonify(
+                    {"error": f"No unified source available for {store.source_type}"}
+                ), 400
+
+            unified_type = plugin_class.source_type
+
+            # Build config using the plugin's own method
+            # Uses PluginConfig if available, falls back to legacy columns
+            config = plugin_class.get_config_for_store(store)
+
+            # Instantiate and test the plugin
+            plugin = plugin_class(config)
+            success, message = plugin.test_connection()
+
+            # Get capability info
+            supports_rag = getattr(plugin_class, "supports_rag", True)
+            supports_live = getattr(plugin_class, "supports_live", False)
+
+            return jsonify(
+                {
+                    "success": success,
+                    "message": message,
+                    "unified_type": unified_type,
+                    "capabilities": {
+                        "rag": supports_rag,
+                        "live": supports_live,
+                        "actions": getattr(plugin_class, "supports_actions", False),
+                    },
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to test unified source: {e}")
+            return jsonify({"error": str(e)}), 500
+
     @admin.route(
         "/api/document-stores/<int:store_id>/refresh-intelligence", methods=["POST"]
     )
@@ -6106,6 +6195,193 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         except Exception as e:
             logger.error(f"Failed to generate intelligence: {e}")
             return jsonify({"error": str(e)}), 500
+
+    # -------------------------------------------------------------------------
+    # Plugin Config Routes for Document Stores
+    # -------------------------------------------------------------------------
+
+    @admin.route("/api/document-stores/<int:store_id>/plugin-config", methods=["GET"])
+    @require_auth_api
+    def get_store_plugin_config(store_id: int):
+        """Get the PluginConfig for a document store."""
+        from db import get_document_store_by_id
+        from db.plugin_configs import get_plugin_config
+
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        if not store.plugin_config_id:
+            return jsonify({"plugin_config": None})
+
+        plugin_config = get_plugin_config(store.plugin_config_id)
+        if not plugin_config:
+            return jsonify({"plugin_config": None})
+
+        return jsonify({"plugin_config": plugin_config.to_dict()})
+
+    @admin.route("/api/document-stores/<int:store_id>/plugin-config", methods=["POST"])
+    @require_auth_api
+    def create_store_plugin_config(store_id: int):
+        """
+        Create a PluginConfig for a document store.
+
+        This creates a new PluginConfig with the provided config and links it
+        to the document store. If the store already has a PluginConfig, this
+        will fail - use PUT to update instead.
+
+        Request body:
+        {
+            "config": { ... plugin-specific config ... }
+        }
+        """
+        from db import get_document_store_by_id, update_document_store
+        from db.plugin_configs import create_plugin_config
+
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        if store.plugin_config_id:
+            return jsonify(
+                {"error": "Store already has a PluginConfig - use PUT to update"}
+            ), 400
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        config = data.get("config", {})
+
+        # Create the PluginConfig
+        plugin_config = create_plugin_config(
+            plugin_type="unified_source",
+            source_type=store.source_type,
+            name=f"{store.name}_config",
+            config=config,
+            enabled=True,
+        )
+
+        if not plugin_config:
+            return jsonify({"error": "Failed to create PluginConfig"}), 500
+
+        # Link it to the document store
+        updated_store = update_document_store(
+            store_id=store_id,
+            plugin_config_id=plugin_config.id,
+        )
+
+        if not updated_store:
+            return jsonify({"error": "Failed to link PluginConfig to store"}), 500
+
+        return jsonify(
+            {
+                "plugin_config": plugin_config.to_dict(),
+                "store": updated_store.to_dict(),
+            }
+        ), 201
+
+    @admin.route("/api/document-stores/<int:store_id>/plugin-config", methods=["PUT"])
+    @require_auth_api
+    def update_store_plugin_config(store_id: int):
+        """
+        Update the PluginConfig for a document store.
+
+        If the store doesn't have a PluginConfig, one will be created.
+
+        Request body:
+        {
+            "config": { ... plugin-specific config ... }
+        }
+        """
+        from db import get_document_store_by_id, update_document_store
+        from db.plugin_configs import (
+            create_plugin_config,
+            get_plugin_config,
+            update_plugin_config,
+        )
+
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        config = data.get("config", {})
+
+        if store.plugin_config_id:
+            # Update existing PluginConfig
+            plugin_config = update_plugin_config(
+                config_id=store.plugin_config_id,
+                config=config,
+            )
+            if not plugin_config:
+                return jsonify({"error": "Failed to update PluginConfig"}), 500
+        else:
+            # Create new PluginConfig and link it
+            plugin_config = create_plugin_config(
+                plugin_type="unified_source",
+                source_type=store.source_type,
+                name=f"{store.name}_config",
+                config=config,
+                enabled=True,
+            )
+            if not plugin_config:
+                return jsonify({"error": "Failed to create PluginConfig"}), 500
+
+            # Link it to the document store
+            update_document_store(
+                store_id=store_id,
+                plugin_config_id=plugin_config.id,
+            )
+
+        # Reload store to get updated data
+        store = get_document_store_by_id(store_id)
+
+        return jsonify(
+            {
+                "plugin_config": plugin_config.to_dict(),
+                "store": store.to_dict(),
+            }
+        )
+
+    @admin.route(
+        "/api/document-stores/<int:store_id>/plugin-config", methods=["DELETE"]
+    )
+    @require_auth_api
+    def delete_store_plugin_config(store_id: int):
+        """
+        Delete the PluginConfig for a document store.
+
+        This unlinks and deletes the PluginConfig. The store will fall back
+        to using legacy column-based configuration.
+        """
+        from db import get_document_store_by_id, update_document_store
+        from db.plugin_configs import delete_plugin_config
+
+        store = get_document_store_by_id(store_id)
+        if not store:
+            return jsonify({"error": "Document store not found"}), 404
+
+        if not store.plugin_config_id:
+            return jsonify({"error": "Store has no PluginConfig"}), 404
+
+        plugin_config_id = store.plugin_config_id
+
+        # Unlink from store first
+        update_document_store(
+            store_id=store_id,
+            plugin_config_id=0,  # Will be treated as None
+        )
+
+        # Delete the PluginConfig
+        deleted = delete_plugin_config(plugin_config_id)
+        if not deleted:
+            return jsonify({"error": "Failed to delete PluginConfig"}), 500
+
+        return jsonify({"success": True})
 
     # -------------------------------------------------------------------------
     # OAuth Routes (Google, etc.)
@@ -8983,14 +9259,103 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Live data sources management page."""
         return render_template("live_data_sources.html")
 
+    @admin.route("/smart-actions")
+    @require_auth
+    def smart_actions_page():
+        """Smart actions (action handlers) management page."""
+        return render_template("smart_actions.html")
+
+    @admin.route("/api/smart-actions", methods=["GET"])
+    @require_auth_api
+    def list_smart_actions():
+        """List all available action handlers with OAuth status."""
+        from actions import load_action_handlers
+        from actions.registry import _handlers as all_handlers
+        from db.oauth_tokens import list_oauth_tokens
+
+        # Ensure handlers are loaded
+        if not all_handlers:
+            load_action_handlers()
+
+        # Get available OAuth accounts
+        oauth_accounts = {}
+        for provider in ["google", "microsoft"]:
+            try:
+                tokens = list_oauth_tokens(provider=provider)
+                oauth_accounts[provider] = [
+                    {
+                        "id": t["id"],
+                        "account_email": t["account_email"],
+                        "account_name": t.get("account_name"),
+                    }
+                    for t in tokens
+                ]
+            except Exception:
+                oauth_accounts[provider] = []
+
+        handlers = []
+        for action_type, handler in all_handlers.items():
+            # Determine which OAuth providers this handler can use
+            oauth_providers = []
+            if handler.requires_oauth:
+                if handler.oauth_provider:
+                    oauth_providers = [handler.oauth_provider]
+                else:
+                    # Handler can use multiple providers (e.g., email works with google or microsoft)
+                    if action_type in ["email", "calendar"]:
+                        oauth_providers = ["google", "microsoft"]
+                    elif action_type == "schedule":
+                        oauth_providers = ["google"]  # Calendar-based scheduling
+                    else:
+                        oauth_providers = ["google"]
+
+            # Check if any accounts are available
+            available_accounts = []
+            for provider in oauth_providers:
+                available_accounts.extend(oauth_accounts.get(provider, []))
+
+            handlers.append(
+                {
+                    "action_type": action_type,
+                    "supported_actions": handler.supported_actions,
+                    "requires_oauth": handler.requires_oauth,
+                    "oauth_providers": oauth_providers,
+                    "available_accounts": available_accounts,
+                    "is_configured": len(available_accounts) > 0
+                    or not handler.requires_oauth,
+                    "description": handler.__doc__ or "",
+                }
+            )
+
+        return jsonify(
+            {
+                "handlers": handlers,
+                "oauth_accounts": oauth_accounts,
+            }
+        )
+
     @admin.route("/api/live-data-sources", methods=["GET"])
     @require_auth_api
     def list_live_data_sources():
-        """List all live data sources."""
+        """List all live data sources.
+
+        Excludes unified sources (which are shown in Document Stores instead).
+        """
         from db import get_all_live_data_sources
 
+        # Get live source types that are handled by unified sources
+        # These should only appear in Document Stores, not here
+        try:
+            from plugin_base.loader import get_live_source_to_unified_map
+
+            unified_live_types = set(get_live_source_to_unified_map().keys())
+        except ImportError:
+            unified_live_types = set()
+
         sources = get_all_live_data_sources()
-        return jsonify([s.to_dict() for s in sources])
+        return jsonify(
+            [s.to_dict() for s in sources if s.source_type not in unified_live_types]
+        )
 
     @admin.route("/api/live-data-sources", methods=["POST"])
     @require_auth_api
@@ -9041,6 +9406,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 data_type=data.get("data_type", "general"),
                 best_for=data.get("best_for"),
                 enabled=data.get("enabled", True),
+                config=parse_json(data.get("config_json")),
             )
             return jsonify(source.to_dict()), 201
         except ValueError as e:
@@ -9056,6 +9422,35 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         import os
 
         return jsonify({"configured": bool(os.environ.get("RAPIDAPI_KEY"))})
+
+    @admin.route("/api/live-data-sources/env-var-status", methods=["GET"])
+    @require_auth_api
+    def env_var_status():
+        """Return which plugin env vars are configured.
+
+        Used by frontend to hide fields that have env var fallbacks when
+        the env var is already set.
+        """
+        import os
+
+        from plugin_base.loader import live_source_registry
+
+        configured_vars = {}
+
+        # Check all live source plugins for env_var fields
+        for source_type, plugin_class in live_source_registry.get_all().items():
+            try:
+                fields = plugin_class.get_config_fields()
+                for field in fields:
+                    if field.env_var:
+                        # Check if this env var is set
+                        configured_vars[field.env_var] = bool(
+                            os.environ.get(field.env_var)
+                        )
+            except Exception as e:
+                logger.debug(f"Error getting fields for {source_type}: {e}")
+
+        return jsonify(configured_vars)
 
     @admin.route("/api/live-data-sources/test-config", methods=["POST"])
     @require_auth_api
@@ -9206,6 +9601,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     rate_limit_rpm=data.get("rate_limit_rpm", source.rate_limit_rpm),
                     data_type=data.get("data_type", source.data_type),
                     best_for=data.get("best_for", source.best_for),
+                    config=parse_json(data.get("config_json")),
                 )
 
             if not updated:
@@ -9429,8 +9825,20 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/live-data-sources/for-smart-alias", methods=["GET"])
     @require_auth_api
     def list_live_data_sources_for_smart_alias():
-        """List all live data sources for Smart Alias configuration."""
+        """List all live data sources for Smart Alias configuration.
+
+        Excludes unified sources (which are shown in Document Stores instead).
+        """
         from db import get_all_live_data_sources
+
+        # Get live source types that are handled by unified sources
+        # These should only appear in Document Stores, not here
+        try:
+            from plugin_base.loader import get_live_source_to_unified_map
+
+            unified_live_types = set(get_live_source_to_unified_map().keys())
+        except ImportError:
+            unified_live_types = set()
 
         sources = get_all_live_data_sources()
         return jsonify(
@@ -9442,8 +9850,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "data_type": s.data_type,
                     "description": s.description,
                     "enabled": s.enabled,
+                    "config": s.config,  # Include plugin config for display name
                 }
                 for s in sources
+                if s.source_type not in unified_live_types
             ]
         )
 
@@ -9595,5 +10005,511 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         "period": period,
                     }
                 )
+
+    # =========================================================================
+    # PLUGIN MANAGEMENT ENDPOINTS
+    # =========================================================================
+
+    @admin.route("/api/plugins")
+    @require_auth_api
+    def get_all_plugins():
+        """Get metadata for all discovered plugins."""
+        try:
+            from plugin_base.loader import get_all_plugin_metadata
+
+            metadata = get_all_plugin_metadata()
+            return jsonify(metadata)
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to get plugin metadata: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/actions")
+    @require_auth_api
+    def get_action_plugins():
+        """Get metadata for all action plugins."""
+        try:
+            from plugin_base.loader import action_registry
+
+            return jsonify(action_registry.get_all_metadata())
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to get action plugins: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/actions/<action_type>")
+    @require_auth_api
+    def get_action_plugin(action_type):
+        """Get details for a specific action plugin."""
+        try:
+            from plugin_base.loader import action_registry
+
+            plugin_class = action_registry.get(action_type)
+            if not plugin_class:
+                return jsonify({"error": f"Plugin not found: {action_type}"}), 404
+
+            # Get detailed metadata
+            metadata = {
+                "action_type": action_type,
+                "display_name": getattr(plugin_class, "display_name", action_type),
+                "description": getattr(plugin_class, "description", ""),
+                "category": getattr(plugin_class, "category", "other"),
+                "icon": getattr(plugin_class, "icon", ""),
+                "fields": [f.to_dict() for f in plugin_class.get_config_fields()],
+                "actions": [a.to_dict() for a in plugin_class.get_actions()],
+            }
+
+            return jsonify(metadata)
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to get action plugin {action_type}: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/live-sources")
+    @require_auth_api
+    def get_live_source_plugins():
+        """Get metadata for all live source plugins."""
+        try:
+            from plugin_base.loader import live_source_registry
+
+            return jsonify(live_source_registry.get_all_metadata())
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to get live source plugins: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/live-sources/<source_type>")
+    @require_auth_api
+    def get_live_source_plugin(source_type):
+        """Get details for a specific live source plugin."""
+        try:
+            from plugin_base.loader import live_source_registry
+
+            plugin_class = live_source_registry.get(source_type)
+            if not plugin_class:
+                return jsonify({"error": f"Plugin not found: {source_type}"}), 404
+
+            # Get detailed metadata
+            metadata = {
+                "source_type": source_type,
+                "display_name": getattr(plugin_class, "display_name", source_type),
+                "description": getattr(plugin_class, "description", ""),
+                "data_type": getattr(plugin_class, "data_type", ""),
+                "best_for": getattr(plugin_class, "best_for", ""),
+                "icon": getattr(plugin_class, "icon", ""),
+                "is_builtin": live_source_registry._builtin.get(source_type, False),
+                "fields": [f.to_dict() for f in plugin_class.get_config_fields()],
+                "params": [p.to_dict() for p in plugin_class.get_param_definitions()],
+                "designator_hint": plugin_class.get_designator_hint(),
+            }
+
+            return jsonify(metadata)
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to get live source plugin {source_type}: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/configs", methods=["GET"])
+    @require_auth_api
+    def list_plugin_configs_endpoint():
+        """List all saved plugin configurations."""
+        try:
+            from db.plugin_configs import (
+                get_all_plugin_configs,
+                get_plugin_configs_by_type,
+            )
+
+            plugin_type = request.args.get("type")  # Optional filter
+            if plugin_type:
+                configs = get_plugin_configs_by_type(plugin_type)
+            else:
+                configs = get_all_plugin_configs()
+
+            # Convert to dicts for JSON serialization
+            result = []
+            for c in configs:
+                import json
+
+                result.append(
+                    {
+                        "id": c.id,
+                        "plugin_type": c.plugin_type,
+                        "source_type": c.source_type,
+                        "name": c.name,
+                        "config": json.loads(c.config_json) if c.config_json else {},
+                        "enabled": c.enabled,
+                        "created_at": c.created_at.isoformat()
+                        if c.created_at
+                        else None,
+                        "updated_at": c.updated_at.isoformat()
+                        if c.updated_at
+                        else None,
+                    }
+                )
+            return jsonify(result)
+        except Exception as e:
+            logger.error(f"Failed to list plugin configs: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/configs", methods=["POST"])
+    @require_auth_api
+    def create_plugin_config_endpoint():
+        """Create a new plugin configuration."""
+        try:
+            from db.plugin_configs import create_plugin_config as db_create_config
+            from plugin_base.loader import action_registry
+
+            data = request.get_json()
+            plugin_type = data.get("plugin_type")
+            source_type = data.get("source_type")
+            name = data.get("name")
+            config = data.get("config", {})
+
+            if not plugin_type or not source_type or not name:
+                return jsonify(
+                    {"error": "plugin_type, source_type, and name are required"}
+                ), 400
+
+            # Validate config against plugin schema
+            if plugin_type == "action":
+                plugin_class = action_registry.get(source_type)
+                if not plugin_class:
+                    return jsonify(
+                        {"error": f"Unknown action plugin: {source_type}"}
+                    ), 400
+
+                validation = plugin_class.validate_config(config)
+                if not validation.valid:
+                    errors = [
+                        {"field": e.field, "message": e.message}
+                        for e in validation.errors
+                    ]
+                    return jsonify(
+                        {"error": "Validation failed", "errors": errors}
+                    ), 400
+
+            new_config = db_create_config(
+                plugin_type=plugin_type,
+                source_type=source_type,
+                name=name,
+                config=config,
+                enabled=data.get("enabled", True),
+            )
+
+            if new_config:
+                return jsonify(
+                    {"id": new_config.id, "message": "Plugin configuration created"}
+                )
+            else:
+                return jsonify(
+                    {"error": "Configuration with this name already exists"}
+                ), 400
+        except Exception as e:
+            logger.error(f"Failed to create plugin config: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/configs/<int:config_id>", methods=["GET"])
+    @require_auth_api
+    def get_plugin_config_endpoint(config_id):
+        """Get a specific plugin configuration."""
+        try:
+            import json as json_module
+
+            from db.plugin_configs import get_plugin_config as db_get_config
+
+            config = db_get_config(config_id)
+            if not config:
+                return jsonify({"error": "Configuration not found"}), 404
+
+            result = {
+                "id": config.id,
+                "plugin_type": config.plugin_type,
+                "source_type": config.source_type,
+                "config": json_module.loads(config.config_json)
+                if config.config_json
+                else {},
+                "enabled": config.enabled,
+                "created_at": config.created_at.isoformat()
+                if config.created_at
+                else None,
+                "updated_at": config.updated_at.isoformat()
+                if config.updated_at
+                else None,
+                "updated_at": config.updated_at.isoformat()
+                if config.updated_at
+                else None,
+            }
+            return jsonify(result)
+        except Exception as e:
+            logger.error(f"Failed to get plugin config {config_id}: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/configs/<int:config_id>", methods=["PUT"])
+    @require_auth_api
+    def update_plugin_config_endpoint(config_id):
+        """Update a plugin configuration."""
+        try:
+            from db.plugin_configs import get_plugin_config as db_get_config
+            from db.plugin_configs import update_plugin_config as db_update_config
+            from plugin_base.loader import action_registry
+
+            existing = db_get_config(config_id)
+            if not existing:
+                return jsonify({"error": "Configuration not found"}), 404
+
+            data = request.get_json()
+            config = data.get("config")
+
+            # Validate config if provided
+            if config is not None:
+                plugin_type = existing.get("plugin_type")
+                source_type = existing.get("source_type")
+
+                if plugin_type == "action":
+                    plugin_class = action_registry.get(source_type)
+                    if plugin_class:
+                        validation = plugin_class.validate_config(config)
+                        if not validation.valid:
+                            errors = [
+                                {"field": e.field, "message": e.message}
+                                for e in validation.errors
+                            ]
+                            return jsonify(
+                                {"error": "Validation failed", "errors": errors}
+                            ), 400
+
+            success = db_update_config(
+                config_id,
+                name=data.get("name"),
+                config=config,
+                enabled=data.get("enabled"),
+            )
+
+            if success:
+                return jsonify({"message": "Plugin configuration updated"})
+            else:
+                return jsonify({"error": "Update failed"}), 500
+        except Exception as e:
+            logger.error(f"Failed to update plugin config {config_id}: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/configs/<int:config_id>", methods=["DELETE"])
+    @require_auth_api
+    def delete_plugin_config_endpoint(config_id):
+        """Delete a plugin configuration."""
+        try:
+            from db.plugin_configs import delete_plugin_config as db_delete_config
+
+            success = db_delete_config(config_id)
+            if success:
+                return jsonify({"message": "Plugin configuration deleted"})
+            else:
+                return jsonify({"error": "Configuration not found"}), 404
+        except Exception as e:
+            logger.error(f"Failed to delete plugin config {config_id}: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/plugins/configs/<int:config_id>/test", methods=["POST"])
+    @require_auth_api
+    def test_plugin_config_endpoint(config_id):
+        """Test a plugin configuration."""
+        try:
+            from db.plugin_configs import get_plugin_config as db_get_config
+            from plugin_base.loader import action_registry
+
+            config_data = db_get_config(config_id)
+            if not config_data:
+                return jsonify({"error": "Configuration not found"}), 404
+
+            plugin_type = config_data.get("plugin_type")
+            source_type = config_data.get("source_type")
+            config = config_data.get("config", {})
+
+            if plugin_type == "action":
+                plugin_class = action_registry.get(source_type)
+                if not plugin_class:
+                    return jsonify({"error": f"Plugin not found: {source_type}"}), 404
+
+                try:
+                    instance = plugin_class(config)
+                    success, message = instance.test_connection()
+                    return jsonify({"success": success, "message": message})
+                except Exception as e:
+                    return jsonify({"success": False, "message": str(e)})
+            else:
+                return jsonify({"error": f"Test not supported for {plugin_type}"}), 400
+        except Exception as e:
+            logger.error(f"Failed to test plugin config {config_id}: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # =========================================================================
+    # Unified Sources API
+    # =========================================================================
+
+    @admin.route("/unified-sources")
+    @require_auth
+    def unified_sources_page():
+        """Unified sources management page."""
+        return render_template("unified_sources.html")
+
+    @admin.route("/api/unified-sources/plugins", methods=["GET"])
+    @require_auth_api
+    def list_unified_source_plugins():
+        """List all registered unified source plugins with their metadata."""
+        try:
+            from plugin_base.loader import unified_source_registry
+
+            plugins = []
+            for source_type, plugin_class in unified_source_registry.get_all().items():
+                plugins.append(
+                    {
+                        "source_type": source_type,
+                        "display_name": getattr(
+                            plugin_class, "display_name", source_type
+                        ),
+                        "description": getattr(plugin_class, "description", ""),
+                        "category": getattr(plugin_class, "category", "other"),
+                        "icon": getattr(plugin_class, "icon", "📦"),
+                        "supports_rag": getattr(plugin_class, "supports_rag", True),
+                        "supports_live": getattr(plugin_class, "supports_live", True),
+                        "supports_actions": getattr(
+                            plugin_class, "supports_actions", False
+                        ),
+                        "config_fields": [
+                            f.to_dict() for f in plugin_class.get_config_fields()
+                        ],
+                        "live_params": [
+                            p.to_dict() for p in plugin_class.get_live_params()
+                        ],
+                        "designator_hint": plugin_class.get_designator_hint(),
+                    }
+                )
+
+            return jsonify({"plugins": plugins})
+        except ImportError:
+            return jsonify({"plugins": []})
+        except Exception as e:
+            logger.error(f"Failed to list unified source plugins: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/unified-sources/plugins/<source_type>", methods=["GET"])
+    @require_auth_api
+    def get_unified_source_plugin(source_type: str):
+        """Get detailed information about a specific unified source plugin."""
+        try:
+            from plugin_base.loader import unified_source_registry
+
+            plugin_class = unified_source_registry.get(source_type)
+            if not plugin_class:
+                return jsonify({"error": f"Plugin not found: {source_type}"}), 404
+
+            return jsonify(
+                {
+                    "source_type": source_type,
+                    "display_name": getattr(plugin_class, "display_name", source_type),
+                    "description": getattr(plugin_class, "description", ""),
+                    "category": getattr(plugin_class, "category", "other"),
+                    "icon": getattr(plugin_class, "icon", "📦"),
+                    "supports_rag": getattr(plugin_class, "supports_rag", True),
+                    "supports_live": getattr(plugin_class, "supports_live", True),
+                    "supports_actions": getattr(
+                        plugin_class, "supports_actions", False
+                    ),
+                    "supports_incremental": getattr(
+                        plugin_class, "supports_incremental", True
+                    ),
+                    "default_cache_ttl": getattr(
+                        plugin_class, "default_cache_ttl", 300
+                    ),
+                    "default_index_days": getattr(
+                        plugin_class, "default_index_days", 90
+                    ),
+                    "config_fields": [
+                        f.to_dict() for f in plugin_class.get_config_fields()
+                    ],
+                    "live_params": [
+                        p.to_dict() for p in plugin_class.get_live_params()
+                    ],
+                    "designator_hint": plugin_class.get_designator_hint(),
+                }
+            )
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to get unified source plugin {source_type}: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route(
+        "/api/unified-sources/plugins/<source_type>/validate", methods=["POST"]
+    )
+    @require_auth_api
+    def validate_unified_source_config(source_type: str):
+        """Validate configuration for a unified source plugin."""
+        try:
+            from plugin_base.loader import unified_source_registry
+
+            plugin_class = unified_source_registry.get(source_type)
+            if not plugin_class:
+                return jsonify({"error": f"Plugin not found: {source_type}"}), 404
+
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "No data provided"}), 400
+
+            config = data.get("config", {})
+            result = plugin_class.validate_config(config)
+
+            return jsonify(result.to_dict())
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to validate unified source config: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    @admin.route("/api/unified-sources/plugins/<source_type>/test", methods=["POST"])
+    @require_auth_api
+    def test_unified_source_plugin(source_type: str):
+        """Test a unified source plugin configuration."""
+        try:
+            from plugin_base.loader import unified_source_registry
+
+            plugin_class = unified_source_registry.get(source_type)
+            if not plugin_class:
+                return jsonify({"error": f"Plugin not found: {source_type}"}), 404
+
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "No data provided"}), 400
+
+            config = data.get("config", {})
+
+            # Validate first
+            validation = plugin_class.validate_config(config)
+            if not validation.valid:
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": f"Invalid configuration: {validation.error_message}",
+                    }
+                )
+
+            # Create instance and test
+            try:
+                instance = plugin_class(config)
+                success, message = instance.test_connection()
+                return jsonify({"success": success, "message": message})
+            except Exception as e:
+                return jsonify({"success": False, "message": str(e)})
+
+        except ImportError:
+            return jsonify({"error": "Plugin system not available"}), 500
+        except Exception as e:
+            logger.error(f"Failed to test unified source plugin: {e}")
+            return jsonify({"error": str(e)}), 500
 
     return admin

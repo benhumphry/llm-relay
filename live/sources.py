@@ -7162,9 +7162,133 @@ class RoutesSmartProvider(LiveDataProvider):
         return False, "Failed to geocode test location"
 
 
+class PluginLiveSourceAdapter(LiveDataProvider):
+    """
+    Adapter that wraps a PluginLiveSource to implement LiveDataProvider interface.
+
+    This allows the new plugin-based live sources to be used with the existing
+    smart_enricher.py flow without modifying the enricher code.
+    """
+
+    def __init__(self, source: Any, plugin_class: type):
+        """
+        Initialize the adapter.
+
+        Args:
+            source: LiveDataSource or DetachedLiveDataSource from DB
+            plugin_class: The PluginLiveSource class to instantiate
+        """
+        self.source = source
+        self.name = source.name if source else "plugin"
+
+        # Build config dict from source attributes
+        config = self._build_config_from_source(source)
+
+        # Instantiate the plugin
+        self._plugin = plugin_class(config)
+        self.last_endpoint = None
+
+    def _build_config_from_source(self, source: Any) -> dict:
+        """
+        Build a config dict from a LiveDataSource/DetachedLiveDataSource.
+
+        Maps database columns to plugin config fields.
+        """
+        config = {
+            "name": getattr(source, "name", ""),
+            "cache_ttl_seconds": getattr(source, "cache_ttl_seconds", 300),
+        }
+
+        # Add API key if present
+        if hasattr(source, "api_key") and source.api_key:
+            config["api_key"] = source.api_key
+
+        # Add app_id for TransportAPI
+        if hasattr(source, "app_id") and source.app_id:
+            config["app_id"] = source.app_id
+
+        # Add any config_json fields
+        if hasattr(source, "config_json") and source.config_json:
+            try:
+                extra_config = (
+                    json.loads(source.config_json)
+                    if isinstance(source.config_json, str)
+                    else source.config_json
+                )
+                config.update(extra_config)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Also check auth_config_json - plugin sources store config there
+        if hasattr(source, "auth_config_json") and source.auth_config_json:
+            try:
+                auth_config = (
+                    json.loads(source.auth_config_json)
+                    if isinstance(source.auth_config_json, str)
+                    else source.auth_config_json
+                )
+                config.update(auth_config)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return config
+
+    def fetch(self, query: str, context: dict | None = None) -> LiveDataResult:
+        """
+        Fetch data using the wrapped plugin.
+
+        Converts between the plugin's LiveDataResult and this module's LiveDataResult.
+        """
+        start_time = time.time()
+
+        # The plugin expects params dict, not query string
+        # The context from smart_enricher contains the structured params
+        params = context or {}
+        if "query" not in params:
+            params["query"] = query
+
+        try:
+            # Call the plugin's fetch method
+            plugin_result = self._plugin.fetch(params)
+
+            # Track last endpoint if plugin has it
+            if hasattr(self._plugin, "last_endpoint"):
+                self.last_endpoint = self._plugin.last_endpoint
+
+            # Convert plugin result to this module's LiveDataResult format
+            return LiveDataResult(
+                source_name=self.name,
+                success=plugin_result.success,
+                data=plugin_result.data,
+                formatted=plugin_result.formatted,
+                error=plugin_result.error,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        except Exception as e:
+            logger.error(f"Plugin fetch error for {self.name}: {e}")
+            return LiveDataResult(
+                source_name=self.name,
+                success=False,
+                error=str(e),
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+    def is_available(self) -> bool:
+        """Check if the wrapped plugin is available."""
+        return self._plugin.is_available()
+
+    def test_connection(self) -> tuple[bool, str]:
+        """Test connection using the wrapped plugin."""
+        return self._plugin.test_connection()
+
+
 def get_provider_for_source(source: Any) -> LiveDataProvider:
     """
     Get the appropriate provider for a LiveDataSource.
+
+    First checks the plugin registry for a matching source_type,
+    then falls back to built-in providers for non-migrated sources.
 
     Args:
         source: LiveDataSource or DetachedLiveDataSource
@@ -7174,6 +7298,19 @@ def get_provider_for_source(source: Any) -> LiveDataProvider:
     """
     source_type = source.source_type
 
+    # Check plugin registry first
+    try:
+        from plugin_base.loader import get_live_source_plugin
+
+        plugin_class = get_live_source_plugin(source_type)
+        if plugin_class:
+            logger.debug(f"Using plugin for live source type: {source_type}")
+            return PluginLiveSourceAdapter(source, plugin_class)
+    except ImportError:
+        # Plugin system not available, fall back to built-in
+        pass
+
+    # Fall back to built-in providers for non-migrated sources
     if source_type == "builtin_stocks":
         return StocksProvider(source)
     elif source_type == "builtin_alpha_vantage":

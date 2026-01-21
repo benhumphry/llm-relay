@@ -1853,6 +1853,35 @@ def _run_migrations(engine) -> None:
                 )
                 conn.commit()
 
+    # Migration: Add config_json field to live_data_sources for plugin config (v2.0.1)
+    if "live_data_sources" in inspector.get_table_names():
+        lds_columns = [c["name"] for c in inspector.get_columns("live_data_sources")]
+        if "config_json" not in lds_columns:
+            logger.info(
+                "Adding config_json field to live_data_sources for plugin config (v2.0.1)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE live_data_sources ADD COLUMN config_json TEXT")
+                )
+                conn.commit()
+
+    # Migration: Add plugin_config_id to document_stores table (v2.0.2)
+    # Links document stores to PluginConfig for plugin-specific configuration
+    if "document_stores" in inspector.get_table_names():
+        ds_columns = {col["name"] for col in inspector.get_columns("document_stores")}
+        if "plugin_config_id" not in ds_columns:
+            logger.info(
+                "Adding plugin_config_id column to document_stores table (v2.0.2)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN plugin_config_id INTEGER REFERENCES plugin_configs(id) ON DELETE SET NULL"
+                    )
+                )
+                conn.commit()
+
     # Migration: Drop legacy tables (v1.8 - Smart Aliases unification)
     # These tables have been replaced by the unified smart_aliases table
     legacy_tables = [

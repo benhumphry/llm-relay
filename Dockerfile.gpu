@@ -49,6 +49,9 @@ COPY actions/ ./actions/
 COPY live/ ./live/
 COPY scripts/ ./scripts/
 COPY config/ ./config/
+COPY plugin_base/ ./plugin_base/
+COPY builtin_plugins/ ./builtin_plugins/
+COPY scheduling/ ./scheduling/
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

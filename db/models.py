@@ -864,6 +864,86 @@ class Redirect(Base):
 
 
 # ============================================================================
+# Plugin Configuration Model
+# ============================================================================
+
+
+class PluginConfig(Base):
+    """
+    Configuration for a plugin instance.
+
+    This table stores configuration for plugins that have been set up by the user.
+    Each row represents a configured instance of a plugin (e.g., a specific Todoist
+    account, a particular Google Drive folder source, etc.).
+
+    The config_json field stores plugin-specific configuration as JSON, matching
+    the plugin's get_config_fields() definition. This allows plugins to define
+    their own configuration without requiring schema changes.
+    """
+
+    __tablename__ = "plugin_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Plugin identification
+    plugin_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True
+    )  # 'document_source', 'live_source', 'action'
+    source_type: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
+    )  # Plugin's source_type/action_type identifier
+
+    # User-friendly name for this configuration
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+
+    # Configuration data as JSON
+    config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # State
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Indexes for efficient queries
+    __table_args__ = (
+        Index("ix_plugin_configs_type", "plugin_type", "source_type"),
+        {"sqlite_autoincrement": True},
+    )
+
+    @property
+    def config(self) -> dict:
+        """Parse and return the config JSON as a dict."""
+        if self.config_json:
+            try:
+                return json.loads(self.config_json)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    @config.setter
+    def config(self, value: dict):
+        """Set the config from a dict."""
+        self.config_json = json.dumps(value) if value else None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for API responses."""
+        return {
+            "id": self.id,
+            "plugin_type": self.plugin_type,
+            "source_type": self.source_type,
+            "name": self.name,
+            "config": self.config,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ============================================================================
 # Document Store Model (v3.9)
 # ============================================================================
 
@@ -887,6 +967,13 @@ class DocumentStore(Base):
     source_type: Mapped[str] = mapped_column(
         String(20), default="local"
     )  # "local" | "mcp"
+
+    # Link to PluginConfig for plugin-specific configuration (unified sources)
+    # When set, plugin config is read from the linked PluginConfig instead of
+    # the legacy hardcoded columns. This enables custom plugins without schema changes.
+    plugin_config_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("plugin_configs.id", ondelete="SET NULL"), nullable=True
+    )
 
     # Local source (Docker-mapped folder)
     source_path: Mapped[Optional[str]] = mapped_column(
@@ -1179,6 +1266,7 @@ class DocumentStore(Base):
             "id": self.id,
             "name": self.name,
             "source_type": self.source_type,
+            "plugin_config_id": self.plugin_config_id,
             "source_path": self.source_path,
             "mcp_server_config": self.mcp_server_config,
             "google_account_id": self.google_account_id,
@@ -1880,6 +1968,10 @@ class LiveDataSource(Base):
     # Description of what queries this source is good for
     best_for: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ===== PLUGIN CONFIGURATION =====
+    # JSON object storing plugin-specific config (e.g., oura_account_id, withings_account_id)
+    config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # ===== STATUS =====
     last_success: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -1975,6 +2067,21 @@ class LiveDataSource(Base):
         """Set sample response from a dict."""
         self.sample_response_json = json.dumps(value) if value else None
 
+    @property
+    def config(self) -> dict:
+        """Get plugin config as a dict."""
+        if not self.config_json:
+            return {}
+        try:
+            return json.loads(self.config_json)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @config.setter
+    def config(self, value: dict) -> None:
+        """Set plugin config from a dict."""
+        self.config_json = json.dumps(value) if value else None
+
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -2004,6 +2111,8 @@ class LiveDataSource(Base):
             "data_type": self.data_type,
             "sample_response": self.sample_response,
             "best_for": self.best_for,
+            # Plugin config
+            "config": self.config,
             # Status
             "last_success": self.last_success.isoformat()
             if self.last_success

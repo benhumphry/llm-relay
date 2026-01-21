@@ -56,6 +56,23 @@ rag/                  # Document processing for RAG
   model_cache.py      # GPU model cache with TTL-based eviction
 mcp/                  # Document sources (direct APIs)
   sources.py          # Document source classes for RAG indexing
+plugin_base/          # Plugin framework (v2.0)
+  common.py           # Shared dataclasses (FieldDefinition, ValidationResult)
+  loader.py           # Plugin discovery and registration
+  document_source.py  # PluginDocumentSource base class
+  live_source.py      # PluginLiveSource base class
+  action.py           # PluginActionHandler base class
+  oauth.py            # OAuthMixin for OAuth-based plugins
+builtin_plugins/      # Built-in plugins (shipped with app)
+  document_sources/   # Document source plugins
+  live_sources/       # Live data source plugins
+  actions/            # Action handler plugins
+plugins/              # User plugins (gitignored, can override builtins)
+  document_sources/
+  live_sources/
+  actions/
+tests/                # Unit tests
+  plugins/            # Plugin system tests
 docs/                 # Documentation
   guides/             # Feature guides
 ```
@@ -300,6 +317,14 @@ This pattern is used in `document_stores.html`, `rag_config.html`, and `web_sour
 - `GET /v1/models` — List models
 - `POST /v1/chat/completions` — Chat completion
 - `POST /v1/completions` — Text completion
+
+**Anthropic API** (port 11434):
+- `POST /v1/messages` — Anthropic-format chat completion (supports streaming with named SSE events)
+
+Configure Claude Code to use LLM Relay:
+```bash
+export ANTHROPIC_BASE_URL=http://your-relay-host:11434
+```
 
 ## Important Notes
 
@@ -620,3 +645,153 @@ Updated param hints to guide the designator:
 - Routes provider tested with driving and transit modes
 - Geocoding caching working (30-day TTL)
 - Arrival time correctly used for transit (calculates backwards from event time)
+
+---
+
+## Development Session (2026-01-19) - Plugin System Phase 1
+
+### Plugin System Infrastructure
+
+Implemented Phase 1 of the plugin system as documented in `docs/PLUGIN_SYSTEM_PLAN.md`. This creates a modular architecture for extending LLM Relay without modifying core code.
+
+**New directories:**
+- `plugin_base/` - Core plugin framework
+- `builtin_plugins/` - Built-in plugins shipped with app
+- `plugins/` - User plugins (can override builtins)
+- `tests/plugins/` - Unit tests for plugin system
+
+**Key files created:**
+- `plugin_base/common.py` - Shared dataclasses (FieldDefinition, FieldType, ValidationResult, etc.)
+- `plugin_base/loader.py` - Plugin discovery and registration (PluginRegistry)
+- `plugin_base/document_source.py` - PluginDocumentSource base class
+- `plugin_base/live_source.py` - PluginLiveSource base class
+- `plugin_base/action.py` - PluginActionHandler base class
+- `db/plugin_configs.py` - CRUD operations for plugin configurations
+- `db/models.py` - Added PluginConfig model
+- `plugins/README.md` - Plugin development guide
+
+**Plugin types:**
+1. **Document Sources** - Enumerate and fetch documents for RAG indexing
+2. **Live Sources** - Fetch real-time data at request time (weather, stocks, etc.)
+3. **Actions** - Allow LLM to perform side effects (email, calendar, tasks)
+
+**Plugin discovery:**
+- Runs at app startup via `discover_plugins()` in `proxy.py`
+- Scans `builtin_plugins/` first, then `plugins/`
+- User plugins can override builtins with same `source_type`
+- 64 unit tests covering all functionality
+
+**Database:**
+- New `plugin_configs` table stores plugin instance configurations
+- Config stored as JSON, allowing plugins to define custom fields
+- Auto-created via SQLAlchemy's `create_all()`
+
+### Key Design Decisions
+
+1. **Stub base classes created early** - Needed for loader testing even though full implementation is in later phases
+2. **No hot reloading** - Restart required for new plugins (simpler, more reliable)
+3. **Plugins are trusted code** - No sandboxing (admin-installed only)
+4. **Field definitions drive UI** - Plugins declare config fields, admin UI renders dynamically
+
+### Test Coverage
+
+```
+tests/plugins/test_common.py - 40 tests
+tests/plugins/test_loader.py - 24 tests
+tests/plugins/fixtures/ - Mock plugins for testing
+```
+
+### Current State
+- Phase 1 complete (infrastructure)
+- Plugin discovery working (shows "0 document sources, 0 live sources, 0 actions" until builtins migrated)
+- Next: Phase 2 (Action Plugins) - migrate existing action handlers to plugin architecture
+
+### Files Modified
+- `proxy.py` - Added plugin discovery at startup
+- `db/models.py` - Added PluginConfig model
+- `db/__init__.py` - Added plugin_configs exports
+
+---
+
+## Development Session (2026-01-21) - Smart Plugins (News, Amazon) & Bug Fixes
+
+### New Smart Live Source Plugins
+
+**Smart News (`builtin_plugins/live_sources/smart_news.py`)**
+- Real-Time News Data API via RapidAPI
+- Smart features:
+  - Auto-detects query type: headlines, topic, search, local news
+  - Fetches headlines then enriches with full story coverage
+  - Geo-based local news support
+  - Combines multiple sources for comprehensive coverage
+- Parameters: `query`, `country`, `time_range`, `full_coverage`
+- Default country: GB (configurable)
+
+**Smart Amazon (`builtin_plugins/live_sources/smart_amazon.py`)**
+- Real-Time Amazon Data API via RapidAPI
+- Smart features:
+  - Natural language product search
+  - Auto-resolves product names to ASINs with 24-hour caching
+  - Combines search + details + reviews in one query
+  - Handles comparisons, bestsellers, deals queries
+- Parameters: `query`, `type`, `country`, `include_reviews`
+- Default country: GB (configurable)
+- Output includes: price, rating, availability, about product, specifications, reviews
+
+### Bug Fixes
+
+1. **Amazon API 400 errors - country format**
+   - Problem: API expects 2-letter codes (`GB`) not domains (`amazon.co.uk`)
+   - Fix: Updated `COUNTRIES` mapping to use ISO codes
+   - Added `_normalize_country_code()` to handle legacy values and UK→GB alias
+
+2. **Plugin config not loading from auth_config_json**
+   - Problem: `PluginLiveSourceAdapter._build_config_from_source()` only checked `config_json`
+   - Fix: Added fallback to read from `auth_config_json` where plugin configs are stored
+   - File: `live/sources.py`
+
+3. **Sports plugin missing EFL Championship**
+   - Problem: `TOURNAMENT_IDS` only had top leagues
+   - Fix: Added comprehensive tournament list including:
+     - English: Championship, League One, League Two, FA Cup, EFL Cup
+     - European: Eredivisie, Conference League
+     - Scottish Premiership, World Cup, Euros, MLS
+   - File: `builtin_plugins/live_sources/smart_sports.py`
+
+4. **Notification handler showing OAuth connect button**
+   - Problem: Default `requires_oauth=True` in base class
+   - Fix: Added `requires_oauth = False` to NotificationActionHandler
+   - File: `actions/handlers/notification.py`
+
+### Admin UI Changes
+
+**Live Data Sources page:**
+- Fields with configured env vars are now hidden (e.g., RAPIDAPI_KEY)
+- Added `/api/live-data-sources/env-var-status` endpoint
+- Select dropdowns now properly restore saved values
+
+**Smart Actions page:**
+- Removed info banner about Smart Aliases
+- Removed usage examples section (meant for LLMs, not humans)
+- Notification handler no longer shows "Connect" dropdown
+
+**Navigation:**
+- Moved RAG Config and Web Config from Data Sources to System section
+
+### Plugin System Enhancements
+
+- `FieldDefinition.env_var` property - hide field when env var is set
+- Plugin `best_for` descriptions improved for better designator selection
+- Amazon: "BEST FOR: 'How much does X cost?', product prices..."
+
+### Key Files Modified
+- `builtin_plugins/live_sources/smart_news.py` - New plugin
+- `builtin_plugins/live_sources/smart_amazon.py` - New plugin
+- `builtin_plugins/live_sources/smart_sports.py` - Added tournament IDs
+- `live/sources.py` - Fixed PluginLiveSourceAdapter config loading
+- `actions/handlers/notification.py` - Set requires_oauth=False
+- `admin/templates/smart_actions.html` - Removed banner and examples
+- `admin/templates/live_data_sources.html` - Env var field hiding
+- `admin/templates/base.html` - Moved nav links
+- `admin/app.py` - Added env-var-status endpoint
+- `plugin_base/common.py` - Added env_var to FieldDefinition

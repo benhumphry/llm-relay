@@ -25,7 +25,7 @@ block content %}
                     d="M12 4v16m8-8H4"
                 />
             </svg>
-            Add API Source
+            Add Source
         </button>
     </div>
 
@@ -146,7 +146,7 @@ block content %}
                     </ul>
                 </div>
                 <button @click="openCreateModal()" class="btn btn-primary mt-6">
-                    Add Custom API Source
+                    Add Live Data Source
                 </button>
             </div>
         </div>
@@ -205,7 +205,7 @@ block content %}
                                         <div>
                                             <div
                                                 class="font-medium"
-                                                x-text="source.name"
+                                                x-text="getDisplayName(source)"
                                             ></div>
                                             <div
                                                 class="text-xs text-base-content/50"
@@ -215,11 +215,20 @@ block content %}
                                     </div>
                                 </td>
                                 <td>
-                                    <span
-                                        class="badge badge-sm"
-                                        :class="getTypeBadgeClass(source.source_type)"
-                                        x-text="getTypeLabel(source.source_type)"
-                                    ></span>
+                                    <div class="flex items-center gap-2">
+                                        <span
+                                            class="badge badge-sm"
+                                            :class="getTypeBadgeClass(source.source_type)"
+                                            :title="pluginsByType[source.source_type]?.description || ''"
+                                        >
+                                            <span
+                                                x-text="getPluginIcon(source.source_type)"
+                                            ></span>
+                                            <span
+                                                x-text="getTypeLabel(source.source_type)"
+                                            ></span>
+                                        </span>
+                                    </div>
                                 </td>
                                 <td>
                                     <span
@@ -649,11 +658,11 @@ block content %}
         <div class="modal-box max-w-3xl">
             <h3
                 class="font-bold text-lg mb-4"
-                x-text="editingSource ? 'Edit API Source' : 'Add API Source'"
+                x-text="editingSource ? 'Edit Live Data Source' : 'Add Live Data Source'"
             ></h3>
 
             <form @submit.prevent="saveSource()">
-                <!-- Source Type Selection - FIRST -->
+                <!-- Source Type Selection - FIRST (Dynamic from plugins) -->
                 <div class="form-control mb-4">
                     <label class="label"
                         ><span class="label-text">Source Type</span></label
@@ -663,168 +672,47 @@ block content %}
                         class="select select-bordered"
                         @change="onSourceTypeChange()"
                     >
-                        <optgroup label="Google (OAuth)">
-                            <option value="google_calendar_live">
-                                Google Calendar (real-time)
-                            </option>
-                            <option value="google_tasks_live">
-                                Google Tasks (real-time)
-                            </option>
-                            <option value="google_gmail_live">
-                                Gmail (real-time)
-                            </option>
-                        </optgroup>
-                        <optgroup label="Health & Fitness (OAuth)">
-                            <option value="oura_live">
-                                Oura Ring (sleep, readiness, activity)
-                            </option>
-                            <option value="withings_live">
-                                Withings (weight, body composition, sleep)
-                            </option>
-                        </optgroup>
-                        <optgroup label="External APIs">
-                            <option value="mcp_server">
-                                MCP API (RapidAPI auto-discovery)
-                            </option>
-                            <option value="rest_api">
-                                Legacy REST API (manual config)
-                            </option>
-                        </optgroup>
+                        <!-- Dynamic plugin options grouped by category -->
+                        <template
+                            x-for="[category, categoryPlugins] in Object.entries(getPluginCategories())"
+                            :key="category"
+                        >
+                            <optgroup :label="getCategoryLabel(category)">
+                                <template
+                                    x-for="plugin in categoryPlugins"
+                                    :key="plugin.source_type"
+                                >
+                                    <option :value="plugin.source_type">
+                                        <span x-text="plugin.icon"></span>
+                                        <span
+                                            x-text="plugin.display_name"
+                                        ></span>
+                                    </option>
+                                </template>
+                            </optgroup>
+                        </template>
                     </select>
                     <label class="label"
                         ><span
                             class="label-text-alt"
-                            x-text="form.source_type.startsWith('google_') ? 'Requires connected Google account' : (form.source_type === 'oura_live' ? 'Requires connected Oura account' : (form.source_type === 'withings_live' ? 'Requires connected Withings account' : (form.source_type.startsWith('builtin_') ? 'Requires GOOGLE_MAPS_API_KEY environment variable' : 'MCP sources auto-discover API endpoints')))"
+                            x-text="getCurrentPlugin()?.description || 'Select a source type'"
                         ></span
                     ></label>
                 </div>
 
-                <!-- Quick Start: RapidAPI MCP Import (only for MCP sources) -->
+                <!-- Dynamic Plugin Configuration -->
                 <template
-                    x-if="!editingSource && form.source_type === 'mcp_server'"
+                    x-if="getCurrentPlugin() && getCurrentPlugin().fields && getCurrentPlugin().fields.length > 0"
                 >
                     <div class="bg-base-200 rounded-lg p-4 mb-4">
-                        <div class="flex items-center gap-2 mb-3">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-5 w-5 text-primary"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 10V3L4 14h7v7l9-11h-7z"
-                                />
-                            </svg>
-                            <span class="font-medium"
-                                >Quick Start - RapidAPI MCP</span
-                            >
-                        </div>
-                        <p class="text-sm text-base-content/70 mb-3">
-                            Paste a RapidAPI URL to auto-configure. Tools are
-                            discovered automatically.
-                        </p>
-                        <div class="form-control">
-                            <div class="join">
-                                <input
-                                    type="text"
-                                    x-model="rapidapiImportUrl"
-                                    class="input input-bordered input-sm join-item w-full"
-                                    placeholder="https://rapidapi.com/user/api/name"
-                                />
-                                <button
-                                    type="button"
-                                    @click="importFromRapidApi()"
-                                    class="btn btn-sm btn-primary join-item"
-                                >
-                                    Import
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </template>
+                        <div
+                            class="divider mt-0"
+                            x-text="getCurrentPlugin().display_name + ' Configuration'"
+                        ></div>
 
-                <!-- Basic Info -->
-                <div class="grid grid-cols-2 gap-4 mb-4">
-                    <div class="form-control">
-                        <label class="label"
-                            ><span class="label-text">Name *</span></label
-                        >
-                        <input
-                            type="text"
-                            x-model="form.name"
-                            class="input input-bordered"
-                            placeholder="my-source"
-                            required
-                            :disabled="editingSource"
-                        />
-                        <label class="label"
-                            ><span class="label-text-alt"
-                                >Unique identifier (lowercase)</span
-                            ></label
-                        >
-                    </div>
-                    <div class="form-control">
-                        <label class="label"
-                            ><span class="label-text">Data Type *</span></label
-                        >
-                        <select
-                            x-model="form.data_type"
-                            class="select select-bordered"
-                            required
-                        >
-                            <option value="health">Health</option>
-                            <option value="finance">Finance</option>
-                            <option value="calendar">Calendar</option>
-                            <option value="email">Email</option>
-                            <option value="tasks">Tasks</option>
-                            <option value="weather">Weather</option>
-                            <option value="sports">Sports</option>
-                            <option value="news">News</option>
-                            <option value="transport">Transport</option>
-                            <option value="entertainment">Entertainment</option>
-                            <option value="general">General</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="form-control mb-4">
-                    <label class="label"
-                        ><span class="label-text">Description</span></label
-                    >
-                    <input
-                        type="text"
-                        x-model="form.description"
-                        class="input input-bordered"
-                        placeholder="Brief description of this data source"
-                    />
-                </div>
-
-                <div class="form-control mb-4">
-                    <label class="label"
-                        ><span class="label-text"
-                            >Best For (helps designator pick this source)</span
-                        ></label
-                    >
-                    <textarea
-                        x-model="form.best_for"
-                        class="textarea textarea-bordered"
-                        rows="2"
-                        placeholder="e.g., Sleep scores, weight tracking, calendar events..."
-                    ></textarea>
-                </div>
-
-                <!-- Google OAuth Configuration -->
-                <template x-if="form.source_type.startsWith('google_')">
-                    <div class="bg-base-200 rounded-lg p-4 mb-4">
-                        <div class="divider mt-0">Google Account</div>
-                        <template
-                            x-if="!googleAccounts || googleAccounts.length === 0"
-                        >
-                            <div class="alert alert-warning">
+                        <!-- Plugin description -->
+                        <template x-if="getCurrentPlugin().description">
+                            <div class="alert alert-info mb-4">
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
                                     class="h-5 w-5"
@@ -836,756 +724,371 @@ block content %}
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                         stroke-width="2"
-                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                                     />
                                 </svg>
-                                <div>
-                                    <div class="font-medium">
-                                        No Google accounts connected
-                                    </div>
-                                    <div class="text-sm">
-                                        Go to
-                                        <a href="/document-stores" class="link"
-                                            >Document Stores</a
-                                        >
-                                        to connect a Google account first.
-                                    </div>
-                                </div>
+                                <span
+                                    class="text-sm"
+                                    x-text="getCurrentPlugin().description"
+                                ></span>
                             </div>
                         </template>
-                        <template
-                            x-if="googleAccounts && googleAccounts.length > 0"
-                        >
-                            <div class="form-control">
-                                <label class="label"
-                                    ><span class="label-text"
-                                        >Google Account *</span
-                                    ></label
-                                >
-                                <select
-                                    x-model="form.google_account_id"
-                                    class="select select-bordered"
-                                    required
-                                >
-                                    <option value="">
-                                        Select an account...
-                                    </option>
-                                    <template
-                                        x-for="account in googleAccounts"
-                                        :key="account.id"
-                                    >
-                                        <option
-                                            :value="account.id"
-                                            x-text="account.account_email + (account.account_name ? ' (' + account.account_name + ')' : '')"
-                                        ></option>
-                                    </template>
-                                </select>
-                                <label class="label"
-                                    ><span class="label-text-alt"
-                                        >Select the Google account to use for
-                                        this source</span
-                                    ></label
-                                >
-                            </div>
-                        </template>
-                        <div class="alert alert-info mt-4">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-5 w-5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                />
-                            </svg>
-                            <span
-                                class="text-sm"
-                                x-text="getGoogleSourceDescription(form.source_type)"
-                            ></span>
-                        </div>
-                    </div>
-                </template>
 
-                <!-- Oura OAuth Configuration -->
-                <template x-if="form.source_type === 'oura_live'">
-                    <div class="bg-base-200 rounded-lg p-4 mb-4">
-                        <div class="divider mt-0">Oura Account</div>
-                        <template x-if="!ouraConfigured">
-                            <div class="alert alert-warning">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-5 w-5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                                    />
-                                </svg>
-                                <div>
-                                    <div class="font-medium">
-                                        Oura OAuth not configured
-                                    </div>
-                                    <div class="text-sm">
-                                        Set
-                                        <code class="bg-base-300 px-1 rounded"
-                                            >OURA_CLIENT_ID</code
-                                        >
-                                        and
-                                        <code class="bg-base-300 px-1 rounded"
-                                            >OURA_CLIENT_SECRET</code
-                                        >
-                                        environment variables to enable Oura
-                                        integration.
-                                    </div>
-                                </div>
-                            </div>
-                        </template>
+                        <!-- Dynamic fields -->
                         <template
-                            x-if="ouraConfigured && (!ouraAccounts || ouraAccounts.length === 0)"
+                            x-for="field in getCurrentPlugin().fields"
+                            :key="field.name"
                         >
-                            <div>
-                                <div class="alert alert-info mb-4">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-5 w-5"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            <div
+                                class="form-control mb-4"
+                                x-show="isFieldVisible(field)"
+                            >
+                                <!-- OAuth Account Field -->
+                                <template
+                                    x-if="field.field_type === 'oauth_account'"
+                                >
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+
+                                        <!-- OAuth not configured -->
+                                        <template
+                                            x-if="!isOAuthConfigured(field.picker_options?.provider)"
+                                        >
+                                            <div
+                                                class="alert alert-warning text-sm py-2"
+                                            >
+                                                <span
+                                                    x-text="getOAuthNotConfiguredMessage(field.picker_options?.provider)"
+                                                ></span>
+                                            </div>
+                                        </template>
+
+                                        <!-- No accounts connected -->
+                                        <template
+                                            x-if="isOAuthConfigured(field.picker_options?.provider) && getOAuthAccounts(field.picker_options?.provider).length === 0"
+                                        >
+                                            <div>
+                                                <div
+                                                    class="alert alert-info mb-2 text-sm py-2"
+                                                >
+                                                    <span
+                                                        x-text="'No ' + (field.picker_options?.provider || 'OAuth') + ' accounts connected yet.'"
+                                                    ></span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    @click="connectOAuthProvider(field.picker_options?.provider)"
+                                                    class="btn btn-sm btn-outline"
+                                                    :disabled="oauthConnecting[field.picker_options?.provider]"
+                                                >
+                                                    <template
+                                                        x-if="oauthConnecting[field.picker_options?.provider]"
+                                                    >
+                                                        <span
+                                                            class="loading loading-spinner loading-sm"
+                                                        ></span>
+                                                    </template>
+                                                    <span
+                                                        x-text="'Connect ' + capitalizeFirst(field.picker_options?.provider || 'Account')"
+                                                    ></span>
+                                                </button>
+                                            </div>
+                                        </template>
+
+                                        <!-- Account dropdown -->
+                                        <template
+                                            x-if="isOAuthConfigured(field.picker_options?.provider) && getOAuthAccounts(field.picker_options?.provider).length > 0"
+                                        >
+                                            <div>
+                                                <select
+                                                    x-model="pluginConfig[field.name]"
+                                                    class="select select-bordered w-full"
+                                                    :class="{'select-sm': !field.required}"
+                                                    :required="field.required"
+                                                >
+                                                    <option value="">
+                                                        <span
+                                                            x-text="field.required ? 'Select an account...' : 'None (skip)'"
+                                                        ></span>
+                                                    </option>
+                                                    <template
+                                                        x-for="account in getOAuthAccounts(field.picker_options?.provider)"
+                                                        :key="account.id"
+                                                    >
+                                                        <option
+                                                            :value="account.id"
+                                                            x-text="account.account_email + (account.account_name ? ' (' + account.account_name + ')' : '')"
+                                                        ></option>
+                                                    </template>
+                                                </select>
+                                                <label class="label py-1">
+                                                    <span
+                                                        class="label-text-alt"
+                                                        x-text="field.help_text"
+                                                    ></span>
+                                                    <button
+                                                        type="button"
+                                                        @click="connectOAuthProvider(field.picker_options?.provider)"
+                                                        class="link link-primary text-xs"
+                                                    >
+                                                        Connect another
+                                                    </button>
+                                                </label>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+
+                                <!-- Text Field -->
+                                <template x-if="field.field_type === 'text'">
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            x-model="pluginConfig[field.name]"
+                                            class="input input-bordered w-full"
+                                            :placeholder="field.placeholder"
+                                            :required="field.required"
                                         />
-                                    </svg>
-                                    <span
-                                        >No Oura accounts connected yet. Click
-                                        below to connect your Oura Ring.</span
-                                    >
-                                </div>
-                                <button
-                                    type="button"
-                                    @click="connectOura()"
-                                    class="btn btn-primary"
-                                    :disabled="ouraConnecting"
-                                >
-                                    <template x-if="ouraConnecting">
-                                        <span
-                                            class="loading loading-spinner loading-sm"
-                                        ></span>
-                                    </template>
-                                    <template x-if="!ouraConnecting">
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            class="h-5 w-5 mr-1"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
+                                        <label
+                                            class="label"
+                                            x-show="field.help_text"
                                         >
-                                            <path
-                                                stroke-linecap="round"
-                                                stroke-linejoin="round"
-                                                stroke-width="2"
-                                                d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-                                            />
-                                        </svg>
-                                    </template>
-                                    Connect Oura Ring
-                                </button>
-                            </div>
-                        </template>
-                        <template
-                            x-if="ouraConfigured && ouraAccounts && ouraAccounts.length > 0"
-                        >
-                            <div class="form-control">
-                                <label class="label"
-                                    ><span class="label-text"
-                                        >Oura Account *</span
-                                    ></label
-                                >
-                                <select
-                                    x-model="form.oura_account_id"
-                                    class="select select-bordered"
-                                    required
-                                >
-                                    <option value="">
-                                        Select an account...
-                                    </option>
-                                    <template
-                                        x-for="account in ouraAccounts"
-                                        :key="account.id"
-                                    >
-                                        <option
-                                            :value="account.id"
-                                            x-text="account.account_email + (account.account_name ? ' (' + account.account_name + ')' : '')"
-                                        ></option>
-                                    </template>
-                                </select>
-                                <label class="label">
-                                    <span class="label-text-alt"
-                                        >Select the Oura account to use</span
-                                    >
-                                    <button
-                                        type="button"
-                                        @click="connectOura()"
-                                        class="link link-primary text-xs"
-                                    >
-                                        Connect another account
-                                    </button>
-                                </label>
-                            </div>
-                        </template>
-                        <div class="alert alert-info mt-4">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-5 w-5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                />
-                            </svg>
-                            <span class="text-sm">
-                                Provides sleep scores, readiness scores,
-                                activity data, and heart rate from your Oura
-                                Ring.
-                            </span>
-                        </div>
-                    </div>
-                </template>
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
 
-                <!-- Withings OAuth Configuration -->
-                <template x-if="form.source_type === 'withings_live'">
-                    <div class="bg-base-200 rounded-lg p-4 mb-4">
-                        <div class="divider mt-0">Withings Account</div>
-                        <template x-if="!withingsConfigured">
-                            <div class="alert alert-warning">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    class="h-5 w-5"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
+                                <!-- Password Field -->
+                                <template
+                                    x-if="field.field_type === 'password'"
                                 >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        stroke-width="2"
-                                        d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                                    />
-                                </svg>
-                                <div>
-                                    <div class="font-medium">
-                                        Withings OAuth not configured
-                                    </div>
-                                    <div class="text-sm">
-                                        Set
-                                        <code class="bg-base-300 px-1 rounded"
-                                            >WITHINGS_CLIENT_ID</code
-                                        >
-                                        and
-                                        <code class="bg-base-300 px-1 rounded"
-                                            >WITHINGS_CLIENT_SECRET</code
-                                        >
-                                        environment variables to enable Withings
-                                        integration.
-                                    </div>
-                                </div>
-                            </div>
-                        </template>
-                        <template
-                            x-if="withingsConfigured && (!withingsAccounts || withingsAccounts.length === 0)"
-                        >
-                            <div>
-                                <div class="alert alert-info mb-4">
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        class="h-5 w-5"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                    >
-                                        <path
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            stroke-width="2"
-                                            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+                                        <input
+                                            type="password"
+                                            x-model="pluginConfig[field.name]"
+                                            class="input input-bordered w-full"
+                                            :placeholder="field.placeholder"
+                                            :required="field.required"
                                         />
-                                    </svg>
-                                    <span
-                                        >No Withings accounts connected yet.
-                                        Click below to connect your Withings
-                                        devices.</span
-                                    >
-                                </div>
-                                <button
-                                    type="button"
-                                    @click="connectWithings()"
-                                    class="btn btn-primary"
-                                    :disabled="withingsConnecting"
-                                >
-                                    <template x-if="withingsConnecting">
-                                        <span
-                                            class="loading loading-spinner loading-sm"
-                                        ></span>
-                                    </template>
-                                    <template x-if="!withingsConnecting">
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            class="h-5 w-5 mr-1"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
+                                        <label
+                                            class="label"
+                                            x-show="field.help_text"
                                         >
-                                            <path
-                                                stroke-linecap="round"
-                                                stroke-linejoin="round"
-                                                stroke-width="2"
-                                                d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
+
+                                <!-- Integer Field -->
+                                <template x-if="field.field_type === 'integer'">
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            x-model.number="pluginConfig[field.name]"
+                                            class="input input-bordered w-full"
+                                            :placeholder="field.placeholder"
+                                            :required="field.required"
+                                            :min="field.min_value"
+                                            :max="field.max_value"
+                                        />
+                                        <label
+                                            class="label"
+                                            x-show="field.help_text"
+                                        >
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
+
+                                <!-- Number Field -->
+                                <template x-if="field.field_type === 'number'">
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            x-model.number="pluginConfig[field.name]"
+                                            class="input input-bordered w-full"
+                                            :placeholder="field.placeholder"
+                                            :required="field.required"
+                                            :min="field.min_value"
+                                            :max="field.max_value"
+                                        />
+                                        <label
+                                            class="label"
+                                            x-show="field.help_text"
+                                        >
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
+
+                                <!-- Boolean Field -->
+                                <template x-if="field.field_type === 'boolean'">
+                                    <div>
+                                        <label
+                                            class="label cursor-pointer justify-start gap-3"
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                x-model="pluginConfig[field.name]"
+                                                class="toggle toggle-primary"
                                             />
-                                        </svg>
-                                    </template>
-                                    Connect Withings
-                                </button>
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label"
+                                            ></span>
+                                        </label>
+                                        <label
+                                            class="label py-0"
+                                            x-show="field.help_text"
+                                        >
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
+
+                                <!-- Select Field -->
+                                <template x-if="field.field_type === 'select'">
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+                                        <select
+                                            x-model="pluginConfig[field.name]"
+                                            class="select select-bordered w-full"
+                                            :required="field.required"
+                                        >
+                                            <option value="">Select...</option>
+                                            <template
+                                                x-for="opt in field.options"
+                                                :key="opt.value"
+                                            >
+                                                <option
+                                                    :value="opt.value"
+                                                    x-text="opt.label"
+                                                ></option>
+                                            </template>
+                                        </select>
+                                        <label
+                                            class="label"
+                                            x-show="field.help_text"
+                                        >
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
+
+                                <!-- Textarea Field -->
+                                <template
+                                    x-if="field.field_type === 'textarea'"
+                                >
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+                                        <textarea
+                                            x-model="pluginConfig[field.name]"
+                                            class="textarea textarea-bordered w-full"
+                                            :placeholder="field.placeholder"
+                                            :required="field.required"
+                                            rows="3"
+                                        ></textarea>
+                                        <label
+                                            class="label"
+                                            x-show="field.help_text"
+                                        >
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
+
+                                <!-- JSON Field -->
+                                <template x-if="field.field_type === 'json'">
+                                    <div>
+                                        <label class="label">
+                                            <span
+                                                class="label-text"
+                                                x-text="field.label + (field.required ? ' *' : '')"
+                                            ></span>
+                                        </label>
+                                        <textarea
+                                            x-model="pluginConfig[field.name]"
+                                            class="textarea textarea-bordered w-full font-mono text-sm"
+                                            :placeholder="field.placeholder || '{}'"
+                                            :required="field.required"
+                                            rows="4"
+                                        ></textarea>
+                                        <label
+                                            class="label"
+                                            x-show="field.help_text"
+                                        >
+                                            <span
+                                                class="label-text-alt"
+                                                x-text="field.help_text"
+                                            ></span>
+                                        </label>
+                                    </div>
+                                </template>
                             </div>
                         </template>
-                        <template
-                            x-if="withingsConfigured && withingsAccounts && withingsAccounts.length > 0"
-                        >
-                            <div class="form-control">
-                                <label class="label"
-                                    ><span class="label-text"
-                                        >Withings Account *</span
-                                    ></label
-                                >
-                                <select
-                                    x-model="form.withings_account_id"
-                                    class="select select-bordered"
-                                    required
-                                >
-                                    <option value="">
-                                        Select an account...
-                                    </option>
-                                    <template
-                                        x-for="account in withingsAccounts"
-                                        :key="account.id"
-                                    >
-                                        <option
-                                            :value="account.id"
-                                            x-text="account.account_name || account.account_email"
-                                        ></option>
-                                    </template>
-                                </select>
-                                <label class="label">
-                                    <span class="label-text-alt"
-                                        >Select the Withings account to
-                                        use</span
-                                    >
-                                    <button
-                                        type="button"
-                                        @click="connectWithings()"
-                                        class="link link-primary text-xs"
-                                    >
-                                        Connect another account
-                                    </button>
-                                </label>
-                            </div>
-                        </template>
-                        <div class="alert alert-info mt-4">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-5 w-5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                />
-                            </svg>
-                            <span class="text-sm">
-                                Provides weight, body composition (fat %, muscle
-                                mass, bone mass), sleep data, and activity from
-                                your Withings devices.
-                            </span>
-                        </div>
                     </div>
                 </template>
-
-                <!-- MCP Configuration (simplified) -->
-                <template x-if="form.source_type === 'mcp_server'">
-                    <div class="bg-base-200 rounded-lg p-4 mb-4">
-                        <div class="divider mt-0">MCP Configuration</div>
-                        <div class="form-control mb-4">
-                            <label class="label"
-                                ><span class="label-text"
-                                    >RapidAPI Host *</span
-                                ></label
-                            >
-                            <input
-                                type="text"
-                                x-model="form.mcp_api_host"
-                                class="input input-bordered font-mono text-sm"
-                                placeholder="yahoo-finance15.p.rapidapi.com"
-                                required
-                            />
-                            <label class="label"
-                                ><span class="label-text-alt"
-                                    >The API host (from RapidAPI endpoint
-                                    page)</span
-                                ></label
-                            >
-                        </div>
-                        <div class="form-control">
-                            <label class="label"
-                                ><span class="label-text"
-                                    >API Key (optional)</span
-                                ></label
-                            >
-                            <input
-                                type="password"
-                                x-model="form.mcp_api_key"
-                                class="input input-bordered font-mono text-sm"
-                                placeholder="Leave empty to use RAPIDAPI_KEY env var"
-                            />
-                            <label class="label"
-                                ><span class="label-text-alt"
-                                    >Override key for this source (defaults to
-                                    RAPIDAPI_KEY)</span
-                                ></label
-                            >
-                        </div>
-                        <div class="alert alert-info mt-4">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-5 w-5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                                />
-                            </svg>
-                            <span class="text-sm"
-                                >Tools will be auto-discovered via MCP. No
-                                manual endpoint configuration needed.</span
-                            >
-                        </div>
-                    </div>
-                </template>
-
-                <!-- Legacy REST API Configuration -->
-                <template
-                    x-if="form.source_type !== 'mcp_server' && !form.source_type.startsWith('google_') && form.source_type !== 'oura_live' && form.source_type !== 'withings_live'"
-                >
-                    <div>
-                        <div class="divider">API Configuration</div>
-
-                        <div class="grid grid-cols-3 gap-4 mb-4">
-                            <div class="form-control col-span-2">
-                                <label class="label"
-                                    ><span class="label-text"
-                                        >Endpoint URL *</span
-                                    ></label
-                                >
-                                <input
-                                    type="text"
-                                    x-model="form.endpoint_url"
-                                    class="input input-bordered font-mono text-sm"
-                                    placeholder="https://api.example.com/v1/quote"
-                                />
-                                <label class="label"
-                                    ><span class="label-text-alt"
-                                        >Use {% raw %}{{param}}{% endraw %} for
-                                        placeholders</span
-                                    ></label
-                                >
-                            </div>
-                            <div class="form-control">
-                                <label class="label"
-                                    ><span class="label-text"
-                                        >Method</span
-                                    ></label
-                                >
-                                <select
-                                    x-model="form.http_method"
-                                    class="select select-bordered"
-                                >
-                                    <option value="GET">GET</option>
-                                    <option value="POST">POST</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Auth Type -->
-                        <div class="form-control mb-4">
-                            <label class="label"
-                                ><span class="label-text"
-                                    >Authentication</span
-                                ></label
-                            >
-                            <select
-                                x-model="form.auth_type"
-                                class="select select-bordered"
-                                @change="onAuthTypeChange()"
-                            >
-                                <option value="none">None</option>
-                                <option value="rapidapi">
-                                    RapidAPI (uses RAPIDAPI_KEY env var)
-                                </option>
-                                <option value="api_key">API Key</option>
-                                <option value="bearer">Bearer Token</option>
-                            </select>
-                        </div>
-
-                        <!-- RapidAPI Auth -->
-                        <template x-if="form.auth_type === 'rapidapi'">
-                            <div class="form-control mb-4">
-                                <label class="label"
-                                    ><span class="label-text"
-                                        >RapidAPI Host *</span
-                                    ></label
-                                >
-                                <input
-                                    type="text"
-                                    x-model="form.rapidapi_host"
-                                    class="input input-bordered font-mono text-sm"
-                                    placeholder="yahoo-finance15.p.rapidapi.com"
-                                />
-                                <label class="label"
-                                    ><span class="label-text-alt"
-                                        >From RapidAPI endpoint page
-                                        (X-RapidAPI-Host header)</span
-                                    ></label
-                                >
-                            </div>
-                        </template>
-
-                        <!-- API Key Auth -->
-                        <template x-if="form.auth_type === 'api_key'">
-                            <div class="grid grid-cols-3 gap-4 mb-4">
-                                <div class="form-control">
-                                    <label class="label"
-                                        ><span class="label-text"
-                                            >Key Name</span
-                                        ></label
-                                    >
-                                    <input
-                                        type="text"
-                                        x-model="form.api_key_name"
-                                        class="input input-bordered"
-                                        placeholder="X-API-Key"
-                                    />
-                                </div>
-                                <div class="form-control">
-                                    <label class="label"
-                                        ><span class="label-text"
-                                            >Key Value</span
-                                        ></label
-                                    >
-                                    <input
-                                        type="text"
-                                        x-model="form.api_key_value"
-                                        class="input input-bordered"
-                                        placeholder="${MY_API_KEY}"
-                                    />
-                                    <label class="label"
-                                        ><span class="label-text-alt"
-                                            >Use ${ENV_VAR} for env vars</span
-                                        ></label
-                                    >
-                                </div>
-                                <div class="form-control">
-                                    <label class="label"
-                                        ><span class="label-text"
-                                            >Location</span
-                                        ></label
-                                    >
-                                    <select
-                                        x-model="form.api_key_location"
-                                        class="select select-bordered"
-                                    >
-                                        <option value="header">Header</option>
-                                        <option value="query">
-                                            Query Param
-                                        </option>
-                                    </select>
-                                </div>
-                            </div>
-                        </template>
-
-                        <!-- Bearer Auth -->
-                        <template x-if="form.auth_type === 'bearer'">
-                            <div class="form-control mb-4">
-                                <label class="label"
-                                    ><span class="label-text"
-                                        >Bearer Token</span
-                                    ></label
-                                >
-                                <input
-                                    type="text"
-                                    x-model="form.bearer_token"
-                                    class="input input-bordered"
-                                    placeholder="${MY_TOKEN}"
-                                />
-                                <label class="label"
-                                    ><span class="label-text-alt"
-                                        >Use ${ENV_VAR} for env vars</span
-                                    ></label
-                                >
-                            </div>
-                        </template>
-
-                        <!-- Query Parameters -->
-                        <div class="form-control mb-4">
-                            <label class="label"
-                                ><span class="label-text"
-                                    >Query Parameters (JSON)</span
-                                ></label
-                            >
-                            <textarea
-                                x-model="form.query_params_json"
-                                class="textarea textarea-bordered font-mono text-sm"
-                                rows="2"
-                                placeholder='{"symbol": "{{symbol}}", "interval": "1d"}'
-                            ></textarea>
-                            <label class="label"
-                                ><span class="label-text-alt"
-                                    >Use {% raw %}{{param}}{% endraw %} for
-                                    dynamic values from designator</span
-                                ></label
-                            >
-                        </div>
-
-                        <!-- Response Configuration (legacy only) -->
-                        <div class="divider">Response Extraction</div>
-
-                        <div class="form-control mb-4">
-                            <label class="label"
-                                ><span class="label-text"
-                                    >JSONPath to Extract Data</span
-                                ></label
-                            >
-                            <input
-                                type="text"
-                                x-model="form.response_path"
-                                class="input input-bordered font-mono text-sm"
-                                placeholder="$.body[0]"
-                            />
-                            <label class="label"
-                                ><span class="label-text-alt"
-                                    >e.g., $.data.quote or
-                                    $.results[0].price</span
-                                ></label
-                            >
-                        </div>
-
-                        <div class="form-control mb-4">
-                            <label class="label"
-                                ><span class="label-text"
-                                    >Response Format Template</span
-                                ></label
-                            >
-                            <textarea
-                                x-model="form.response_format_template"
-                                class="textarea textarea-bordered font-mono text-sm"
-                                rows="3"
-                                placeholder="### {{symbol}} Stock Price&#10;Price: ${{regularMarketPrice}}&#10;Change: {{regularMarketChangePercent}}%"
-                            ></textarea>
-                            <label class="label"
-                                ><span class="label-text-alt"
-                                    >Template for LLM context. Use {% raw
-                                    %}{{field}}{% endraw %} for data
-                                    fields</span
-                                ></label
-                            >
-                        </div>
-                    </div>
-                </template>
-
-                <!-- Behavior (shared by all source types) -->
-                <div class="divider">Behavior</div>
-
-                <div class="grid grid-cols-4 gap-4 mb-4">
-                    <div class="form-control">
-                        <label class="label"
-                            ><span class="label-text">Cache TTL</span></label
-                        >
-                        <input
-                            type="number"
-                            x-model="form.cache_ttl_seconds"
-                            class="input input-bordered"
-                            min="0"
-                        />
-                        <label class="label"
-                            ><span class="label-text-alt">seconds</span></label
-                        >
-                    </div>
-                    <div class="form-control">
-                        <label class="label"
-                            ><span class="label-text">Timeout</span></label
-                        >
-                        <input
-                            type="number"
-                            x-model="form.timeout_seconds"
-                            class="input input-bordered"
-                            min="1"
-                            max="120"
-                        />
-                        <label class="label"
-                            ><span class="label-text-alt">seconds</span></label
-                        >
-                    </div>
-                    <div class="form-control">
-                        <label class="label"
-                            ><span class="label-text">Retries</span></label
-                        >
-                        <input
-                            type="number"
-                            x-model="form.retry_count"
-                            class="input input-bordered"
-                            min="0"
-                            max="5"
-                        />
-                    </div>
-                    <div class="form-control">
-                        <label class="label"
-                            ><span class="label-text">Rate Limit</span></label
-                        >
-                        <input
-                            type="number"
-                            x-model="form.rate_limit_rpm"
-                            class="input input-bordered"
-                            min="1"
-                        />
-                        <label class="label"
-                            ><span class="label-text-alt">req/min</span></label
-                        >
-                    </div>
-                </div>
 
                 <div class="modal-action">
                     <button
@@ -1806,6 +1309,7 @@ block content %}
             endpointStats: {},
             loadingEndpointStats: {},
             hasRapidApiKey: false,
+            configuredEnvVars: {},  // Which env vars are set (for hiding fields)
             rapidapiImportUrl: "",
             selectedPreset: "",
             form: {
@@ -1956,12 +1460,186 @@ block content %}
             withingsConfigured: false,
             withingsConnecting: false,
 
+            // Plugin system
+            plugins: [],
+            pluginsByType: {},
+            oauthAccounts: {},  // Keyed by provider: {google: [], oura: [], withings: [], ...}
+            oauthStatus: {},    // Keyed by provider: {google: {configured: true}, ...}
+            oauthConnecting: {},  // Keyed by provider
+            pluginConfig: {},   // Dynamic plugin field values
+
             async init() {
+                await this.loadPlugins();
                 await this.loadSources();
                 await this.checkRapidApiKey();
-                await this.loadGoogleAccounts();
-                await this.loadOuraAccounts();
-                await this.loadWithingsAccounts();
+                await this.loadEnvVarStatus();
+                await this.loadAllOAuthAccounts();
+            },
+
+            async loadPlugins() {
+                try {
+                    const response = await fetch("/api/plugins/live-sources");
+                    if (response.ok) {
+                        this.plugins = await response.json();
+                        // Index by source_type for quick lookup
+                        this.pluginsByType = {};
+                        for (const plugin of this.plugins) {
+                            this.pluginsByType[plugin.source_type] = plugin;
+                        }
+                        console.log(`Loaded ${this.plugins.length} live source plugins`);
+                    }
+                } catch (error) {
+                    console.error("Failed to load plugins:", error);
+                }
+            },
+
+            async loadAllOAuthAccounts() {
+                // Get unique OAuth providers from plugin fields
+                const providers = new Set();
+                for (const plugin of this.plugins) {
+                    for (const field of plugin.fields || []) {
+                        if (field.field_type === 'oauth_account' && field.picker_options?.provider) {
+                            providers.add(field.picker_options.provider);
+                        }
+                    }
+                }
+                // Always include google for legacy sources
+                providers.add('google');
+
+                // Load accounts for each provider
+                for (const provider of providers) {
+                    await this.loadOAuthAccountsForProvider(provider);
+                }
+            },
+
+            async loadOAuthAccountsForProvider(provider) {
+                try {
+                    const response = await fetch(`/api/oauth/${provider}/status`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        this.oauthAccounts[provider] = data.accounts || [];
+                        this.oauthStatus[provider] = { configured: data.configured };
+                    }
+                } catch (error) {
+                    console.error(`Failed to load ${provider} accounts:`, error);
+                    this.oauthAccounts[provider] = [];
+                    this.oauthStatus[provider] = { configured: false };
+                }
+            },
+
+            async connectOAuthProvider(provider) {
+                this.oauthConnecting[provider] = true;
+                try {
+                    const response = await fetch(`/api/oauth/${provider}/start?redirect_uri=/live-data-sources`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.auth_url) {
+                            window.location.href = data.auth_url;
+                        }
+                    } else {
+                        const error = await response.json();
+                        alert(error.error || `Failed to start ${provider} OAuth`);
+                    }
+                } catch (error) {
+                    console.error(`Failed to connect ${provider}:`, error);
+                    alert(`Failed to connect ${provider}: ` + error.message);
+                } finally {
+                    this.oauthConnecting[provider] = false;
+                }
+            },
+
+            getPluginCategories() {
+                // Group plugins by category for dropdown
+                const categories = {};
+                for (const plugin of this.plugins) {
+                    const cat = plugin.category || 'other';
+                    if (!categories[cat]) {
+                        categories[cat] = [];
+                    }
+                    categories[cat].push(plugin);
+                }
+                return categories;
+            },
+
+            getCategoryLabel(category) {
+                const labels = {
+                    'smart': 'Smart Providers',
+                    'google': 'Google (OAuth)',
+                    'health': 'Health & Fitness',
+                    'weather': 'Weather',
+                    'finance': 'Finance',
+                    'transport': 'Transport',
+                    'other': 'Other Integrations',
+                };
+                return labels[category] || category.charAt(0).toUpperCase() + category.slice(1);
+            },
+
+            getCurrentPlugin() {
+                return this.pluginsByType[this.form.source_type] || null;
+            },
+
+            // Helper methods for dynamic plugin form
+            isOAuthConfigured(provider) {
+                if (!provider) return false;
+                return this.oauthStatus[provider]?.configured === true;
+            },
+
+            getOAuthAccounts(provider) {
+                if (!provider) return [];
+                return this.oauthAccounts[provider] || [];
+            },
+
+            getOAuthNotConfiguredMessage(provider) {
+                const envVars = {
+                    'google': 'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET',
+                    'oura': 'OURA_CLIENT_ID and OURA_CLIENT_SECRET',
+                    'withings': 'WITHINGS_CLIENT_ID and WITHINGS_CLIENT_SECRET',
+                };
+                const vars = envVars[provider] || `${provider?.toUpperCase()}_CLIENT_ID and ${provider?.toUpperCase()}_CLIENT_SECRET`;
+                return `${this.capitalizeFirst(provider || 'OAuth')} not configured. Set ${vars} environment variables.`;
+            },
+
+            capitalizeFirst(str) {
+                if (!str) return '';
+                return str.charAt(0).toUpperCase() + str.slice(1);
+            },
+
+            isFieldVisible(field) {
+                // Hide field if env var is configured
+                if (this.isFieldHiddenByEnvVar(field)) {
+                    return false;
+                }
+                // Check depends_on conditions
+                if (!field.depends_on || Object.keys(field.depends_on).length === 0) {
+                    return true;
+                }
+                for (const [fieldName, expectedValue] of Object.entries(field.depends_on)) {
+                    if (this.pluginConfig[fieldName] !== expectedValue) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+
+            onSourceTypeChange() {
+                const plugin = this.getCurrentPlugin();
+                if (plugin) {
+                    // Initialize pluginConfig with defaults from plugin fields
+                    this.pluginConfig = {};
+                    for (const field of plugin.fields || []) {
+                        if (field.default !== undefined && field.default !== null) {
+                            this.pluginConfig[field.name] = field.default;
+                        } else {
+                            this.pluginConfig[field.name] = '';
+                        }
+                    }
+                    // Set data_type and best_for from plugin metadata
+                    this.form.data_type = plugin.data_type || '';
+                    this.form.best_for = plugin.best_for || '';
+                } else {
+                    // Fallback defaults for non-plugin source types
+                    this.pluginConfig = {};
+                }
             },
 
             async loadGoogleAccounts() {
@@ -2053,26 +1731,6 @@ block content %}
                 }
             },
 
-            onSourceTypeChange() {
-                // Set appropriate defaults for Google sources
-                if (this.form.source_type === "google_calendar_live") {
-                    this.form.data_type = "calendar";
-                    this.form.best_for = "Today's schedule, next meeting, calendar events, free/busy status";
-                } else if (this.form.source_type === "google_tasks_live") {
-                    this.form.data_type = "tasks";
-                    this.form.best_for = "Pending tasks, due today, overdue items, task lists";
-                } else if (this.form.source_type === "google_gmail_live") {
-                    this.form.data_type = "email";
-                    this.form.best_for = "Unread emails, today's messages, recent emails, email search";
-                } else if (this.form.source_type === "oura_live") {
-                    this.form.data_type = "health";
-                    this.form.best_for = "Sleep scores, readiness scores, activity data, heart rate, HRV";
-                } else if (this.form.source_type === "withings_live") {
-                    this.form.data_type = "health";
-                    this.form.best_for = "Weight, body composition (fat %, muscle, bone), sleep data, activity";
-                }
-            },
-
             async loadSources() {
                 this.loading = true;
                 try {
@@ -2101,7 +1759,42 @@ block content %}
                 }
             },
 
+            async loadEnvVarStatus() {
+                try {
+                    const response = await fetch("/api/live-data-sources/env-var-status");
+                    if (response.ok) {
+                        this.configuredEnvVars = await response.json();
+                    }
+                } catch (error) {
+                    console.error("Failed to load env var status:", error);
+                }
+            },
+
+            isFieldHiddenByEnvVar(field) {
+                // Hide field if it has an env_var and that env var is configured
+                return field.env_var && this.configuredEnvVars[field.env_var];
+            },
+
+            getDisplayName(source) {
+                // Get friendly display name for a source
+                // First check auth_config for stored name (plugin sources)
+                if (source.auth_config?.name) {
+                    return source.auth_config.name;
+                }
+                // Convert slug to title case: "smart-health" -> "Smart Health"
+                return source.name
+                    .split('-')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+            },
+
             getTypeLabel(type) {
+                // First check if we have a plugin for this type
+                const plugin = this.pluginsByType[type];
+                if (plugin && plugin.display_name) {
+                    return plugin.display_name;
+                }
+                // Fallback labels for legacy types
                 const labels = {
                     mcp_server: "MCP API",
                     rest_api: "REST API",
@@ -2122,6 +1815,20 @@ block content %}
             },
 
             getTypeBadgeClass(type) {
+                // First check if we have a plugin with a category for this type
+                const plugin = this.pluginsByType[type];
+                if (plugin) {
+                    // Use category to determine badge class
+                    const categoryClasses = {
+                        'health': 'badge-success',
+                        'productivity': 'badge-info',
+                        'finance': 'badge-warning',
+                        'location': 'badge-primary',
+                        'other': 'badge-ghost',
+                    };
+                    return categoryClasses[plugin.category] || 'badge-ghost';
+                }
+                // Fallback for legacy types
                 if (type.startsWith("builtin_")) return "badge-primary";
                 if (type.startsWith("google_") && type.endsWith("_live")) return "badge-info";
                 if (type === "oura_live") return "badge-success";
@@ -2129,6 +1836,27 @@ block content %}
                 if (type === "mcp_server") return "badge-accent";
                 if (type === "rapidapi") return "badge-secondary";
                 return "badge-ghost";
+            },
+
+            getPluginIcon(type) {
+                // Get icon from plugin metadata
+                const plugin = this.pluginsByType[type];
+                if (plugin && plugin.icon) {
+                    return plugin.icon;
+                }
+                // Fallback icons for legacy types
+                const fallbackIcons = {
+                    mcp_server: "",
+                    rest_api: "",
+                    rapidapi: "",
+                    builtin_stocks: "",
+                    builtin_alpha_vantage: "",
+                    builtin_weather: "",
+                    builtin_transport: "",
+                    builtin_google_maps: "",
+                    builtin_routes: "",
+                };
+                return fallbackIcons[type] || "";
             },
 
             resetForm() {
@@ -2289,24 +2017,13 @@ block content %}
                     queryParamsJson = source.query_params_json;
                 }
 
-                // Determine account_id based on source type
-                const isOura = source.source_type === "oura_live";
-                const isWithings = source.source_type === "withings_live";
-                const isGoogle = source.source_type?.startsWith("google_") && source.source_type?.endsWith("_live");
-
                 this.form = {
                     name: source.name,
                     description: source.description || "",
                     source_type: source.source_type || "mcp_server",
                     data_type: source.data_type || "general",
                     best_for: source.best_for || "",
-                    // Google OAuth settings
-                    google_account_id: isGoogle && authConfig.account_id ? String(authConfig.account_id) : "",
-                    // Oura OAuth settings
-                    oura_account_id: isOura && authConfig.account_id ? String(authConfig.account_id) : "",
-                    // Withings OAuth settings
-                    withings_account_id: isWithings && authConfig.account_id ? String(authConfig.account_id) : "",
-                    // MCP settings
+                    // MCP settings (for non-plugin MCP sources)
                     mcp_api_host: authConfig.mcp_api_host || "",
                     mcp_api_key: authConfig.mcp_api_key || "",
                     // Legacy REST API settings
@@ -2331,7 +2048,61 @@ block content %}
                         ? JSON.stringify(authConfig.test_params)
                         : "",
                 };
+
+                // Populate pluginConfig from config (preferred) or authConfig (legacy) for plugin-based sources
+                const plugin = this.pluginsByType[source.source_type];
+                const selectFieldsToRestore = [];
+                // Plugin config is stored in source.config, with authConfig as legacy fallback
+                const pluginConfigSource = (source.config && Object.keys(source.config).length > 0)
+                    ? source.config
+                    : authConfig;
+                if (plugin && plugin.fields) {
+                    this.pluginConfig = {};
+                    for (const field of plugin.fields) {
+                        // Get value from config, falling back to default
+                        let value = pluginConfigSource[field.name];
+                        if (value === undefined || value === null) {
+                            value = field.default !== undefined ? field.default : '';
+                        }
+                        // Convert to string for form binding (except booleans)
+                        if (field.field_type === 'oauth_account' || field.field_type === 'integer') {
+                            this.pluginConfig[field.name] = value ? String(value) : '';
+                            // Track OAuth fields for DOM restoration
+                            if (field.field_type === 'oauth_account' && value) {
+                                selectFieldsToRestore.push({ name: field.name, value: String(value) });
+                            }
+                        } else {
+                            this.pluginConfig[field.name] = value;
+                            // Track select fields for DOM restoration (options rendered via x-for)
+                            if (field.field_type === 'select' && value) {
+                                selectFieldsToRestore.push({ name: field.name, value: String(value) });
+                            }
+                        }
+                    }
+                } else {
+                    this.pluginConfig = {};
+                }
+
                 this.showEditModal = true;
+
+                // Fix Alpine.js select dropdown restoration for OAuth and select fields
+                // When options are rendered via x-for after value is set, x-model doesn't sync
+                if (selectFieldsToRestore.length > 0) {
+                    setTimeout(() => {
+                        for (const { name, value } of selectFieldsToRestore) {
+                            // Try a general approach - find all selects in the modal
+                            const selects = document.querySelectorAll('#editModal select');
+                            for (const sel of selects) {
+                                // Check if this select has the value we're looking for as an option
+                                const option = sel.querySelector(`option[value="${value}"]`);
+                                if (option && sel.value !== value) {
+                                    sel.value = value;
+                                    sel.dispatchEvent(new Event('change'));
+                                }
+                            }
+                        }
+                    }, 100);
+                }
             },
 
             openDetailsModal(source) {
@@ -2370,88 +2141,107 @@ block content %}
                 try {
                     // Determine source type
                     let sourceType = this.form.source_type || "mcp_server";
+                    const plugin = this.getCurrentPlugin();
 
-                    // Check for OAuth sources
-                    const isGoogleSource = sourceType.startsWith("google_") && sourceType.endsWith("_live");
-                    const isOuraSource = sourceType === "oura_live";
-                    const isWithingsSource = sourceType === "withings_live";
+                    // Build config based on source type
+                    // Plugin sources use config_json, legacy sources use auth_config_json
+                    let authConfig = {};
+                    let pluginConfigData = {};
+                    const isPluginSource = plugin && plugin.fields && plugin.fields.length > 0;
 
-                    if (!isGoogleSource && !isOuraSource && !isWithingsSource && sourceType !== "mcp_server") {
-                        // Legacy: determine from auth_type for older sources
-                        sourceType = this.form.auth_type === "rapidapi" ? "rapidapi" : "rest_api";
-                    }
+                    if (isPluginSource) {
+                        // Plugin-based source: build config from pluginConfig
+                        // Store the display name in config for getDisplayName()
+                        if (this.pluginConfig.name) {
+                            pluginConfigData.name = this.pluginConfig.name;
+                        }
 
-                    // Build auth config based on source type
-                    let authConfig;
-                    if (isGoogleSource) {
-                        // Google OAuth sources need account_id
-                        if (!this.form.google_account_id) {
-                            this.testResult = {
-                                success: false,
-                                message: "Please select a Google account",
-                            };
-                            this.saving = false;
-                            setTimeout(() => (this.testResult = null), 3000);
-                            return;
+                        for (const field of plugin.fields) {
+                            // Skip 'name' field - already handled above, used as both display name and slug
+                            if (field.name === 'name') continue;
+
+                            const value = this.pluginConfig[field.name];
+
+                            // Only validate required OAuth account fields (can't have env var fallback)
+                            // Other required fields (API keys, etc.) may have env var fallbacks
+                            if (field.required && field.field_type === 'oauth_account' && !value) {
+                                this.testResult = {
+                                    success: false,
+                                    message: `Please fill in required field: ${field.label}`,
+                                };
+                                this.saving = false;
+                                setTimeout(() => (this.testResult = null), 3000);
+                                return;
+                            }
+
+                            // Convert oauth_account values to integers
+                            if (field.field_type === 'oauth_account' && value) {
+                                pluginConfigData[field.name] = parseInt(value);
+                            } else if (field.field_type === 'integer' && value) {
+                                pluginConfigData[field.name] = parseInt(value);
+                            } else if (field.field_type === 'number' && value) {
+                                pluginConfigData[field.name] = parseFloat(value);
+                            } else if (field.field_type === 'boolean') {
+                                pluginConfigData[field.name] = !!value;
+                            } else if (value !== undefined && value !== '') {
+                                pluginConfigData[field.name] = value;
+                            }
                         }
-                        authConfig = {
-                            account_id: parseInt(this.form.google_account_id),
-                        };
-                    } else if (isOuraSource) {
-                        // Oura OAuth sources need account_id
-                        if (!this.form.oura_account_id) {
-                            this.testResult = {
-                                success: false,
-                                message: "Please select an Oura account",
-                            };
-                            this.saving = false;
-                            setTimeout(() => (this.testResult = null), 3000);
-                            return;
-                        }
-                        authConfig = {
-                            account_id: parseInt(this.form.oura_account_id),
-                        };
-                    } else if (isWithingsSource) {
-                        // Withings OAuth sources need account_id
-                        if (!this.form.withings_account_id) {
-                            this.testResult = {
-                                success: false,
-                                message: "Please select a Withings account",
-                            };
-                            this.saving = false;
-                            setTimeout(() => (this.testResult = null), 3000);
-                            return;
-                        }
-                        authConfig = {
-                            account_id: parseInt(this.form.withings_account_id),
-                        };
                     } else if (sourceType === "mcp_server") {
                         // MCP sources just need host and optional key
                         authConfig = {
                             mcp_api_host: this.form.mcp_api_host,
                             mcp_api_key: this.form.mcp_api_key || "",  // Empty = use RAPIDAPI_KEY env
                         };
+                    } else if (sourceType !== "rest_api" && sourceType !== "rapidapi") {
+                        // Legacy: determine from auth_type for older sources
+                        sourceType = this.form.auth_type === "rapidapi" ? "rapidapi" : "rest_api";
+                        authConfig = this.buildAuthConfig();
                     } else {
                         // Legacy REST API auth config
                         authConfig = this.buildAuthConfig();
                     }
 
+                    // Use plugin metadata for description, data_type, best_for
+                    const description = plugin?.description || this.form.description || '';
+                    const dataType = plugin?.data_type || this.form.data_type || 'general';
+                    const bestFor = plugin?.best_for || this.form.best_for || '';
+
+                    // For plugin sources, get name from pluginConfig; otherwise use form.name
+                    const sourceName = (plugin && this.pluginConfig.name)
+                        ? this.pluginConfig.name.toLowerCase().replace(/\s+/g, "-")
+                        : this.form.name.toLowerCase().replace(/\s+/g, "-");
+
+                    // Validate name is provided
+                    if (!sourceName) {
+                        this.testResult = {
+                            success: false,
+                            message: "Please provide a Source Name",
+                        };
+                        this.saving = false;
+                        setTimeout(() => (this.testResult = null), 3000);
+                        return;
+                    }
+
                     const payload = {
-                        name: this.form.name.toLowerCase().replace(/\s+/g, "-"),
+                        name: sourceName,
                         source_type: sourceType,
-                        description: this.form.description,
-                        data_type: this.form.data_type,
-                        best_for: this.form.best_for,
-                        auth_config_json: JSON.stringify(authConfig),
-                        cache_ttl_seconds:
-                            parseInt(this.form.cache_ttl_seconds) || 60,
-                        timeout_seconds:
-                            parseInt(this.form.timeout_seconds) || 30,
-                        retry_count: parseInt(this.form.retry_count) || 1,
-                        rate_limit_rpm:
-                            parseInt(this.form.rate_limit_rpm) || 60,
+                        description: description,
+                        data_type: dataType,
+                        best_for: bestFor,
+                        cache_ttl_seconds: 300,  // Default, plugins can override
+                        timeout_seconds: 30,
+                        retry_count: 1,
+                        rate_limit_rpm: 60,
                         enabled: true,
                     };
+
+                    // Plugin sources use config_json, legacy sources use auth_config_json
+                    if (isPluginSource) {
+                        payload.config_json = JSON.stringify(pluginConfigData);
+                    } else {
+                        payload.auth_config_json = JSON.stringify(authConfig);
+                    }
 
                     // Add legacy fields only for non-MCP sources
                     if (sourceType !== "mcp_server") {

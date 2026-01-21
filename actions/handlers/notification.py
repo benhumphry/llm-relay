@@ -38,6 +38,11 @@ class NotificationActionHandler(ActionHandler):
     def supported_actions(self) -> list[str]:
         return ["send"]
 
+    @property
+    def requires_oauth(self) -> bool:
+        """Notifications use webhooks, not OAuth."""
+        return False
+
     def _get_api_url(self) -> str:
         """Get Apprise API base URL from environment."""
         return os.environ.get("APPRISE_API_URL", "")
