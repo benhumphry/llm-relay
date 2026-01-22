@@ -149,6 +149,19 @@ class ActionHandler(ABC):
         """
         return None
 
+    @property
+    def supported_source_types(self) -> list[str]:
+        """
+        List of document store source_type values that provide accounts for this handler.
+
+        Examples: ['mcp:gmail', 'outlook'] for email handler
+                  ['mcp:gcalendar', 'outlook_calendar'] for calendar handler
+                  ['todoist', 'mcp:gtasks', 'notion'] for tasks handler
+
+        Override in subclasses to specify compatible source types.
+        """
+        return []
+
     @abstractmethod
     def validate(
         self, action: str, params: dict, context: ActionContext

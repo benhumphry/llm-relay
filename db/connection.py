@@ -1157,6 +1157,14 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        if "notion_is_task_database" not in existing_columns:
+            migrations.append(
+                (
+                    "notion_is_task_database",
+                    "ALTER TABLE document_stores ADD COLUMN notion_is_task_database BOOLEAN DEFAULT FALSE",
+                )
+            )
+
         if "nextcloud_folder" not in existing_columns:
             migrations.append(
                 (
@@ -1892,6 +1900,20 @@ def _run_migrations(engine) -> None:
                 conn.execute(
                     text(
                         "ALTER TABLE document_stores ADD COLUMN display_name VARCHAR(100)"
+                    )
+                )
+                conn.commit()
+
+    # Migration: Add action_notes_store_id to smart_aliases (v2.0.1)
+    if "smart_aliases" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+
+        if "action_notes_store_id" not in columns:
+            logger.info("Adding action_notes_store_id column to smart_aliases (v2.0.1)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE smart_aliases ADD COLUMN action_notes_store_id INTEGER REFERENCES document_stores(id) ON DELETE SET NULL"
                     )
                 )
                 conn.commit()

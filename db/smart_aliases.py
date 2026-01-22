@@ -205,6 +205,7 @@ def create_smart_alias(
     action_tasks_provider: str | None = None,
     action_tasks_list_id: str | None = None,
     action_notification_urls: list[str] | None = None,
+    action_notes_store_id: int | None = None,
     # Scheduled prompts
     scheduled_prompts_enabled: bool = False,
     scheduled_prompts_account_id: int | None = None,
@@ -332,6 +333,7 @@ def create_smart_alias(
             action_tasks_account_id=action_tasks_account_id,
             action_tasks_provider=action_tasks_provider,
             action_tasks_list_id=action_tasks_list_id,
+            action_notes_store_id=action_notes_store_id,
             # Scheduled prompts
             scheduled_prompts_enabled=scheduled_prompts_enabled,
             scheduled_prompts_account_id=scheduled_prompts_account_id,
@@ -454,6 +456,7 @@ def update_smart_alias(
     action_tasks_provider: str | None = None,
     action_tasks_list_id: str | None = None,
     action_notification_urls: list[str] | None = None,
+    action_notes_store_id: int | None = None,
     # Scheduled prompts
     scheduled_prompts_enabled: bool | None = None,
     scheduled_prompts_account_id: int | None = None,
@@ -628,6 +631,10 @@ def update_smart_alias(
             alias.allowed_actions = allowed_actions
         if action_notification_urls is not None:
             alias.action_notification_urls = action_notification_urls
+        if action_notes_store_id is not None:
+            alias.action_notes_store_id = (
+                action_notes_store_id if action_notes_store_id != 0 else None
+            )
         if action_email_account_id is not None:
             # Allow setting to 0 to clear the account
             alias.action_email_account_id = (
@@ -1010,6 +1017,9 @@ def _store_to_dict(store: DocumentStore) -> dict:
         # Todoist fields
         "todoist_project_id": store.todoist_project_id,
         "todoist_project_name": store.todoist_project_name,
+        # Notion fields
+        "notion_database_id": store.notion_database_id,
+        "notion_is_task_database": store.notion_is_task_database,
         "embedding_provider": store.embedding_provider,
         "embedding_model": store.embedding_model,
         "ollama_url": store.ollama_url,
@@ -1058,6 +1068,9 @@ class DetachedDocumentStore:
         # Todoist fields
         self.todoist_project_id = data.get("todoist_project_id")
         self.todoist_project_name = data.get("todoist_project_name")
+        # Notion fields
+        self.notion_database_id = data.get("notion_database_id")
+        self.notion_is_task_database = data.get("notion_is_task_database", False)
         self.embedding_provider = data["embedding_provider"]
         self.embedding_model = data["embedding_model"]
         self.ollama_url = data["ollama_url"]
@@ -1186,6 +1199,7 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         action_tasks_provider=alias.action_tasks_provider,
         action_tasks_list_id=alias.action_tasks_list_id,
         action_notification_urls_json=alias.action_notification_urls_json,
+        action_notes_store_id=alias.action_notes_store_id,
         # Scheduled prompts
         scheduled_prompts_enabled=alias.scheduled_prompts_enabled,
         scheduled_prompts_account_id=alias.scheduled_prompts_account_id,

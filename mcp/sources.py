@@ -5640,6 +5640,254 @@ class WebSearchDocumentSource(DocumentSource):
         )
 
 
+class GoogleKeepDocumentSource(DocumentSource):
+    """
+    Document source for Google Keep using the Keep API.
+
+    Uses Google Keep API directly with stored OAuth tokens.
+    Indexes notes (both text and list notes) for RAG retrieval.
+
+    Note: Google Keep API is only available for Google Workspace accounts.
+    """
+
+    KEEP_API_BASE = "https://keep.googleapis.com/v1"
+
+    def __init__(
+        self,
+        account_id: int,
+        include_trashed: bool = False,
+    ):
+        """
+        Initialize with OAuth account ID.
+
+        Args:
+            account_id: ID of the stored OAuth token
+            include_trashed: Whether to include trashed notes
+        """
+        self.account_id = account_id
+        self.include_trashed = include_trashed
+        self._access_token: Optional[str] = None
+        self._token_data: Optional[dict] = None
+
+    def _get_token_data(self) -> Optional[dict]:
+        """Get and cache the decrypted token data."""
+        if self._token_data is None:
+            from db.oauth_tokens import get_oauth_token_by_id
+
+            self._token_data = get_oauth_token_by_id(self.account_id)
+        return self._token_data
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get a valid access token, refreshing if necessary."""
+        import requests as http_requests
+
+        token_data = self._get_token_data()
+        if not token_data:
+            logger.error(f"OAuth token {self.account_id} not found")
+            return None
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        client_id = token_data.get("client_id")
+        client_secret = token_data.get("client_secret")
+
+        if not access_token:
+            logger.error("No access token in stored credentials")
+            return None
+
+        # Try the access token first with a simple API call
+        test_response = http_requests.get(
+            f"{self.KEEP_API_BASE}/notes",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"pageSize": 1},
+            timeout=10,
+        )
+
+        if test_response.status_code == 200:
+            return access_token
+
+        # Token expired, try to refresh
+        if not refresh_token or not client_id or not client_secret:
+            logger.error(
+                "Cannot refresh token - missing refresh_token or client credentials"
+            )
+            return None
+
+        logger.info("Access token expired, refreshing...")
+        refresh_response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=30,
+        )
+
+        if refresh_response.status_code != 200:
+            logger.error(f"Token refresh failed: {refresh_response.text}")
+            return None
+
+        new_token_data = refresh_response.json()
+        new_access_token = new_token_data.get("access_token")
+
+        # Update stored token
+        from db.oauth_tokens import update_oauth_token_data
+
+        updated_data = {**token_data, "access_token": new_access_token}
+        update_oauth_token_data(self.account_id, updated_data)
+
+        self._token_data = updated_data
+        logger.info("Token refreshed successfully")
+        return new_access_token
+
+    def is_available(self) -> bool:
+        """Check if we can access Google Keep."""
+        return self._get_access_token() is not None
+
+    def _format_note_content(self, note: dict) -> str:
+        """Format a Keep note's content for indexing."""
+        parts = []
+
+        title = note.get("title", "")
+        if title:
+            parts.append(f"# {title}\n")
+
+        body = note.get("body", {})
+
+        # Handle text notes
+        if "text" in body:
+            text_content = body["text"].get("text", "")
+            if text_content:
+                parts.append(text_content)
+
+        # Handle list notes
+        if "list" in body:
+            list_content = body["list"]
+            list_items = list_content.get("listItems", [])
+            for item in list_items:
+                text_item = item.get("text", {})
+                item_text = text_item.get("text", "")
+                checked = item.get("checked", False)
+                checkbox = "[x]" if checked else "[ ]"
+                parts.append(f"- {checkbox} {item_text}")
+
+                # Handle nested items (one level of nesting)
+                child_items = item.get("childListItems", [])
+                for child in child_items:
+                    child_text_item = child.get("text", {})
+                    child_text = child_text_item.get("text", "")
+                    child_checked = child.get("checked", False)
+                    child_checkbox = "[x]" if child_checked else "[ ]"
+                    parts.append(f"  - {child_checkbox} {child_text}")
+
+        return "\n".join(parts)
+
+    def list_documents(self) -> Iterator[DocumentInfo]:
+        """List notes from Google Keep."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot list notes - no valid access token")
+            return
+
+        logger.info("Listing Google Keep notes")
+
+        total_notes = 0
+        page_token = None
+
+        # Build filter - by default exclude trashed notes
+        filter_str = None if self.include_trashed else "trashed=false"
+
+        while True:
+            params = {"pageSize": 100}
+            if page_token:
+                params["pageToken"] = page_token
+            if filter_str:
+                params["filter"] = filter_str
+
+            response = http_requests.get(
+                f"{self.KEEP_API_BASE}/notes",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                logger.error(
+                    f"Keep API error listing notes: {response.status_code} - {response.text}"
+                )
+                return
+
+            data = response.json()
+            notes = data.get("notes", [])
+
+            for note in notes:
+                note_name = note.get("name", "")  # e.g., "notes/abc123"
+                note_id = note_name.split("/")[-1] if "/" in note_name else note_name
+                title = note.get("title", "Untitled Note")
+                update_time = note.get("updateTime")
+
+                total_notes += 1
+                yield DocumentInfo(
+                    uri=f"gkeep://{note_id}",
+                    name=title[:100] if title else f"Note {note_id[:8]}",
+                    mime_type="text/plain",
+                    modified_time=update_time,
+                    metadata={
+                        "note_id": note_id,
+                        "note_name": note_name,
+                        "source_type": "note",
+                    },
+                )
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        logger.info(f"Listed {total_notes} Google Keep notes")
+
+    def read_document(self, uri: str) -> Optional[DocumentContent]:
+        """Read a specific note from Google Keep."""
+        import requests as http_requests
+
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Cannot read note - no valid access token")
+            return None
+
+        # Extract note ID from URI (gkeep://note_id)
+        if uri.startswith("gkeep://"):
+            note_id = uri[8:]
+        else:
+            note_id = uri
+
+        response = http_requests.get(
+            f"{self.KEEP_API_BASE}/notes/{note_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            logger.error(
+                f"Keep API error reading note {note_id}: {response.status_code} - {response.text}"
+            )
+            return None
+
+        note = response.json()
+        title = note.get("title", "Untitled Note")
+        content = self._format_note_content(note)
+
+        return DocumentContent(
+            uri=uri,
+            name=title,
+            mime_type="text/plain",
+            text=content,
+        )
+
+
 def get_document_source(
     source_type: str,
     source_path: Optional[str] = None,
@@ -5898,6 +6146,16 @@ def get_document_source(
         return GoogleContactsDocumentSource(
             account_id=google_account_id,
             group_id=gcontacts_group_id,
+        )
+
+    elif source_type == "mcp:gkeep":
+        # Google Keep - use Keep API (Workspace accounts only)
+        if not google_account_id:
+            raise ValueError(f"google_account_id required for {source_type} source")
+
+        logger.info(f"Creating Google Keep source (account={google_account_id})")
+        return GoogleKeepDocumentSource(
+            account_id=google_account_id,
         )
 
     elif source_type == "mcp:onedrive":

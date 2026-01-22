@@ -57,6 +57,9 @@ class ScheduleActionHandler(OAuthMixin, PluginActionHandler):
     description = "Schedule prompts for future or recurring execution via calendar"
     icon = "⏰"
     category = "automation"
+    supported_sources = ["Google Calendar", "Outlook Calendar"]
+    # Uses calendar accounts for scheduling
+    supported_source_types = ["mcp:gcalendar", "outlook_calendar"]
 
     _abstract = False
 

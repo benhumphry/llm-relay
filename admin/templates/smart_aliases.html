@@ -1978,6 +1978,36 @@ content %}
                                     </label>
                                 </div>
 
+                                <!-- Notes Store -->
+                                <div class="form-control">
+                                    <label class="label py-1">
+                                        <span class="label-text text-sm"
+                                            >Default Notes Store</span
+                                        >
+                                    </label>
+                                    <select
+                                        x-model="form.action_notes_store_id"
+                                        class="select select-bordered select-sm"
+                                    >
+                                        <option value="">None</option>
+                                        <template
+                                            x-for="store in getNotesStores()"
+                                            :key="store.id"
+                                        >
+                                            <option
+                                                :value="store.id"
+                                                x-text="store.name + ' (' + store.source_type + ')'"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                    <label class="label py-0">
+                                        <span class="label-text-alt text-xs">
+                                            Notion database or OneNote notebook
+                                            for created notes
+                                        </span>
+                                    </label>
+                                </div>
+
                                 <!-- Notification URLs -->
                                 <div class="divider text-xs my-2">
                                     Notifications
@@ -2543,6 +2573,7 @@ content %}
                 action_tasks_provider: "",
                 action_tasks_list_id: "",
                 action_notification_urls: "",
+                action_notes_store_id: "",
                 // Scheduled Prompts
                 scheduled_prompts_enabled: false,
                 scheduled_prompts_account_id: "",
@@ -2683,6 +2714,15 @@ content %}
                     .split("-")
                     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
                     .join(" ");
+            },
+
+            getNotesStores() {
+                // Filter document stores to those compatible with notes actions
+                // Note: mcp:gkeep disabled - Google Keep API requires domain-wide delegation
+                const notesSourceTypes = ["notion", "onenote"];
+                return this.documentStores.filter((store) =>
+                    notesSourceTypes.includes(store.source_type),
+                );
             },
 
             async loadOAuthAccounts() {
@@ -3160,6 +3200,7 @@ content %}
                     action_notification_urls: (
                         alias.action_notification_urls || []
                     ).join("\n"),
+                    action_notes_store_id: alias.action_notes_store_id || "",
                     // Scheduled Prompts
                     scheduled_prompts_enabled:
                         alias.scheduled_prompts_enabled || false,
@@ -3465,6 +3506,8 @@ content %}
                               .map((u) => u.trim())
                               .filter((u) => u)
                         : null,
+                    action_notes_store_id:
+                        this.form.action_notes_store_id || null,
                     // Scheduled Prompts
                     scheduled_prompts_enabled:
                         this.form.scheduled_prompts_enabled,

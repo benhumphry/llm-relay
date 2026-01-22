@@ -44,23 +44,29 @@ logger = logging.getLogger(__name__)
 
 class TasksActionHandler(OAuthMixin, PluginActionHandler):
     """
-    Unified task management across Google Tasks and Todoist.
+    Unified task management across Google Tasks, Todoist, and Notion.
 
     Provider is determined at runtime from Smart Alias context - no plugin config needed.
     """
 
     action_type = "tasks"
     display_name = "Tasks"
-    description = "Create, complete, and manage tasks (Google Tasks or Todoist)"
+    description = (
+        "Create, complete, and manage tasks (Google Tasks, Todoist, or Notion)"
+    )
     icon = "✅"
     category = "productivity"
-    supported_sources = ["Google Tasks", "Todoist"]
+    supported_sources = ["Google Tasks", "Todoist", "Notion"]
+    # Document store source_type values that provide task accounts
+    supported_source_types = ["mcp:gtasks", "todoist", "notion"]
 
     _abstract = False
 
     # API endpoints
     GTASKS_API_BASE = "https://tasks.googleapis.com/tasks/v1"
     TODOIST_API_BASE = "https://api.todoist.com/rest/v2"
+    NOTION_API_BASE = "https://api.notion.com/v1"
+    NOTION_VERSION = "2022-06-28"
 
     @classmethod
     def get_config_fields(cls) -> list[FieldDefinition]:
@@ -158,11 +164,21 @@ class TasksActionHandler(OAuthMixin, PluginActionHandler):
                         name="task_id",
                         label="Task ID",
                         field_type=FieldType.TEXT,
-                        required=True,
+                        required=False,
                         help_text="The ID of the task to complete",
                     ),
+                    FieldDefinition(
+                        name="title",
+                        label="Task Title",
+                        field_type=FieldType.TEXT,
+                        required=False,
+                        help_text="Task title (can use instead of task_id)",
+                    ),
                 ],
-                examples=[{"task_id": "abc123"}],
+                examples=[
+                    {"task_id": "abc123"},
+                    {"title": "Hang painting"},
+                ],
             ),
             ActionDefinition(
                 name="update",
@@ -269,6 +285,8 @@ class TasksActionHandler(OAuthMixin, PluginActionHandler):
                         # Different slug and display name - show both
                         if provider == "todoist" or source_type == "todoist":
                             account_list.append(f'  - "{slug}" or "{name}" (Todoist)')
+                        elif provider == "notion" or source_type == "notion":
+                            account_list.append(f'  - "{slug}" or "{name}" (Notion)')
                         elif email:
                             account_list.append(
                                 f'  - "{slug}" or "{name}" ({email}, Google Tasks)'
@@ -282,6 +300,8 @@ class TasksActionHandler(OAuthMixin, PluginActionHandler):
                         identifier = slug or name
                         if provider == "todoist" or source_type == "todoist":
                             account_list.append(f'  - "{identifier}" (Todoist)')
+                        elif provider == "notion" or source_type == "notion":
+                            account_list.append(f'  - "{identifier}" (Notion)')
                         elif email:
                             account_list.append(
                                 f'  - "{identifier}" ({email}, Google Tasks)'
@@ -290,16 +310,25 @@ class TasksActionHandler(OAuthMixin, PluginActionHandler):
                             account_list.append(f'  - "{identifier}" (Google Tasks)')
                     elif provider == "todoist":
                         account_list.append('  - "Todoist"')
+                    elif provider == "notion":
+                        account_list.append('  - "Notion"')
                     elif email:
                         account_list.append(f'  - "{email}" (Google Tasks)')
 
                 if account_list:
-                    account_text = f"""
+                    if len(account_list) > 1:
+                        account_text = f"""
 **Available Task Accounts:**
 {chr(10).join(account_list)}
 
-To use a specific account, add `"account": "Account Name"` to your action params.
-If only one account is available, it will be used automatically.
+IMPORTANT: You MUST specify `"account": "account-name"` in your action params when multiple accounts are available.
+"""
+                    else:
+                        account_text = f"""
+**Available Task Accounts:**
+{chr(10).join(account_list)}
+
+Only one account available - it will be used automatically.
 """
 
         return f"""## Tasks
@@ -314,7 +343,7 @@ Create a new task.
 - notes (optional): Additional details
 - due (optional): Due date - use YYYY-MM-DD format
 - list (optional): Task list or project name
-- account (optional): Which account to use
+- account (required if multiple accounts): Which account to use (from list above)
 
 **Example:**
 ```xml
@@ -327,12 +356,22 @@ Create a new task.
 Mark a task as complete.
 
 **Parameters:**
-- task_id (required): The task ID
+- task_id: The task ID (from list output)
+- title: Task title (can use instead of task_id)
+- account (required if multiple accounts): Which account to use
 
-**Example:**
+One of task_id or title is required.
+
+**Examples:**
 ```xml
 <smart_action type="tasks" action="complete">
-{{"task_id": "abc123"}}
+{{"task_id": "abc123", "account": "my-tasks"}}
+</smart_action>
+```
+
+```xml
+<smart_action type="tasks" action="complete">
+{{"title": "Hang painting", "account": "notion-tasks"}}
 </smart_action>
 ```
 
@@ -366,6 +405,11 @@ List tasks from a list/project.
         self.default_tasklist_id = "@default"
         self.todoist_api_token: Optional[str] = None
         self.default_project: Optional[str] = None
+
+        # Notion-specific
+        self.notion_api_token: Optional[str] = None
+        self.notion_database_id: Optional[str] = None
+        self._notion_client: Optional[httpx.Client] = None
 
         # Caches
         self._tasklist_cache: dict[str, str] = {}
@@ -488,6 +532,12 @@ List tasks from a list/project.
                         f"Tasks: Todoist default project from account: {self.default_project}"
                     )
                 return success, error
+            elif account.get("provider") == "notion" or source_type == "notion":
+                # Notion task database
+                database_id = account.get("database_id") or account.get("list_id")
+                if not database_id:
+                    return False, "Notion task database ID not found in account config"
+                return self._configure_notion(database_id)
             else:
                 self.provider = "gtasks"
                 # Store-based accounts use oauth_account_id, legacy uses id
@@ -507,11 +557,17 @@ List tasks from a list/project.
         else:
             # Check if there's exactly one available account - use it as default
             available_accounts = context.available_accounts.get("tasks", [])
+
             if len(available_accounts) == 1:
                 account = available_accounts[0]
                 source_type = account.get("source_type", "")
                 if account.get("provider") == "todoist" or source_type == "todoist":
                     return self._configure_todoist()
+                elif account.get("provider") == "notion" or source_type == "notion":
+                    database_id = account.get("database_id") or account.get("list_id")
+                    if database_id:
+                        return self._configure_notion(database_id)
+                    return False, "Notion database ID not found"
                 else:
                     self.provider = "gtasks"
                     self.oauth_account_id = account.get(
@@ -544,6 +600,29 @@ List tasks from a list/project.
             return True, ""
         else:
             return False, "Todoist API token not configured"
+
+    def _configure_notion(self, database_id: str) -> tuple[bool, str]:
+        """Configure Notion provider."""
+        api_token = os.environ.get("NOTION_TOKEN") or os.environ.get("NOTION_API_KEY")
+        if api_token:
+            self.provider = "notion"
+            self.notion_api_token = api_token
+            self.notion_database_id = database_id
+            self._notion_client = httpx.Client(
+                base_url=self.NOTION_API_BASE,
+                headers={
+                    "Authorization": f"Bearer {api_token}",
+                    "Notion-Version": self.NOTION_VERSION,
+                    "Content-Type": "application/json",
+                },
+                timeout=15,
+            )
+            return True, ""
+        else:
+            return (
+                False,
+                "Notion API token not configured (set NOTION_TOKEN or NOTION_API_KEY)",
+            )
 
     def _configure_from_context(self, context: ActionContext) -> tuple[bool, str]:
         """Configure provider and credentials from Smart Alias context defaults."""
@@ -597,6 +676,8 @@ List tasks from a list/project.
         try:
             if self.provider == "todoist":
                 return self._execute_todoist(action, params)
+            elif self.provider == "notion":
+                return self._execute_notion(action, params)
             else:
                 return self._execute_gtasks(action, params)
         except httpx.HTTPStatusError as e:
@@ -698,13 +779,50 @@ List tasks from a list/project.
             data={"task_id": task["id"], "provider": "gtasks"},
         )
 
+    def _find_gtasks_task_by_title(
+        self, title: str, tasklist_id: str = "@default"
+    ) -> Optional[str]:
+        """Find a Google Tasks task ID by title (case-insensitive partial match)."""
+        try:
+            response = self.oauth_get(
+                f"{self.GTASKS_API_BASE}/lists/{tasklist_id}/tasks",
+                params={"maxResults": 100, "showCompleted": "false"},
+            )
+            response.raise_for_status()
+
+            title_lower = title.lower()
+            for task in response.json().get("items", []):
+                task_title = task.get("title", "")
+                if task_title.lower() == title_lower:
+                    return task["id"]
+                # Also try partial match
+                if title_lower in task_title.lower():
+                    return task["id"]
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to search Google Tasks: {e}")
+            return None
+
     def _gtasks_complete(self, params: dict) -> ActionResult:
         """Complete task via Google Tasks."""
         task_id = params.get("task_id")
-        if not task_id:
-            return ActionResult(success=False, message="", error="Task ID is required")
-
+        task_title = params.get("title")
         tasklist_id = self._resolve_gtasks_list_id(params.get("list"))
+
+        # Allow completion by title if no task_id provided
+        if not task_id and task_title:
+            task_id = self._find_gtasks_task_by_title(task_title, tasklist_id)
+            if not task_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error=f"Could not find task with title: {task_title}",
+                )
+
+        if not task_id:
+            return ActionResult(
+                success=False, message="", error="Task ID or title is required"
+            )
 
         get_response = self.oauth_get(
             f"{self.GTASKS_API_BASE}/lists/{tasklist_id}/tasks/{task_id}"
@@ -919,11 +1037,44 @@ List tasks from a list/project.
             data={"task_id": task["id"], "provider": "todoist"},
         )
 
+    def _find_todoist_task_by_title(self, title: str) -> Optional[str]:
+        """Find a Todoist task ID by title (case-insensitive partial match)."""
+        try:
+            response = self._todoist_client.get("/tasks")
+            response.raise_for_status()
+
+            title_lower = title.lower()
+            for task in response.json():
+                task_title = task.get("content", "")
+                if task_title.lower() == title_lower:
+                    return task["id"]
+                # Also try partial match
+                if title_lower in task_title.lower():
+                    return task["id"]
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to search Todoist tasks: {e}")
+            return None
+
     def _todoist_complete(self, params: dict) -> ActionResult:
         """Complete task via Todoist."""
         task_id = params.get("task_id")
+        task_title = params.get("title")
+
+        # Allow completion by title if no task_id provided
+        if not task_id and task_title:
+            task_id = self._find_todoist_task_by_title(task_title)
+            if not task_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error=f"Could not find task with title: {task_title}",
+                )
+
         if not task_id:
-            return ActionResult(success=False, message="", error="Task ID is required")
+            return ActionResult(
+                success=False, message="", error="Task ID or title is required"
+            )
 
         response = self._todoist_client.post(f"/tasks/{task_id}/close")
         response.raise_for_status()
@@ -1010,6 +1161,363 @@ List tasks from a list/project.
         )
 
     # -------------------------------------------------------------------------
+    # Notion Implementation
+    # -------------------------------------------------------------------------
+
+    def _execute_notion(self, action: str, params: dict) -> ActionResult:
+        """Execute action via Notion API."""
+        if action == "create":
+            return self._notion_create(params)
+        elif action == "complete":
+            return self._notion_complete(params)
+        elif action == "update":
+            return self._notion_update(params)
+        elif action == "delete":
+            return self._notion_delete(params)
+        elif action == "list":
+            return self._notion_list(params)
+        else:
+            return ActionResult(
+                success=False, message="", error=f"Unknown action: {action}"
+            )
+
+    def _get_notion_title_property(self) -> Optional[str]:
+        """Get the name of the title property in the database schema."""
+        # Query database to find title property
+        try:
+            response = self._notion_client.get(f"/databases/{self.notion_database_id}")
+            response.raise_for_status()
+            db = response.json()
+
+            # Find the title property
+            for prop_name, prop_def in db.get("properties", {}).items():
+                if prop_def.get("type") == "title":
+                    return prop_name
+
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get Notion database schema: {e}")
+            return None
+
+    def _get_notion_status_property(self) -> Optional[tuple[str, dict]]:
+        """Get the name and config of the status/checkbox property."""
+        try:
+            response = self._notion_client.get(f"/databases/{self.notion_database_id}")
+            response.raise_for_status()
+            db = response.json()
+
+            # Look for status or checkbox property
+            for prop_name, prop_def in db.get("properties", {}).items():
+                prop_type = prop_def.get("type")
+                if prop_type == "status":
+                    # Get the "done" option name
+                    options = prop_def.get("status", {}).get("options", [])
+                    done_option = None
+                    for opt in options:
+                        name_lower = opt.get("name", "").lower()
+                        if name_lower in ("done", "complete", "completed", "finished"):
+                            done_option = opt.get("name")
+                            break
+                    return prop_name, {
+                        "type": "status",
+                        "done_option": done_option or "Done",
+                    }
+                elif prop_type == "checkbox":
+                    return prop_name, {"type": "checkbox"}
+
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get Notion status property: {e}")
+            return None
+
+    def _get_notion_date_property(self) -> Optional[str]:
+        """Get the name of the date/due date property."""
+        try:
+            response = self._notion_client.get(f"/databases/{self.notion_database_id}")
+            response.raise_for_status()
+            db = response.json()
+
+            # Look for date property - prefer common names
+            date_props = []
+            for prop_name, prop_def in db.get("properties", {}).items():
+                if prop_def.get("type") == "date":
+                    name_lower = prop_name.lower()
+                    # Prioritize common due date names
+                    if name_lower in ("due", "due date", "deadline", "date"):
+                        return prop_name
+                    date_props.append(prop_name)
+
+            # Return first date property if no common name found
+            return date_props[0] if date_props else None
+        except Exception as e:
+            logger.warning(f"Failed to get Notion date property: {e}")
+            return None
+
+    def _notion_create(self, params: dict) -> ActionResult:
+        """Create task via Notion."""
+        title = params.get("title")
+        if not title:
+            return ActionResult(
+                success=False, message="", error="Task title is required"
+            )
+
+        # Get title property name
+        title_prop = self._get_notion_title_property()
+        if not title_prop:
+            return ActionResult(
+                success=False,
+                message="",
+                error="Could not find title property in Notion database",
+            )
+
+        # Build properties
+        properties = {title_prop: {"title": [{"text": {"content": title}}]}}
+
+        # Add due date if provided
+        if params.get("due"):
+            date_prop = self._get_notion_date_property()
+            if date_prop:
+                properties[date_prop] = {"date": {"start": params["due"]}}
+
+        # Create the page
+        data = {
+            "parent": {"database_id": self.notion_database_id},
+            "properties": properties,
+        }
+
+        # Add notes as page content if provided
+        if params.get("notes"):
+            data["children"] = [
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": params["notes"]}}
+                        ]
+                    },
+                }
+            ]
+
+        response = self._notion_client.post("/pages", json=data)
+        response.raise_for_status()
+
+        page = response.json()
+        page_id = page["id"]
+        due_info = f" (due: {params['due']})" if params.get("due") else ""
+
+        return ActionResult(
+            success=True,
+            message=f"Created task: {title}{due_info}",
+            data={"task_id": page_id, "provider": "notion"},
+        )
+
+    def _find_notion_task_by_title(self, title: str) -> Optional[str]:
+        """Find a Notion task page ID by title (case-insensitive partial match)."""
+        title_prop = self._get_notion_title_property()
+        if not title_prop:
+            return None
+
+        # Query the database
+        response = self._notion_client.post(
+            f"/databases/{self.notion_database_id}/query",
+            json={"page_size": 100},
+        )
+        response.raise_for_status()
+
+        title_lower = title.lower()
+        for page in response.json().get("results", []):
+            props = page.get("properties", {})
+            if title_prop in props:
+                title_data = props[title_prop].get("title", [])
+                if title_data:
+                    page_title = title_data[0].get("plain_text", "")
+                    if page_title.lower() == title_lower:
+                        return page["id"]
+                    # Also try partial match
+                    if title_lower in page_title.lower():
+                        return page["id"]
+        return None
+
+    def _notion_complete(self, params: dict) -> ActionResult:
+        """Mark task as complete via Notion."""
+        task_id = params.get("task_id")
+        task_title = params.get("title")
+
+        # Allow completion by title if no task_id provided
+        if not task_id and task_title:
+            task_id = self._find_notion_task_by_title(task_title)
+            if not task_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error=f"Could not find task with title: {task_title}",
+                )
+
+        if not task_id:
+            return ActionResult(
+                success=False,
+                message="",
+                error="Task ID or title is required",
+            )
+
+        # Get status property
+        status_info = self._get_notion_status_property()
+        if not status_info:
+            return ActionResult(
+                success=False,
+                message="",
+                error="Could not find status/checkbox property in Notion database",
+            )
+
+        prop_name, config = status_info
+
+        # Build update based on property type
+        if config["type"] == "status":
+            properties = {prop_name: {"status": {"name": config["done_option"]}}}
+        else:  # checkbox
+            properties = {prop_name: {"checkbox": True}}
+
+        response = self._notion_client.patch(
+            f"/pages/{task_id}",
+            json={"properties": properties},
+        )
+        response.raise_for_status()
+
+        return ActionResult(
+            success=True,
+            message=f"Completed task {task_id[:8]}...",
+            data={"task_id": task_id, "provider": "notion"},
+        )
+
+    def _notion_update(self, params: dict) -> ActionResult:
+        """Update task via Notion."""
+        task_id = params.get("task_id")
+        if not task_id:
+            return ActionResult(success=False, message="", error="Task ID is required")
+
+        properties = {}
+
+        # Update title if provided
+        if params.get("title"):
+            title_prop = self._get_notion_title_property()
+            if title_prop:
+                properties[title_prop] = {
+                    "title": [{"text": {"content": params["title"]}}]
+                }
+
+        # Update due date if provided
+        if params.get("due"):
+            date_prop = self._get_notion_date_property()
+            if date_prop:
+                properties[date_prop] = {"date": {"start": params["due"]}}
+
+        if not properties:
+            return ActionResult(success=False, message="", error="No fields to update")
+
+        response = self._notion_client.patch(
+            f"/pages/{task_id}",
+            json={"properties": properties},
+        )
+        response.raise_for_status()
+
+        return ActionResult(
+            success=True,
+            message=f"Updated task {task_id[:8]}...",
+            data={"task_id": task_id, "provider": "notion"},
+        )
+
+    def _notion_delete(self, params: dict) -> ActionResult:
+        """Delete (archive) task via Notion."""
+        task_id = params.get("task_id")
+        if not task_id:
+            return ActionResult(success=False, message="", error="Task ID is required")
+
+        # Notion doesn't have true delete - archive the page
+        response = self._notion_client.patch(
+            f"/pages/{task_id}",
+            json={"archived": True},
+        )
+        response.raise_for_status()
+
+        return ActionResult(
+            success=True,
+            message=f"Archived task {task_id[:8]}...",
+            data={"task_id": task_id, "provider": "notion"},
+        )
+
+    def _notion_list(self, params: dict) -> ActionResult:
+        """List tasks via Notion."""
+        limit = min(params.get("limit", 20), 100)
+
+        # Query the database for non-archived pages
+        query = {
+            "filter": {
+                "property": "object",
+                "equals": "page",
+            },
+            "page_size": limit,
+        }
+
+        # Try to filter by incomplete status if possible
+        status_info = self._get_notion_status_property()
+        if status_info:
+            prop_name, config = status_info
+            if config["type"] == "checkbox":
+                query["filter"] = {
+                    "property": prop_name,
+                    "checkbox": {"equals": False},
+                }
+            # For status type, we'd need to know the "not done" options
+
+        response = self._notion_client.post(
+            f"/databases/{self.notion_database_id}/query",
+            json=query,
+        )
+        response.raise_for_status()
+
+        results = response.json().get("results", [])
+
+        # Get title property name
+        title_prop = self._get_notion_title_property()
+        date_prop = self._get_notion_date_property()
+
+        task_list = []
+        for page in results:
+            page_id = page["id"]
+            props = page.get("properties", {})
+
+            # Extract title
+            title = ""
+            if title_prop and title_prop in props:
+                title_data = props[title_prop].get("title", [])
+                if title_data:
+                    title = title_data[0].get("plain_text", "")
+
+            # Extract due date
+            due_str = ""
+            if date_prop and date_prop in props:
+                date_data = props[date_prop].get("date")
+                if date_data and date_data.get("start"):
+                    due_str = f" (due: {date_data['start']})"
+
+            if title:
+                # Show full ID for Notion (UUIDs are needed for actions)
+                task_list.append(f"- [{page_id}] {title}{due_str}")
+
+        message = (
+            f"Found {len(task_list)} task(s):\n" + "\n".join(task_list)
+            if task_list
+            else "No tasks found"
+        )
+
+        return ActionResult(
+            success=True,
+            message=message,
+            data={"tasks": results, "count": len(results), "provider": "notion"},
+        )
+
+    # -------------------------------------------------------------------------
     # Common methods
     # -------------------------------------------------------------------------
 
@@ -1020,7 +1528,13 @@ List tasks from a list/project.
         if action == "create":
             if not params.get("title"):
                 errors.append(ValidationError("title", "Task title is required"))
-        elif action in ("complete", "update", "delete"):
+        elif action == "complete":
+            # Allow either task_id or title (for Notion)
+            if not params.get("task_id") and not params.get("title"):
+                errors.append(
+                    ValidationError("task_id", "Task ID or title is required")
+                )
+        elif action in ("update", "delete"):
             if not params.get("task_id"):
                 errors.append(ValidationError("task_id", "Task ID is required"))
 
@@ -1033,6 +1547,8 @@ List tasks from a list/project.
             due = f" (due: {params['due']})" if params.get("due") else ""
             return f'Create task: "{title}"{due}'
         elif action == "complete":
+            if params.get("title"):
+                return f'Mark task "{params["title"]}" as complete'
             return f"Mark task {params.get('task_id', '?')[:20]} as complete"
         elif action == "update":
             return f"Update task {params.get('task_id', '?')[:20]}"
@@ -1061,3 +1577,5 @@ List tasks from a list/project.
             self._oauth_client.close()
         if self._todoist_client:
             self._todoist_client.close()
+        if self._notion_client:
+            self._notion_client.close()

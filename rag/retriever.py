@@ -423,9 +423,9 @@ class RAGRetriever:
             f"Retrieved {len(date_matched_chunks)} date-matched + {len(semantic_chunks)} semantic chunks"
         )
 
-        # Only rerank semantic results
+        # Only rerank semantic results (skip if provider is "none")
         reranked_semantic = []
-        if semantic_chunks:
+        if semantic_chunks and rerank_provider != "none":
             try:
                 from .reranker import rerank_documents
 
@@ -475,6 +475,11 @@ class RAGRetriever:
                 reranked_semantic = sorted(
                     semantic_chunks, key=lambda c: c.score, reverse=True
                 )[: max(0, max_results - len(date_matched_chunks))]
+        elif semantic_chunks:
+            # Reranking skipped (provider="none"), just sort by score and limit
+            reranked_semantic = sorted(
+                semantic_chunks, key=lambda c: c.score, reverse=True
+            )[: max(0, max_results - len(date_matched_chunks))]
 
         # Combine: date-matched first (sorted by score), then reranked semantic
         date_matched_chunks = sorted(
@@ -611,8 +616,8 @@ class RAGRetriever:
                     )
                     chunks.append(chunk)
 
-        # Always rerank for better relevance
-        if chunks:
+        # Rerank for better relevance (skip if provider is "none")
+        if chunks and rerank_provider != "none":
             try:
                 from .reranker import rerank_documents
 
@@ -655,7 +660,12 @@ class RAGRetriever:
             except Exception as e:
                 logger.warning(f"Reranking failed, using original order: {e}")
                 # Fall back to original chunks, limited to max_results
-                chunks = chunks[:max_results]
+                chunks = sorted(chunks, key=lambda c: c.score, reverse=True)[
+                    :max_results
+                ]
+        elif chunks:
+            # Reranking skipped (provider="none"), just sort by score and limit
+            chunks = sorted(chunks, key=lambda c: c.score, reverse=True)[:max_results]
 
         # Calculate total tokens
         for chunk in chunks:

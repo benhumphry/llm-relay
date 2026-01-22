@@ -65,6 +65,8 @@ class EmailActionHandler(OAuthMixin, PluginActionHandler):
     icon = "✉️"
     category = "communication"
     supported_sources = ["Gmail", "Outlook"]
+    # Document store source_type values that provide email accounts
+    supported_source_types = ["mcp:gmail", "outlook"]
 
     _abstract = False
 

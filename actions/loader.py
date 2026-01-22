@@ -76,6 +76,31 @@ class PluginActionAdapter(ActionHandler):
                 )
         return None
 
+    @property
+    def supported_source_types(self) -> list[str]:
+        """Get supported document store source types from plugin class."""
+        return getattr(self._plugin_class, "supported_source_types", [])
+
+    @property
+    def supported_sources(self) -> list[str]:
+        """Get supported sources display names from plugin class."""
+        return getattr(self._plugin_class, "supported_sources", [])
+
+    @property
+    def display_name(self) -> str:
+        """Get display name from plugin class."""
+        return getattr(self._plugin_class, "display_name", self.action_type)
+
+    @property
+    def icon(self) -> str:
+        """Get icon from plugin class."""
+        return getattr(self._plugin_class, "icon", "")
+
+    @property
+    def config_fields(self) -> list:
+        """Get config fields from plugin class."""
+        return self._plugin_class.get_config_fields()
+
     def validate(
         self, action: str, params: dict, context: ActionContext
     ) -> tuple[bool, str]:

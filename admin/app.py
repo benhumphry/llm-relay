@@ -5616,6 +5616,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "mcp:gcalendar",
             "mcp:gtasks",
             "mcp:gcontacts",
+            # "mcp:gkeep",  # Disabled - requires domain-wide delegation
         ):
             # Google sources require OAuth account
             if not google_account_id:
@@ -5746,6 +5747,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 github_path=data.get("github_path"),
                 notion_database_id=data.get("notion_database_id"),
                 notion_page_id=data.get("notion_page_id"),
+                notion_is_task_database=data.get("notion_is_task_database", False),
                 nextcloud_folder=data.get("nextcloud_folder"),
                 website_url=data.get("website_url"),
                 website_crawl_depth=data.get("website_crawl_depth", 1),
@@ -5852,6 +5854,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 github_path=data.get("github_path"),
                 notion_database_id=data.get("notion_database_id"),
                 notion_page_id=data.get("notion_page_id"),
+                notion_is_task_database=data.get("notion_is_task_database"),
                 nextcloud_folder=data.get("nextcloud_folder"),
                 website_url=data.get("website_url"),
                 website_crawl_depth=data.get("website_crawl_depth"),
@@ -6418,6 +6421,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "https://www.googleapis.com/auth/contacts.readonly",
             "https://www.googleapis.com/auth/contacts",  # Create/edit contacts
         ],
+        # Keep disabled - requires domain-wide delegation, not standard OAuth
+        # "keep": [
+        #     "https://www.googleapis.com/auth/userinfo.email",
+        #     "https://www.googleapis.com/auth/keep.readonly",
+        #     "https://www.googleapis.com/auth/keep",
+        # ],
         "workspace": [
             "https://www.googleapis.com/auth/userinfo.email",
             # Drive
@@ -6437,6 +6446,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             # Contacts
             "https://www.googleapis.com/auth/contacts.readonly",
             "https://www.googleapis.com/auth/contacts",
+            # Keep disabled - requires domain-wide delegation
+            # "https://www.googleapis.com/auth/keep.readonly",
+            # "https://www.googleapis.com/auth/keep",
         ],
         "places": [
             "https://www.googleapis.com/auth/userinfo.email",
@@ -8963,6 +8975,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 action_tasks_provider=data.get("action_tasks_provider"),
                 action_tasks_list_id=data.get("action_tasks_list_id"),
                 action_notification_urls=data.get("action_notification_urls"),
+                action_notes_store_id=data.get("action_notes_store_id"),
                 # Scheduled Prompts
                 scheduled_prompts_enabled=data.get("scheduled_prompts_enabled", False),
                 scheduled_prompts_account_id=data.get("scheduled_prompts_account_id"),
@@ -9061,6 +9074,7 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 action_tasks_provider=data.get("action_tasks_provider"),
                 action_tasks_list_id=data.get("action_tasks_list_id"),
                 action_notification_urls=data.get("action_notification_urls"),
+                action_notes_store_id=data.get("action_notes_store_id"),
                 # Scheduled Prompts
                 scheduled_prompts_enabled=data.get("scheduled_prompts_enabled"),
                 scheduled_prompts_account_id=data.get("scheduled_prompts_account_id"),
@@ -9268,9 +9282,10 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
     @admin.route("/api/smart-actions", methods=["GET"])
     @require_auth_api
     def list_smart_actions():
-        """List all available action handlers with OAuth status."""
+        """List all available action handlers with OAuth status and compatible stores."""
         from actions import load_action_handlers
         from actions.registry import _handlers as all_handlers
+        from db import get_all_document_stores
         from db.oauth_tokens import list_oauth_tokens
 
         # Ensure handlers are loaded
@@ -9293,6 +9308,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             except Exception:
                 oauth_accounts[provider] = []
 
+        # Get all document stores for matching compatible stores
+        all_stores = get_all_document_stores()
+
         handlers = []
         for action_type, handler in all_handlers.items():
             # Determine which OAuth providers this handler can use
@@ -9314,6 +9332,46 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             for provider in oauth_providers:
                 available_accounts.extend(oauth_accounts.get(provider, []))
 
+            # Get supported source types from handler
+            supported_source_types = getattr(handler, "supported_source_types", [])
+            supported_sources = getattr(handler, "supported_sources", [])
+
+            # Find compatible document stores
+            compatible_stores = []
+            for store in all_stores:
+                store_source_type = getattr(store, "source_type", "") or ""
+                # Check if store matches any supported source type
+                if store_source_type in supported_source_types:
+                    compatible_stores.append(
+                        {
+                            "id": store.id,
+                            "name": store.name,
+                            "slug": getattr(store, "slug", "") or store.name,
+                            "source_type": store_source_type,
+                        }
+                    )
+                # Special case: Notion stores marked as task databases
+                elif (
+                    action_type == "tasks"
+                    and store_source_type == "notion"
+                    and getattr(store, "notion_is_task_database", False)
+                ):
+                    compatible_stores.append(
+                        {
+                            "id": store.id,
+                            "name": store.name,
+                            "slug": getattr(store, "slug", "") or store.name,
+                            "source_type": "notion (tasks)",
+                        }
+                    )
+
+            # Get config fields if available
+            config_fields = []
+            if hasattr(handler, "config_fields"):
+                fields = handler.config_fields
+                if fields:
+                    config_fields = [f.to_dict() for f in fields]
+
             handlers.append(
                 {
                     "action_type": action_type,
@@ -9324,6 +9382,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                     "is_configured": len(available_accounts) > 0
                     or not handler.requires_oauth,
                     "description": handler.__doc__ or "",
+                    "supported_sources": supported_sources,
+                    "supported_source_types": supported_source_types,
+                    "compatible_stores": compatible_stores,
+                    "display_name": getattr(handler, "display_name", action_type),
+                    "icon": getattr(handler, "icon", ""),
+                    "config_fields": config_fields,
                 }
             )
 

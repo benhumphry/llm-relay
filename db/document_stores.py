@@ -102,6 +102,7 @@ def create_document_store(
     github_path: Optional[str] = None,
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
+    notion_is_task_database: bool = False,
     nextcloud_folder: Optional[str] = None,
     website_url: Optional[str] = None,
     website_crawl_depth: int = 1,
@@ -185,6 +186,7 @@ def create_document_store(
             github_path=github_path,
             notion_database_id=notion_database_id,
             notion_page_id=notion_page_id,
+            notion_is_task_database=notion_is_task_database,
             nextcloud_folder=nextcloud_folder,
             website_url=website_url,
             website_crawl_depth=website_crawl_depth,
@@ -276,6 +278,7 @@ def update_document_store(
     github_path: Optional[str] = None,
     notion_database_id: Optional[str] = None,
     notion_page_id: Optional[str] = None,
+    notion_is_task_database: Optional[bool] = None,
     nextcloud_folder: Optional[str] = None,
     website_url: Optional[str] = None,
     website_crawl_depth: Optional[int] = None,
@@ -426,6 +429,8 @@ def update_document_store(
             )
         if notion_page_id is not None:
             store.notion_page_id = notion_page_id if notion_page_id else None
+        if notion_is_task_database is not None:
+            store.notion_is_task_database = notion_is_task_database
         if nextcloud_folder is not None:
             store.nextcloud_folder = nextcloud_folder if nextcloud_folder else None
         if website_url is not None:
@@ -704,6 +709,7 @@ def _store_to_detached(
         github_path=store.github_path,
         notion_database_id=store.notion_database_id,
         notion_page_id=store.notion_page_id,
+        notion_is_task_database=store.notion_is_task_database,
         nextcloud_folder=store.nextcloud_folder,
         website_url=store.website_url,
         website_crawl_depth=store.website_crawl_depth,

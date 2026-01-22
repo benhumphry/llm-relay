@@ -192,6 +192,14 @@ class SmartEnricherEngine:
 
                 # Get content category from plugin system
                 content_category = get_content_category(source_type)
+
+                # Special case: Notion stores marked as task databases
+                # Override category from FILES to TASKS
+                if source_type == "notion" and getattr(
+                    store, "notion_is_task_database", False
+                ):
+                    content_category = ContentCategory.TASKS
+
                 category = CONTENT_TO_ACTION_CATEGORY.get(content_category)
 
                 if not category:
@@ -217,6 +225,9 @@ class SmartEnricherEngine:
                 elif source_type == "todoist":
                     # Todoist uses API key, not OAuth
                     oauth_provider = "todoist"
+                elif source_type == "notion":
+                    # Notion uses API key, not OAuth
+                    oauth_provider = "notion"
 
                 # Get email from OAuth token if we have an account ID
                 if oauth_account_id:
@@ -254,6 +265,14 @@ class SmartEnricherEngine:
                     )
                     logger.info(
                         f"  Todoist store '{store_name}': project_id={account_info['project_id']}"
+                    )
+                elif source_type == "notion" and category == "tasks":
+                    # Notion task database - include database_id
+                    account_info["database_id"] = getattr(
+                        store, "notion_database_id", None
+                    )
+                    logger.info(
+                        f"  Notion tasks store '{store_name}': database_id={account_info['database_id']}"
                     )
 
                 available_accounts[category].append(account_info)
@@ -309,6 +328,50 @@ class SmartEnricherEngine:
                 "provider": "google",
                 "list_id": tasks_list_id,
             }
+
+        # Notes default (from document store)
+        notes_store_id = getattr(self.enricher, "action_notes_store_id", None)
+        if notes_store_id:
+            try:
+                from db import get_document_store_by_id
+
+                notes_store = get_document_store_by_id(notes_store_id)
+                if notes_store:
+                    source_type = getattr(notes_store, "source_type", "")
+                    # Map source type to provider name
+                    provider = (
+                        "notion"
+                        if source_type == "notion"
+                        else "onenote"
+                        if source_type == "onenote"
+                        else "gkeep"
+                        if source_type == "mcp:gkeep"
+                        else source_type
+                    )
+                    notes_config = {
+                        "store_id": notes_store_id,
+                        "provider": provider,
+                        "name": getattr(notes_store, "name", ""),
+                    }
+                    # Add provider-specific fields
+                    if provider == "notion":
+                        notes_config["database_id"] = getattr(
+                            notes_store, "notion_database_id", None
+                        )
+                    elif provider == "onenote":
+                        notes_config["oauth_account_id"] = getattr(
+                            notes_store, "microsoft_account_id", None
+                        )
+                        notes_config["notebook_id"] = getattr(
+                            notes_store, "onenote_notebook_id", None
+                        )
+                    elif provider == "gkeep":
+                        notes_config["oauth_account_id"] = getattr(
+                            notes_store, "google_account_id", None
+                        )
+                    default_accounts["notes"] = notes_config
+            except Exception as e:
+                logger.warning(f"Failed to load notes store {notes_store_id}: {e}")
 
         # Notification URLs
         notification_urls = getattr(self.enricher, "action_notification_urls", None)
@@ -934,11 +997,11 @@ class SmartEnricherEngine:
                     )
 
                     if result.chunks:
-                        # Extract just the text, truncated
+                        # Extract just the content, truncated
                         samples[store_id] = [
-                            chunk.text[:300] + "..."
-                            if len(chunk.text) > 300
-                            else chunk.text
+                            chunk.content[:300] + "..."
+                            if len(chunk.content) > 300
+                            else chunk.content
                             for chunk in result.chunks[:chunks_per_store]
                         ]
                 except Exception as e:
@@ -1172,7 +1235,9 @@ class SmartEnricherEngine:
 
         # Live data sources section (builtin providers)
         if live_source_info:
-            sources_text += "LIVE DATA SOURCES (real-time API queries):\n"
+            sources_text += "LIVE DATA SOURCES (real-time API queries - READ ONLY):\n"
+            sources_text += "These sources FETCH data only. They CANNOT perform actions like complete/update/delete/send.\n"
+            sources_text += "For write operations, the target LLM will use Smart Actions separately.\n"
             sources_text += "(Use the source NAME in live_params, e.g., 'weather', 'stocks', 'transport')\n"
             for s in live_source_info:
                 sources_text += f"- {s['name']}"
@@ -1319,6 +1384,7 @@ Rules:
   - Direct tool call (when you know exact params): {{"source": [{{"tool_name": "ToolName", "tool_args": {{"id": "123"}}}}]}}
 - If no live data needed, use empty object: "live_params": {{}}{routing_rules}
 - Live data sources provide real-time API data. PREFER live data sources over web search when a matching source exists.
+- IMPORTANT: Live data sources are READ-ONLY. Do NOT include action params like "action": "complete" or "action": "delete". For write operations (complete task, send email, etc.), just fetch the relevant data - the target LLM handles actions separately.
 - For MCP APIs, PREFER agentic mode when the query involves entities that need ID lookups (teams, players, companies, locations).
 - TIP: It's better to allocate the full budget across multiple sources than to leave budget unused
 

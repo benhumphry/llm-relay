@@ -80,6 +80,15 @@ block content %}
             <span class="badge badge-sm ml-1" x-text="tabCounts.tasks"></span>
         </button>
         <button
+            @click="setFilter('notes')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'notes' }"
+            x-show="tabCounts.notes > 0"
+        >
+            Notes
+            <span class="badge badge-sm ml-1" x-text="tabCounts.notes"></span>
+        </button>
+        <button
             @click="setFilter('websites')"
             class="tab"
             :class="{ 'tab-active': filterMode === 'websites' }"
@@ -807,6 +816,11 @@ block content %}
                             <option value="mcp:gcontacts">
                                 Google Contacts
                             </option>
+                            <!-- Google Keep disabled - requires domain-wide delegation, not standard OAuth
+                            <option value="mcp:gkeep">
+                                Google Keep (Workspace)
+                            </option>
+                            -->
                         </optgroup>
                         <optgroup label="Microsoft">
                             <option value="mcp:onedrive">OneDrive</option>
@@ -1347,6 +1361,27 @@ block content %}
                         x-show="!form.notion_database_id && !form.notion_page_id"
                     >
                         Leave both empty to search all accessible pages.
+                    </div>
+
+                    <!-- Task Database Option -->
+                    <div class="form-control" x-show="form.notion_database_id">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="form.notion_is_task_database"
+                                class="checkbox checkbox-primary"
+                            />
+                            <span class="label-text"
+                                >This is a task database</span
+                            >
+                        </label>
+                        <label class="label pt-0">
+                            <span class="label-text-alt"
+                                >Enable to use this database with Smart Actions
+                                for task management (create, complete, update
+                                tasks)</span
+                            >
+                        </label>
                     </div>
                 </div>
 
@@ -1918,9 +1953,9 @@ block content %}
                     </div>
                 </div>
 
-                <!-- Google OAuth Configuration (for mcp:gdrive, mcp:gmail, mcp:gcalendar, mcp:gtasks, mcp:gcontacts) -->
+                <!-- Google OAuth Configuration (for mcp:gdrive, mcp:gmail, mcp:gcalendar, mcp:gtasks, mcp:gcontacts, mcp:gkeep) -->
                 <div
-                    x-show="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts'].includes(form.source_type)"
+                    x-show="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts', 'mcp:gkeep'].includes(form.source_type)"
                     class="mt-4"
                 >
                     <!-- No OAuth configured -->
@@ -2004,7 +2039,7 @@ block content %}
                                         x-model="form.google_account_id"
                                         @change="onGoogleAccountChange()"
                                         class="select select-bordered flex-1"
-                                        :required="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts'].includes(form.source_type)"
+                                        :required="['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts', 'mcp:gkeep'].includes(form.source_type)"
                                     >
                                         <option value="">
                                             Select an account...
@@ -3217,7 +3252,7 @@ block content %}
 
                 <!-- MCP Server Configuration (for mcp sources) -->
                 <div
-                    x-show="form.source_type.startsWith('mcp:') && !['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts', 'mcp:onedrive', 'mcp:outlook', 'mcp:onenote', 'mcp:teams'].includes(form.source_type)"
+                    x-show="form.source_type.startsWith('mcp:') && !['mcp:gdrive', 'mcp:gmail', 'mcp:gcalendar', 'mcp:gtasks', 'mcp:gcontacts', 'mcp:gkeep', 'mcp:onedrive', 'mcp:outlook', 'mcp:onenote', 'mcp:teams'].includes(form.source_type)"
                     class="mt-4 space-y-4"
                 >
                     <!-- Custom MCP Server fields (only shown for mcp:custom) -->
@@ -3691,10 +3726,8 @@ block content %}
                 local: "files",
                 "mcp:gdrive": "files",
                 "mcp:onedrive": "files",
-                notion: "files",
                 paperless: "files",
                 nextcloud: "files",
-                "mcp:onenote": "files",
                 "mcp:github": "files",
                 // Emails
                 "mcp:gmail": "emails",
@@ -3710,20 +3743,52 @@ block content %}
                 websearch: "websites",
                 // Contacts (grouped with Other for now)
                 "mcp:gcontacts": "contacts",
+                // Notes
+                // "mcp:gkeep": "notes",  // Disabled - requires domain-wide delegation
+                "mcp:onenote": "notes",
+                notion: "notes",
                 // Messages
                 slack: "messages",
                 "mcp:teams": "messages",
             },
 
-            // Get content category for a source type
-            getContentCategory(sourceType) {
-                return this.contentCategories[sourceType] || "other";
+            // Get content category for a source type (or store object)
+            getContentCategory(sourceTypeOrStore) {
+                // If passed a store object, check for special cases
+                if (
+                    typeof sourceTypeOrStore === "object" &&
+                    sourceTypeOrStore !== null
+                ) {
+                    const store = sourceTypeOrStore;
+                    // Notion task databases should be categorized as tasks
+                    if (
+                        store.source_type === "notion" &&
+                        store.notion_is_task_database
+                    ) {
+                        return "tasks";
+                    }
+                    return this.contentCategories[store.source_type] || "other";
+                }
+                // Otherwise treat as source_type string
+                return this.contentCategories[sourceTypeOrStore] || "other";
             },
 
             // Check if source type is "actionable" (email, calendar, tasks)
             // These source types can be used by action handlers
-            isActionableSource(sourceType) {
-                const category = this.getContentCategory(sourceType);
+            // Accepts either a store object or a source_type string
+            isActionableSource(storeOrSourceType) {
+                // If it's a string (source_type from form), check form.notion_is_task_database
+                if (typeof storeOrSourceType === "string") {
+                    if (
+                        storeOrSourceType === "notion" &&
+                        this.form?.notion_is_task_database
+                    ) {
+                        return true;
+                    }
+                    const category = this.getContentCategory(storeOrSourceType);
+                    return ["emails", "calendars", "tasks"].includes(category);
+                }
+                const category = this.getContentCategory(storeOrSourceType);
                 return ["emails", "calendars", "tasks"].includes(category);
             },
 
@@ -3735,12 +3800,13 @@ block content %}
                     emails: 0,
                     calendars: 0,
                     tasks: 0,
+                    notes: 0,
                     websites: 0,
                     messages: 0,
                     other: 0,
                 };
                 for (const store of this.allStores) {
-                    const category = this.getContentCategory(store.source_type);
+                    const category = this.getContentCategory(store);
                     if (category === "contacts") {
                         counts.other++; // Group contacts with other for now
                     } else if (counts.hasOwnProperty(category)) {
@@ -3762,6 +3828,7 @@ block content %}
                     emails: ["emails"],
                     calendars: ["calendars"],
                     tasks: ["tasks"],
+                    notes: ["notes"],
                     websites: ["websites"],
                     messages: ["messages"],
                     other: ["contacts", "other"], // Include contacts in other
@@ -3771,7 +3838,7 @@ block content %}
                 if (!categories) return this.allStores;
 
                 return this.allStores.filter((s) => {
-                    const category = this.getContentCategory(s.source_type);
+                    const category = this.getContentCategory(s);
                     return categories.includes(category);
                 });
             },
@@ -3784,6 +3851,7 @@ block content %}
                     emails: "Email",
                     calendars: "Calendar",
                     tasks: "Tasks",
+                    notes: "Notes",
                     websites: "Website",
                     messages: "Messages",
                     other: "Other",
@@ -3918,6 +3986,7 @@ block content %}
                 github_path: "",
                 notion_database_id: "",
                 notion_page_id: "",
+                notion_is_task_database: false,
                 nextcloud_folder: "",
                 website_url: "",
                 website_crawl_depth: 1,
@@ -4057,6 +4126,7 @@ block content %}
                                 "mcp:gcalendar",
                                 "mcp:gtasks",
                                 "mcp:gcontacts",
+                                "mcp:gkeep",
                             ].includes(this.form.source_type)
                         ) {
                             // Trigger folder/label/list loading if account is set
@@ -4518,6 +4588,7 @@ block content %}
                         "mcp:gcalendar": "calendar",
                         "mcp:gtasks": "tasks",
                         "mcp:gcontacts": "contacts",
+                        "mcp:gkeep": "keep",
                     };
                     const scope = scopeMap[this.form.source_type] || "drive";
                     const response = await fetch(
@@ -5092,6 +5163,13 @@ block content %}
             },
 
             getSourceIcon(store) {
+                // Special case: Notion task databases get task icon
+                if (
+                    store.source_type === "notion" &&
+                    store.notion_is_task_database
+                ) {
+                    return "✅";
+                }
                 const icons = {
                     local: "📁",
                     website: "🌐",
@@ -5104,6 +5182,7 @@ block content %}
                     "mcp:gcalendar": "📅",
                     "mcp:gtasks": "✅",
                     "mcp:gcontacts": "👥",
+                    "mcp:gkeep": "📝",
                     "mcp:onedrive": "📂",
                     "mcp:outlook": "📧",
                     "mcp:onenote": "📓",
@@ -5128,6 +5207,7 @@ block content %}
                 if (store.source_type === "mcp:gcalendar") return "Calendar";
                 if (store.source_type === "mcp:gtasks") return "Tasks";
                 if (store.source_type === "mcp:gcontacts") return "Contacts";
+                if (store.source_type === "mcp:gkeep") return "Keep";
                 if (store.source_type === "mcp:onedrive") return "OneDrive";
                 if (store.source_type === "mcp:outlook") return "Outlook";
                 if (store.source_type === "mcp:onenote") return "OneNote";
@@ -5189,6 +5269,9 @@ block content %}
                 if (store.source_type === "mcp:gcontacts") {
                     const label = store.gcontacts_group_name || "All contacts";
                     return acct ? `${acct}: ${label}` : label;
+                }
+                if (store.source_type === "mcp:gkeep") {
+                    return acct ? `${acct}: All notes` : "All notes";
                 }
                 // Microsoft sources
                 const msAcct = store.microsoft_account_email || "";
@@ -5466,6 +5549,8 @@ block content %}
                     github_path: store.github_path || "",
                     notion_database_id: store.notion_database_id || "",
                     notion_page_id: store.notion_page_id || "",
+                    notion_is_task_database:
+                        store.notion_is_task_database || false,
                     nextcloud_folder: store.nextcloud_folder || "",
                     website_url: store.website_url || "",
                     website_crawl_depth: store.website_crawl_depth || 1,
@@ -5739,6 +5824,8 @@ block content %}
                         body.notion_database_id =
                             this.form.notion_database_id || null;
                         body.notion_page_id = this.form.notion_page_id || null;
+                        body.notion_is_task_database =
+                            this.form.notion_is_task_database || false;
                     } else if (this.form.source_type === "mcp:github") {
                         body.source_type = "mcp:github";
                         body.github_repo = this.form.github_repo;
@@ -5781,6 +5868,7 @@ block content %}
                             "mcp:gcalendar",
                             "mcp:gtasks",
                             "mcp:gcontacts",
+                            "mcp:gkeep",
                         ].includes(this.form.source_type)
                     ) {
                         // Google sources - use specific source type and OAuth account

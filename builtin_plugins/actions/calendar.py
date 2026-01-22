@@ -53,6 +53,8 @@ class CalendarActionHandler(OAuthMixin, PluginActionHandler):
     icon = "📅"
     category = "productivity"
     supported_sources = ["Google Calendar", "Outlook Calendar"]
+    # Document store source_type values that provide calendar accounts
+    supported_source_types = ["mcp:gcalendar", "outlook_calendar"]
 
     _abstract = False
 

@@ -1125,6 +1125,9 @@ class DocumentStore(Base):
     notion_page_id: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True
     )  # Root page ID (indexes children)
+    notion_is_task_database: Mapped[bool] = mapped_column(
+        Boolean, default=False
+    )  # Treat as task database for Smart Actions
 
     # Nextcloud configuration (for source_type="nextcloud")
     nextcloud_folder: Mapped[Optional[str]] = mapped_column(
@@ -1312,6 +1315,7 @@ class DocumentStore(Base):
             "github_path": self.github_path,
             "notion_database_id": self.notion_database_id,
             "notion_page_id": self.notion_page_id,
+            "notion_is_task_database": self.notion_is_task_database,
             "nextcloud_folder": self.nextcloud_folder,
             "website_url": self.website_url,
             "website_crawl_depth": self.website_crawl_depth,
@@ -1570,6 +1574,12 @@ class SmartAlias(Base):
         Text, nullable=True
     )
 
+    # Notes: default document store for note creation
+    # References a document store (Notion database, OneNote notebook, etc.)
+    action_notes_store_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("document_stores.id", ondelete="SET NULL"), nullable=True
+    )
+
     # ===== SCHEDULED PROMPTS SETTINGS =====
     # Calendar-based scheduled prompts: events in this calendar are executed as LLM prompts
     # The event title becomes the prompt, description provides additional context
@@ -1797,6 +1807,7 @@ class SmartAlias(Base):
             "action_tasks_provider": self.action_tasks_provider,
             "action_tasks_list_id": self.action_tasks_list_id,
             "action_notification_urls": self.action_notification_urls,
+            "action_notes_store_id": self.action_notes_store_id,
             # Scheduled prompts
             "scheduled_prompts_enabled": self.scheduled_prompts_enabled,
             "scheduled_prompts_account_id": self.scheduled_prompts_account_id,

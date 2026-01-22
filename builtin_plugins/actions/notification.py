@@ -52,6 +52,8 @@ class NotificationActionHandler(PluginActionHandler):
     )
     icon = "🔔"
     category = "communication"
+    supported_sources = []  # Uses Apprise API, not document stores
+    supported_source_types = []
 
     # Mark as non-abstract so it can be registered
     _abstract = False

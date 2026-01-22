@@ -157,17 +157,54 @@ content %}
                                 </td>
                                 <td>
                                     <div class="flex flex-wrap gap-1">
-                                        <!-- Show supported document source types -->
+                                        <!-- Show compatible document stores -->
                                         <template
-                                            x-for="source in (handler.supported_sources || [])"
-                                            :key="source"
+                                            x-if="handler.compatible_stores && handler.compatible_stores.length > 0"
                                         >
-                                            <span
-                                                class="badge badge-outline badge-sm"
-                                                x-text="source"
-                                            ></span>
+                                            <div class="flex flex-wrap gap-1">
+                                                <template
+                                                    x-for="store in handler.compatible_stores.slice(0, 3)"
+                                                    :key="store.id"
+                                                >
+                                                    <span
+                                                        class="badge badge-primary badge-sm"
+                                                        x-text="store.name"
+                                                        :title="store.source_type"
+                                                    ></span>
+                                                </template>
+                                                <template
+                                                    x-if="handler.compatible_stores.length > 3"
+                                                >
+                                                    <span
+                                                        class="badge badge-ghost badge-sm"
+                                                        x-text="'+' + (handler.compatible_stores.length - 3)"
+                                                    ></span>
+                                                </template>
+                                            </div>
                                         </template>
-                                        <!-- None required (notification, schedule) -->
+                                        <!-- No compatible stores - show supported types -->
+                                        <template
+                                            x-if="(!handler.compatible_stores || handler.compatible_stores.length === 0) && handler.supported_sources && handler.supported_sources.length > 0"
+                                        >
+                                            <div
+                                                class="flex flex-wrap gap-1 items-center"
+                                            >
+                                                <template
+                                                    x-for="source in handler.supported_sources"
+                                                    :key="source"
+                                                >
+                                                    <span
+                                                        class="badge badge-outline badge-sm opacity-50"
+                                                        x-text="source"
+                                                    ></span>
+                                                </template>
+                                                <span
+                                                    class="text-xs text-warning ml-1"
+                                                    >(none configured)</span
+                                                >
+                                            </div>
+                                        </template>
+                                        <!-- None required (notification) -->
                                         <template
                                             x-if="!handler.supported_sources || handler.supported_sources.length === 0"
                                         >
@@ -258,6 +295,90 @@ content %}
                                                         </tbody>
                                                     </table>
                                                 </div>
+                                                <!-- Compatible Document Stores -->
+                                                <template
+                                                    x-if="handler.supported_sources && handler.supported_sources.length > 0"
+                                                >
+                                                    <div class="mt-4">
+                                                        <h4
+                                                            class="text-sm font-semibold mb-2"
+                                                        >
+                                                            Compatible Document
+                                                            Stores
+                                                        </h4>
+                                                        <template
+                                                            x-if="handler.compatible_stores && handler.compatible_stores.length > 0"
+                                                        >
+                                                            <div
+                                                                class="overflow-x-auto"
+                                                            >
+                                                                <table
+                                                                    class="table table-xs"
+                                                                >
+                                                                    <thead>
+                                                                        <tr>
+                                                                            <th>
+                                                                                Store
+                                                                            </th>
+                                                                            <th>
+                                                                                Type
+                                                                            </th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        <template
+                                                                            x-for="store in handler.compatible_stores"
+                                                                            :key="store.id"
+                                                                        >
+                                                                            <tr>
+                                                                                <td>
+                                                                                    <a
+                                                                                        :href="'/document-stores?edit=' + store.id"
+                                                                                        class="link link-primary"
+                                                                                        x-text="store.name"
+                                                                                    ></a>
+                                                                                </td>
+                                                                                <td
+                                                                                    class="text-xs text-base-content/60"
+                                                                                    x-text="store.source_type"
+                                                                                ></td>
+                                                                            </tr>
+                                                                        </template>
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </template>
+                                                        <template
+                                                            x-if="!handler.compatible_stores || handler.compatible_stores.length === 0"
+                                                        >
+                                                            <div
+                                                                class="text-sm text-base-content/60"
+                                                            >
+                                                                <p>
+                                                                    No
+                                                                    compatible
+                                                                    stores
+                                                                    configured.
+                                                                </p>
+                                                                <p class="mt-1">
+                                                                    Supported
+                                                                    types:
+                                                                    <span
+                                                                        class="font-mono text-xs"
+                                                                        x-text="handler.supported_sources.join(', ')"
+                                                                    ></span>
+                                                                </p>
+                                                                <a
+                                                                    href="/document-stores"
+                                                                    class="btn btn-xs btn-outline mt-2"
+                                                                    >Create
+                                                                    Document
+                                                                    Store</a
+                                                                >
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </template>
                                             </div>
                                             <!-- Usage Instructions -->
                                             <div>
