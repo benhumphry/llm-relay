@@ -190,16 +190,11 @@ class GPUModelCache:
                 cached.touch()
                 return cached.model
 
-        # Load model outside lock to avoid blocking other threads
-        logger.info(f"Loading model for cache: {key}")
-        model = loader_fn()
-
-        with self._cache_lock:
-            # Double-check in case another thread loaded it
-            if key in self._cache:
-                cached = self._cache[key]
-                cached.touch()
-                return cached.model
+            # Load model inside lock to prevent concurrent loading
+            # This blocks other threads but prevents the "meta tensor" error
+            # that occurs when multiple threads load the same GPU model simultaneously
+            logger.info(f"Loading model for cache: {key}")
+            model = loader_fn()
 
             self._cache[key] = CachedModel(
                 key=key,
@@ -208,7 +203,7 @@ class GPUModelCache:
                 unload_fn=unload_fn,
             )
 
-        return model
+            return model
 
     def touch(self, key: str):
         """Update last used time for a cached model."""

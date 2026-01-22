@@ -963,6 +963,11 @@ class DocumentStore(Base):
         String(100), unique=True, nullable=False, index=True
     )
 
+    # Friendly display name for LLM to identify this as an account
+    # e.g., "Work Email", "Personal Calendar", "Home Tasks"
+    # If not set, falls back to `name`
+    display_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
     # Source configuration
     source_type: Mapped[str] = mapped_column(
         String(20), default="local"
@@ -1265,6 +1270,7 @@ class DocumentStore(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "display_name": self.display_name,
             "source_type": self.source_type,
             "plugin_config_id": self.plugin_config_id,
             "source_path": self.source_path,

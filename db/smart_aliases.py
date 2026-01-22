@@ -1004,6 +1004,12 @@ def _store_to_dict(store: DocumentStore) -> dict:
         "gmail_label_name": store.gmail_label_name,
         "gcalendar_calendar_id": store.gcalendar_calendar_id,
         "gcalendar_calendar_name": store.gcalendar_calendar_name,
+        # Google Tasks fields
+        "gtasks_tasklist_id": store.gtasks_tasklist_id,
+        "gtasks_tasklist_name": store.gtasks_tasklist_name,
+        # Todoist fields
+        "todoist_project_id": store.todoist_project_id,
+        "todoist_project_name": store.todoist_project_name,
         "embedding_provider": store.embedding_provider,
         "embedding_model": store.embedding_model,
         "ollama_url": store.ollama_url,
@@ -1046,6 +1052,12 @@ class DetachedDocumentStore:
         self.gmail_label_name = data["gmail_label_name"]
         self.gcalendar_calendar_id = data["gcalendar_calendar_id"]
         self.gcalendar_calendar_name = data["gcalendar_calendar_name"]
+        # Google Tasks fields
+        self.gtasks_tasklist_id = data.get("gtasks_tasklist_id")
+        self.gtasks_tasklist_name = data.get("gtasks_tasklist_name")
+        # Todoist fields
+        self.todoist_project_id = data.get("todoist_project_id")
+        self.todoist_project_name = data.get("todoist_project_name")
         self.embedding_provider = data["embedding_provider"]
         self.embedding_model = data["embedding_model"]
         self.ollama_url = data["ollama_url"]

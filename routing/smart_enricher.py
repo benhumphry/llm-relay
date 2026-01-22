@@ -87,7 +87,12 @@ class EnrichmentResult:
     # Actions metadata
     actions_enabled: bool = False
     allowed_actions: list[str] = field(default_factory=list)
-    # Action-category defaults
+    # Available accounts derived from linked document stores
+    # Keys: "email", "calendar", "tasks" - each contains list of store-based accounts
+    available_accounts: dict[str, list[dict]] = field(default_factory=dict)
+    # Default accounts configured on the Smart Alias (fallback if LLM doesn't specify)
+    default_accounts: dict[str, dict] = field(default_factory=dict)
+    # Legacy action-category defaults (for backwards compatibility)
     action_email_account_id: int | None = None
     action_calendar_account_id: int | None = None
     action_calendar_id: str | None = None
@@ -146,6 +151,171 @@ class SmartEnricherEngine:
             if enabled and status == "ready" and collection:
                 return True
         return False
+
+    def _build_available_accounts(self) -> dict[str, list[dict]]:
+        """
+        Build available_accounts dict from linked document stores.
+
+        Maps document stores to action categories based on source_type:
+        - mcp:gmail -> email
+        - mcp:gcalendar -> calendar
+        - mcp:gtasks, todoist -> tasks
+
+        Returns:
+            Dict mapping categories (email, calendar, tasks) to lists of account info.
+            Each account has: store_id, name, slug, source_type, oauth_account_id,
+            provider, email, and source-specific fields (project_id, tasklist_id, etc.)
+        """
+        from db.oauth_tokens import get_oauth_token_info
+        from plugin_base.common import ContentCategory, get_content_category
+
+        available_accounts: dict[str, list[dict]] = {
+            "email": [],
+            "calendar": [],
+            "tasks": [],
+        }
+
+        # Map ContentCategory enum to action handler category keys
+        CONTENT_TO_ACTION_CATEGORY = {
+            ContentCategory.EMAILS: "email",
+            ContentCategory.CALENDARS: "calendar",
+            ContentCategory.TASKS: "tasks",
+        }
+
+        stores = self._get_linked_stores()
+        logger.debug(f"_build_available_accounts: Found {len(stores)} linked stores")
+
+        try:
+            for store in stores:
+                source_type = getattr(store, "source_type", "")
+                store_name = getattr(store, "name", "unknown")
+
+                # Get content category from plugin system
+                content_category = get_content_category(source_type)
+                category = CONTENT_TO_ACTION_CATEGORY.get(content_category)
+
+                if not category:
+                    continue  # Not an actionable source type
+
+                # Use display_name if set, otherwise fall back to name
+                display_name = getattr(store, "display_name", None) or store_name
+                store_id = getattr(store, "id", None)
+
+                # Determine OAuth info based on source type
+                oauth_account_id = None
+                oauth_provider = ""
+                oauth_email = ""
+
+                if source_type.startswith("mcp:g"):
+                    # Google source
+                    oauth_account_id = getattr(store, "google_account_id", None)
+                    oauth_provider = "google"
+                elif source_type.startswith("mcp:o"):
+                    # Microsoft/Outlook source
+                    oauth_account_id = getattr(store, "microsoft_account_id", None)
+                    oauth_provider = "microsoft"
+                elif source_type == "todoist":
+                    # Todoist uses API key, not OAuth
+                    oauth_provider = "todoist"
+
+                # Get email from OAuth token if we have an account ID
+                if oauth_account_id:
+                    token_info = get_oauth_token_info(oauth_account_id)
+                    if token_info:
+                        oauth_email = token_info.get("account_email", "")
+
+                # Build account info with both slug and display name
+                account_info = {
+                    "store_id": store_id,
+                    "name": display_name,  # Friendly name
+                    "slug": store_name,  # Original slug for matching
+                    "source_type": source_type,
+                    "oauth_account_id": oauth_account_id,
+                    "provider": oauth_provider,
+                    "email": oauth_email,
+                }
+
+                # Add source-specific fields
+                if source_type == "mcp:gcalendar":
+                    account_info["calendar_id"] = getattr(
+                        store, "gcalendar_calendar_id", None
+                    )
+                elif source_type == "mcp:gtasks":
+                    account_info["tasklist_id"] = getattr(
+                        store, "gtasks_tasklist_id", None
+                    )
+                elif source_type == "todoist":
+                    # Include project_id so tasks go to the right project
+                    account_info["project_id"] = getattr(
+                        store, "todoist_project_id", None
+                    )
+                    account_info["project_name"] = getattr(
+                        store, "todoist_project_name", None
+                    )
+                    logger.info(
+                        f"  Todoist store '{store_name}': project_id={account_info['project_id']}"
+                    )
+
+                available_accounts[category].append(account_info)
+                logger.debug(f"  -> Added to {category}: {store_name}")
+
+        except Exception as e:
+            logger.warning(f"Failed to build available_accounts from stores: {e}")
+
+        # Log final result
+        for cat, accounts in available_accounts.items():
+            if accounts:
+                names = [a.get("name", "?") for a in accounts]
+                logger.info(f"Available {cat} accounts: {names}")
+
+        return available_accounts
+
+    def _build_default_accounts(self) -> dict[str, dict]:
+        """
+        Build default_accounts dict from Smart Alias configuration.
+
+        These are the fallback accounts when the LLM doesn't specify which account to use.
+
+        Returns:
+            Dict mapping categories (email, calendar, tasks, notification, schedule)
+            to default account configuration.
+        """
+        default_accounts: dict[str, dict] = {}
+
+        # Email default
+        email_account_id = getattr(self.enricher, "action_email_account_id", None)
+        if email_account_id:
+            default_accounts["email"] = {
+                "id": email_account_id,
+                "provider": "google",  # Legacy: always Google
+            }
+
+        # Calendar default
+        calendar_account_id = getattr(self.enricher, "action_calendar_account_id", None)
+        calendar_id = getattr(self.enricher, "action_calendar_id", None)
+        if calendar_account_id:
+            default_accounts["calendar"] = {
+                "id": calendar_account_id,
+                "provider": "google",
+                "calendar_id": calendar_id,
+            }
+
+        # Tasks default
+        tasks_account_id = getattr(self.enricher, "action_tasks_account_id", None)
+        tasks_list_id = getattr(self.enricher, "action_tasks_list_id", None)
+        if tasks_account_id:
+            default_accounts["tasks"] = {
+                "id": tasks_account_id,
+                "provider": "google",
+                "list_id": tasks_list_id,
+            }
+
+        # Notification URLs
+        notification_urls = getattr(self.enricher, "action_notification_urls", None)
+        if notification_urls:
+            default_accounts["notification"] = {"urls": notification_urls}
+
+        return default_accounts
 
     def _get_linked_live_sources(self) -> list:
         """Get live data sources linked to this enricher.
@@ -635,6 +805,13 @@ class SmartEnricherEngine:
                         )
                         result_metadata.action_notification_urls = getattr(
                             self.enricher, "action_notification_urls", None
+                        )
+                        # Build available accounts from linked document stores
+                        result_metadata.available_accounts = (
+                            self._build_available_accounts()
+                        )
+                        result_metadata.default_accounts = (
+                            self._build_default_accounts()
                         )
                         # Scheduled prompts config (for schedule:prompt action)
                         result_metadata.scheduled_prompts_account_id = getattr(

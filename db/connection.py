@@ -1882,6 +1882,20 @@ def _run_migrations(engine) -> None:
                 )
                 conn.commit()
 
+    # Migration: Add display_name to document_stores table (v2.0.3)
+    # Friendly name for LLM to identify accounts (e.g., "Work Email", "Personal Calendar")
+    if "document_stores" in inspector.get_table_names():
+        ds_columns = {col["name"] for col in inspector.get_columns("document_stores")}
+        if "display_name" not in ds_columns:
+            logger.info("Adding display_name column to document_stores table (v2.0.3)")
+            with engine.connect() as conn:
+                conn.execute(
+                    text(
+                        "ALTER TABLE document_stores ADD COLUMN display_name VARCHAR(100)"
+                    )
+                )
+                conn.commit()
+
     # Migration: Drop legacy tables (v1.8 - Smart Aliases unification)
     # These tables have been replaced by the unified smart_aliases table
     legacy_tables = [

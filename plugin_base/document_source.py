@@ -12,7 +12,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Iterator, Optional
 
-from plugin_base.common import FieldDefinition, ValidationResult, validate_config
+from plugin_base.common import (
+    ContentCategory,
+    FieldDefinition,
+    ValidationResult,
+    get_content_category,
+    validate_config,
+)
 
 
 @dataclass
@@ -107,8 +113,24 @@ class PluginDocumentSource(ABC):
     icon: str = "📄"
     supports_incremental: bool = True  # Can detect changed documents
 
+    # Content category for admin UI filtering and action handler grouping
+    # Defaults to lookup from LEGACY_SOURCE_TYPE_CATEGORIES if not set
+    content_category: ContentCategory | None = None
+
     # Mark as abstract to prevent direct registration
     _abstract: bool = True
+
+    @classmethod
+    def get_content_category(cls) -> ContentCategory:
+        """
+        Get the content category for this source type.
+
+        Returns the content_category class attribute if set,
+        otherwise falls back to LEGACY_SOURCE_TYPE_CATEGORIES lookup.
+        """
+        if cls.content_category is not None:
+            return cls.content_category
+        return get_content_category(cls.source_type)
 
     @classmethod
     @abstractmethod

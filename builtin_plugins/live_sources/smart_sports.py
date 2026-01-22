@@ -1252,8 +1252,9 @@ class SmartSportsLiveSource(PluginLiveSource):
         team1_name = team1["name"]
         team2_name = team2["name"]
 
-        # Handle "score" query - only return live match, not fixtures
-        if query_type == "score":
+        # Handle "score" or "result" query - check live first, then recent results
+        if query_type in ["score", "result"]:
+            # First check for live match
             live_match = self._get_team_live_match(team1_id)
             if live_match:
                 # Check if it's against team2
@@ -1261,10 +1262,34 @@ class SmartSportsLiveSource(PluginLiveSource):
                 away_id = live_match.get("awayTeam", {}).get("id")
                 if home_id == team2_id or away_id == team2_id:
                     return self._format_live_match(team1, live_match)
-            # No live match between these teams
+
+            # Check for recent match between these teams
+            match = self._find_live_or_recent_match_between_teams(team1_id, team2_id)
+            if match:
+                status = match.get("status", {}).get("type", "")
+                if status == "finished":
+                    event_id = match.get("id")
+                    if event_id:
+                        event_data = self._get_comprehensive_event_data(event_id)
+                        formatted = self._format_comprehensive_event(event_data)
+                    else:
+                        home = match.get("homeTeam", {})
+                        away = match.get("awayTeam", {})
+                        home_score = match.get("homeScore", {}).get("current", 0)
+                        away_score = match.get("awayScore", {}).get("current", 0)
+                        formatted = f"**{home.get('name')} {home_score} - {away_score} {away.get('name')}** (FT)"
+
+                    return LiveDataResult(
+                        success=True,
+                        formatted=formatted,
+                        data={"team1": team1, "team2": team2, "match": match},
+                        cache_ttl=300,
+                    )
+
+            # No live or recent match found
             return LiveDataResult(
                 success=True,
-                formatted=f"**{team1_name}** and **{team2_name}** are not currently playing each other.",
+                formatted=f"No recent match found between **{team1_name}** and **{team2_name}**.",
                 data={"team1": team1, "team2": team2, "live": False},
             )
 

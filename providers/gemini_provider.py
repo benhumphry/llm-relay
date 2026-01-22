@@ -249,6 +249,9 @@ class GeminiProvider(OpenAICompatibleProvider):
 
         return usage
 
+    # Max retries for empty response (known Gemini API issue)
+    MAX_EMPTY_RESPONSE_RETRIES = 3
+
     def chat_completion(
         self,
         model: str,
@@ -260,29 +263,50 @@ class GeminiProvider(OpenAICompatibleProvider):
         Execute non-streaming chat completion with cost calculation.
 
         Extracts Gemini-specific usage data and calculates total cost.
+        Retries up to MAX_EMPTY_RESPONSE_RETRIES times on empty response.
         """
         client = self.get_client()
 
         kwargs = self._build_kwargs(model, options)
         kwargs["messages"] = self._build_messages(model, messages, system)
 
-        response = client.chat.completions.create(**kwargs)
+        # Retry loop for empty responses
+        for attempt in range(1, self.MAX_EMPTY_RESPONSE_RETRIES + 1):
+            response = client.chat.completions.create(**kwargs)
 
-        content = response.choices[0].message.content or ""
-        finish_reason = response.choices[0].finish_reason
+            content = response.choices[0].message.content or ""
+            finish_reason = response.choices[0].finish_reason
 
-        # Log finish reason for debugging
-        logger.info(
-            f"Gemini {model} response: finish_reason='{finish_reason}', "
-            f"content_length={len(content)} chars"
-        )
-
-        # Log if response was truncated
-        if finish_reason and finish_reason != "stop":
-            logger.warning(
-                f"Gemini {model} finished with reason '{finish_reason}' "
-                f"(output may be truncated)"
+            # Log finish reason for debugging
+            logger.info(
+                f"Gemini {model} response: finish_reason='{finish_reason}', "
+                f"content_length={len(content)} chars"
             )
+
+            # Check for empty response (known Gemini API issue)
+            if not content and finish_reason == "stop":
+                logger.warning(
+                    f"Gemini {model} attempt {attempt}/{self.MAX_EMPTY_RESPONSE_RETRIES}: "
+                    f"empty response with finish_reason=stop"
+                )
+                if attempt < self.MAX_EMPTY_RESPONSE_RETRIES:
+                    continue  # Retry
+                else:
+                    # All retries exhausted
+                    content = (
+                        f"[Gemini returned empty responses after {self.MAX_EMPTY_RESPONSE_RETRIES} attempts. "
+                        f"This is a known intermittent API issue. Please try again later.]"
+                    )
+            elif finish_reason and finish_reason != "stop":
+                # Log if response was truncated or blocked (don't retry these)
+                logger.warning(
+                    f"Gemini {model} finished with reason '{finish_reason}' "
+                    f"(output may be truncated or blocked)"
+                )
+                break
+            else:
+                # Got content, success
+                break
 
         result = {
             "content": content,
@@ -307,34 +331,37 @@ class GeminiProvider(OpenAICompatibleProvider):
 
         return result
 
-    def chat_completion_stream(
+    def _stream_single_attempt(
         self,
+        client,
         model: str,
-        messages: list[dict],
-        system: str | None,
-        options: dict,
-    ) -> Generator[str, None, None]:
+        kwargs: dict,
+    ) -> tuple[list[str], dict | None, int, int]:
         """
-        Execute streaming chat completion with usage extraction.
+        Execute a single streaming attempt.
 
-        Captures usage data from the final chunk and calculates cost.
-        The result is stored in _last_stream_result for the proxy to retrieve.
+        Returns:
+            tuple of (content_list, usage_data, chunk_count, content_chunks)
         """
-        client = self.get_client()
-
-        kwargs = self._build_kwargs(model, options)
-        kwargs["messages"] = self._build_messages(model, messages, system)
-        kwargs["stream"] = True
-        # Request usage info in streaming mode
-        kwargs["stream_options"] = {"include_usage": True}
-
-        # Reset stream result
-        self._last_stream_result = None
-        usage_data = None
-
         stream = client.chat.completions.create(**kwargs)
 
+        content_list = []
+        usage_data = None
+        chunk_count = 0
+        content_chunks = 0
+        first_chunk_logged = False
+
         for chunk in stream:
+            chunk_count += 1
+
+            # Log first chunk structure for debugging empty responses
+            if not first_chunk_logged:
+                first_chunk_logged = True
+                logger.debug(
+                    f"Gemini {model} first chunk: choices={len(chunk.choices) if chunk.choices else 0}, "
+                    f"has_usage={hasattr(chunk, 'usage') and chunk.usage is not None}"
+                )
+
             # Check for usage data (usually in final chunk)
             if hasattr(chunk, "usage") and chunk.usage:
                 usage_data = {
@@ -367,9 +394,98 @@ class GeminiProvider(OpenAICompatibleProvider):
                     if details and hasattr(details, "cached_tokens"):
                         usage_data["cached_content_token_count"] = details.cached_tokens
 
-            # Yield content
+            # Collect content
             if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+                content_chunks += 1
+                content_list.append(chunk.choices[0].delta.content)
+            elif chunk.choices:
+                choice = chunk.choices[0]
+                # Log finish reason for debugging
+                if choice.finish_reason:
+                    if choice.finish_reason != "stop":
+                        logger.warning(
+                            f"Gemini {model} stream ended with reason: {choice.finish_reason}"
+                        )
+                    else:
+                        logger.debug(f"Gemini {model} stream finished normally (stop)")
+
+                # Check for any error or block information in the choice
+                if hasattr(choice, "finish_details"):
+                    logger.warning(
+                        f"Gemini {model} finish_details: {choice.finish_details}"
+                    )
+                if hasattr(choice, "message") and choice.message:
+                    msg = choice.message
+                    if hasattr(msg, "refusal") and msg.refusal:
+                        logger.warning(f"Gemini {model} refusal: {msg.refusal}")
+
+        return content_list, usage_data, chunk_count, content_chunks
+
+    def chat_completion_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        system: str | None,
+        options: dict,
+    ) -> Generator[str, None, None]:
+        """
+        Execute streaming chat completion with usage extraction and retry on empty response.
+
+        Captures usage data from the final chunk and calculates cost.
+        The result is stored in _last_stream_result for the proxy to retrieve.
+
+        Retries up to MAX_EMPTY_RESPONSE_RETRIES times if Gemini returns an empty response
+        (a known intermittent API issue).
+        """
+        client = self.get_client()
+
+        kwargs = self._build_kwargs(model, options)
+        kwargs["messages"] = self._build_messages(model, messages, system)
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+
+        # Reset stream result
+        self._last_stream_result = None
+        usage_data = None
+        content_list = []
+
+        # Retry loop for empty responses
+        for attempt in range(1, self.MAX_EMPTY_RESPONSE_RETRIES + 1):
+            content_list, usage_data, chunk_count, content_chunks = (
+                self._stream_single_attempt(client, model, kwargs)
+            )
+
+            # Check if we got content
+            if content_chunks > 0:
+                # Success - yield all collected content
+                logger.debug(
+                    f"Gemini {model} stream: {chunk_count} total chunks, {content_chunks} with content"
+                )
+                for text in content_list:
+                    yield text
+                break
+
+            # Empty response - decide whether to retry
+            if chunk_count == 0:
+                logger.warning(
+                    f"Gemini {model} stream attempt {attempt}/{self.MAX_EMPTY_RESPONSE_RETRIES}: "
+                    f"received NO chunks at all!"
+                )
+            else:
+                logger.warning(
+                    f"Gemini {model} stream attempt {attempt}/{self.MAX_EMPTY_RESPONSE_RETRIES}: "
+                    f"received {chunk_count} chunks but no content! Usage: {usage_data}"
+                )
+
+            if attempt < self.MAX_EMPTY_RESPONSE_RETRIES:
+                # Notify user and retry
+                yield f"[Gemini returned an empty response: retrying ({attempt}/{self.MAX_EMPTY_RESPONSE_RETRIES})]\n\n"
+            else:
+                # All retries exhausted
+                yield (
+                    f"[Gemini returned empty responses after {self.MAX_EMPTY_RESPONSE_RETRIES} attempts. "
+                    f"This is a known intermittent API issue. Please try again later.]"
+                )
 
         # After streaming completes, calculate cost from usage data
         if usage_data:

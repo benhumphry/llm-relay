@@ -2113,8 +2113,12 @@ class GoogleTasksDocumentSource(DocumentSource):
         # Format status nicely
         status_text = "Completed" if status == "completed" else "Pending"
 
-        # Format as readable text
-        content_parts = [f"Task: {title}", f"Status: {status_text}"]
+        # Format as readable text - include task_id for action use
+        content_parts = [
+            f"Task: {title}",
+            f"Task ID: {task_id}",
+            f"Status: {status_text}",
+        ]
 
         if due:
             # Due date is in RFC 3339 format
@@ -2139,6 +2143,7 @@ class GoogleTasksDocumentSource(DocumentSource):
             mime_type="text/plain",
             text=content.strip(),
             metadata={
+                "task_id": task_id,
                 "due_date": due_date,
                 "status": status,
                 "completed": status == "completed",

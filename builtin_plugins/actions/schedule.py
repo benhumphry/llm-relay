@@ -1,14 +1,19 @@
 """
-Schedule action plugin.
+Unified Schedule action plugin.
 
-Handles scheduling prompts for future execution:
-- prompt: Create a scheduled prompt (calendar event with prompt as description)
-- cancel: Cancel a scheduled prompt
+Handles scheduling prompts for future execution across calendar providers:
+- Google Calendar (via OAuth)
+- Outlook Calendar (via OAuth)
 
 Scheduled prompts are stored as calendar events where:
 - Event title: Brief description for logging (prefixed with [Prompt])
 - Event description: The actual prompt to execute
 - Event time: When to run the prompt
+
+NO CONFIG FIELDS - all configuration comes from Smart Alias context at runtime:
+- default_accounts["schedule"]["id"] = OAuth account ID
+- default_accounts["schedule"]["provider"] = "google" or "microsoft"
+- default_accounts["schedule"]["calendar_id"] = specific calendar ID
 """
 
 import logging
@@ -24,6 +29,8 @@ from plugin_base.action import (
     ActionResult,
     ActionRisk,
     PluginActionHandler,
+    ResourceRequirement,
+    ResourceType,
 )
 from plugin_base.common import (
     FieldDefinition,
@@ -41,46 +48,42 @@ class ScheduleActionHandler(OAuthMixin, PluginActionHandler):
     Schedule prompts for future or recurring execution.
 
     Creates calendar events that trigger prompt execution at the scheduled time.
-    Requires a Smart Alias with Scheduled Prompts enabled.
+    Supports both Google Calendar and Outlook.
+    Provider is determined at runtime from Smart Alias context - no plugin config needed.
     """
 
     action_type = "schedule"
-    display_name = "Scheduled Prompts (GCal)"
-    description = (
-        "Schedule prompts for future or recurring execution via Google Calendar"
-    )
+    display_name = "Scheduled Prompts"
+    description = "Schedule prompts for future or recurring execution via calendar"
     icon = "⏰"
     category = "automation"
 
-    # Mark as non-abstract so it can be registered
     _abstract = False
 
     @classmethod
     def get_config_fields(cls) -> list[FieldDefinition]:
+        """No config fields - everything comes from Smart Alias context."""
+        return []
+
+    @classmethod
+    def get_resource_requirements(cls) -> list[ResourceRequirement]:
+        """Define resources needed from Smart Alias."""
         return [
-            FieldDefinition(
-                name="oauth_account_id",
-                label="Google Account",
-                field_type=FieldType.OAUTH_ACCOUNT,
+            ResourceRequirement(
+                key="schedule",
+                label="Scheduled Prompts Account",
+                resource_type=ResourceType.OAUTH_ACCOUNT,
+                providers=["google", "microsoft"],
+                help_text="Calendar account for scheduled prompts (Google or Outlook)",
                 required=True,
-                help_text="Select a connected Google account with Calendar access",
-                picker_options={"provider": "google"},
             ),
-            FieldDefinition(
-                name="calendar_id",
-                label="Calendar ID",
-                field_type=FieldType.TEXT,
-                required=False,
-                default="primary",
-                help_text="Calendar ID for scheduled prompts (default: primary)",
-            ),
-            FieldDefinition(
-                name="default_timezone",
-                label="Default Timezone",
-                field_type=FieldType.TEXT,
-                required=False,
-                default="Europe/London",
-                help_text="Default timezone for scheduled times",
+            ResourceRequirement(
+                key="schedule",
+                sub_key="calendar_id",
+                label="Prompts Calendar",
+                resource_type=ResourceType.CALENDAR_PICKER,
+                depends_on="schedule",
+                help_text="Calendar to store scheduled prompt events",
             ),
         ]
 
@@ -168,7 +171,7 @@ class ScheduleActionHandler(OAuthMixin, PluginActionHandler):
 
     @classmethod
     def get_llm_instructions(cls) -> str:
-        """Custom LLM instructions for schedule actions."""
+        """LLM instructions for schedule actions."""
         return """## Scheduled Prompts
 
 Schedule prompts to run at specific times. The scheduled prompt runs through this assistant with full capabilities.
@@ -213,38 +216,75 @@ Cancel a scheduled prompt.
 """
 
     def __init__(self, config: dict):
-        """Initialize the schedule handler."""
-        self.oauth_account_id = config.get("oauth_account_id")
-        self.oauth_provider = "google"
-        self.calendar_id = config.get("calendar_id", "primary")
-        self.default_timezone = config.get("default_timezone", "Europe/London")
+        """Initialize the schedule handler - config is ignored, uses context."""
+        # These will be set from context at execution time
+        self.oauth_account_id: Optional[int] = None
+        self.oauth_provider: Optional[str] = None
+        self.calendar_id = "primary"
+        self.default_timezone = "Europe/London"
 
-        # Initialize OAuth client if account configured
-        if self.oauth_account_id:
-            self._init_oauth_client()
+    def _configure_from_context(self, context: ActionContext) -> bool:
+        """Configure provider and credentials from Smart Alias context."""
+        default_accounts = getattr(context, "default_accounts", {})
+        schedule_config = default_accounts.get("schedule", {})
+
+        if not schedule_config:
+            logger.warning("No schedule configuration in context.default_accounts")
+            return False
+
+        account_id = schedule_config.get("account_id") or schedule_config.get("id")
+        if not account_id:
+            logger.error("Schedule OAuth account ID not found in context")
+            return False
+
+        self.oauth_account_id = account_id
+        self.oauth_provider = schedule_config.get("provider", "google")
+        self.calendar_id = schedule_config.get("calendar_id", "primary")
+
+        logger.info(
+            f"Schedule: Using provider '{self.oauth_provider}' account {account_id}"
+        )
+
+        self._init_oauth_client()
+        return True
 
     def execute(
         self, action: str, params: dict, context: ActionContext
     ) -> ActionResult:
         """Execute the schedule action."""
-        if not self.oauth_account_id:
+        # Always configure from context
+        if not self._configure_from_context(context):
             return ActionResult(
                 success=False,
                 message="",
-                error="OAuth account not configured",
+                error="No schedule account configured - set Scheduled Prompts Account in Smart Alias",
             )
 
         try:
             if action == "prompt":
-                return self._schedule_prompt(params)
+                if self.oauth_provider == "microsoft":
+                    return self._schedule_prompt_outlook(params, context)
+                else:
+                    return self._schedule_prompt_google(params, context)
             elif action == "cancel":
-                return self._cancel_prompt(params)
+                if self.oauth_provider == "microsoft":
+                    return self._cancel_prompt_outlook(params)
+                else:
+                    return self._cancel_prompt_google(params)
             else:
                 return ActionResult(
                     success=False,
                     message="",
                     error=f"Unknown action: {action}",
                 )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Schedule API error: {e.response.status_code}")
+            error_text = e.response.text[:200] if e.response.text else str(e)
+            return ActionResult(
+                success=False,
+                message="",
+                error=f"Calendar API error ({e.response.status_code}): {error_text}",
+            )
         except Exception as e:
             logger.exception(f"Schedule action failed: {action}")
             return ActionResult(
@@ -253,8 +293,14 @@ Cancel a scheduled prompt.
                 error=f"Action failed: {str(e)}",
             )
 
-    def _schedule_prompt(self, params: dict) -> ActionResult:
-        """Schedule a prompt for future execution."""
+    # -------------------------------------------------------------------------
+    # Google Calendar Implementation
+    # -------------------------------------------------------------------------
+
+    def _schedule_prompt_google(
+        self, params: dict, context: "ActionContext"
+    ) -> ActionResult:
+        """Schedule a prompt via Google Calendar."""
         prompt = params.get("prompt")
         title = params.get("title") or self._generate_title(prompt)
         time_str = params.get("time")
@@ -271,9 +317,12 @@ Cancel a scheduled prompt.
             )
 
         # Build event body
+        # Store the alias name in location so scheduler knows which alias to use
+        alias_name = context.alias_name or "unknown"
         event_body = {
             "summary": f"[Prompt] {title}",
             "description": prompt,
+            "location": f"alias:{alias_name}",
             "start": {
                 "dateTime": start_time.isoformat(),
                 "timeZone": timezone,
@@ -286,7 +335,7 @@ Cancel a scheduled prompt.
 
         # Add recurrence if specified
         if recurrence:
-            rrule = self._parse_recurrence(recurrence)
+            rrule = self._parse_recurrence_google(recurrence)
             if rrule:
                 event_body["recurrence"] = [rrule]
 
@@ -295,14 +344,7 @@ Cancel a scheduled prompt.
             f"https://www.googleapis.com/calendar/v3/calendars/{self.calendar_id}/events",
             json=event_body,
         )
-
-        if response.status_code not in (200, 201):
-            logger.error(f"Failed to create scheduled prompt: {response.text}")
-            return ActionResult(
-                success=False,
-                message="",
-                error=f"Failed to create calendar event: {response.status_code}",
-            )
+        response.raise_for_status()
 
         event = response.json()
         event_id = event.get("id")
@@ -313,7 +355,7 @@ Cancel a scheduled prompt.
         else:
             schedule_desc = start_time.strftime("%Y-%m-%d at %H:%M")
 
-        logger.info(f"Created scheduled prompt: {event_id}")
+        logger.info(f"Created scheduled prompt (Google): {event_id}")
         return ActionResult(
             success=True,
             message=f"Scheduled prompt '{title}' for {schedule_desc}",
@@ -323,11 +365,12 @@ Cancel a scheduled prompt.
                 "prompt": prompt,
                 "scheduled_time": start_time.isoformat(),
                 "recurrence": recurrence,
+                "provider": "google",
             },
         )
 
-    def _cancel_prompt(self, params: dict) -> ActionResult:
-        """Cancel a scheduled prompt."""
+    def _cancel_prompt_google(self, params: dict) -> ActionResult:
+        """Cancel a scheduled prompt via Google Calendar."""
         event_id = params.get("event_id")
 
         response = self.oauth_delete(
@@ -341,12 +384,119 @@ Cancel a scheduled prompt.
                 error=f"Failed to cancel scheduled prompt: {response.status_code}",
             )
 
-        logger.info(f"Cancelled scheduled prompt: {event_id}")
+        logger.info(f"Cancelled scheduled prompt (Google): {event_id}")
         return ActionResult(
             success=True,
             message=f"Cancelled scheduled prompt {event_id}",
-            data={"event_id": event_id},
+            data={"event_id": event_id, "provider": "google"},
         )
+
+    # -------------------------------------------------------------------------
+    # Outlook Calendar Implementation
+    # -------------------------------------------------------------------------
+
+    def _schedule_prompt_outlook(
+        self, params: dict, context: "ActionContext"
+    ) -> ActionResult:
+        """Schedule a prompt via Outlook Calendar."""
+        prompt = params.get("prompt")
+        title = params.get("title") or self._generate_title(prompt)
+        time_str = params.get("time")
+        recurrence = params.get("recurrence")
+        timezone = params.get("timezone", self.default_timezone)
+
+        # Parse time
+        start_time, end_time = self._parse_time(time_str, timezone)
+        if not start_time:
+            return ActionResult(
+                success=False,
+                message="",
+                error=f"Could not parse time: {time_str}",
+            )
+
+        # Build event body for Outlook
+        # Store the alias name in location so scheduler knows which alias to use
+        alias_name = context.alias_name or "unknown"
+        event_body = {
+            "subject": f"[Prompt] {title}",
+            "body": {
+                "contentType": "text",
+                "content": prompt,
+            },
+            "location": {
+                "displayName": f"alias:{alias_name}",
+            },
+            "start": {
+                "dateTime": start_time.isoformat(),
+                "timeZone": timezone,
+            },
+            "end": {
+                "dateTime": end_time.isoformat(),
+                "timeZone": timezone,
+            },
+        }
+
+        # Add recurrence if specified
+        if recurrence:
+            pattern = self._parse_recurrence_outlook(recurrence)
+            if pattern:
+                event_body["recurrence"] = pattern
+
+        # Create event
+        response = self.oauth_post(
+            "https://graph.microsoft.com/v1.0/me/events",
+            json=event_body,
+        )
+        response.raise_for_status()
+
+        event = response.json()
+        event_id = event.get("id")
+
+        # Format response message
+        if recurrence:
+            schedule_desc = f"recurring ({recurrence})"
+        else:
+            schedule_desc = start_time.strftime("%Y-%m-%d at %H:%M")
+
+        logger.info(f"Created scheduled prompt (Outlook): {event_id}")
+        return ActionResult(
+            success=True,
+            message=f"Scheduled prompt '{title}' for {schedule_desc}",
+            data={
+                "event_id": event_id,
+                "title": title,
+                "prompt": prompt,
+                "scheduled_time": start_time.isoformat(),
+                "recurrence": recurrence,
+                "provider": "microsoft",
+            },
+        )
+
+    def _cancel_prompt_outlook(self, params: dict) -> ActionResult:
+        """Cancel a scheduled prompt via Outlook Calendar."""
+        event_id = params.get("event_id")
+
+        response = self.oauth_delete(
+            f"https://graph.microsoft.com/v1.0/me/events/{event_id}"
+        )
+
+        if response.status_code not in (200, 204):
+            return ActionResult(
+                success=False,
+                message="",
+                error=f"Failed to cancel scheduled prompt: {response.status_code}",
+            )
+
+        logger.info(f"Cancelled scheduled prompt (Outlook): {event_id}")
+        return ActionResult(
+            success=True,
+            message=f"Cancelled scheduled prompt {event_id}",
+            data={"event_id": event_id, "provider": "microsoft"},
+        )
+
+    # -------------------------------------------------------------------------
+    # Helper methods
+    # -------------------------------------------------------------------------
 
     def _generate_title(self, prompt: str) -> str:
         """Generate a short title from the prompt."""
@@ -450,8 +600,8 @@ Cancel a scheduled prompt.
 
         return None, None
 
-    def _parse_recurrence(self, recurrence: str) -> Optional[str]:
-        """Convert recurrence string to RRULE format."""
+    def _parse_recurrence_google(self, recurrence: str) -> Optional[str]:
+        """Convert recurrence string to Google RRULE format."""
         if not recurrence:
             return None
 
@@ -473,6 +623,53 @@ Cancel a scheduled prompt.
             "every month": "RRULE:FREQ=MONTHLY",
             "yearly": "RRULE:FREQ=YEARLY",
             "every year": "RRULE:FREQ=YEARLY",
+        }
+
+        return patterns.get(recurrence_lower)
+
+    def _parse_recurrence_outlook(self, recurrence: str) -> Optional[dict]:
+        """Convert recurrence string to Outlook pattern."""
+        if not recurrence:
+            return None
+
+        recurrence_lower = recurrence.lower().strip()
+
+        patterns = {
+            "daily": {
+                "pattern": {"type": "daily", "interval": 1},
+                "range": {"type": "noEnd"},
+            },
+            "weekly": {
+                "pattern": {"type": "weekly", "interval": 1, "daysOfWeek": ["monday"]},
+                "range": {"type": "noEnd"},
+            },
+            "weekdays": {
+                "pattern": {
+                    "type": "weekly",
+                    "interval": 1,
+                    "daysOfWeek": [
+                        "monday",
+                        "tuesday",
+                        "wednesday",
+                        "thursday",
+                        "friday",
+                    ],
+                },
+                "range": {"type": "noEnd"},
+            },
+            "monthly": {
+                "pattern": {"type": "absoluteMonthly", "interval": 1, "dayOfMonth": 1},
+                "range": {"type": "noEnd"},
+            },
+            "yearly": {
+                "pattern": {
+                    "type": "absoluteYearly",
+                    "interval": 1,
+                    "dayOfMonth": 1,
+                    "month": 1,
+                },
+                "range": {"type": "noEnd"},
+            },
         }
 
         return patterns.get(recurrence_lower)
@@ -515,24 +712,15 @@ Cancel a scheduled prompt.
         return f"Schedule action: {action}"
 
     def is_available(self) -> bool:
-        """Check if plugin is configured."""
-        return bool(self.oauth_account_id)
+        """Check if plugin is available (always true - config comes from context)."""
+        return True
 
     def test_connection(self) -> tuple[bool, str]:
-        """Test connection by listing calendars."""
-        if not self.oauth_account_id:
-            return False, "OAuth account not configured"
-
-        try:
-            response = self.oauth_get(
-                "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-                params={"maxResults": 1},
-            )
-            response.raise_for_status()
-
-            return True, f"Connected. Using calendar: {self.calendar_id}"
-        except Exception as e:
-            return False, f"Connection failed: {str(e)}"
+        """Test connection - cannot test without context."""
+        return (
+            True,
+            "Schedule handler ready (provider configured per Smart Alias)",
+        )
 
     def close(self):
         """Clean up resources."""

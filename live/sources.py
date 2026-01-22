@@ -3913,6 +3913,7 @@ class GoogleTasksLiveProvider(GoogleOAuthLiveProvider):
         lines.append(f"Found {len(tasks)} task(s):\n")
 
         for task in tasks:
+            task_id = task.get("id", "")
             title = task.get("title", "(No title)")
             status = task.get("status", "needsAction")
             due = task.get("due", "")
@@ -3922,6 +3923,8 @@ class GoogleTasksLiveProvider(GoogleOAuthLiveProvider):
             status_icon = "[ ]" if status == "needsAction" else "[x]"
 
             lines.append(f"{status_icon} **{title}**")
+            if task_id:
+                lines.append(f"    Task ID: {task_id}")
 
             if due:
                 # Parse and format due date

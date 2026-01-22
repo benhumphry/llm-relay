@@ -32,6 +32,74 @@ class FieldType(Enum):
     TASKLIST_PICKER = "tasklist_picker"
 
 
+class ContentCategory(Enum):
+    """
+    Content categories for document sources.
+
+    Used for:
+    1. Admin UI filtering of document stores
+    2. Action handler account grouping (email, calendar, tasks)
+
+    Document source plugins should set their content_category class attribute
+    to indicate what type of content they provide.
+    """
+
+    FILES = "files"  # General documents, files, notes (Drive, OneDrive, Notion, etc.)
+    EMAILS = "emails"  # Email messages (Gmail, Outlook)
+    CALENDARS = "calendars"  # Calendar events (Google Calendar, Outlook Calendar)
+    TASKS = "tasks"  # Tasks/todos (Google Tasks, Todoist)
+    WEBSITES = "websites"  # Crawled web content
+    CONTACTS = "contacts"  # Contact information
+    MESSAGES = "messages"  # Chat messages (Slack, Teams)
+    OTHER = "other"  # Anything else
+
+
+# Legacy source_type to ContentCategory mapping
+# Used for legacy sources that haven't been migrated to plugins yet
+# Plugins should define content_category directly as a class attribute
+LEGACY_SOURCE_TYPE_CATEGORIES: dict[str, ContentCategory] = {
+    # Files (documents, notes, etc.)
+    "local": ContentCategory.FILES,
+    "mcp:gdrive": ContentCategory.FILES,
+    "mcp:onedrive": ContentCategory.FILES,
+    "notion": ContentCategory.FILES,
+    "paperless": ContentCategory.FILES,
+    "nextcloud": ContentCategory.FILES,
+    "mcp:onenote": ContentCategory.FILES,
+    "mcp:github": ContentCategory.FILES,
+    # Emails
+    "mcp:gmail": ContentCategory.EMAILS,
+    "mcp:outlook": ContentCategory.EMAILS,
+    # Calendars
+    "mcp:gcalendar": ContentCategory.CALENDARS,
+    "mcp:ocalendar": ContentCategory.CALENDARS,
+    # Tasks
+    "mcp:gtasks": ContentCategory.TASKS,
+    "todoist": ContentCategory.TASKS,
+    # Websites
+    "website": ContentCategory.WEBSITES,
+    "websearch": ContentCategory.WEBSITES,
+    # Contacts
+    "mcp:gcontacts": ContentCategory.CONTACTS,
+    # Messages
+    "slack": ContentCategory.MESSAGES,
+    "mcp:teams": ContentCategory.MESSAGES,
+}
+
+
+def get_content_category(source_type: str) -> ContentCategory:
+    """
+    Get the content category for a source type.
+
+    Args:
+        source_type: The source type identifier (e.g., "mcp:gmail", "local")
+
+    Returns:
+        ContentCategory enum value, defaults to OTHER if not mapped
+    """
+    return LEGACY_SOURCE_TYPE_CATEGORIES.get(source_type, ContentCategory.OTHER)
+
+
 @dataclass
 class SelectOption:
     """Option for select/multiselect fields."""

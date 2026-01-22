@@ -24,12 +24,14 @@ from plugin_base.action import (
     ActionResult,
     ActionRisk,
     PluginActionHandler,
+    ResourceRequirement,
+    ResourceType,
 )
 from plugin_base.common import (
     FieldDefinition,
     FieldType,
-    ValidationResult,
     ValidationError,
+    ValidationResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +66,7 @@ class NotificationActionHandler(PluginActionHandler):
                 required=True,
                 placeholder="http://apprise-api:8000",
                 help_text="URL of your Apprise API instance",
+                env_var="APPRISE_API_URL",
             ),
             FieldDefinition(
                 name="default_urls",
@@ -71,7 +74,21 @@ class NotificationActionHandler(PluginActionHandler):
                 field_type=FieldType.TEXTAREA,
                 required=False,
                 placeholder="gotify://gotify.example.com/token\nntfy://ntfy.sh/mytopic",
-                help_text="Default Apprise URLs (one per line). Used when no URLs specified in action.",
+                help_text="Global default Apprise URLs (Smart Aliases can override)",
+            ),
+        ]
+
+    @classmethod
+    def get_resource_requirements(cls) -> list[ResourceRequirement]:
+        """Define resources needed from Smart Alias."""
+        return [
+            ResourceRequirement(
+                key="notification",
+                sub_key="urls",
+                label="Notification URLs (Apprise)",
+                resource_type=ResourceType.TEXTAREA,
+                help_text="Apprise URLs for this alias (one per line). See Apprise docs for URL formats.",
+                required=False,
             ),
         ]
 
@@ -140,21 +157,41 @@ class NotificationActionHandler(PluginActionHandler):
         return """## Notifications
 
 ### notification:send
-Send a push notification to configured services (Slack, Discord, ntfy, etc.)
+Send a push notification to the user's device (phone/desktop via Gotify, ntfy, Slack, etc.)
+
+**TRIGGER WORDS - USE THIS ACTION WHEN YOU SEE:**
+- "send a notification"
+- "send me a notification"
+- "notify me"
+- "push notification"
+- "send an alert"
+- "alert me"
+
+**CRITICAL**: When the user uses ANY of the trigger words above, you MUST include a <smart_action type="notification" action="send"> block. Do NOT just write the information as text - the user wants it delivered to their phone/device as a push notification.
 
 **Parameters:**
-- body (required): Notification message content
+- body (required): The notification message
 - title (optional): Notification title
-- type (optional): info, success, warning, failure (defaults to "info")
+- type (optional): info, success, warning, failure
 
-**Example:**
-```xml
+**Example - "Send me a notification with the weather":**
+First write a brief response, then include the action:
+```
+I'll send that to your device now.
 <smart_action type="notification" action="send">
-{"title": "Task Complete", "body": "The report has been generated successfully.", "type": "success"}
+{"title": "Weather", "body": "London: 12°C, partly cloudy"}
 </smart_action>
 ```
 
-Use notifications to alert the user about completed tasks, important events, or when you need their attention.
+**Example - "Send a notification saying nearly time":**
+```
+Sending that notification now.
+<smart_action type="notification" action="send">
+{"body": "nearly time!"}
+</smart_action>
+```
+
+REMEMBER: "Send a notification" = use <smart_action>, NOT just text in chat.
 """
 
     def __init__(self, config: dict):
@@ -215,7 +252,7 @@ Use notifications to alert the user about completed tasks, important events, or 
         if notify_type not in ("info", "success", "warning", "failure"):
             notify_type = "info"
 
-        # Get URLs - from params or default config
+        # Get URLs - priority: params > context (Smart Alias) > plugin config
         urls = params.get("urls")
         if urls:
             # Parse if string (newline or comma-separated)
@@ -224,7 +261,21 @@ Use notifications to alert the user about completed tasks, important events, or 
                     u.strip() for u in urls.replace(",", "\n").split("\n") if u.strip()
                 ]
         else:
-            urls = self.default_urls
+            # Check context.default_accounts for Smart Alias configured URLs
+            default_accounts = getattr(context, "default_accounts", {}) or {}
+            notification_config = default_accounts.get("notification", {})
+            if notification_config and notification_config.get("urls"):
+                urls = notification_config["urls"]
+                if isinstance(urls, str):
+                    urls = [
+                        u.strip()
+                        for u in urls.replace(",", "\n").split("\n")
+                        if u.strip()
+                    ]
+                logger.debug(f"Using notification URLs from Smart Alias: {urls}")
+            else:
+                # Fall back to plugin config default
+                urls = self.default_urls
 
         if not urls:
             return ActionResult(
@@ -232,6 +283,10 @@ Use notifications to alert the user about completed tasks, important events, or 
                 message="",
                 error="No notification URLs configured",
             )
+
+        # Log which URLs are being used (mask sensitive tokens)
+        masked_urls = [u.split("/")[0] + "/..." if "/" in u else u for u in urls]
+        logger.info(f"Sending notification to {len(urls)} URL(s): {masked_urls}")
 
         # Send via Apprise API stateless endpoint
         notify_url = f"{self.api_url.rstrip('/')}/notify/"
@@ -346,7 +401,10 @@ Use notifications to alert the user about completed tasks, important events, or 
 
             if response.status_code == 200:
                 urls_count = len(self.default_urls)
-                return True, f"Connected to Apprise API. {urls_count} default URL(s) configured."
+                return (
+                    True,
+                    f"Connected to Apprise API. {urls_count} default URL(s) configured.",
+                )
             else:
                 return False, f"Apprise API returned status {response.status_code}"
 

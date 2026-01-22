@@ -12,6 +12,29 @@ content %}
         </div>
     </div>
 
+    <!-- Info Alert -->
+    <div class="alert alert-info mb-6">
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+        >
+            <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+        </svg>
+        <div>
+            <span class="font-semibold">Accounts via Document Stores:</span>
+            Email, calendar, and task accounts are derived from Document Stores
+            linked to each Smart Alias. Create stores for Gmail, Calendar, or
+            Tasks, then link them to your alias.
+        </div>
+    </div>
+
     <!-- Loading State -->
     <div x-show="loading" class="flex justify-center py-12">
         <span class="loading loading-spinner loading-lg"></span>
@@ -62,9 +85,8 @@ content %}
                             <th class="w-8"></th>
                             <th>Handler</th>
                             <th>Actions</th>
-                            <th>Connected Accounts</th>
-                            <th>Status</th>
-                            <th class="text-right">Actions</th>
+                            <th>Sources</th>
+                            <th class="text-right">Settings</th>
                         </tr>
                     </thead>
                     <template
@@ -98,12 +120,12 @@ content %}
                                     <div class="flex items-center gap-3">
                                         <span
                                             class="text-xl"
-                                            x-text="getIcon(handler.action_type)"
+                                            x-text="handler.icon || getIcon(handler.action_type)"
                                         ></span>
                                         <div>
                                             <div
-                                                class="font-medium capitalize"
-                                                x-text="handler.action_type"
+                                                class="font-medium"
+                                                x-text="handler.display_name || handler.action_type"
                                             ></div>
                                             <div
                                                 class="text-xs text-base-content/50"
@@ -134,117 +156,59 @@ content %}
                                     </div>
                                 </td>
                                 <td>
-                                    <template x-if="handler.requires_oauth">
+                                    <div class="flex flex-wrap gap-1">
+                                        <!-- Show supported document source types -->
                                         <template
-                                            x-if="handler.available_accounts.length > 0"
+                                            x-for="source in (handler.supported_sources || [])"
+                                            :key="source"
                                         >
-                                            <div class="flex flex-wrap gap-1">
-                                                <template
-                                                    x-for="account in handler.available_accounts.slice(0, 2)"
-                                                    :key="account.id"
-                                                >
-                                                    <span
-                                                        class="badge badge-outline badge-sm"
-                                                        x-text="account.account_email.split('@')[0]"
-                                                    ></span>
-                                                </template>
-                                                <template
-                                                    x-if="handler.available_accounts.length > 2"
-                                                >
-                                                    <span
-                                                        class="badge badge-outline badge-sm"
-                                                        x-text="'+' + (handler.available_accounts.length - 2)"
-                                                    ></span>
-                                                </template>
-                                            </div>
-                                        </template>
-                                        <template
-                                            x-if="handler.available_accounts.length === 0"
-                                        >
-                                            <span class="text-xs text-warning"
-                                                >None connected</span
-                                            >
-                                        </template>
-                                    </template>
-                                    <template x-if="!handler.requires_oauth">
-                                        <span
-                                            class="text-xs text-base-content/50"
-                                            >Not required</span
-                                        >
-                                    </template>
-                                </td>
-                                <td>
-                                    <template x-if="handler.is_configured">
-                                        <div class="flex items-center gap-1">
-                                            <div
-                                                class="w-2 h-2 rounded-full bg-success"
-                                            ></div>
                                             <span
-                                                class="text-xs text-base-content/60"
-                                                >Ready</span
+                                                class="badge badge-outline badge-sm"
+                                                x-text="source"
+                                            ></span>
+                                        </template>
+                                        <!-- None required (notification, schedule) -->
+                                        <template
+                                            x-if="!handler.supported_sources || handler.supported_sources.length === 0"
+                                        >
+                                            <span
+                                                class="text-xs text-base-content/50"
+                                                >None required</span
                                             >
-                                        </div>
-                                    </template>
-                                    <template x-if="!handler.is_configured">
-                                        <div class="flex items-center gap-1">
-                                            <div
-                                                class="w-2 h-2 rounded-full bg-warning"
-                                            ></div>
-                                            <span class="text-xs text-warning"
-                                                >Setup needed</span
-                                            >
-                                        </div>
-                                    </template>
+                                        </template>
+                                    </div>
                                 </td>
                                 <td class="text-right" @click.stop>
+                                    <!-- Configure button for handlers with global config fields -->
                                     <template
-                                        x-if="handler.requires_oauth && handler.oauth_providers.length > 0"
+                                        x-if="handler.config_fields && handler.config_fields.length > 0"
                                     >
-                                        <div class="dropdown dropdown-end">
-                                            <label
-                                                tabindex="0"
-                                                class="btn btn-ghost btn-xs"
+                                        <button
+                                            @click="openConfigModal(handler)"
+                                            class="btn btn-ghost btn-sm"
+                                            title="Configure global settings"
+                                        >
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                class="h-4 w-4"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
                                             >
-                                                Connect
-                                                <svg
-                                                    xmlns="http://www.w3.org/2000/svg"
-                                                    class="h-3 w-3"
-                                                    fill="none"
-                                                    viewBox="0 0 24 24"
-                                                    stroke="currentColor"
-                                                >
-                                                    <path
-                                                        stroke-linecap="round"
-                                                        stroke-linejoin="round"
-                                                        stroke-width="2"
-                                                        d="M19 9l-7 7-7-7"
-                                                    />
-                                                </svg>
-                                            </label>
-                                            <ul
-                                                tabindex="0"
-                                                class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52"
-                                            >
-                                                <template
-                                                    x-for="provider in handler.oauth_providers"
-                                                    :key="provider"
-                                                >
-                                                    <li>
-                                                        <a
-                                                            :href="'/oauth/' + provider + '?redirect_uri=/smart-actions'"
-                                                            class="capitalize"
-                                                        >
-                                                            <span
-                                                                x-text="getProviderIcon(provider)"
-                                                            ></span>
-                                                            <span
-                                                                x-text="provider"
-                                                            ></span>
-                                                        </a>
-                                                    </li>
-                                                </template>
-                                            </ul>
-                                        </div>
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                                                />
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    stroke-width="2"
+                                                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                                                />
+                                            </svg>
+                                        </button>
                                     </template>
                                 </td>
                             </tr>
@@ -253,7 +217,7 @@ content %}
                                 x-show="expandedRows.includes(handler.action_type)"
                                 x-collapse
                             >
-                                <td colspan="6" class="bg-base-200/50 p-0">
+                                <td colspan="5" class="bg-base-200/50 p-0">
                                     <div class="p-4">
                                         <div class="grid md:grid-cols-2 gap-6">
                                             <!-- Supported Actions -->
@@ -295,31 +259,130 @@ content %}
                                                     </table>
                                                 </div>
                                             </div>
-                                            <!-- Connected Accounts -->
-                                            <template
-                                                x-if="handler.requires_oauth && handler.available_accounts.length > 0"
-                                            >
-                                                <div>
-                                                    <h4
-                                                        class="text-sm font-semibold mb-2"
-                                                    >
-                                                        Connected Accounts
-                                                    </h4>
-                                                    <div
-                                                        class="flex flex-wrap gap-2"
+                                            <!-- Usage Instructions -->
+                                            <div>
+                                                <h4
+                                                    class="text-sm font-semibold mb-2"
+                                                >
+                                                    Usage
+                                                </h4>
+                                                <div
+                                                    class="text-sm text-base-content/70"
+                                                >
+                                                    <p class="mb-2">
+                                                        To use
+                                                        <strong
+                                                            x-text="handler.action_type"
+                                                        ></strong>
+                                                        actions:
+                                                    </p>
+                                                    <ol
+                                                        class="list-decimal list-inside space-y-1"
                                                     >
                                                         <template
-                                                            x-for="account in handler.available_accounts"
-                                                            :key="account.id"
+                                                            x-if="handler.oauth_providers && handler.oauth_providers.length > 0"
                                                         >
-                                                            <span
-                                                                class="badge badge-outline"
-                                                                x-text="account.account_email"
-                                                            ></span>
+                                                            <li>
+                                                                Connect a
+                                                                <span
+                                                                    x-text="handler.oauth_providers.join(' or ')"
+                                                                ></span>
+                                                                account in
+                                                                <a
+                                                                    href="/oauth-accounts"
+                                                                    class="link"
+                                                                    >OAuth
+                                                                    Accounts</a
+                                                                >
+                                                            </li>
                                                         </template>
-                                                    </div>
+                                                        <li>
+                                                            Configure the
+                                                            account in your
+                                                            Smart Alias under
+                                                            "Default Resources"
+                                                        </li>
+                                                        <li>
+                                                            Enable Smart Actions
+                                                            in the Smart Alias
+                                                            settings
+                                                        </li>
+                                                    </ol>
                                                 </div>
-                                            </template>
+                                                <!-- Global configuration if available -->
+                                                <template
+                                                    x-if="handler.config_fields && handler.config_fields.length > 0"
+                                                >
+                                                    <div class="mt-4">
+                                                        <h4
+                                                            class="text-sm font-semibold mb-2"
+                                                        >
+                                                            Global Configuration
+                                                        </h4>
+                                                        <div
+                                                            class="text-xs space-y-1"
+                                                        >
+                                                            <template
+                                                                x-for="field in handler.config_fields"
+                                                                :key="field.name"
+                                                            >
+                                                                <div
+                                                                    class="flex items-center gap-2"
+                                                                >
+                                                                    <span
+                                                                        class="text-base-content/60"
+                                                                        x-text="field.label + ':'"
+                                                                    ></span>
+                                                                    <template
+                                                                        x-if="getConfigValue(handler, field.name)"
+                                                                    >
+                                                                        <span
+                                                                            class="badge badge-success badge-xs"
+                                                                            >Set</span
+                                                                        >
+                                                                    </template>
+                                                                    <template
+                                                                        x-if="!getConfigValue(handler, field.name) && field.required"
+                                                                    >
+                                                                        <span
+                                                                            class="badge badge-warning badge-xs"
+                                                                            >Required</span
+                                                                        >
+                                                                    </template>
+                                                                    <template
+                                                                        x-if="!getConfigValue(handler, field.name) && !field.required"
+                                                                    >
+                                                                        <span
+                                                                            class="badge badge-ghost badge-xs"
+                                                                            >Optional</span
+                                                                        >
+                                                                    </template>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                        <button
+                                                            @click="openConfigModal(handler)"
+                                                            class="btn btn-sm btn-outline mt-3"
+                                                        >
+                                                            <svg
+                                                                xmlns="http://www.w3.org/2000/svg"
+                                                                class="h-4 w-4 mr-1"
+                                                                fill="none"
+                                                                viewBox="0 0 24 24"
+                                                                stroke="currentColor"
+                                                            >
+                                                                <path
+                                                                    stroke-linecap="round"
+                                                                    stroke-linejoin="round"
+                                                                    stroke-width="2"
+                                                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                                                />
+                                                            </svg>
+                                                            Edit Global Settings
+                                                        </button>
+                                                    </div>
+                                                </template>
+                                            </div>
                                         </div>
                                     </div>
                                 </td>
@@ -330,6 +393,237 @@ content %}
             </div>
         </div>
     </template>
+
+    <!-- Configuration Modal (for global settings only) -->
+    <div class="modal" :class="{ 'modal-open': showConfigModal }">
+        <div class="modal-box max-w-lg">
+            <h3 class="font-bold text-lg flex items-center gap-2">
+                <span x-text="editingHandler?.icon || '⚙️'"></span>
+                <span>
+                    Global Settings:
+                    <span
+                        x-text="editingHandler?.display_name || editingHandler?.action_type"
+                    ></span>
+                </span>
+            </h3>
+
+            <p class="text-sm text-base-content/60 mt-2">
+                These settings apply to all Smart Aliases using this handler.
+            </p>
+
+            <form @submit.prevent="saveConfig()">
+                <!-- Dynamic Config Fields -->
+                <template x-if="editingHandler && editingHandler.config_fields">
+                    <div class="space-y-4 mt-4">
+                        <template
+                            x-for="field in editingHandler.config_fields"
+                            :key="field.name"
+                        >
+                            <div
+                                class="form-control"
+                                x-show="isFieldVisible(field)"
+                            >
+                                <label class="label">
+                                    <span
+                                        class="label-text"
+                                        x-text="field.label"
+                                    ></span>
+                                    <span
+                                        x-show="field.required"
+                                        class="label-text-alt text-error"
+                                        >*</span
+                                    >
+                                </label>
+
+                                <!-- Text input -->
+                                <template x-if="field.field_type === 'text'">
+                                    <input
+                                        type="text"
+                                        :name="field.name"
+                                        x-model="configForm[field.name]"
+                                        :placeholder="field.placeholder"
+                                        :required="field.required"
+                                        class="input input-bordered"
+                                    />
+                                </template>
+
+                                <!-- Password input -->
+                                <template
+                                    x-if="field.field_type === 'password'"
+                                >
+                                    <input
+                                        type="password"
+                                        :name="field.name"
+                                        x-model="configForm[field.name]"
+                                        :placeholder="field.placeholder"
+                                        :required="field.required"
+                                        class="input input-bordered"
+                                    />
+                                </template>
+
+                                <!-- Textarea -->
+                                <template
+                                    x-if="field.field_type === 'textarea'"
+                                >
+                                    <textarea
+                                        :name="field.name"
+                                        x-model="configForm[field.name]"
+                                        :placeholder="field.placeholder"
+                                        :required="field.required"
+                                        class="textarea textarea-bordered"
+                                        rows="3"
+                                    ></textarea>
+                                </template>
+
+                                <!-- Integer input -->
+                                <template x-if="field.field_type === 'integer'">
+                                    <input
+                                        type="number"
+                                        :name="field.name"
+                                        x-model.number="configForm[field.name]"
+                                        :placeholder="field.placeholder"
+                                        :required="field.required"
+                                        :min="field.min_value"
+                                        :max="field.max_value"
+                                        class="input input-bordered"
+                                    />
+                                </template>
+
+                                <!-- Number input -->
+                                <template x-if="field.field_type === 'number'">
+                                    <input
+                                        type="number"
+                                        step="any"
+                                        :name="field.name"
+                                        x-model.number="configForm[field.name]"
+                                        :placeholder="field.placeholder"
+                                        :required="field.required"
+                                        :min="field.min_value"
+                                        :max="field.max_value"
+                                        class="input input-bordered"
+                                    />
+                                </template>
+
+                                <!-- Boolean toggle -->
+                                <template x-if="field.field_type === 'boolean'">
+                                    <label
+                                        class="label cursor-pointer justify-start gap-3"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            :name="field.name"
+                                            x-model="configForm[field.name]"
+                                            class="toggle toggle-primary"
+                                        />
+                                    </label>
+                                </template>
+
+                                <!-- Select dropdown -->
+                                <template x-if="field.field_type === 'select'">
+                                    <select
+                                        :name="field.name"
+                                        x-model="configForm[field.name]"
+                                        :required="field.required"
+                                        class="select select-bordered"
+                                    >
+                                        <option value="">Select...</option>
+                                        <template
+                                            x-for="opt in field.options"
+                                            :key="opt.value"
+                                        >
+                                            <option
+                                                :value="opt.value"
+                                                x-text="opt.label"
+                                            ></option>
+                                        </template>
+                                    </select>
+                                </template>
+
+                                <!-- Help text -->
+                                <label class="label" x-show="field.help_text">
+                                    <span
+                                        class="label-text-alt"
+                                        x-text="field.help_text"
+                                    ></span>
+                                </label>
+
+                                <!-- Environment variable fallback notice -->
+                                <template
+                                    x-if="field.env_var && !configForm[field.name]"
+                                >
+                                    <div class="text-xs text-info mt-1">
+                                        Falls back to environment variable:
+                                        <code
+                                            class="bg-base-200 px-1 rounded"
+                                            x-text="field.env_var"
+                                        ></code>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- Test Connection Button -->
+                <div class="mt-4 pt-4 border-t border-base-300">
+                    <button
+                        type="button"
+                        @click="testConnection()"
+                        class="btn btn-outline btn-sm"
+                        :class="{ 'loading': testing }"
+                        :disabled="testing"
+                    >
+                        <template x-if="!testing">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4 mr-1"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                                />
+                            </svg>
+                        </template>
+                        Test Connection
+                    </button>
+                    <template x-if="testResult !== null">
+                        <div class="mt-2">
+                            <div
+                                class="alert alert-sm py-2"
+                                :class="testResult.success ? 'alert-success' : 'alert-error'"
+                            >
+                                <span x-text="testResult.message"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="modal-action">
+                    <button
+                        type="button"
+                        @click="closeConfigModal()"
+                        class="btn btn-ghost"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        type="submit"
+                        class="btn btn-primary"
+                        :class="{ 'loading': saving }"
+                        :disabled="saving"
+                    >
+                        Save Settings
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="modal-backdrop" @click="closeConfigModal()"></div>
+    </div>
 </div>
 
 <script>
@@ -337,8 +631,15 @@ content %}
         return {
             loading: true,
             handlers: [],
-            oauthAccounts: {},
             expandedRows: [],
+
+            // Config modal state
+            showConfigModal: false,
+            editingHandler: null,
+            configForm: {},
+            saving: false,
+            testing: false,
+            testResult: null,
 
             async init() {
                 await this.loadHandlers();
@@ -350,7 +651,6 @@ content %}
                     const response = await fetch("/api/smart-actions");
                     const data = await response.json();
                     this.handlers = data.handlers || [];
-                    this.oauthAccounts = data.oauth_accounts || {};
                 } catch (error) {
                     console.error("Failed to load handlers:", error);
                 }
@@ -371,17 +671,9 @@ content %}
                     calendar: "📅",
                     notification: "🔔",
                     schedule: "⏰",
-                    task: "✅",
+                    tasks: "✅",
                 };
-                return icons[actionType] || "🎬";
-            },
-
-            getProviderIcon(provider) {
-                const icons = {
-                    google: "🔵",
-                    microsoft: "🟦",
-                };
-                return icons[provider] || "🔗";
+                return icons[actionType] || "⚡";
             },
 
             getDescription(actionType) {
@@ -390,7 +682,7 @@ content %}
                     calendar: "Create, update, and delete calendar events",
                     notification: "Send push notifications via webhooks",
                     schedule: "Schedule recurring or one-time prompts",
-                    task: "Create and manage tasks",
+                    tasks: "Create and manage tasks (GTasks or Todoist)",
                 };
                 return (
                     descriptions[actionType] ||
@@ -418,19 +710,138 @@ content %}
                         create: "Create a new calendar event",
                         update: "Update an existing calendar event",
                         delete: "Delete a calendar event",
+                        rsvp: "Respond to a calendar invitation",
                     },
                     notification: {
-                        push: "Send a push notification",
+                        send: "Send a push notification",
                     },
                     schedule: {
                         prompt: "Schedule a recurring or one-time prompt",
                         cancel: "Cancel a scheduled prompt",
+                    },
+                    tasks: {
+                        create: "Create a new task",
+                        complete: "Mark a task as complete",
+                        update: "Update an existing task",
+                        delete: "Delete a task",
+                        list: "List tasks",
                     },
                 };
                 return (
                     descriptions[actionType]?.[action] ||
                     action.replace(/_/g, " ")
                 );
+            },
+
+            getConfigValue(handler, fieldName) {
+                if (handler.saved_config && handler.saved_config.config) {
+                    return handler.saved_config.config[fieldName];
+                }
+                return null;
+            },
+
+            isFieldVisible(field) {
+                // Check conditional visibility
+                if (
+                    field.depends_on &&
+                    Object.keys(field.depends_on).length > 0
+                ) {
+                    for (const [depField, depValue] of Object.entries(
+                        field.depends_on,
+                    )) {
+                        if (this.configForm[depField] !== depValue) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            },
+
+            async openConfigModal(handler) {
+                this.editingHandler = handler;
+                this.testResult = null;
+
+                // Initialize form with saved config or defaults
+                this.configForm = {};
+                for (const field of handler.config_fields || []) {
+                    let value = handler.saved_config?.config?.[field.name];
+                    if (value === undefined && field.default !== undefined) {
+                        value = field.default;
+                    }
+                    this.configForm[field.name] = value ?? "";
+                }
+
+                this.showConfigModal = true;
+            },
+
+            closeConfigModal() {
+                this.showConfigModal = false;
+                this.editingHandler = null;
+                this.configForm = {};
+                this.testResult = null;
+            },
+
+            async saveConfig() {
+                if (!this.editingHandler) return;
+
+                this.saving = true;
+                try {
+                    const response = await fetch(
+                        `/api/smart-actions/${this.editingHandler.action_type}/config`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                config: this.configForm,
+                                enabled: true,
+                            }),
+                        },
+                    );
+
+                    const data = await response.json();
+
+                    if (response.ok && data.success) {
+                        await this.loadHandlers();
+                        this.closeConfigModal();
+                    } else {
+                        alert(data.error || "Failed to save configuration");
+                    }
+                } catch (error) {
+                    console.error("Failed to save config:", error);
+                    alert("Failed to save configuration");
+                } finally {
+                    this.saving = false;
+                }
+            },
+
+            async testConnection() {
+                if (!this.editingHandler) return;
+
+                this.testing = true;
+                this.testResult = null;
+
+                try {
+                    const response = await fetch(
+                        `/api/smart-actions/${this.editingHandler.action_type}/test`,
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                config: this.configForm,
+                            }),
+                        },
+                    );
+
+                    this.testResult = await response.json();
+                } catch (error) {
+                    console.error("Test failed:", error);
+                    this.testResult = {
+                        success: false,
+                        message: "Test request failed",
+                    };
+                } finally {
+                    this.testing = false;
+                }
             },
         };
     }

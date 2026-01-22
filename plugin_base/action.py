@@ -16,6 +16,63 @@ from typing import Any, Optional
 from plugin_base.common import FieldDefinition, ValidationResult, validate_config
 
 
+class ResourceType(Enum):
+    """Types of resources that action handlers can require."""
+
+    OAUTH_ACCOUNT = "oauth_account"  # OAuth account selector (filtered by provider)
+    CALENDAR_PICKER = "calendar_picker"  # Calendar selector (depends on account)
+    TASKLIST_PICKER = "tasklist_picker"  # Task list selector (depends on account)
+    TEXT = "text"  # Free text input
+    TEXTAREA = "textarea"  # Multi-line text
+    PASSWORD = "password"  # Hidden text (API keys)
+    SELECT = "select"  # Dropdown with options
+
+
+@dataclass
+class ResourceRequirement:
+    """
+    Defines a resource that an action handler needs from the Smart Alias.
+
+    These are rendered dynamically in the Smart Alias edit modal's
+    "Default Resources" section.
+
+    Keys map to context.default_accounts structure:
+    - email: {"id": account_id, "provider": "google|microsoft"}
+    - calendar: {"id": account_id, "provider": "...", "calendar_id": "..."}
+    - tasks: {"id": account_id, "provider": "gtasks", "list_id": "..."} or
+             {"provider": "todoist", "api_token": "...", "list_id": "..."}
+    - notification: {"urls": ["..."]}
+    - schedule: {"account_id": ..., "calendar_id": "...", "provider": "..."}
+    """
+
+    key: str  # Context key (e.g., "email", "calendar", "tasks")
+    label: str  # Display label
+    resource_type: ResourceType  # Type of input
+    help_text: str = ""  # Help text shown below input
+    required: bool = False  # Whether this resource is required
+    providers: list[str] = field(
+        default_factory=list
+    )  # For oauth_account: ["google", "microsoft"]
+    depends_on: Optional[str] = None  # Show only when this other key has a value
+    options: list[dict] = field(
+        default_factory=list
+    )  # For select type: [{"value": "x", "label": "X"}]
+    sub_key: Optional[str] = None  # Sub-key within the context (e.g., "calendar_id")
+
+    def to_dict(self) -> dict:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "resource_type": self.resource_type.value,
+            "help_text": self.help_text,
+            "required": self.required,
+            "providers": self.providers,
+            "depends_on": self.depends_on,
+            "options": self.options,
+            "sub_key": self.sub_key,
+        }
+
+
 class ActionRisk(Enum):
     """
     Risk level determines approval requirements.
@@ -77,7 +134,29 @@ class ActionContext:
     user_tags: list[str] = field(default_factory=list)
     smart_alias_name: str = ""
     conversation_id: Optional[str] = None
-    # Extensible - add more context as needed
+
+    # All available accounts by category - LLM can choose any of these
+    # Keys: "email", "calendar", "tasks"
+    # Each account has: {"id": "...", "type": "oauth|api|smtp", "provider": "google|microsoft|todoist|smtp", "email": "...", "name": "..."}
+    # e.g.:
+    #   available_accounts["email"] = [
+    #       {"id": 1, "type": "oauth", "provider": "google", "email": "user@gmail.com"},
+    #       {"id": 2, "type": "oauth", "provider": "microsoft", "email": "user@outlook.com"},
+    #   ]
+    #   available_accounts["tasks"] = [
+    #       {"id": 1, "type": "oauth", "provider": "google", "email": "user@gmail.com"},
+    #       {"id": "todoist", "type": "api", "provider": "todoist", "name": "Todoist"},
+    #   ]
+    available_accounts: dict[str, list[dict]] = field(default_factory=dict)
+
+    # Default accounts from Smart Alias configuration (fallback if LLM doesn't specify)
+    # Keys: "email", "calendar", "tasks", "notification", "schedule"
+    # Values vary by type, e.g.:
+    #   email/calendar: {"id": 1, "email": "user@gmail.com", "provider": "google"}
+    #   tasks: {"id": 1, "email": "...", "provider": "google", "list_id": "..."}
+    #          or {"provider": "todoist", "api_token": "..."}
+    #   notification: {"urls": ["https://..."]}
+    default_accounts: dict[str, dict] = field(default_factory=dict)
 
 
 class PluginActionHandler(ABC):
@@ -108,6 +187,7 @@ class PluginActionHandler(ABC):
     # --- Optional class attributes ---
     icon: str = "⚡"
     category: str = "other"  # For grouping: "communication", "productivity", etc.
+    supported_sources: list[str] = []  # Document source types this handler works with
 
     # Mark as abstract to prevent direct registration
     _abstract: bool = True
@@ -120,8 +200,49 @@ class PluginActionHandler(ABC):
 
         These are set once when configuring the plugin, not per-request.
         Examples: API keys, OAuth accounts, default settings.
+
+        NOTE: Most handlers should return [] here - resources come from
+        Smart Alias context via get_resource_requirements() instead.
+        Only truly global settings (like Apprise URL) belong here.
         """
         pass
+
+    @classmethod
+    def get_resource_requirements(cls) -> list[ResourceRequirement]:
+        """
+        Define resources this handler needs from the Smart Alias.
+
+        These are rendered dynamically in the Smart Alias edit modal's
+        "Default Resources" section when actions are enabled.
+
+        The values are passed at execution time via context.default_accounts.
+
+        Example:
+            return [
+                ResourceRequirement(
+                    key="email",
+                    label="Email Account",
+                    resource_type=ResourceType.OAUTH_ACCOUNT,
+                    providers=["google", "microsoft"],
+                    help_text="Account for sending emails",
+                ),
+                ResourceRequirement(
+                    key="calendar",
+                    label="Calendar Account",
+                    resource_type=ResourceType.OAUTH_ACCOUNT,
+                    providers=["google", "microsoft"],
+                ),
+                ResourceRequirement(
+                    key="calendar",
+                    sub_key="calendar_id",
+                    label="Default Calendar",
+                    resource_type=ResourceType.CALENDAR_PICKER,
+                    depends_on="calendar",
+                    help_text="Calendar for creating events",
+                ),
+            ]
+        """
+        return []
 
     @classmethod
     @abstractmethod

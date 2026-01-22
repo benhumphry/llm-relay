@@ -64,6 +64,7 @@ def get_document_store_by_id(store_id: int, db=None) -> Optional[DocumentStore]:
 
 def create_document_store(
     name: str,
+    display_name: Optional[str] = None,
     source_type: str = "local",
     plugin_config_id: Optional[int] = None,
     source_path: Optional[str] = None,
@@ -144,6 +145,7 @@ def create_document_store(
     def _create(session: Session) -> DocumentStore:
         store = DocumentStore(
             name=name.lower().strip(),
+            display_name=display_name.strip() if display_name else None,
             source_type=source_type,
             plugin_config_id=plugin_config_id,
             source_path=source_path,
@@ -236,6 +238,7 @@ def create_document_store(
 def update_document_store(
     store_id: int,
     name: Optional[str] = None,
+    display_name: Optional[str] = None,
     source_type: Optional[str] = None,
     plugin_config_id: Optional[int] = None,
     source_path: Optional[str] = None,
@@ -317,6 +320,8 @@ def update_document_store(
 
         if name is not None:
             store.name = name.lower().strip()
+        if display_name is not None:
+            store.display_name = display_name.strip() if display_name else None
         if source_type is not None:
             store.source_type = source_type
         if plugin_config_id is not None:
@@ -661,6 +666,7 @@ def _store_to_detached(
     detached = DocumentStore(
         id=store.id,
         name=store.name,
+        display_name=store.display_name,
         source_type=store.source_type,
         plugin_config_id=store.plugin_config_id,
         source_path=store.source_path,

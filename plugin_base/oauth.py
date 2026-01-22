@@ -18,28 +18,90 @@ class OAuthMixin:
     Mixin for plugins that use OAuth authentication.
 
     Provides common token refresh and authenticated request methods.
-    Requires the plugin to set:
-    - self.oauth_account_id: ID of the stored OAuth token
-    - self.oauth_provider: Provider name (e.g., "google", "slack")
 
-    Usage:
+    OAuth can be configured in two ways:
+    1. Config-based: Set oauth_account_id in plugin config during __init__
+    2. Context-based: Pass default_accounts in ActionContext at execute time
+
+    For action plugins, context-based is preferred as it allows the Smart Alias
+    to specify which account to use without requiring plugin configuration.
+
+    Usage (config-based):
         class MyPlugin(OAuthMixin, PluginActionHandler):
             def __init__(self, config: dict):
-                self.oauth_account_id = config["oauth_account_id"]
+                self.oauth_account_id = config.get("oauth_account_id")
                 self.oauth_provider = "google"
-                self._init_oauth_client()
+                if self.oauth_account_id:
+                    self._init_oauth_client()
+
+    Usage (context-based):
+        class MyPlugin(OAuthMixin, PluginActionHandler):
+            def __init__(self, config: dict):
+                self.oauth_account_id = config.get("oauth_account_id")
+                self.oauth_provider = "google"
 
             def execute(self, action, params, context):
-                # Use authenticated requests
+                # Configure from context if not already set
+                self.configure_oauth_from_context(context, "email")
                 response = self.oauth_get("https://api.example.com/data")
                 ...
     """
 
-    oauth_account_id: int
-    oauth_provider: str
+    oauth_account_id: Optional[int] = None
+    oauth_provider: str = "google"
     _oauth_client: Optional[httpx.Client] = None
     _access_token: Optional[str] = None
     _token_expires_at: float = 0
+
+    def configure_oauth_from_context(
+        self, context, account_key: str, force: bool = False
+    ) -> bool:
+        """
+        Configure OAuth from ActionContext default_accounts.
+
+        This allows plugins to get their OAuth account from Smart Alias
+        configuration rather than requiring plugin-level config.
+
+        Args:
+            context: ActionContext with default_accounts dict
+            account_key: Key in default_accounts (e.g., "email", "calendar", "tasks")
+            force: If True, override existing oauth_account_id
+
+        Returns:
+            True if OAuth was configured successfully
+        """
+        # Skip if already configured (unless force=True)
+        if self.oauth_account_id and not force:
+            return True
+
+        # Get default account from context
+        default_accounts = getattr(context, "default_accounts", {})
+        if not default_accounts:
+            logger.debug(f"No default_accounts in context for {account_key}")
+            return False
+
+        account_info = default_accounts.get(account_key, {})
+        if not account_info:
+            logger.debug(f"No {account_key} account in context.default_accounts")
+            return False
+
+        account_id = account_info.get("id")
+        if not account_id:
+            logger.debug(f"No account ID in {account_key} default account")
+            return False
+
+        # Configure OAuth
+        self.oauth_account_id = account_id
+        self.oauth_provider = account_info.get("provider", "google")
+
+        logger.info(
+            f"Configured OAuth from context: {account_key} -> "
+            f"account {account_id} ({account_info.get('email', 'unknown')})"
+        )
+
+        # Initialize/reinitialize OAuth client
+        self._init_oauth_client()
+        return True
 
     def _init_oauth_client(self, timeout: int = 30) -> None:
         """

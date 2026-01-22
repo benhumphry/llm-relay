@@ -71,7 +71,8 @@ class NotionUnifiedSource(PluginUnifiedSource):
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {
-            "api_token": os.environ.get("NOTION_TOKEN", ""),
+            "api_token": os.environ.get("NOTION_TOKEN")
+            or os.environ.get("NOTION_API_KEY", ""),
             "database_ids": store.notion_database_id or "",
             "root_page_id": store.notion_page_id or "",
         }
@@ -89,7 +90,7 @@ class NotionUnifiedSource(PluginUnifiedSource):
                 label="Integration Token",
                 field_type=FieldType.PASSWORD,
                 required=False,
-                help_text="Notion integration token (or set NOTION_TOKEN env var)",
+                help_text="Notion integration token (or set NOTION_TOKEN/NOTION_API_KEY env var)",
             ),
             FieldDefinition(
                 name="root_page_id",
@@ -183,7 +184,11 @@ class NotionUnifiedSource(PluginUnifiedSource):
 
     def __init__(self, config: dict):
         """Initialize with configuration."""
-        self.api_token = config.get("api_token") or os.environ.get("NOTION_TOKEN", "")
+        self.api_token = (
+            config.get("api_token")
+            or os.environ.get("NOTION_TOKEN")
+            or os.environ.get("NOTION_API_KEY", "")
+        )
         self.root_page_id = config.get("root_page_id", "")
         self.include_databases = config.get("include_databases", True)
         self.include_pages = config.get("include_pages", True)
@@ -227,15 +232,27 @@ class NotionUnifiedSource(PluginUnifiedSource):
     # =========================================================================
 
     def list_documents(self) -> Iterator[DocumentInfo]:
-        """Enumerate pages and databases for indexing."""
+        """
+        Enumerate pages and databases for indexing.
+
+        Filtering logic:
+        - If database_ids specified: ONLY index those databases (ignore include_pages)
+        - If root_page_id specified: only index pages under that root
+        - If neither: index all accessible pages and databases
+        """
         logger.info("Listing Notion content")
 
-        if self.include_pages:
-            yield from self._list_pages()
-
-        if self.include_databases and self.database_ids:
+        # If specific databases are configured, ONLY index those
+        # This prevents bleeding between stores that target different databases
+        if self.database_ids:
+            logger.info(f"Indexing specific databases: {self.database_ids}")
             for db_id in self.database_ids:
                 yield from self._list_database_entries(db_id)
+            return  # Don't index pages when database filter is active
+
+        # Otherwise, index pages (optionally filtered by root_page_id)
+        if self.include_pages:
+            yield from self._list_pages()
 
     def _list_pages(self) -> Iterator[DocumentInfo]:
         """List pages using search."""

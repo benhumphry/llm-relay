@@ -372,6 +372,10 @@ class PromptScheduler:
         """
         Execute a single scheduled prompt.
 
+        If the event description contains a <smart_action> block, it is executed
+        directly without going through the LLM. Otherwise, the prompt is sent
+        through the normal chat API.
+
         Args:
             execution: ScheduledPromptExecution record
         """

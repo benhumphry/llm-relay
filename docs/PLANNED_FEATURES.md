@@ -294,7 +294,7 @@ The proxy:
 | `calendar:create` | Create calendar event | ✅ Implemented |
 | `calendar:update` | Modify existing event | ✅ Implemented |
 | `calendar:delete` | Cancel/delete event | ✅ Implemented |
-| `calendar:rsvp` | Respond to invitation | 🔜 Planned |
+| `calendar:rsvp` | Respond to invitation | ✅ Implemented |
 
 #### Scheduled Prompts (Implemented)
 | Action | Description | Status |
@@ -358,12 +358,19 @@ The proxy:
 | `slack:react` | Add reaction |
 | `teams:message` | Send Teams message |
 
-#### Task Actions
-| Action | Description |
-|--------|-------------|
-| `task:create` | Create task (Todoist, Asana, etc.) |
-| `task:complete` | Mark task done |
-| `task:update` | Update task details |
+#### Task Actions (Implemented)
+| Action | Description | Status |
+|--------|-------------|--------|
+| `gtasks:create` | Create Google Task | ✅ Implemented |
+| `gtasks:complete` | Mark task complete | ✅ Implemented |
+| `gtasks:update` | Update task details | ✅ Implemented |
+| `gtasks:delete` | Delete task | ✅ Implemented |
+| `gtasks:list` | List tasks | ✅ Implemented |
+| `todoist:create` | Create Todoist task | ✅ Implemented |
+| `todoist:complete` | Mark task complete | ✅ Implemented |
+| `todoist:update` | Update task details | ✅ Implemented |
+| `todoist:delete` | Delete task | ✅ Implemented |
+| `todoist:list` | List tasks | ✅ Implemented |
 
 ### Scheduled Prompts Architecture
 
@@ -453,7 +460,7 @@ class ActionHandler(ABC):
 - [x] Document Store Intelligence (themes, best_for, summary)
 - [x] Smart Actions framework (detection, parsing, execution, action block stripping)
 - [x] Smart Actions - Email (Gmail: draft, send, mark read/unread, archive, label)
-- [x] Smart Actions - Calendar (Google: create, update, delete events)
+- [x] Smart Actions - Calendar (Google: create, update, delete, rsvp)
 - [x] Smart Actions - Notifications (push via configured URLs)
 - [x] Smart Actions - Scheduled Prompts (calendar-triggered prompt execution)
 - [x] Live Data Sources (real-time API queries for Gmail, Calendar, Stocks, Weather, Transport, etc.)
@@ -463,6 +470,9 @@ class ActionHandler(ABC):
 - [x] Smart Amazon Plugin (RapidAPI Real-Time Amazon Data API with country code normalization)
 - [x] Smart Sports Plugin enhancements (comprehensive UK league tournament IDs)
 - [x] Anthropic API endpoint (`/v1/messages` with full Smart Alias support, streaming)
+- [x] Smart Actions - Tasks (Google Tasks: create, complete, update, delete, list)
+- [x] Smart Actions - Tasks (Todoist: create, complete, update, delete, list)
+- [x] Plugin-based action handlers (removed legacy handlers, context-based OAuth)
 
 ## Next Up (v1.9)
 - [x] Slack integration (Document Store)
@@ -477,4 +487,5 @@ class ActionHandler(ABC):
 - [ ] Smart Query Studio
 - [ ] Model Sync service
 - [ ] Media endpoints (images, audio)
-- [ ] Smart Actions - Calendar, scheduled prompts, send actions
+- [ ] Smart Actions - Slack, Teams integration
+- [ ] Smart Actions - Document actions (Drive, Notion)

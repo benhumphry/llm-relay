@@ -30,7 +30,7 @@ block content %}
         </button>
     </div>
 
-    <!-- Filter Tabs -->
+    <!-- Filter Tabs (content-based categories) -->
     <div class="tabs tabs-boxed bg-base-200 mb-4 inline-flex">
         <button
             @click="setFilter('all')"
@@ -41,43 +41,67 @@ block content %}
             <span class="badge badge-sm ml-1" x-text="tabCounts.all"></span>
         </button>
         <button
-            @click="setFilter('local')"
+            @click="setFilter('files')"
             class="tab"
-            :class="{ 'tab-active': filterMode === 'local' }"
-            x-show="tabCounts.local > 0"
+            :class="{ 'tab-active': filterMode === 'files' }"
+            x-show="tabCounts.files > 0"
         >
-            Local
-            <span class="badge badge-sm ml-1" x-text="tabCounts.local"></span>
+            Files
+            <span class="badge badge-sm ml-1" x-text="tabCounts.files"></span>
         </button>
         <button
-            @click="setFilter('google')"
+            @click="setFilter('emails')"
             class="tab"
-            :class="{ 'tab-active': filterMode === 'google' }"
-            x-show="tabCounts.google > 0"
+            :class="{ 'tab-active': filterMode === 'emails' }"
+            x-show="tabCounts.emails > 0"
         >
-            Google
-            <span class="badge badge-sm ml-1" x-text="tabCounts.google"></span>
+            Emails
+            <span class="badge badge-sm ml-1" x-text="tabCounts.emails"></span>
         </button>
         <button
-            @click="setFilter('microsoft')"
+            @click="setFilter('calendars')"
             class="tab"
-            :class="{ 'tab-active': filterMode === 'microsoft' }"
-            x-show="tabCounts.microsoft > 0"
+            :class="{ 'tab-active': filterMode === 'calendars' }"
+            x-show="tabCounts.calendars > 0"
         >
-            Microsoft
+            Calendars
             <span
                 class="badge badge-sm ml-1"
-                x-text="tabCounts.microsoft"
+                x-text="tabCounts.calendars"
             ></span>
         </button>
         <button
-            @click="setFilter('website')"
+            @click="setFilter('tasks')"
             class="tab"
-            :class="{ 'tab-active': filterMode === 'website' }"
-            x-show="tabCounts.website > 0"
+            :class="{ 'tab-active': filterMode === 'tasks' }"
+            x-show="tabCounts.tasks > 0"
+        >
+            Tasks
+            <span class="badge badge-sm ml-1" x-text="tabCounts.tasks"></span>
+        </button>
+        <button
+            @click="setFilter('websites')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'websites' }"
+            x-show="tabCounts.websites > 0"
         >
             Websites
-            <span class="badge badge-sm ml-1" x-text="tabCounts.website"></span>
+            <span
+                class="badge badge-sm ml-1"
+                x-text="tabCounts.websites"
+            ></span>
+        </button>
+        <button
+            @click="setFilter('messages')"
+            class="tab"
+            :class="{ 'tab-active': filterMode === 'messages' }"
+            x-show="tabCounts.messages > 0"
+        >
+            Messages
+            <span
+                class="badge badge-sm ml-1"
+                x-text="tabCounts.messages"
+            ></span>
         </button>
         <button
             @click="setFilter('other')"
@@ -144,8 +168,7 @@ block content %}
                     <thead>
                         <tr>
                             <th class="w-8"></th>
-                            <th>Name</th>
-                            <th>Source</th>
+                            <th>Store</th>
                             <th>Index</th>
                             <th class="text-right">Docs</th>
                             <th class="text-right">Chunks</th>
@@ -179,32 +202,31 @@ block content %}
                                     </svg>
                                 </td>
                                 <td>
-                                    <div
-                                        class="font-medium"
-                                        x-text="getStoreDisplayName(store)"
-                                    ></div>
-                                </td>
-                                <td>
-                                    <div class="flex items-center gap-2">
+                                    <div class="flex items-center gap-3">
                                         <span
-                                            class="badge badge-sm"
-                                            :class="store.unified_source ? 'badge-accent' : getSourceBadgeClass(store)"
-                                            :title="store.unified_source ? ('Unified: ' + (store.unified_source?.supports_live ? 'RAG + Live' : 'RAG')) : ''"
-                                        >
-                                            <span
-                                                x-text="store.unified_source?.icon || getSourceBadgeText(store)"
-                                            ></span>
-                                            <span
-                                                x-show="store.unified_source?.supports_live"
-                                                class="ml-1"
-                                                >+Live</span
-                                            >
-                                        </span>
-                                        <span
-                                            class="font-mono text-sm text-base-content/70 truncate max-w-[200px]"
-                                            x-text="getSourceDetailShort(store)"
-                                            :title="getSourceDetail(store)"
+                                            class="text-xl"
+                                            x-text="store.unified_source?.icon || getSourceIcon(store)"
                                         ></span>
+                                        <div>
+                                            <div
+                                                class="flex items-center gap-1.5"
+                                            >
+                                                <span
+                                                    class="font-medium"
+                                                    x-text="getStoreDisplayName(store)"
+                                                ></span>
+                                                <span
+                                                    x-show="store.unified_source?.supports_live"
+                                                    class="text-warning text-xs"
+                                                    title="Live data enabled"
+                                                    >⚡</span
+                                                >
+                                            </div>
+                                            <div
+                                                class="text-xs text-base-content/50"
+                                                x-text="getSourceDetailShort(store) || getSourceBadgeText(store)"
+                                            ></div>
+                                        </div>
                                     </div>
                                 </td>
                                 <td>
@@ -721,17 +743,46 @@ block content %}
                     <input
                         type="text"
                         x-model="form.name"
-                        class="input input-bordered font-mono"
+                        class="input input-bordered"
                         :class="{ 'input-error': formErrors.name }"
-                        placeholder="e.g., my-drive-docs, company-wiki"
+                        placeholder="e.g., work-gmail, personal-calendar"
                         required
                         :disabled="editingStore"
                     />
-                    <label class="label" x-show="formErrors.name">
+                    <label class="label">
+                        <span class="label-text-alt" x-show="!formErrors.name"
+                            >Unique identifier (lowercase, no spaces)</span
+                        >
                         <span
                             class="label-text-alt text-error"
+                            x-show="formErrors.name"
                             x-text="formErrors.name"
                         ></span>
+                    </label>
+                </div>
+
+                <!-- Display Name (for actionable sources) -->
+                <div
+                    class="form-control mt-4"
+                    x-show="isActionableSource(form.source_type)"
+                >
+                    <label class="label">
+                        <span class="label-text">Display Name</span>
+                        <span class="label-text-alt text-base-content/60"
+                            >Used by LLM to identify this account</span
+                        >
+                    </label>
+                    <input
+                        type="text"
+                        x-model="form.display_name"
+                        class="input input-bordered"
+                        placeholder="e.g., Work Email, Personal Calendar, Home Tasks"
+                    />
+                    <label class="label">
+                        <span class="label-text-alt"
+                            >Friendly name for LLM instructions (e.g., "send
+                            from Work Email")</span
+                        >
                     </label>
                 </div>
 
@@ -3633,102 +3684,108 @@ block content %}
                 "all",
             expandedRows: [],
 
-            // Computed: tab counts
-            get tabCounts() {
-                return {
-                    all: this.allStores.length,
-                    local: this.allStores.filter(
-                        (s) => s.source_type === "local",
-                    ).length,
-                    google: this.allStores.filter((s) =>
-                        [
-                            "mcp:gdrive",
-                            "mcp:gmail",
-                            "mcp:gcalendar",
-                            "mcp:gtasks",
-                            "mcp:gcontacts",
-                        ].includes(s.source_type),
-                    ).length,
-                    microsoft: this.allStores.filter((s) =>
-                        ["mcp:onedrive", "mcp:outlook", "mcp:onenote"].includes(
-                            s.source_type,
-                        ),
-                    ).length,
-                    website: this.allStores.filter(
-                        (s) => s.source_type === "website",
-                    ).length,
-                    other: this.allStores.filter(
-                        (s) =>
-                            ![
-                                "local",
-                                "website",
-                                "mcp:gdrive",
-                                "mcp:gmail",
-                                "mcp:gcalendar",
-                                "mcp:gtasks",
-                                "mcp:gcontacts",
-                                "mcp:onedrive",
-                                "mcp:outlook",
-                                "mcp:onenote",
-                            ].includes(s.source_type),
-                    ).length,
-                };
+            // Content category mapping for source types
+            // Matches LEGACY_SOURCE_TYPE_CATEGORIES in plugin_base/common.py
+            contentCategories: {
+                // Files (documents, notes, etc.)
+                local: "files",
+                "mcp:gdrive": "files",
+                "mcp:onedrive": "files",
+                notion: "files",
+                paperless: "files",
+                nextcloud: "files",
+                "mcp:onenote": "files",
+                "mcp:github": "files",
+                // Emails
+                "mcp:gmail": "emails",
+                "mcp:outlook": "emails",
+                // Calendars
+                "mcp:gcalendar": "calendars",
+                "mcp:ocalendar": "calendars",
+                // Tasks
+                "mcp:gtasks": "tasks",
+                todoist: "tasks",
+                // Websites
+                website: "websites",
+                websearch: "websites",
+                // Contacts (grouped with Other for now)
+                "mcp:gcontacts": "contacts",
+                // Messages
+                slack: "messages",
+                "mcp:teams": "messages",
             },
 
-            // Computed: filtered stores based on current tab
+            // Get content category for a source type
+            getContentCategory(sourceType) {
+                return this.contentCategories[sourceType] || "other";
+            },
+
+            // Check if source type is "actionable" (email, calendar, tasks)
+            // These source types can be used by action handlers
+            isActionableSource(sourceType) {
+                const category = this.getContentCategory(sourceType);
+                return ["emails", "calendars", "tasks"].includes(category);
+            },
+
+            // Computed: tab counts (content-based)
+            get tabCounts() {
+                const counts = {
+                    all: this.allStores.length,
+                    files: 0,
+                    emails: 0,
+                    calendars: 0,
+                    tasks: 0,
+                    websites: 0,
+                    messages: 0,
+                    other: 0,
+                };
+                for (const store of this.allStores) {
+                    const category = this.getContentCategory(store.source_type);
+                    if (category === "contacts") {
+                        counts.other++; // Group contacts with other for now
+                    } else if (counts.hasOwnProperty(category)) {
+                        counts[category]++;
+                    } else {
+                        counts.other++;
+                    }
+                }
+                return counts;
+            },
+
+            // Computed: filtered stores based on current tab (content-based)
             get filteredStores() {
                 if (this.filterMode === "all") return this.allStores;
-                if (this.filterMode === "local")
-                    return this.allStores.filter(
-                        (s) => s.source_type === "local",
-                    );
-                if (this.filterMode === "google")
-                    return this.allStores.filter((s) =>
-                        [
-                            "mcp:gdrive",
-                            "mcp:gmail",
-                            "mcp:gcalendar",
-                            "mcp:gtasks",
-                            "mcp:gcontacts",
-                        ].includes(s.source_type),
-                    );
-                if (this.filterMode === "microsoft")
-                    return this.allStores.filter((s) =>
-                        ["mcp:onedrive", "mcp:outlook", "mcp:onenote"].includes(
-                            s.source_type,
-                        ),
-                    );
-                if (this.filterMode === "website")
-                    return this.allStores.filter(
-                        (s) => s.source_type === "website",
-                    );
-                if (this.filterMode === "other")
-                    return this.allStores.filter(
-                        (s) =>
-                            ![
-                                "local",
-                                "website",
-                                "mcp:gdrive",
-                                "mcp:gmail",
-                                "mcp:gcalendar",
-                                "mcp:gtasks",
-                                "mcp:gcontacts",
-                                "mcp:onedrive",
-                                "mcp:outlook",
-                                "mcp:onenote",
-                            ].includes(s.source_type),
-                    );
-                return this.allStores;
+
+                // Map filter mode to content categories
+                const categoryMap = {
+                    files: ["files"],
+                    emails: ["emails"],
+                    calendars: ["calendars"],
+                    tasks: ["tasks"],
+                    websites: ["websites"],
+                    messages: ["messages"],
+                    other: ["contacts", "other"], // Include contacts in other
+                };
+
+                const categories = categoryMap[this.filterMode];
+                if (!categories) return this.allStores;
+
+                return this.allStores.filter((s) => {
+                    const category = this.getContentCategory(s.source_type);
+                    return categories.includes(category);
+                });
             },
 
             // Computed: label for current filter
             get filterLabel() {
                 const labels = {
                     all: "All",
-                    local: "Local",
-                    google: "Google",
-                    microsoft: "Microsoft",
-                    website: "Website",
+                    files: "Files",
+                    emails: "Email",
+                    calendars: "Calendar",
+                    tasks: "Tasks",
+                    websites: "Website",
+                    messages: "Messages",
                     other: "Other",
                 };
                 return labels[this.filterMode] || "All";
@@ -5023,11 +5080,40 @@ block content %}
             },
 
             getStoreDisplayName(store) {
+                // Use display_name if set, otherwise convert slug to title case
+                if (store.display_name) {
+                    return store.display_name;
+                }
                 // Convert slug to title case: "my-gmail-store" -> "My Gmail Store"
                 return store.name
                     .split("-")
                     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
                     .join(" ");
+            },
+
+            getSourceIcon(store) {
+                const icons = {
+                    local: "📁",
+                    website: "🌐",
+                    websearch: "🔍",
+                    paperless: "📄",
+                    nextcloud: "☁️",
+                    notion: "📝",
+                    "mcp:gdrive": "📂",
+                    "mcp:gmail": "📧",
+                    "mcp:gcalendar": "📅",
+                    "mcp:gtasks": "✅",
+                    "mcp:gcontacts": "👥",
+                    "mcp:onedrive": "📂",
+                    "mcp:outlook": "📧",
+                    "mcp:onenote": "📓",
+                    "mcp:teams": "💬",
+                    "mcp:notion": "📝",
+                    "mcp:github": "🐙",
+                    slack: "💬",
+                    todoist: "✅",
+                };
+                return icons[store.source_type] || "📦";
             },
 
             getSourceBadgeText(store) {
@@ -5268,6 +5354,7 @@ block content %}
                 this.onenoteNotebooks = [];
                 this.form = {
                     name: "",
+                    display_name: "",
                     source_type:
                         this.filterMode === "website" ? "website" : "local",
                     source_path: "",
@@ -5367,6 +5454,7 @@ block content %}
 
                 this.form = {
                     name: store.name,
+                    display_name: store.display_name || "",
                     source_type: sourceType,
                     source_path: store.source_path || "",
                     paperless_url: store.paperless_url || "",
@@ -5616,6 +5704,7 @@ block content %}
                     // Build request body
                     const body = {
                         name: this.form.name,
+                        display_name: this.form.display_name || null,
                         enabled: this.form.enabled,
                         chunk_size: parseInt(this.form.chunk_size),
                         chunk_overlap: parseInt(this.form.chunk_overlap),

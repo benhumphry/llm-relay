@@ -135,13 +135,8 @@ def create_api_app():
     # Register providers AFTER seeding so YAML overrides are applied first
     register_all_providers()
 
-    # Load action handlers for Smart Actions
-    try:
-        from actions import load_action_handlers
-
-        load_action_handlers()
-    except Exception as e:
-        logger.warning(f"Failed to load action handlers: {e}")
+    # NOTE: Action handlers are loaded in main() AFTER discover_plugins()
+    # to ensure plugin actions are registered first
 
     return application
 
@@ -751,6 +746,60 @@ def estimate_input_chars(messages: list, system: str | None = None) -> int:
     return total
 
 
+def execute_actions_from_enrichment(
+    enrichment_result, response_text: str
+) -> tuple[list, str]:
+    """
+    Execute actions from an enrichment result.
+
+    Helper to call execute_actions with all required parameters from the enrichment result.
+    This centralizes the parameter extraction logic.
+
+    Args:
+        enrichment_result: The EnrichmentResult from SmartAliasEngine
+        response_text: The LLM response text to parse for actions
+
+    Returns:
+        Tuple of (list of ActionResults, cleaned response text with actions stripped)
+    """
+    from actions import execute_actions
+
+    allowed = getattr(enrichment_result, "allowed_actions", [])
+    return execute_actions(
+        response_text=response_text,
+        alias_name=enrichment_result.enricher_name,
+        allowed_actions=allowed,
+        session_key=getattr(enrichment_result, "session_key", None),
+        # New: Store-based accounts from enrichment
+        available_accounts=getattr(enrichment_result, "available_accounts", None),
+        default_accounts=getattr(enrichment_result, "default_accounts", None),
+        # Legacy: Action-category defaults (backwards compatibility)
+        default_email_account_id=getattr(
+            enrichment_result, "action_email_account_id", None
+        ),
+        default_calendar_account_id=getattr(
+            enrichment_result, "action_calendar_account_id", None
+        ),
+        default_calendar_id=getattr(enrichment_result, "action_calendar_id", None),
+        default_tasks_account_id=getattr(
+            enrichment_result, "action_tasks_account_id", None
+        ),
+        default_tasks_provider=getattr(
+            enrichment_result, "action_tasks_provider", None
+        ),
+        default_tasks_list_id=getattr(enrichment_result, "action_tasks_list_id", None),
+        default_notification_urls=getattr(
+            enrichment_result, "action_notification_urls", None
+        ),
+        scheduled_prompts_account_id=getattr(
+            enrichment_result, "scheduled_prompts_account_id", None
+        ),
+        scheduled_prompts_calendar_id=getattr(
+            enrichment_result, "scheduled_prompts_calendar_id", None
+        ),
+    )
+
+
 def build_source_attribution(enrichment_result) -> str | None:
     """
     Build a source attribution string showing budget percentages.
@@ -815,6 +864,8 @@ class ActionStreamFilter:
         self.buffer = ""
         self.in_action_block = False
         self.action_blocks = []  # Collected complete action blocks
+        self.total_input = 0
+        self.total_output = 0
 
     def process(self, text: str) -> str:
         """
@@ -825,6 +876,7 @@ class ActionStreamFilter:
         if not self.strip_actions:
             return text
 
+        self.total_input += len(text)
         self.buffer += text
         output = ""
 
@@ -855,9 +907,15 @@ class ActionStreamFilter:
                     end_pos = end_idx + len("</smart_action>")
                     action_block = self.buffer[:end_pos]
                     self.action_blocks.append(action_block)
+                    logger.debug(
+                        f"ActionStreamFilter: Captured action block ({len(action_block)} chars)"
+                    )
+                    # Replace action block with placeholder so user sees something
+                    output += "\n\n*[Performing action...]*\n\n"
                     self.buffer = self.buffer[end_pos:]
                     self.in_action_block = False
 
+        self.total_output += len(output)
         return output
 
     def flush(self) -> str:
@@ -873,6 +931,18 @@ class ActionStreamFilter:
         # Include it in output so nothing is silently lost
         remaining = self.buffer
         self.buffer = ""
+
+        if remaining:
+            self.total_output += len(remaining)
+
+        # Log summary
+        logger.info(
+            f"ActionStreamFilter: input={self.total_input} chars, "
+            f"output={self.total_output} chars, "
+            f"actions={len(self.action_blocks)}, "
+            f"flushed={len(remaining)} chars"
+        )
+
         return remaining
 
 
@@ -1785,58 +1855,8 @@ def chat():
                     and not error
                 ):
                     try:
-                        from actions import execute_actions
-
-                        allowed = getattr(
-                            captured_enrichment_result, "allowed_actions", []
-                        )
-                        results, _ = execute_actions(
-                            response_text=full_content,
-                            alias_name=captured_enrichment_result.enricher_name,
-                            allowed_actions=allowed,
-                            session_key=getattr(
-                                captured_enrichment_result, "session_key", None
-                            ),
-                            default_email_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_email_account_id",
-                                None,
-                            ),
-                            default_calendar_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_calendar_account_id",
-                                None,
-                            ),
-                            default_calendar_id=getattr(
-                                captured_enrichment_result,
-                                "action_calendar_id",
-                                None,
-                            ),
-                            default_tasks_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_tasks_account_id",
-                                None,
-                            ),
-                            default_tasks_list_id=getattr(
-                                captured_enrichment_result,
-                                "action_tasks_list_id",
-                                None,
-                            ),
-                            default_notification_urls=getattr(
-                                captured_enrichment_result,
-                                "action_notification_urls",
-                                None,
-                            ),
-                            scheduled_prompts_account_id=getattr(
-                                captured_enrichment_result,
-                                "scheduled_prompts_account_id",
-                                None,
-                            ),
-                            scheduled_prompts_calendar_id=getattr(
-                                captured_enrichment_result,
-                                "scheduled_prompts_calendar_id",
-                                None,
-                            ),
+                        results, _ = execute_actions_from_enrichment(
+                            captured_enrichment_result, full_content
                         )
                         if results:
                             logger.info(
@@ -1947,38 +1967,8 @@ def chat():
                 and llm_content
             ):
                 try:
-                    from actions import execute_actions, strip_actions
-
-                    allowed = getattr(enrichment_result, "allowed_actions", [])
-                    results, cleaned_content = execute_actions(
-                        response_text=llm_content,
-                        alias_name=enrichment_result.enricher_name,
-                        allowed_actions=allowed,
-                        session_key=getattr(enrichment_result, "session_key", None),
-                        default_email_account_id=getattr(
-                            enrichment_result, "action_email_account_id", None
-                        ),
-                        default_calendar_account_id=getattr(
-                            enrichment_result, "action_calendar_account_id", None
-                        ),
-                        default_calendar_id=getattr(
-                            enrichment_result, "action_calendar_id", None
-                        ),
-                        default_tasks_account_id=getattr(
-                            enrichment_result, "action_tasks_account_id", None
-                        ),
-                        default_tasks_list_id=getattr(
-                            enrichment_result, "action_tasks_list_id", None
-                        ),
-                        default_notification_urls=getattr(
-                            enrichment_result, "action_notification_urls", None
-                        ),
-                        scheduled_prompts_account_id=getattr(
-                            enrichment_result, "scheduled_prompts_account_id", None
-                        ),
-                        scheduled_prompts_calendar_id=getattr(
-                            enrichment_result, "scheduled_prompts_calendar_id", None
-                        ),
+                    results, cleaned_content = execute_actions_from_enrichment(
+                        enrichment_result, llm_content
                     )
                     if results:
                         logger.info(
@@ -2758,58 +2748,8 @@ def openai_chat_completions():
                     and not error
                 ):
                     try:
-                        from actions import execute_actions
-
-                        allowed = getattr(
-                            captured_enrichment_result, "allowed_actions", []
-                        )
-                        results, _ = execute_actions(
-                            response_text=full_content,
-                            alias_name=captured_enrichment_result.enricher_name,
-                            allowed_actions=allowed,
-                            session_key=getattr(
-                                captured_enrichment_result, "session_key", None
-                            ),
-                            default_email_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_email_account_id",
-                                None,
-                            ),
-                            default_calendar_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_calendar_account_id",
-                                None,
-                            ),
-                            default_calendar_id=getattr(
-                                captured_enrichment_result,
-                                "action_calendar_id",
-                                None,
-                            ),
-                            default_tasks_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_tasks_account_id",
-                                None,
-                            ),
-                            default_tasks_list_id=getattr(
-                                captured_enrichment_result,
-                                "action_tasks_list_id",
-                                None,
-                            ),
-                            default_notification_urls=getattr(
-                                captured_enrichment_result,
-                                "action_notification_urls",
-                                None,
-                            ),
-                            scheduled_prompts_account_id=getattr(
-                                captured_enrichment_result,
-                                "scheduled_prompts_account_id",
-                                None,
-                            ),
-                            scheduled_prompts_calendar_id=getattr(
-                                captured_enrichment_result,
-                                "scheduled_prompts_calendar_id",
-                                None,
-                            ),
+                        results, _ = execute_actions_from_enrichment(
+                            captured_enrichment_result, full_content
                         )
                         if results:
                             logger.info(
@@ -2937,38 +2877,8 @@ def openai_chat_completions():
                 and llm_content
             ):
                 try:
-                    from actions import execute_actions
-
-                    allowed = getattr(enrichment_result, "allowed_actions", [])
-                    results, cleaned_content = execute_actions(
-                        response_text=llm_content,
-                        alias_name=enrichment_result.enricher_name,
-                        allowed_actions=allowed,
-                        session_key=getattr(enrichment_result, "session_key", None),
-                        default_email_account_id=getattr(
-                            enrichment_result, "action_email_account_id", None
-                        ),
-                        default_calendar_account_id=getattr(
-                            enrichment_result, "action_calendar_account_id", None
-                        ),
-                        default_calendar_id=getattr(
-                            enrichment_result, "action_calendar_id", None
-                        ),
-                        default_tasks_account_id=getattr(
-                            enrichment_result, "action_tasks_account_id", None
-                        ),
-                        default_tasks_list_id=getattr(
-                            enrichment_result, "action_tasks_list_id", None
-                        ),
-                        default_notification_urls=getattr(
-                            enrichment_result, "action_notification_urls", None
-                        ),
-                        scheduled_prompts_account_id=getattr(
-                            enrichment_result, "scheduled_prompts_account_id", None
-                        ),
-                        scheduled_prompts_calendar_id=getattr(
-                            enrichment_result, "scheduled_prompts_calendar_id", None
-                        ),
+                    results, cleaned_content = execute_actions_from_enrichment(
+                        enrichment_result, llm_content
                     )
                     if results:
                         logger.info(
@@ -3719,58 +3629,8 @@ def anthropic_messages():
                     and not error
                 ):
                     try:
-                        from actions import execute_actions
-
-                        allowed = getattr(
-                            captured_enrichment_result, "allowed_actions", []
-                        )
-                        results, _ = execute_actions(
-                            response_text=full_content,
-                            alias_name=captured_enrichment_result.enricher_name,
-                            allowed_actions=allowed,
-                            session_key=getattr(
-                                captured_enrichment_result, "session_key", None
-                            ),
-                            default_email_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_email_account_id",
-                                None,
-                            ),
-                            default_calendar_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_calendar_account_id",
-                                None,
-                            ),
-                            default_calendar_id=getattr(
-                                captured_enrichment_result,
-                                "action_calendar_id",
-                                None,
-                            ),
-                            default_tasks_account_id=getattr(
-                                captured_enrichment_result,
-                                "action_tasks_account_id",
-                                None,
-                            ),
-                            default_tasks_list_id=getattr(
-                                captured_enrichment_result,
-                                "action_tasks_list_id",
-                                None,
-                            ),
-                            default_notification_urls=getattr(
-                                captured_enrichment_result,
-                                "action_notification_urls",
-                                None,
-                            ),
-                            scheduled_prompts_account_id=getattr(
-                                captured_enrichment_result,
-                                "scheduled_prompts_account_id",
-                                None,
-                            ),
-                            scheduled_prompts_calendar_id=getattr(
-                                captured_enrichment_result,
-                                "scheduled_prompts_calendar_id",
-                                None,
-                            ),
+                        results, _ = execute_actions_from_enrichment(
+                            captured_enrichment_result, full_content
                         )
                         if results:
                             logger.info(
@@ -3885,38 +3745,8 @@ def anthropic_messages():
                 and llm_content
             ):
                 try:
-                    from actions import execute_actions
-
-                    allowed = getattr(enrichment_result, "allowed_actions", [])
-                    results, cleaned_content = execute_actions(
-                        response_text=llm_content,
-                        alias_name=enrichment_result.enricher_name,
-                        allowed_actions=allowed,
-                        session_key=getattr(enrichment_result, "session_key", None),
-                        default_email_account_id=getattr(
-                            enrichment_result, "action_email_account_id", None
-                        ),
-                        default_calendar_account_id=getattr(
-                            enrichment_result, "action_calendar_account_id", None
-                        ),
-                        default_calendar_id=getattr(
-                            enrichment_result, "action_calendar_id", None
-                        ),
-                        default_tasks_account_id=getattr(
-                            enrichment_result, "action_tasks_account_id", None
-                        ),
-                        default_tasks_list_id=getattr(
-                            enrichment_result, "action_tasks_list_id", None
-                        ),
-                        default_notification_urls=getattr(
-                            enrichment_result, "action_notification_urls", None
-                        ),
-                        scheduled_prompts_account_id=getattr(
-                            enrichment_result, "scheduled_prompts_account_id", None
-                        ),
-                        scheduled_prompts_calendar_id=getattr(
-                            enrichment_result, "scheduled_prompts_calendar_id", None
-                        ),
+                    results, cleaned_content = execute_actions_from_enrichment(
+                        enrichment_result, llm_content
                     )
                     if results:
                         logger.info(
@@ -4021,6 +3851,16 @@ if __name__ == "__main__":
                 f"{plugin_counts['live_sources']} live sources, "
                 f"{plugin_counts['actions']} actions"
             )
+
+            # Load action handlers AFTER plugin discovery
+            # (must happen AFTER discover_plugins so action plugins are registered)
+            if plugin_counts["actions"] > 0:
+                try:
+                    from actions import load_action_handlers
+
+                    load_action_handlers()
+                except Exception as e:
+                    logger.warning(f"Failed to load action handlers: {e}")
 
             # Seed database entries for live source plugins
             # (must happen AFTER plugin discovery so registry is populated)

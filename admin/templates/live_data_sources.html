@@ -10,10 +10,10 @@ block content %}
                 custom APIs or use built-in integrations.
             </p>
         </div>
-        <button @click="openCreateModal()" class="btn btn-primary">
+        <button @click="openCreateModal()" class="btn btn-primary btn-sm">
             <svg
                 xmlns="http://www.w3.org/2000/svg"
-                class="h-5 w-5 mr-1"
+                class="h-4 w-4 mr-1"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -133,8 +133,7 @@ block content %}
                     <thead>
                         <tr>
                             <th class="w-8"></th>
-                            <th>Name</th>
-                            <th>Type</th>
+                            <th>Source</th>
                             <th>Data Type</th>
                             <th>API Calls</th>
                             <th>Status</th>
@@ -167,14 +166,11 @@ block content %}
                                     </svg>
                                 </td>
                                 <td>
-                                    <div class="flex items-center gap-2">
-                                        <input
-                                            type="checkbox"
-                                            class="toggle toggle-sm toggle-success"
-                                            :checked="source.enabled"
-                                            @change="toggleEnabled(source)"
-                                            @click.stop
-                                        />
+                                    <div class="flex items-center gap-3">
+                                        <span
+                                            class="text-xl"
+                                            x-text="getPluginIcon(source.source_type)"
+                                        ></span>
                                         <div>
                                             <div
                                                 class="font-medium"
@@ -182,25 +178,9 @@ block content %}
                                             ></div>
                                             <div
                                                 class="text-xs text-base-content/50"
-                                                x-text="source.description || 'No description'"
+                                                x-text="source.description || getTypeLabel(source.source_type)"
                                             ></div>
                                         </div>
-                                    </div>
-                                </td>
-                                <td>
-                                    <div class="flex items-center gap-2">
-                                        <span
-                                            class="badge badge-sm"
-                                            :class="getTypeBadgeClass(source.source_type)"
-                                            :title="pluginsByType[source.source_type]?.description || ''"
-                                        >
-                                            <span
-                                                x-text="getPluginIcon(source.source_type)"
-                                            ></span>
-                                            <span
-                                                x-text="getTypeLabel(source.source_type)"
-                                            ></span>
-                                        </span>
                                     </div>
                                 </td>
                                 <td>

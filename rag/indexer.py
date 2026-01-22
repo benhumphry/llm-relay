@@ -445,6 +445,10 @@ SUMMARY: <content type description>"""
         Args:
             rag_id: ID of the SmartRAG
             cron_expression: Cron expression (e.g., "0 2 * * *" for 2 AM daily)
+
+        Note:
+            When minute is "0", a stagger offset is added based on rag_id
+            to prevent all RAGs from indexing simultaneously (thundering herd).
         """
         if not self._scheduler:
             logger.warning("Scheduler not available - cannot schedule RAG indexing")
@@ -468,11 +472,24 @@ SUMMARY: <content type description>"""
                 logger.error(f"Invalid cron expression: {cron_expression}")
                 return
 
+            minute = parts[0]
+            hour = parts[1]
+            second = 0
+
+            # Stagger jobs scheduled at minute 0 to prevent thundering herd
+            # Use rag_id to generate deterministic offset across full hour
+            if minute == "0":
+                total_offset = rag_id % 3600
+                stagger_minute = total_offset // 60
+                second = total_offset % 60
+                minute = str(stagger_minute)
+
             from apscheduler.triggers.cron import CronTrigger
 
             trigger = CronTrigger(
-                minute=parts[0],
-                hour=parts[1],
+                second=second,
+                minute=minute,
+                hour=hour,
                 day=parts[2],
                 month=parts[3],
                 day_of_week=parts[4],
@@ -485,7 +502,8 @@ SUMMARY: <content type description>"""
                 id=job_id,
                 replace_existing=True,
             )
-            logger.info(f"Scheduled indexing for RAG {rag_id}: {cron_expression}")
+            actual_cron = f"{minute} {hour} {parts[2]} {parts[3]} {parts[4]}"
+            logger.info(f"Scheduled indexing for RAG {rag_id}: {actual_cron}")
         except Exception as e:
             logger.error(f"Failed to schedule RAG {rag_id}: {e}")
 
@@ -496,6 +514,11 @@ SUMMARY: <content type description>"""
         Args:
             store_id: ID of the DocumentStore
             cron_expression: Cron expression (e.g., "0 2 * * *" for 2 AM daily)
+
+        Note:
+            When minute is "0", a stagger offset is added based on store_id
+            to prevent all stores from indexing simultaneously (thundering herd).
+            The offset is deterministic: same store always gets same minute.
         """
         if not self._scheduler:
             logger.warning("Scheduler not available - cannot schedule store indexing")
@@ -518,11 +541,28 @@ SUMMARY: <content type description>"""
                 logger.error(f"Invalid cron expression: {cron_expression}")
                 return
 
+            minute = parts[0]
+            hour = parts[1]
+            second = 0
+
+            # Stagger jobs that are scheduled at minute 0 to prevent thundering herd
+            # Use store_id to generate deterministic offset across full hour (0-3599 seconds)
+            # This supports up to 3600 jobs without collision
+            if minute == "0":
+                total_offset = store_id % 3600  # seconds into the hour
+                stagger_minute = total_offset // 60
+                second = total_offset % 60
+                minute = str(stagger_minute)
+                logger.debug(
+                    f"Staggering store {store_id} to {stagger_minute}:{second:02d}"
+                )
+
             from apscheduler.triggers.cron import CronTrigger
 
             trigger = CronTrigger(
-                minute=parts[0],
-                hour=parts[1],
+                second=second,
+                minute=minute,
+                hour=hour,
                 day=parts[2],
                 month=parts[3],
                 day_of_week=parts[4],
@@ -535,7 +575,8 @@ SUMMARY: <content type description>"""
                 id=job_id,
                 replace_existing=True,
             )
-            logger.info(f"Scheduled indexing for store {store_id}: {cron_expression}")
+            actual_cron = f"{minute} {hour} {parts[2]} {parts[3]} {parts[4]}"
+            logger.info(f"Scheduled indexing for store {store_id}: {actual_cron}")
         except Exception as e:
             logger.error(f"Failed to schedule store {store_id}: {e}")
 
@@ -733,6 +774,14 @@ SUMMARY: <content type description>"""
         update_document_store_index_status(store_id, "indexing")
 
         try:
+            # Always load global vision settings (needed for local file processing)
+            from .vision import get_vision_config_from_settings
+
+            global_vision = get_vision_config_from_settings()
+            vision_provider = global_vision.provider_type or "local"
+            vision_model = global_vision.model_name
+            vision_ollama_url = global_vision.base_url
+
             # Check if a unified source plugin exists for this store type
             # Unified sources combine RAG + Live into a single plugin
             source = self._get_unified_source_for_store(store)
@@ -741,13 +790,6 @@ SUMMARY: <content type description>"""
                 # Fall back to legacy document source
                 from mcp.sources import get_document_source
 
-                # Always use global vision settings
-                from .vision import get_vision_config_from_settings
-
-                global_vision = get_vision_config_from_settings()
-                vision_provider = global_vision.provider_type or "local"
-                vision_model = global_vision.model_name
-                vision_ollama_url = global_vision.base_url
                 if vision_provider != "local":
                     logger.info(
                         f"Using global vision settings: {vision_provider}/{vision_model}"
@@ -908,8 +950,12 @@ SUMMARY: <content type description>"""
                 )
                 try:
                     if store.source_type == "local":
+                        # Handle both file:// URIs and plain paths
+                        file_path = doc_info.uri
+                        if file_path.startswith("file://"):
+                            file_path = file_path[7:]  # Strip file:// prefix
                         chunks = self._process_document(
-                            Path(doc_info.uri),
+                            Path(file_path),
                             store.chunk_size,
                             store.chunk_overlap,
                             vision_provider=vision_provider,
