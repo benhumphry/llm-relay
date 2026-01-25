@@ -28,7 +28,6 @@ Usage:
 from .builder import (
     estimate_tokens,
     format_as_context_message,
-    format_cached_response,
     format_context_footer,
     format_context_header,
     format_document_chunks,
@@ -75,7 +74,6 @@ __all__ = [
     "format_search_results",
     "format_scraped_content",
     "format_document_chunks",
-    "format_cached_response",
     "merge_contexts",
     # Model Intelligence
     "ModelIntelligence",

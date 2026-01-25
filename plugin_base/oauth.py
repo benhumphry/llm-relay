@@ -388,3 +388,30 @@ class OAuthMixin:
         if self._oauth_client:
             self._oauth_client.close()
             self._oauth_client = None
+
+
+class GoogleOAuthMixin(OAuthMixin):
+    """
+    OAuth mixin specifically for Google APIs.
+
+    Uses Google's token endpoint by default.
+    """
+
+    oauth_provider: str = "google"
+
+
+class MicrosoftOAuthMixin(OAuthMixin):
+    """
+    OAuth mixin specifically for Microsoft Graph API.
+
+    Uses Microsoft's consumer token endpoint by default.
+    For enterprise/work accounts, override _get_default_token_url.
+    """
+
+    oauth_provider: str = "microsoft"
+
+    def _get_default_token_url(self) -> Optional[str]:
+        """Use Microsoft consumer token endpoint."""
+        # For consumer accounts (personal Microsoft accounts)
+        # Enterprise would use: https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+        return "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"

@@ -17,7 +17,6 @@ Query routing examples:
 
 import logging
 import re
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Optional
 
@@ -26,6 +25,7 @@ import httpx
 from plugin_base.common import FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
+from plugin_base.oauth import MicrosoftOAuthMixin
 from plugin_base.unified_source import (
     MergeStrategy,
     PluginUnifiedSource,
@@ -34,158 +34,6 @@ from plugin_base.unified_source import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class MicrosoftOAuthMixin:
-    """
-    OAuth mixin for Microsoft Graph API.
-
-    Similar to OAuthMixin but handles Microsoft-specific token refresh.
-    """
-
-    oauth_account_id: int
-    _oauth_client: Optional[httpx.Client] = None
-    _access_token: Optional[str] = None
-    _token_expires_at: float = 0
-
-    def _init_oauth_client(self, timeout: int = 30) -> None:
-        """Initialize the OAuth HTTP client."""
-        self._oauth_client = httpx.Client(timeout=timeout)
-        self._refresh_token_if_needed()
-
-    def _get_token_data(self) -> Optional[dict]:
-        """Get token data from the database."""
-        try:
-            from db.oauth_tokens import get_oauth_token_by_id
-
-            token_data = get_oauth_token_by_id(self.oauth_account_id)
-            return token_data
-        except Exception as e:
-            logger.error(f"Failed to get OAuth token: {e}")
-            return None
-
-    def _update_token_data(self, token_data: dict) -> bool:
-        """Update token data in the database."""
-        try:
-            from db.oauth_tokens import update_oauth_token_data
-
-            update_oauth_token_data(self.oauth_account_id, token_data)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to update OAuth token: {e}")
-            return False
-
-    def _refresh_token_if_needed(self) -> bool:
-        """Check token expiry and refresh if needed."""
-        token_data = self._get_token_data()
-        if not token_data:
-            logger.error(f"OAuth token not found: {self.oauth_account_id}")
-            return False
-
-        expires_at = token_data.get("expires_at", 0)
-        current_time = time.time()
-
-        # Refresh if: no expiry set (unknown state) OR expired/expiring soon
-        if not expires_at or current_time > expires_at - 300:
-            logger.info(
-                f"Microsoft OAuth token expired or expiring soon for account {self.oauth_account_id}, refreshing..."
-            )
-            refreshed = self._do_token_refresh(token_data)
-            if refreshed:
-                self._update_token_data(refreshed)
-                token_data = refreshed
-            else:
-                logger.error("Token refresh failed")
-                return False
-
-        self._access_token = token_data.get("access_token")
-        self._token_expires_at = token_data.get("expires_at", 0)
-        return bool(self._access_token)
-
-    def _do_token_refresh(self, token_data: dict) -> Optional[dict]:
-        """Perform Microsoft OAuth token refresh."""
-        refresh_token = token_data.get("refresh_token")
-        if not refresh_token:
-            logger.error("No refresh token available")
-            return None
-
-        client_id = token_data.get("client_id")
-        client_secret = token_data.get("client_secret")
-
-        if not client_id or not client_secret:
-            logger.error("Missing client_id or client_secret in token data")
-            return None
-
-        token_url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token"
-
-        try:
-            response = httpx.post(
-                token_url,
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                },
-                timeout=30,
-            )
-            response.raise_for_status()
-            new_token = response.json()
-
-            result = token_data.copy()
-            result["access_token"] = new_token["access_token"]
-
-            if "refresh_token" in new_token:
-                result["refresh_token"] = new_token["refresh_token"]
-
-            if "expires_in" in new_token:
-                result["expires_at"] = time.time() + new_token["expires_in"]
-
-            logger.info(
-                f"Successfully refreshed Microsoft OAuth token for account {self.oauth_account_id}"
-            )
-            return result
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Token refresh HTTP error: {e.response.status_code}")
-            try:
-                error_body = e.response.json()
-                logger.error(f"Error response: {error_body}")
-            except Exception:
-                pass
-            return None
-        except Exception as e:
-            logger.error(f"Token refresh failed: {e}")
-            return None
-
-    def _get_auth_headers(self) -> dict:
-        """Get authorization headers for requests."""
-        current_time = time.time()
-        if not self._access_token or current_time > self._token_expires_at - 60:
-            self._refresh_token_if_needed()
-
-        if not self._access_token:
-            logger.error("No access token available after refresh attempt")
-
-        return {"Authorization": f"Bearer {self._access_token}"}
-
-    def get_account_email(self) -> Optional[str]:
-        """Get the email address associated with the OAuth account."""
-        try:
-            from db.oauth_tokens import get_oauth_token_info
-
-            token_info = get_oauth_token_info(self.oauth_account_id)
-            if token_info:
-                return token_info.get("account_email")
-            return None
-        except Exception:
-            return None
-
-    def close(self) -> None:
-        """Close the HTTP client."""
-        if self._oauth_client:
-            self._oauth_client.close()
-            self._oauth_client = None
 
 
 class OutlookUnifiedSource(MicrosoftOAuthMixin, PluginUnifiedSource):

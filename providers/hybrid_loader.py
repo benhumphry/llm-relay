@@ -253,24 +253,3 @@ def get_all_models_with_metadata(
             logger.warning(f"Failed to get dynamic models for {provider_name}: {e}")
 
     return result
-
-
-# Legacy functions for backwards compatibility
-# These can be removed once all code is updated to use the new Model table directly
-
-
-def get_model_overrides(provider_id: str) -> dict[str, dict]:
-    """Legacy function - returns empty dict since overrides are no longer used."""
-    return {}
-
-
-def get_custom_models(provider_id: str) -> list[dict]:
-    """Legacy function - returns models with source='custom' from Model table."""
-    _ensure_db_initialized()
-    with get_db_context() as db:
-        models = (
-            db.query(Model)
-            .filter(Model.provider_id == provider_id, Model.source == "custom")
-            .all()
-        )
-        return [m.to_dict() for m in models]

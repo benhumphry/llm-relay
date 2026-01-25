@@ -5,8 +5,8 @@
 <h1 align="center">LLM Relay</h1>
 
 <p align="center">
-<strong>Intelligent LLM Gateway with Smart Routing and Context Enrichment</strong><br>
-A self-hosted proxy that unifies all your LLM providers behind one API, with AI-powered routing, document RAG, real-time web search, and semantic caching.
+<strong>Intelligent LLM Gateway with Smart Routing, RAG, and Real-Time Data</strong><br>
+A self-hosted proxy that unifies all your LLM providers behind one API, with AI-powered routing, document RAG, live data sources, web search, and semantic caching.
 </p>
 
 <p align="center">
@@ -21,11 +21,13 @@ An intelligent gateway that makes your LLMs smarter and easier to use:
 
 - **Smart Routing** — Let AI pick the best model for each request from your available providers
 - **Document RAG** — Automatically inject relevant context from your indexed documents
+- **Live Data Sources** — Real-time data from weather, stocks, sports, news, and custom APIs
+- **Smart Actions** — Let LLMs send emails, create calendar events, and perform tasks
 - **Real-time Web Search** — Enrich requests with current information from the web
 - **Semantic Caching** — Cache and reuse responses for similar queries to reduce costs
 - **One endpoint, all models** — Claude, GPT, Gemini, Llama, and 700+ others through one API
 - **Accurate cost tracking** — Token-level tracking with cache and reasoning tokens
-- **Works with any client** — Ollama and OpenAI API compatible
+- **Works with any client** — Ollama, OpenAI, and Anthropic API compatible
 
 ## Quick Start
 
@@ -53,6 +55,9 @@ client = OpenAI(base_url="http://localhost:11434/v1", api_key="my-team")
 client.chat.completions.create(model="claude-sonnet", messages=[...])
 client.chat.completions.create(model="gpt-4o", messages=[...])
 client.chat.completions.create(model="gemini-2.5-pro", messages=[...])
+
+# Use a Smart Alias with RAG and live data
+client.chat.completions.create(model="research-assistant", messages=[...])
 ```
 
 Or with curl:
@@ -62,40 +67,116 @@ curl http://localhost:11434/api/chat \
   -d '{"model": "claude-sonnet", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-Works with Open WebUI, Cursor, Continue, and any Ollama or OpenAI-compatible client.
+Works with Open WebUI, Cursor, Continue, Claude Code, and any Ollama or OpenAI-compatible client.
 
-## Features
+## Core Features
 
 ### Smart Aliases
 
-The core feature for intelligent model handling. Create a Smart Alias and enable any combination of capabilities:
+The central feature for intelligent LLM handling. A Smart Alias is a virtual model that can combine any of these capabilities:
 
 | Feature | Description |
 |---------|-------------|
-| **Routing** | Designator LLM analyzes each request and picks the best model |
-| **RAG** | Inject relevant context from your indexed documents |
-| **Web** | Real-time web search and scraping for current information |
+| **Routing** | Designator LLM analyzes each request and picks the best model from candidates |
+| **RAG** | Inject relevant context from your indexed Document Stores |
+| **Live Data** | Query real-time data sources (weather, stocks, sports, news, APIs) |
+| **Web Search** | Real-time web search and page scraping for current information |
+| **Smart Actions** | Let LLMs perform actions (send emails, create events, manage tasks) |
 | **Cache** | Semantic response caching to reduce costs |
 | **Memory** | Persistent memory that remembers explicit user facts across sessions |
-| **Smart Source Selection** | Designator allocates token budget across RAG stores and web |
-| **Smart Tag** | Trigger by request tag instead of model name |
+| **Smart Source Selection** | Designator allocates token budget across RAG stores, web, and live sources |
 
 **Example configurations:**
 
 | Alias Name | Features | Use Case |
 |------------|----------|----------|
 | `smart` | Routing | Let AI pick between Claude, GPT, Gemini per request |
-| `research` | RAG + Web | Answer questions with docs and current info |
+| `research` | RAG + Web + Live Data | Answer questions with docs, current info, and live data |
+| `assistant` | RAG + Actions + Memory | Personal assistant that remembers you and can take actions |
 | `docs` | Smart Tag + RAG | Tag any request to add document context |
 | `cached-claude` | Cache | Reduce costs for repeated queries |
-| `assistant` | Memory | Maintain context across conversation sessions |
+
+### Document RAG
+
+Index your documents for semantic search and context injection:
+
+**Supported Sources:**
+- Local filesystem (Docker-mounted folders)
+- Google Drive, Gmail, Calendar, Tasks, Contacts
+- Notion databases and pages
+- GitHub repositories
+- Paperless-ngx document management
+- Nextcloud files
+- Slack channels
+- Microsoft 365 (OneDrive, Outlook, Calendar, OneNote, Teams)
+
+**Supported Formats:**
+- Documents: PDF, DOCX, PPTX, XLSX, HTML, Markdown, plain text
+- Images: PNG, JPG, TIFF with OCR support
+- Code: Most programming languages
+
+**Features:**
+- Configurable embeddings (local, Ollama, or cloud providers)
+- Cross-encoder reranking for improved relevance
+- Scheduled indexing with cron expressions
+- Incremental indexing (only changed documents)
+- Two-pass retrieval: semantic search finds documents, then fetches full content
+
+### Live Data Sources
+
+Real-time data that's fetched at request time:
+
+**Built-in Sources:**
+- **Weather** — Current conditions and forecasts via Open-Meteo
+- **Stocks** — Real-time prices, charts, and financials via Yahoo Finance
+- **Sports** — Live scores, fixtures, and standings via API-Football
+- **News** — Headlines and articles via News API
+- **Routes** — Journey planning with traffic via Google Routes API
+- **Transport** — UK train times via National Rail
+
+**Plugin Sources:**
+- **Amazon** — Product search, prices, and reviews
+- **Custom APIs** — Connect any RapidAPI or MCP-compatible API
+
+The designator LLM automatically decides which sources to query based on the user's question.
+
+### Smart Actions
+
+Let your LLMs perform real-world tasks:
+
+**Email Actions (Gmail/Outlook):**
+- Draft or send new emails
+- Reply to and forward messages
+- Archive, label, mark read/unread
+
+**Calendar Actions (Google/Outlook):**
+- Create, update, and delete events
+- Check availability
+
+**Task Actions (Todoist, Google Tasks):**
+- Create and complete tasks
+- Set due dates and priorities
+
+**Notification Actions:**
+- Send push notifications via webhooks
+
+Actions are sandboxed - you configure which actions each Smart Alias can perform.
+
+### Web Search
+
+Real-time web search and content extraction:
+
+- **SearXNG integration** — Self-hosted meta-search engine
+- **Perplexity search** — Alternative search provider
+- **Jina Reader** — Clean content extraction from URLs
+- **Smart query generation** — Designator rewrites queries for better results
 
 ### Providers
 
-15 built-in providers, 700+ models:
+15+ built-in providers, 700+ models:
 
-| Provider | Set Environment Variable |
-|----------|--------------------------|
+| Provider | Environment Variable |
+|----------|---------------------|
 | Anthropic | `ANTHROPIC_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Google Gemini | `GOOGLE_API_KEY` |
@@ -112,13 +193,18 @@ The core feature for intelligent model handling. Create a Smart Alias and enable
 | SambaNova | `SAMBANOVA_API_KEY` |
 | Cohere | `COHERE_API_KEY` |
 
-Plus: connect local Ollama instances and add custom OpenAI-compatible providers through the Admin UI.
+Plus: connect local Ollama instances and custom OpenAI-compatible providers through the Admin UI.
 
 ### Cost Tracking
 
-Every request is logged with input tokens, output tokens, reasoning tokens, cache tokens, and calculated cost. View breakdowns by provider, model, tag, or client in the Admin UI.
+Every request is logged with:
+- Input tokens, output tokens, reasoning tokens
+- Cache read/write tokens (Anthropic, Gemini, DeepSeek)
+- Calculated cost in USD
 
-Pricing syncs from LiteLLM and handles provider quirks automatically (Gemini tiered pricing, Perplexity per-request fees, Anthropic cache multipliers, etc).
+View breakdowns by provider, model, tag, client, or time period in the Admin UI.
+
+Pricing syncs from LiteLLM and handles provider quirks automatically.
 
 ### Tagging
 
@@ -149,29 +235,25 @@ Transparent model name mappings with wildcard support:
 
 Use cases: seamless model upgrades, provider switching without client changes.
 
-### Data Sources
+## API Compatibility
 
-Index documents and websites for RAG retrieval:
+### Ollama API (port 11434)
+- `GET /api/tags` — List models
+- `POST /api/chat` — Chat completion
+- `POST /api/generate` — Text generation
 
-**Document Stores:**
-- **Multiple formats** — PDF, DOCX, PPTX, HTML, Markdown, images (with OCR)
-- **Multiple sources** — Local files, Google Drive, Gmail, Calendar, Notion, GitHub, Paperless, Nextcloud
-- **Flexible embeddings** — Local (bundled), Ollama, or cloud providers
-- **Scheduled indexing** — Cron-based re-indexing for updated documents
+### OpenAI API (port 11434)
+- `GET /v1/models` — List models
+- `POST /v1/chat/completions` — Chat completion
+- `POST /v1/completions` — Text completion
 
-**Websites:**
-- **Crawl and index** — Automatically crawl websites and extract content
-- **Configurable depth** — Control how many levels of links to follow
-- **URL patterns** — Include/exclude URLs matching specific patterns
+### Anthropic API (port 11434)
+- `POST /v1/messages` — Chat completion with native Anthropic format
 
-### Admin UI
-
-Clean web interface for:
-- Provider and model management
-- Smart Alias configuration
-- Document Store management
-- Usage analytics with charts and filters
-- Settings and data export
+Configure Claude Code to use LLM Relay:
+```bash
+export ANTHROPIC_BASE_URL=http://your-relay-host:11434
+```
 
 ## Installation
 
@@ -186,6 +268,7 @@ services:
       - "8080:8080"
     volumes:
       - llm-relay-data:/data
+      - /path/to/your/docs:/documents:ro  # Optional: mount local docs
     env_file:
       - .env
 
@@ -195,16 +278,18 @@ volumes:
 
 ### Production Setup
 
-For production deployments, PostgreSQL is recommended. For Smart Alias features (RAG, Cache, Model Intelligence), ChromaDB is required.
+For production deployments:
+- **PostgreSQL** — Recommended for the database (SQLite works for testing)
+- **ChromaDB** — Required for RAG, caching, and semantic features
 
-See **[INSTALLATION.md](INSTALLATION.md)** for:
-- PostgreSQL setup
-- ChromaDB integration
-- SearXNG integration (web search)
+See **[INSTALLATION.md](INSTALLATION.md)** for complete setup including:
+- PostgreSQL and ChromaDB configuration
+- SearXNG integration for web search
+- Google OAuth setup for Drive/Gmail/Calendar
 - Full environment variable reference
 - Docker Swarm deployment
 
-### Quick Environment Variables
+### Key Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -212,9 +297,11 @@ See **[INSTALLATION.md](INSTALLATION.md)** for:
 | `ADMIN_PORT` | 8080 | Admin UI port |
 | `ADMIN_PASSWORD` | (random) | Admin UI password |
 | `DATABASE_URL` | SQLite | PostgreSQL URL for production |
-| `CHROMA_URL` | (none) | ChromaDB URL (enables Cache, RAG) |
+| `CHROMA_URL` | (none) | ChromaDB URL (enables RAG, Cache) |
 | `SEARXNG_URL` | (none) | SearXNG URL (enables Web search) |
 | `JINA_API_KEY` | (none) | Jina API key (search, scraping, reranking) |
+| `GOOGLE_CLIENT_ID` | (none) | Google OAuth (Drive, Gmail, Calendar) |
+| `RAPIDAPI_KEY` | (none) | RapidAPI key (news, Amazon, sports) |
 
 ### Without Docker
 
@@ -224,22 +311,70 @@ pip install -r requirements.txt
 python proxy.py
 ```
 
-## API Endpoints
+## Admin UI
 
-### Ollama API
-- `GET /api/tags` — List models
-- `POST /api/chat` — Chat completion
-- `POST /api/generate` — Text generation
+Web interface at port 8080 for:
 
-### OpenAI API
-- `GET /v1/models` — List models
-- `POST /v1/chat/completions` — Chat completion
-- `POST /v1/completions` — Text completion
+**Routing**
+- Smart Aliases — Configure routing, RAG, live data, actions, caching
+- Redirects — Model name mappings
 
-## Documentation
+**Data Sources**
+- Document Stores — Configure and index document sources
+- Live Data Sources — Enable and configure real-time data
+- Websites — Crawl and index websites
 
-- [Getting Started](docs/guides/getting-started.md) - First-time setup walkthrough
-- [Smart Aliases](docs/guides/smart-aliases.md) - Unified routing, caching, and enrichment
+**Model Management**
+- Providers & Models — API keys and model availability
+- Local Servers — Connect Ollama instances
+
+**Analytics**
+- Statistics — Usage charts and cost breakdowns
+- Request Log — Detailed request history
+
+**System**
+- Settings — Global configuration
+- Alerts — System notifications
+
+## Plugin System
+
+LLM Relay supports plugins for extending functionality:
+
+- **Document Sources** — Add new document indexing sources
+- **Live Sources** — Add new real-time data providers
+- **Action Handlers** — Add new actions LLMs can perform
+
+Plugins are Python classes that implement a base interface. See `plugins/README.md` for development guide.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Clients                               │
+│    (Open WebUI, Cursor, Continue, Claude Code, curl, etc.)  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      LLM Relay                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Routing   │  │     RAG     │  │  Live Data  │         │
+│  │  (Designator│  │  (ChromaDB) │  │  (APIs)     │         │
+│  │   selects)  │  │             │  │             │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Actions   │  │  Web Search │  │   Caching   │         │
+│  │  (Email,    │  │  (SearXNG)  │  │  (Semantic) │         │
+│  │   Calendar) │  │             │  │             │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     LLM Providers                            │
+│   Anthropic  OpenAI  Gemini  DeepSeek  Ollama  ...         │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ## License
 

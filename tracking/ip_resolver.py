@@ -131,9 +131,3 @@ def _is_dns_resolution_enabled() -> bool:
         pass
     # Default to enabled
     return True
-
-
-def clear_dns_cache():
-    """Clear the DNS cache. Useful for testing."""
-    with _dns_cache_lock:
-        _dns_cache.clear()

@@ -26,18 +26,13 @@ import httpx
 from plugin_base.common import FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
+from plugin_base.oauth import MicrosoftOAuthMixin
 from plugin_base.unified_source import (
     MergeStrategy,
     PluginUnifiedSource,
     QueryAnalysis,
     QueryRouting,
 )
-
-# Import the mixin from outlook module
-try:
-    from .outlook import MicrosoftOAuthMixin
-except ImportError:
-    from builtin_plugins.unified_sources.outlook import MicrosoftOAuthMixin
 
 logger = logging.getLogger(__name__)
 

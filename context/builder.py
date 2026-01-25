@@ -242,30 +242,6 @@ def format_document_chunks(
     return "\n".join(lines)
 
 
-def format_cached_response(
-    cached: dict,
-    include_metadata: bool = False,
-) -> str:
-    """
-    Format a cached response for return.
-
-    Args:
-        cached: Cached response dict with keys: response, query, created_at, etc.
-        include_metadata: Whether to include cache metadata
-
-    Returns:
-        Response content (and optionally metadata)
-    """
-    response = cached.get("response", "")
-
-    if include_metadata:
-        created = cached.get("created_at", "unknown")
-        query = cached.get("query", "")
-        return f"[Cached response from {created}]\n\n{response}"
-
-    return response
-
-
 def merge_contexts(
     contexts: list[str],
     max_tokens: int,
