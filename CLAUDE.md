@@ -795,3 +795,117 @@ tests/plugins/fixtures/ - Mock plugins for testing
 - `admin/templates/base.html` - Moved nav links
 - `admin/app.py` - Added env-var-status endpoint
 - `plugin_base/common.py` - Added env_var to FieldDefinition
+
+---
+
+## Development Session (2026-01-25) - Live Document Lookup for File-Based Sources
+
+### Feature Overview
+
+Added live document lookup capability to file-based unified sources (local filesystem, Paperless, Nextcloud). This enables fetching full document content by filename when users ask "show me the invoice" or "what's in that document".
+
+**Problem solved:** RAG retrieves chunks semantically, but when users ask for specific file content, only chunks were returned. Now the system can fetch and return full document content.
+
+### Implementation
+
+**Unified sources updated with `supports_live = True`:**
+- `LocalFilesystemUnifiedSource` - Fuzzy filename matching, full file content fetch
+- `PaperlessUnifiedSource` - Title matching, API-based document fetch
+- `NextcloudUnifiedSource` - Filename matching, WebDAV-based file fetch
+
+**New capabilities:**
+- `action='lookup'` with `filename`/`title` param - Fetch full document content
+- `action='list'` - Enumerate files in the source
+- `action='search'` (Paperless only) - Search by content via API
+
+**Document resolution flow:**
+1. User asks for specific file ("show me INVOICE-2022.docx")
+2. Designator selects unified source with `action='lookup', filename='...'`
+3. `_resolve_document()` uses fuzzy matching (rapidfuzz) against indexed metadata
+4. `read_document()` fetches full content
+5. Text extraction handles PDF, DOCX, XLSX, PPTX formats
+
+### Key Architecture Patterns
+
+**Unified Source Live Params:**
+- `param_type` is a string ("string", "integer", "boolean"), NOT an enum
+- Import `ParamDefinition` from `plugin_base.live_source`, not `ParamType`
+
+**Plugin Registry:**
+- `discover_plugins()` returns counts: `{'unified_sources': 19, ...}`
+- Access plugins via `unified_source_registry.get(source_type)` or `unified_source_registry.get_all()`
+- `get_unified_source_plugin(source_type)` is the public API for lookups
+
+**Document Source Base Class (`mcp/sources.py`):**
+- Added `supports_live_lookup` property (default: True)
+- Added `resolve_document(query, indexed_metadata)` method with fuzzy matching
+- Fallback to exact substring match when rapidfuzz unavailable
+
+**Fuzzy Matching (rapidfuzz):**
+- Use `fuzz.partial_ratio` scorer, NOT `fuzz.token_set_ratio`
+- `partial_ratio` finds substrings: "20241024" matches "scanned_20241024-0726.pdf"
+- `token_set_ratio` requires full token matches, fails on partial date/number queries
+- Score cutoff of 70 works well for filename matching
+
+### Files Created/Modified
+
+**Modified:**
+- `mcp/sources.py` - Added `resolve_document()` to DocumentSource base class
+- `builtin_plugins/unified_sources/local_filesystem.py` - Added live lookup support
+- `builtin_plugins/unified_sources/paperless.py` - Added live lookup support
+- `builtin_plugins/unified_sources/nextcloud.py` - Added live lookup support
+- `rag/indexer.py` - Fixed DOCX processing bug (missing `doc = Document(...)` line)
+- `requirements.txt` - Added `rapidfuzz>=3.0.0`
+
+**New docs:**
+- `docs/LIVE_DOCUMENT_LOOKUP_PLAN.md` - Implementation plan
+
+### Bug Fix
+
+**DOCX processing in `_process_content()` (`rag/indexer.py:1634`):**
+```python
+# Before (broken):
+from docx import Document
+text = "\n".join(para.text for para in doc.paragraphs)  # doc undefined!
+
+# After (fixed):
+from docx import Document
+doc = Document(io.BytesIO(content.binary))
+text = "\n".join(para.text for para in doc.paragraphs)
+```
+
+### Smart Source Selection Dependency
+
+Live document lookup requires **Smart Source Selection** to be enabled on the Smart Alias. Without it:
+- No designator call occurs
+- `live_params` is never populated
+- Unified sources won't be queried for live data
+
+With Smart Source Selection enabled, unified sources from document stores are automatically included in the designator prompt (even when "Live Data Sources" toggle is off), allowing the designator to route document lookup requests appropriately.
+
+### Two-Pass Retrieval
+
+Two-pass retrieval combines semantic RAG search with live document fetch for full content retrieval:
+
+**Flow:**
+1. User asks for document content ("show me the invoice from October")
+2. `analyze_query()` returns `routing=QueryRouting.TWO_PASS` with `two_pass_fetch_full=True`
+3. **Pass 1 (RAG)**: Semantic search with `include_metadata=True` returns chunk content + `source_uri`
+4. **Pass 2 (Live)**: For each unique `source_uri`, call `fetch()` with `_two_pass_uri` param
+5. Results merged: RAG chunks provide context, live fetch provides full document content
+
+**Key components:**
+- `QueryRouting.TWO_PASS` in `plugin_base/unified_source.py`
+- `QueryAnalysis.two_pass_fetch_full` - enables pass 2 document fetch
+- `rag_search_fn(query, limit, include_metadata=True)` - returns `list[dict]` with `source_uri`, `source_file`, `content`, `score`
+- `_two_pass_uri` param in `fetch()` - direct URI for document resolution (skips fuzzy matching)
+
+**URI formats by source:**
+- Local filesystem: `file:///path/to/file.pdf`
+- Paperless: `paperless://{doc_id}`
+- Nextcloud: `nextcloud://{relative_path}`
+
+**When to use:**
+- User asks for full content of specific documents
+- Semantic search can identify relevant documents but chunks are insufficient
+- Need to combine RAG context with complete document content

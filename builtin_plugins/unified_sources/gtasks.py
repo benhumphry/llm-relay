@@ -72,6 +72,20 @@ class GTasksUnifiedSource(OAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Google Tasks access. Actions: "
+            "action='pending' for incomplete tasks, "
+            "action='due_today' for tasks due today, "
+            "action='overdue' for overdue tasks, "
+            "action='completed' for completed tasks, "
+            "action='search' with query='...' to search task content, "
+            "action='all' for all tasks. "
+            "Optional: tasklist='ListName' to filter by task list."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

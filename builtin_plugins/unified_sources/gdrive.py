@@ -68,6 +68,18 @@ class GDriveUnifiedSource(OAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Google Drive access. Actions: "
+            "action='recent' for recently modified files, "
+            "action='search' with query='...' to search file names/content, "
+            "action='folder' with folder_id='...' to list folder contents, "
+            "action='shared' for files shared with me. "
+            "Optional: mime_type to filter by file type."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

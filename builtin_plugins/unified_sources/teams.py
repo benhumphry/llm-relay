@@ -76,6 +76,17 @@ class TeamsUnifiedSource(MicrosoftOAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Microsoft Teams access. Actions: "
+            "action='recent' for recent messages, "
+            "action='unread' for unread messages, "
+            "action='search' with query='...' to search message content. "
+            "Optional: team='TeamName', channel='ChannelName' to filter."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

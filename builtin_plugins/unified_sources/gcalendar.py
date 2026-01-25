@@ -73,6 +73,19 @@ class GCalendarUnifiedSource(OAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Google Calendar access. Actions: "
+            "action='today' for today's events, "
+            "action='upcoming' for upcoming events (next 7 days), "
+            "action='week' for this week's events, "
+            "action='search' with query='...' to search events, "
+            "action='freebusy' to check availability. "
+            "Optional: date='YYYY-MM-DD' or date='tomorrow' for specific day."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

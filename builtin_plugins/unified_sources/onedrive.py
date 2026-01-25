@@ -105,6 +105,17 @@ class OneDriveUnifiedSource(MicrosoftOAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME OneDrive access. Actions: "
+            "action='recent' for recently modified files, "
+            "action='search' with query='...' to search file names/content, "
+            "action='list' with folder='path/to/folder' to list folder contents. "
+            "Optional: max_results=N to limit results."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

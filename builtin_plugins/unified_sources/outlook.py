@@ -220,6 +220,19 @@ class OutlookUnifiedSource(MicrosoftOAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Outlook email access. Actions: "
+            "action='recent' for latest emails, "
+            "action='unread' for unread emails, "
+            "action='today' for today's emails, "
+            "action='search' with query='...' using Outlook search syntax "
+            "(e.g. query='from:john@example.com', query='subject:invoice'). "
+            "Optional: max_results=N to limit results."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

@@ -174,20 +174,101 @@ class NotesActionHandler(OAuthMixin, PluginActionHandler):
     @classmethod
     def get_llm_instructions(cls) -> str:
         """Static LLM instructions for notes actions."""
-        return cls._build_instructions(None)
+        return cls._build_static_instructions(None, None)
 
     def get_llm_instructions_with_context(
         self, available_accounts: Optional[dict[str, list[dict]]] = None
     ) -> str:
-        """Dynamic LLM instructions - notes use default store, no account selection needed."""
-        return self._build_instructions(available_accounts)
+        """Dynamic LLM instructions with Notion database schema if available."""
+        # Extract notes config to get database_id for schema fetch
+        notes_config = None
+        if available_accounts:
+            notes_accounts = available_accounts.get("notes", [])
+            if notes_accounts:
+                notes_config = notes_accounts[0]
+
+        # Fetch Notion schema if this is a Notion database
+        notion_schema = None
+        if notes_config and notes_config.get("provider") == "notion":
+            database_id = notes_config.get("database_id")
+            if database_id:
+                notion_schema = self._fetch_notion_schema(database_id)
+
+        return self._build_static_instructions(available_accounts, notion_schema)
+
+    def _fetch_notion_schema(self, database_id: str) -> Optional[dict]:
+        """Fetch the Notion database schema to discover available properties."""
+        try:
+            api_token = os.environ.get("NOTION_TOKEN") or os.environ.get(
+                "NOTION_API_KEY"
+            )
+            if not api_token:
+                return None
+
+            with httpx.Client(
+                base_url=self.NOTION_API_BASE,
+                headers={
+                    "Authorization": f"Bearer {api_token}",
+                    "Notion-Version": self.NOTION_VERSION,
+                    "Content-Type": "application/json",
+                },
+                timeout=10,
+            ) as client:
+                response = client.get(f"/databases/{database_id}")
+                response.raise_for_status()
+                db_data = response.json()
+
+                # Extract useful property information
+                properties = {}
+                for prop_name, prop_info in db_data.get("properties", {}).items():
+                    prop_type = prop_info.get("type")
+
+                    # Skip system properties
+                    if prop_type in (
+                        "created_by",
+                        "created_time",
+                        "last_edited_by",
+                        "last_edited_time",
+                    ):
+                        continue
+
+                    prop_data = {"type": prop_type}
+
+                    # Extract options for select/multi_select
+                    if prop_type == "select":
+                        options = [
+                            o["name"]
+                            for o in prop_info.get("select", {}).get("options", [])
+                        ]
+                        if options:
+                            prop_data["options"] = options
+                    elif prop_type == "multi_select":
+                        options = [
+                            o["name"]
+                            for o in prop_info.get("multi_select", {}).get(
+                                "options", []
+                            )
+                        ]
+                        if options:
+                            prop_data["options"] = options
+
+                    properties[prop_name] = prop_data
+
+                return properties
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch Notion database schema: {e}")
+            return None
 
     @staticmethod
-    def _build_instructions(
+    def _build_static_instructions(
         available_accounts: Optional[dict[str, list[dict]]] = None,
+        notion_schema: Optional[dict] = None,
     ) -> str:
         """Build LLM instructions for notes actions."""
         store_info = ""
+        extra_properties_info = ""
+
         if available_accounts:
             notes_accounts = available_accounts.get("notes", [])
             if notes_accounts and len(notes_accounts) > 0:
@@ -198,9 +279,76 @@ class NotesActionHandler(OAuthMixin, PluginActionHandler):
                     f"\n**Notes will be saved to:** {store_name} ({provider})\n"
                 )
 
+        # Add Notion-specific property information
+        if notion_schema:
+            editable_props = []
+            for prop_name, prop_info in notion_schema.items():
+                prop_type = prop_info.get("type")
+                if prop_type == "title":
+                    continue  # Title is handled separately
+
+                if prop_type in ("select", "multi_select"):
+                    options = prop_info.get("options", [])
+                    if options:
+                        options_str = ", ".join(
+                            f'"{o}"' for o in options[:10]
+                        )  # Limit to 10
+                        if len(options) > 10:
+                            options_str += ", ..."
+                        if prop_type == "multi_select":
+                            editable_props.append(
+                                f"- **{prop_name}** (multi-select): [{options_str}]"
+                            )
+                        else:
+                            editable_props.append(
+                                f"- **{prop_name}** (select): [{options_str}]"
+                            )
+                elif prop_type == "checkbox":
+                    editable_props.append(f"- **{prop_name}** (checkbox): true/false")
+                elif prop_type == "number":
+                    editable_props.append(f"- **{prop_name}** (number)")
+                elif prop_type == "date":
+                    editable_props.append(f"- **{prop_name}** (date): ISO format")
+                elif prop_type in ("rich_text", "url", "email", "phone_number"):
+                    editable_props.append(
+                        f"- **{prop_name}** ({prop_type.replace('_', ' ')})"
+                    )
+
+            if editable_props:
+                extra_properties_info = (
+                    "\n**Additional database properties you can set:**\n"
+                    + "\n".join(editable_props)
+                    + "\n\nInclude these in the `properties` parameter as a JSON object.\n"
+                )
+
+        # Build the properties example section if Notion schema is available
+        notion_example = ""
+        if notion_schema:
+            notion_example = """
+**Example with properties (Notion):**
+```xml
+<smart_action type="notes" action="create">
+{"title": "Q1 Planning", "content": "## Goals\\n\\n- Launch new feature", "properties": {"Category": ["Planning"]}}
+</smart_action>
+```
+"""
+
+        # Build store reference for reading instructions
+        store_name_for_reading = ""
+        if available_accounts:
+            notes_accounts = available_accounts.get("notes", [])
+            if notes_accounts and len(notes_accounts) > 0:
+                store_name_for_reading = notes_accounts[0].get("name", "")
+
+        reading_hint = "Your notes store is indexed and searchable."
+        if store_name_for_reading:
+            reading_hint = f'The document store "{store_name_for_reading}" contains your notes and is indexed and searchable.'
+
         return f"""## Notes
 {store_info}
 Create and manage notes.
+
+**Reading notes:** {reading_hint} When the user asks about their notes, existing notes, or wants to find/list notes, the relevant content will be provided in your context automatically via RAG retrieval. You CAN see and reference existing notes - just answer based on the context provided to you.
 
 ### notes:create
 Create a new note.
@@ -209,14 +357,15 @@ Create a new note.
 - title (required): Note title
 - content (required): Note content (markdown formatting supported)
 - folder (optional): Target folder or section name
-
+- properties (optional): Additional database properties (Notion only)
+{extra_properties_info}
 **Example:**
 ```xml
 <smart_action type="notes" action="create">
 {{"title": "Meeting Notes - Project X", "content": "## Key Points\\n\\n- Budget approved\\n- Timeline: Q2 2026\\n- Next steps: schedule kickoff"}}
 </smart_action>
 ```
-
+{notion_example}
 ### notes:update
 Update an existing note (append content by default).
 
@@ -224,6 +373,7 @@ Update an existing note (append content by default).
 - note_id OR title (required): Identify the note
 - content: New content to add
 - append: true (default) to append, false to replace
+- properties (optional): Update database properties (Notion only)
 
 **Example:**
 ```xml
@@ -425,10 +575,103 @@ Delete a note.
                 success=False, message="", error=f"Unknown action: {action}"
             )
 
+    def _convert_properties_to_notion(self, extra_properties: dict) -> dict:
+        """Convert user-provided properties to Notion API format.
+
+        Handles common property types:
+        - select: {"PropertyName": "value"} -> {"PropertyName": {"select": {"name": "value"}}}
+        - multi_select: {"PropertyName": ["a", "b"]} -> {"PropertyName": {"multi_select": [{"name": "a"}, {"name": "b"}]}}
+        - checkbox: {"PropertyName": true} -> {"PropertyName": {"checkbox": true}}
+        - number: {"PropertyName": 42} -> {"PropertyName": {"number": 42}}
+        - date: {"PropertyName": "2026-01-22"} -> {"PropertyName": {"date": {"start": "2026-01-22"}}}
+        - rich_text: {"PropertyName": "text"} -> {"PropertyName": {"rich_text": [{"text": {"content": "text"}}]}}
+        - url: {"PropertyName": "https://..."} -> {"PropertyName": {"url": "https://..."}}
+        """
+        # Fetch the database schema to know property types
+        try:
+            db_response = self._notion_client.get(
+                f"/databases/{self.notion_database_id}"
+            )
+            db_response.raise_for_status()
+            db_props = db_response.json().get("properties", {})
+        except Exception as e:
+            logger.warning(
+                f"Could not fetch Notion schema for property conversion: {e}"
+            )
+            return {}
+
+        notion_props = {}
+        for prop_name, value in extra_properties.items():
+            if prop_name not in db_props:
+                logger.warning(f"Unknown Notion property: {prop_name}")
+                continue
+
+            prop_type = db_props[prop_name].get("type")
+
+            try:
+                if prop_type == "select":
+                    # Value should be a string
+                    if isinstance(value, str):
+                        notion_props[prop_name] = {"select": {"name": value}}
+                    elif isinstance(value, list) and value:
+                        # Take first item if list provided
+                        notion_props[prop_name] = {"select": {"name": str(value[0])}}
+
+                elif prop_type == "multi_select":
+                    # Value should be a list of strings
+                    if isinstance(value, list):
+                        notion_props[prop_name] = {
+                            "multi_select": [{"name": str(v)} for v in value]
+                        }
+                    elif isinstance(value, str):
+                        notion_props[prop_name] = {"multi_select": [{"name": value}]}
+
+                elif prop_type == "checkbox":
+                    notion_props[prop_name] = {"checkbox": bool(value)}
+
+                elif prop_type == "number":
+                    notion_props[prop_name] = {
+                        "number": float(value) if value else None
+                    }
+
+                elif prop_type == "date":
+                    if isinstance(value, str):
+                        notion_props[prop_name] = {"date": {"start": value}}
+                    elif isinstance(value, dict):
+                        notion_props[prop_name] = {"date": value}
+
+                elif prop_type == "rich_text":
+                    text = str(value) if value else ""
+                    notion_props[prop_name] = {
+                        "rich_text": [{"text": {"content": text}}]
+                    }
+
+                elif prop_type == "url":
+                    notion_props[prop_name] = {"url": str(value) if value else None}
+
+                elif prop_type == "email":
+                    notion_props[prop_name] = {"email": str(value) if value else None}
+
+                elif prop_type == "phone_number":
+                    notion_props[prop_name] = {
+                        "phone_number": str(value) if value else None
+                    }
+
+                else:
+                    logger.warning(
+                        f"Unsupported Notion property type: {prop_type} for {prop_name}"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Error converting property {prop_name}: {e}")
+
+        return notion_props
+
     def _notion_create(self, params: dict) -> ActionResult:
         """Create a new page in Notion database."""
         title = params.get("title", "")
         content = params.get("content", "")
+        extra_properties = params.get("properties", {})
 
         # Get the actual title property name from database schema
         title_prop_name = self._get_notion_title_property_name()
@@ -441,6 +684,11 @@ Delete a note.
 
         # Build page properties using the actual title property name
         properties = {title_prop_name: {"title": [{"text": {"content": title}}]}}
+
+        # Add any extra properties the user specified
+        if extra_properties:
+            notion_props = self._convert_properties_to_notion(extra_properties)
+            properties.update(notion_props)
 
         # Convert markdown content to Notion blocks
         children = self._markdown_to_notion_blocks(content)
@@ -457,9 +705,12 @@ Delete a note.
             data = response.json()
             page_id = data.get("id", "")
 
+            props_msg = (
+                f" with {list(extra_properties.keys())}" if extra_properties else ""
+            )
             return ActionResult(
                 success=True,
-                message=f"Created note: {title}",
+                message=f"Created note: {title}{props_msg}",
                 data={"page_id": page_id, "title": title},
             )
         except httpx.HTTPStatusError as e:
@@ -477,6 +728,7 @@ Delete a note.
         title = params.get("title")
         content = params.get("content", "")
         append = params.get("append", True)
+        extra_properties = params.get("properties", {})
 
         # Find page by title if no ID
         if not note_id and title:
@@ -496,6 +748,15 @@ Delete a note.
             )
 
         try:
+            # Update properties if provided
+            if extra_properties:
+                notion_props = self._convert_properties_to_notion(extra_properties)
+                if notion_props:
+                    prop_response = self._notion_client.patch(
+                        f"/pages/{note_id}", json={"properties": notion_props}
+                    )
+                    prop_response.raise_for_status()
+
             if content:
                 # Convert markdown to blocks
                 new_blocks = self._markdown_to_notion_blocks(content)
@@ -525,9 +786,14 @@ Delete a note.
 
                 response.raise_for_status()
 
+            props_msg = (
+                f" (updated {list(extra_properties.keys())})"
+                if extra_properties
+                else ""
+            )
             return ActionResult(
                 success=True,
-                message=f"Updated note: {title or note_id}",
+                message=f"Updated note: {title or note_id}{props_msg}",
                 data={"page_id": note_id},
             )
         except httpx.HTTPStatusError as e:
@@ -627,134 +893,10 @@ Delete a note.
             return None
 
     def _markdown_to_notion_blocks(self, markdown: str) -> list[dict]:
-        """Convert markdown text to Notion blocks."""
-        blocks = []
-        lines = markdown.split("\n")
-        i = 0
+        """Convert markdown text to Notion blocks using mistune parser."""
+        from utils.notion_markdown import markdown_to_notion_blocks
 
-        while i < len(lines):
-            line = lines[i]
-
-            # Skip empty lines
-            if not line.strip():
-                i += 1
-                continue
-
-            # Headings
-            if line.startswith("### "):
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "heading_3",
-                        "heading_3": {
-                            "rich_text": [
-                                {"type": "text", "text": {"content": line[4:]}}
-                            ]
-                        },
-                    }
-                )
-            elif line.startswith("## "):
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "heading_2",
-                        "heading_2": {
-                            "rich_text": [
-                                {"type": "text", "text": {"content": line[3:]}}
-                            ]
-                        },
-                    }
-                )
-            elif line.startswith("# "):
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "heading_1",
-                        "heading_1": {
-                            "rich_text": [
-                                {"type": "text", "text": {"content": line[2:]}}
-                            ]
-                        },
-                    }
-                )
-            # Bullet list
-            elif line.startswith("- ") or line.startswith("* "):
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "bulleted_list_item",
-                        "bulleted_list_item": {
-                            "rich_text": [
-                                {"type": "text", "text": {"content": line[2:]}}
-                            ]
-                        },
-                    }
-                )
-            # Numbered list
-            elif re.match(r"^\d+\.\s", line):
-                content = re.sub(r"^\d+\.\s", "", line)
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "numbered_list_item",
-                        "numbered_list_item": {
-                            "rich_text": [
-                                {"type": "text", "text": {"content": content}}
-                            ]
-                        },
-                    }
-                )
-            # Code block
-            elif line.startswith("```"):
-                code_lines = []
-                language = line[3:].strip() or "plain text"
-                i += 1
-                while i < len(lines) and not lines[i].startswith("```"):
-                    code_lines.append(lines[i])
-                    i += 1
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "code",
-                        "code": {
-                            "rich_text": [
-                                {
-                                    "type": "text",
-                                    "text": {"content": "\n".join(code_lines)},
-                                }
-                            ],
-                            "language": language,
-                        },
-                    }
-                )
-            # Quote
-            elif line.startswith("> "):
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "quote",
-                        "quote": {
-                            "rich_text": [
-                                {"type": "text", "text": {"content": line[2:]}}
-                            ]
-                        },
-                    }
-                )
-            # Regular paragraph
-            else:
-                blocks.append(
-                    {
-                        "object": "block",
-                        "type": "paragraph",
-                        "paragraph": {
-                            "rich_text": [{"type": "text", "text": {"content": line}}]
-                        },
-                    }
-                )
-
-            i += 1
-
-        return blocks
+        return markdown_to_notion_blocks(markdown)
 
     # =========================================================================
     # OneNote Implementation

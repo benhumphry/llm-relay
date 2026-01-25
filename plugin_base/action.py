@@ -22,6 +22,9 @@ class ResourceType(Enum):
     OAUTH_ACCOUNT = "oauth_account"  # OAuth account selector (filtered by provider)
     CALENDAR_PICKER = "calendar_picker"  # Calendar selector (depends on account)
     TASKLIST_PICKER = "tasklist_picker"  # Task list selector (depends on account)
+    DOCUMENT_STORE = (
+        "document_store"  # Document store selector (filtered by source type)
+    )
     TEXT = "text"  # Free text input
     TEXTAREA = "textarea"  # Multi-line text
     PASSWORD = "password"  # Hidden text (API keys)

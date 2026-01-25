@@ -117,11 +117,15 @@ class SmartAliasEngine:
         from .smart_enricher import EnrichmentResult, SmartEnricherEngine
         from .smart_router import SmartRouterEngine
 
-        # Apply alias system_prompt if configured
+        # Build effective system prompt for target LLM
+        # - system_prompt: Static context from Smart Alias config
+        # - system: The incoming request's system prompt (from client)
         effective_system = system
+
+        # Inject alias system_prompt if configured
         if self.alias.system_prompt:
-            if system:
-                effective_system = f"{self.alias.system_prompt}\n\n{system}"
+            if effective_system:
+                effective_system = f"{self.alias.system_prompt}\n\n{effective_system}"
             else:
                 effective_system = self.alias.system_prompt
 

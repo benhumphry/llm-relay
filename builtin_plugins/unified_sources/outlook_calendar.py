@@ -72,6 +72,18 @@ class OutlookCalendarUnifiedSource(MicrosoftOAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Outlook Calendar access. Actions: "
+            "action='today' for today's events, "
+            "action='upcoming' for upcoming events, "
+            "action='week' for this week's events, "
+            "action='search' with query='...' to search events. "
+            "Optional: date='YYYY-MM-DD' for a specific day."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         # Note: Outlook Calendar doesn't have specific doc store fields yet

@@ -18,6 +18,7 @@ Query routing examples:
 """
 
 import logging
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -67,11 +68,28 @@ class TodoistUnifiedSource(PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Todoist task access. Actions: "
+            "action='pending' for current incomplete tasks, "
+            "action='due_today' for tasks due today, "
+            "action='overdue' for overdue tasks, "
+            "action='search' with query='...' to search task content, "
+            "action='all' for all tasks. "
+            "Optional: project='ProjectName' to filter by project."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
+        # Support both TODOIST_API_TOKEN and TODOIST_API_KEY for compatibility
+        api_token = os.environ.get("TODOIST_API_TOKEN") or os.environ.get(
+            "TODOIST_API_KEY", ""
+        )
         return {
-            "api_token": os.environ.get("TODOIST_API_TOKEN", ""),
-            "project_ids": store.todoist_project_id or "",
+            "api_token": api_token,
+            "index_project_ids": store.todoist_project_id or "",
             "filter_expression": store.todoist_filter or "",
             "include_completed": store.todoist_include_completed or False,
         }
@@ -520,6 +538,14 @@ class TodoistUnifiedSource(PluginUnifiedSource):
         """Fetch tasks from Todoist API."""
         today = datetime.now(timezone.utc).date()
 
+        # If this source is scoped to specific projects, ignore project_name parameter
+        # The designator may not know this source is already project-scoped
+        if self.index_project_ids and project_name:
+            logger.info(
+                f"Todoist: Ignoring project_name={project_name} - source is scoped to projects {self.index_project_ids}"
+            )
+            project_name = ""  # Clear it, we'll filter by index_project_ids instead
+
         # Build filter based on action
         if filter_query:
             # User provided explicit filter
@@ -545,6 +571,10 @@ class TodoistUnifiedSource(PluginUnifiedSource):
         except Exception as e:
             logger.error(f"Failed to fetch tasks: {e}")
             return []
+
+        # Filter by configured project IDs if set (this source is scoped to specific projects)
+        if self.index_project_ids:
+            tasks = [t for t in tasks if t.get("project_id") in self.index_project_ids]
 
         # Add project names to tasks
         for task in tasks:

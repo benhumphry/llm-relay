@@ -68,6 +68,15 @@ class NotionUnifiedSource(PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Notion access. Use action='list' to enumerate ALL pages/notes "
+            "(for 'what notes do I have?' queries), action='search' with query for specific searches, "
+            "action='recent' for recently modified pages. For historical content search, RAG will be used automatically."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {
@@ -149,11 +158,11 @@ class NotionUnifiedSource(PluginUnifiedSource):
         return [
             ParamDefinition(
                 name="action",
-                description="Query type: recent, search, database",
+                description="Query type: list (all pages), recent, search, database",
                 param_type="string",
                 required=False,
                 default="recent",
-                examples=["recent", "search", "database"],
+                examples=["list", "recent", "search", "database"],
             ),
             ParamDefinition(
                 name="query",
@@ -579,7 +588,11 @@ Modified: {modified}
         max_results = params.get("max_results", self.live_max_results)
 
         try:
-            if action == "search" and search_query:
+            if action == "list":
+                # List all documents (pages/database entries)
+                items = self._list_all_pages(max_results)
+                formatted = self._format_list_results(items)
+            elif action == "search" and search_query:
                 items = self._search_pages(search_query, max_results)
                 formatted = self._format_search_results(items)
             elif action == "database" and database_id:
@@ -602,6 +615,162 @@ Modified: {modified}
                 success=False,
                 error=str(e),
             )
+
+    def _list_all_pages(self, max_results: int = 100) -> list[dict]:
+        """
+        List pages scoped to this store's configuration (for 'list' action).
+
+        Respects the store's root_page_id and database_ids settings:
+        - If database_ids: list entries from those databases
+        - If root_page_id: list child pages of that root
+        - If neither: list all accessible pages (fallback)
+        """
+        all_pages = []
+
+        # If database_ids configured, list entries from those databases
+        if self.database_ids:
+            for db_id in self.database_ids[:5]:  # Limit to 5 databases
+                try:
+                    entries = self._list_database_entries_simple(
+                        db_id, max_results // len(self.database_ids)
+                    )
+                    all_pages.extend(entries)
+                except Exception as e:
+                    logger.warning(f"Failed to list database {db_id}: {e}")
+            return all_pages[:max_results]
+
+        # If root_page_id configured, list children of that page
+        if self.root_page_id:
+            return self._list_children_of_page(self.root_page_id, max_results)
+
+        # Fallback: search all accessible pages
+        start_cursor = None
+        while len(all_pages) < max_results:
+            body = {
+                "filter": {"property": "object", "value": "page"},
+                "page_size": min(100, max_results - len(all_pages)),
+            }
+            if start_cursor:
+                body["start_cursor"] = start_cursor
+
+            try:
+                data = self._notion_request("POST", "/search", body)
+                results = data.get("results", [])
+
+                for page in results:
+                    all_pages.append(
+                        {
+                            "id": page.get("id", "").replace("-", ""),
+                            "title": self._extract_title(page),
+                            "modified": page.get("last_edited_time", ""),
+                            "url": page.get("url", ""),
+                            "type": "page",
+                        }
+                    )
+
+                if not data.get("has_more") or len(all_pages) >= max_results:
+                    break
+                start_cursor = data.get("next_cursor")
+
+            except Exception as e:
+                logger.error(f"Failed to list pages: {e}")
+                break
+
+        return all_pages[:max_results]
+
+    def _list_children_of_page(
+        self, page_id: str, max_results: int = 100
+    ) -> list[dict]:
+        """List child pages of a specific page using the blocks API."""
+        all_pages = []
+        start_cursor = None
+
+        # Normalize page_id (remove dashes)
+        page_id = page_id.replace("-", "")
+
+        while len(all_pages) < max_results:
+            endpoint = f"/blocks/{page_id}/children"
+            if start_cursor:
+                endpoint += f"?start_cursor={start_cursor}"
+
+            try:
+                data = self._notion_request("GET", endpoint)
+                results = data.get("results", [])
+
+                for block in results:
+                    # Check if this block is a child_page or child_database
+                    block_type = block.get("type", "")
+                    if block_type == "child_page":
+                        child_page = block.get("child_page", {})
+                        all_pages.append(
+                            {
+                                "id": block.get("id", "").replace("-", ""),
+                                "title": child_page.get("title", "Untitled"),
+                                "modified": block.get("last_edited_time", ""),
+                                "url": f"https://notion.so/{block.get('id', '').replace('-', '')}",
+                                "type": "page",
+                            }
+                        )
+                    elif block_type == "child_database":
+                        child_db = block.get("child_database", {})
+                        all_pages.append(
+                            {
+                                "id": block.get("id", "").replace("-", ""),
+                                "title": child_db.get("title", "Untitled Database"),
+                                "modified": block.get("last_edited_time", ""),
+                                "url": f"https://notion.so/{block.get('id', '').replace('-', '')}",
+                                "type": "database",
+                            }
+                        )
+
+                if not data.get("has_more") or len(all_pages) >= max_results:
+                    break
+                start_cursor = data.get("next_cursor")
+
+            except Exception as e:
+                logger.error(f"Failed to list children of page {page_id}: {e}")
+                break
+
+        return all_pages[:max_results]
+
+    def _list_database_entries_simple(
+        self, database_id: str, max_results: int = 50
+    ) -> list[dict]:
+        """List entries from a database (simplified for list action)."""
+        entries = []
+        start_cursor = None
+
+        while len(entries) < max_results:
+            body = {"page_size": min(100, max_results - len(entries))}
+            if start_cursor:
+                body["start_cursor"] = start_cursor
+
+            try:
+                data = self._notion_request(
+                    "POST", f"/databases/{database_id}/query", body
+                )
+                results = data.get("results", [])
+
+                for page in results:
+                    entries.append(
+                        {
+                            "id": page.get("id", "").replace("-", ""),
+                            "title": self._extract_title(page),
+                            "modified": page.get("last_edited_time", ""),
+                            "url": page.get("url", ""),
+                            "type": "database_entry",
+                        }
+                    )
+
+                if not data.get("has_more") or len(entries) >= max_results:
+                    break
+                start_cursor = data.get("next_cursor")
+
+            except Exception as e:
+                logger.error(f"Failed to query database {database_id}: {e}")
+                break
+
+        return entries[:max_results]
 
     def _get_recent_pages(self, max_results: int) -> list[dict]:
         """Get recently modified pages."""
@@ -672,6 +841,20 @@ Modified: {modified}
             }
             for entry in results[:max_results]
         ]
+
+    def _format_list_results(self, pages: list[dict]) -> str:
+        """Format complete page list for LLM context (for 'list' action)."""
+        if not pages:
+            return "### Notion Pages\nNo pages found in this workspace."
+
+        lines = ["### All Notion Pages", f"Total: {len(pages)} page(s)\n"]
+
+        for page in pages:
+            lines.append(f"• **{page['title']}**")
+            lines.append(f"  Last modified: {page['modified']}")
+            lines.append("")
+
+        return "\n".join(lines)
 
     def _format_recent(self, pages: list[dict]) -> str:
         """Format recent pages for LLM context."""

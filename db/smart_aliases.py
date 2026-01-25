@@ -152,6 +152,10 @@ def create_smart_alias(
     passthrough_model: bool = False,
     # Routing settings
     designator_model: str | None = None,
+    router_designator_model: str | None = None,
+    rag_designator_model: str | None = None,
+    web_designator_model: str | None = None,
+    live_designator_model: str | None = None,
     purpose: str | None = None,
     candidates: list[dict] | None = None,
     fallback_model: str | None = None,
@@ -287,6 +291,10 @@ def create_smart_alias(
             passthrough_model=passthrough_model,
             # Routing
             designator_model=designator_model,
+            router_designator_model=router_designator_model,
+            rag_designator_model=rag_designator_model,
+            web_designator_model=web_designator_model,
+            live_designator_model=live_designator_model,
             purpose=purpose,
             fallback_model=fallback_model,
             routing_strategy=routing_strategy,
@@ -402,6 +410,10 @@ def update_smart_alias(
     passthrough_model: bool | None = None,
     # Routing settings
     designator_model: str | None = None,
+    router_designator_model: str | None = None,
+    rag_designator_model: str | None = None,
+    web_designator_model: str | None = None,
+    live_designator_model: str | None = None,
     purpose: str | None = None,
     candidates: list[dict] | None = None,
     fallback_model: str | None = None,
@@ -524,6 +536,14 @@ def update_smart_alias(
         # Routing
         if designator_model is not None:
             alias.designator_model = designator_model
+        if router_designator_model is not None:
+            alias.router_designator_model = router_designator_model
+        if rag_designator_model is not None:
+            alias.rag_designator_model = rag_designator_model
+        if web_designator_model is not None:
+            alias.web_designator_model = web_designator_model
+        if live_designator_model is not None:
+            alias.live_designator_model = live_designator_model
         if purpose is not None:
             alias.purpose = purpose
         if candidates is not None:
@@ -1017,7 +1037,10 @@ def _store_to_dict(store: DocumentStore) -> dict:
         # Todoist fields
         "todoist_project_id": store.todoist_project_id,
         "todoist_project_name": store.todoist_project_name,
+        "todoist_filter": store.todoist_filter,
+        "todoist_include_completed": store.todoist_include_completed,
         # Notion fields
+        "notion_page_id": store.notion_page_id,
         "notion_database_id": store.notion_database_id,
         "notion_is_task_database": store.notion_is_task_database,
         "embedding_provider": store.embedding_provider,
@@ -1068,7 +1091,10 @@ class DetachedDocumentStore:
         # Todoist fields
         self.todoist_project_id = data.get("todoist_project_id")
         self.todoist_project_name = data.get("todoist_project_name")
+        self.todoist_filter = data.get("todoist_filter")
+        self.todoist_include_completed = data.get("todoist_include_completed", False)
         # Notion fields
+        self.notion_page_id = data.get("notion_page_id")
         self.notion_database_id = data.get("notion_database_id")
         self.notion_is_task_database = data.get("notion_is_task_database", False)
         self.embedding_provider = data["embedding_provider"]
@@ -1137,6 +1163,10 @@ def _alias_to_detached(alias: SmartAlias) -> SmartAlias:
         passthrough_model=alias.passthrough_model,
         # Routing
         designator_model=alias.designator_model,
+        router_designator_model=alias.router_designator_model,
+        rag_designator_model=alias.rag_designator_model,
+        web_designator_model=alias.web_designator_model,
+        live_designator_model=alias.live_designator_model,
         purpose=alias.purpose,
         candidates_json=alias.candidates_json,
         fallback_model=alias.fallback_model,

@@ -297,6 +297,19 @@ class GeminiProvider(OpenAICompatibleProvider):
                         f"[Gemini returned empty responses after {self.MAX_EMPTY_RESPONSE_RETRIES} attempts. "
                         f"This is a known intermittent API issue. Please try again later.]"
                     )
+            elif finish_reason == "length" and len(content) < 100:
+                # Truncated response with very little content - likely API issue, retry
+                logger.warning(
+                    f"Gemini {model} attempt {attempt}/{self.MAX_EMPTY_RESPONSE_RETRIES}: "
+                    f"truncated response (finish_reason=length, {len(content)} chars)"
+                )
+                if attempt < self.MAX_EMPTY_RESPONSE_RETRIES:
+                    continue  # Retry
+                else:
+                    logger.warning(
+                        f"Gemini {model} gave truncated response after {self.MAX_EMPTY_RESPONSE_RETRIES} attempts"
+                    )
+                    break
             elif finish_reason and finish_reason != "stop":
                 # Log if response was truncated or blocked (don't retry these)
                 logger.warning(

@@ -67,6 +67,17 @@ class GContactsUnifiedSource(OAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Google Contacts access. Actions: "
+            "action='list' for all contacts, "
+            "action='search' with query='...' to search by name/email/phone/company, "
+            "action='lookup' with resource_name='people/c...' to get specific contact. "
+            "Optional: max_results=N to limit results."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

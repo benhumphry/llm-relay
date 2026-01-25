@@ -1918,6 +1918,32 @@ def _run_migrations(engine) -> None:
                 )
                 conn.commit()
 
+    # Migration: Add parallel designator columns to smart_aliases (v2.0.2)
+    if "smart_aliases" in inspector.get_table_names():
+        columns = [c["name"] for c in inspector.get_columns("smart_aliases")]
+
+        parallel_designator_cols = [
+            "router_designator_model",
+            "rag_designator_model",
+            "web_designator_model",
+            "live_designator_model",
+        ]
+
+        cols_to_add = [col for col in parallel_designator_cols if col not in columns]
+
+        if cols_to_add:
+            logger.info(
+                f"Adding parallel designator columns to smart_aliases (v2.0.2): {cols_to_add}"
+            )
+            with engine.connect() as conn:
+                for col_name in cols_to_add:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE smart_aliases ADD COLUMN {col_name} VARCHAR(150)"
+                        )
+                    )
+                conn.commit()
+
     # Migration: Drop legacy tables (v1.8 - Smart Aliases unification)
     # These tables have been replaced by the unified smart_aliases table
     legacy_tables = [

@@ -57,7 +57,7 @@ class SmartSportsLiveSource(PluginLiveSource):
     description = "Multi-sport data via SportAPI7 with natural language team names"
     category = "sports"
     data_type = "sports"
-    best_for = "Live scores, upcoming fixtures, recent results, league standings for football, basketball, hockey, and more. Use team names like 'Arsenal', 'Lakers', 'Patriots'."
+    best_for = "Live scores, fixtures, results, standings, top scorers, player info, team squads, transfers for football, basketball, hockey, and more. USE FOR: 'What football is on today?', 'Weekend fixtures', 'Premier League table', 'Championship top scorers', 'Arsenal squad', 'Mbappe stats'. Accepts team names like 'Arsenal', 'Lakers', player names like 'Haaland', and leagues like 'Premier League'."
     icon = "⚽"
     default_cache_ttl = 60  # 1 minute for live data
 
@@ -220,8 +220,17 @@ class SmartSportsLiveSource(PluginLiveSource):
                     "transfers",
                     "fixture",
                     "h2h",
+                    "today",
+                    "top_scorers",
                     "auto",
                 ],
+            ),
+            ParamDefinition(
+                name="date",
+                description="Date for fixtures query (YYYY-MM-DD format, or 'today', 'tomorrow', 'weekend')",
+                param_type="string",
+                required=False,
+                examples=["2026-01-25", "today", "tomorrow", "weekend"],
             ),
             ParamDefinition(
                 name="sport",
@@ -229,6 +238,14 @@ class SmartSportsLiveSource(PluginLiveSource):
                 param_type="string",
                 required=False,
                 examples=["football", "basketball", "hockey", "nfl"],
+            ),
+            ParamDefinition(
+                name="include_venues",
+                description="Include venue information for fixtures (requires extra API calls)",
+                param_type="boolean",
+                required=False,
+                default=False,
+                examples=["true", "false"],
             ),
         ]
 
@@ -455,6 +472,182 @@ class SmartSportsLiveSource(PluginLiveSource):
         except Exception as e:
             logger.warning(
                 f"Failed to fetch standings for tournament {tournament_id}: {e}"
+            )
+            return None
+
+    def _get_tournament_fixtures(
+        self, tournament_id: int, season_id: int = None
+    ) -> list[dict]:
+        """Get upcoming fixtures for a tournament/league."""
+        cache_key = f"fixtures:{tournament_id}:{season_id or 'current'}"
+        cached = self._get_cached(_standings_cache, cache_key, 300)  # 5 min cache
+        if cached:
+            return cached
+
+        try:
+            # First get current season if not provided
+            if not season_id:
+                response = self._client.get(
+                    f"{self.BASE_URL}/unique-tournament/{tournament_id}/seasons"
+                )
+                response.raise_for_status()
+                seasons = response.json().get("seasons", [])
+                if seasons:
+                    season_id = seasons[0].get("id")
+                else:
+                    return []
+
+            # Get next events for the tournament
+            response = self._client.get(
+                f"{self.BASE_URL}/unique-tournament/{tournament_id}/season/{season_id}/events/next/0"
+            )
+            response.raise_for_status()
+            events = response.json().get("events", [])
+
+            self._set_cached(_standings_cache, cache_key, events)
+            return events
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch fixtures for tournament {tournament_id}: {e}"
+            )
+            return []
+
+    def _get_tournament_results(
+        self, tournament_id: int, season_id: int = None
+    ) -> list[dict]:
+        """Get recent results for a tournament/league."""
+        cache_key = f"results:{tournament_id}:{season_id or 'current'}"
+        cached = self._get_cached(_standings_cache, cache_key, 300)  # 5 min cache
+        if cached:
+            return cached
+
+        try:
+            # First get current season if not provided
+            if not season_id:
+                response = self._client.get(
+                    f"{self.BASE_URL}/unique-tournament/{tournament_id}/seasons"
+                )
+                response.raise_for_status()
+                seasons = response.json().get("seasons", [])
+                if seasons:
+                    season_id = seasons[0].get("id")
+                else:
+                    return []
+
+            # Get last events for the tournament
+            response = self._client.get(
+                f"{self.BASE_URL}/unique-tournament/{tournament_id}/season/{season_id}/events/last/0"
+            )
+            response.raise_for_status()
+            events = response.json().get("events", [])
+
+            self._set_cached(_standings_cache, cache_key, events)
+            return events
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch results for tournament {tournament_id}: {e}"
+            )
+            return []
+
+    def _get_scheduled_events(self, sport: str, date_str: str) -> list[dict]:
+        """Get all scheduled events for a sport on a given date."""
+        cache_key = f"scheduled:{sport}:{date_str}"
+        cached = self._get_cached(_standings_cache, cache_key, 300)  # 5 min cache
+        if cached:
+            return cached
+
+        try:
+            response = self._client.get(
+                f"{self.BASE_URL}/sport/{sport}/scheduled-events/{date_str}"
+            )
+            response.raise_for_status()
+            events = response.json().get("events", [])
+
+            self._set_cached(_standings_cache, cache_key, events)
+            return events
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch scheduled events for {sport} on {date_str}: {e}"
+            )
+            return []
+
+    def _get_tournament_top_scorers(
+        self, tournament_id: int, season_id: int = None
+    ) -> list[dict]:
+        """Get top scorers for a tournament/league."""
+        cache_key = f"top_scorers:{tournament_id}:{season_id or 'current'}"
+        cached = self._get_cached(_standings_cache, cache_key, 1800)  # 30 min cache
+        if cached:
+            return cached
+
+        try:
+            # First get current season if not provided
+            if not season_id:
+                response = self._client.get(
+                    f"{self.BASE_URL}/unique-tournament/{tournament_id}/seasons"
+                )
+                response.raise_for_status()
+                seasons = response.json().get("seasons", [])
+                if seasons:
+                    season_id = seasons[0].get("id")
+                else:
+                    return []
+
+            # Get top scorers
+            response = self._client.get(
+                f"{self.BASE_URL}/unique-tournament/{tournament_id}/season/{season_id}/top-players/overall"
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Try different structures the API might return
+            scorers = data.get("topPlayers", {}).get("rating", [])
+            if not scorers:
+                scorers = data.get("topPlayers", {}).get("goals", [])
+            if not scorers:
+                # Fallback: try top-scorers endpoint
+                response = self._client.get(
+                    f"{self.BASE_URL}/unique-tournament/{tournament_id}/season/{season_id}/best-players"
+                )
+                response.raise_for_status()
+                data = response.json()
+                scorers = data.get("bestPlayers", [])
+
+            self._set_cached(_standings_cache, cache_key, scorers)
+            return scorers
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch top scorers for tournament {tournament_id}: {e}"
+            )
+            return []
+
+    def _get_current_season(self, tournament_id: int) -> Optional[int]:
+        """Get the current season ID for a tournament."""
+        cache_key = f"season:{tournament_id}"
+        cached = self._get_cached(
+            _tournament_cache, cache_key, self.TOURNAMENT_CACHE_TTL
+        )
+        if cached:
+            return cached
+
+        try:
+            response = self._client.get(
+                f"{self.BASE_URL}/unique-tournament/{tournament_id}/seasons"
+            )
+            response.raise_for_status()
+            seasons = response.json().get("seasons", [])
+            if seasons:
+                season_id = seasons[0].get("id")
+                self._set_cached(_tournament_cache, cache_key, season_id)
+                return season_id
+            return None
+        except Exception as e:
+            logger.warning(
+                f"Failed to get current season for tournament {tournament_id}: {e}"
             )
             return None
 
@@ -1121,6 +1314,63 @@ class SmartSportsLiveSource(PluginLiveSource):
 
         return "\n".join(lines)
 
+    def _parse_date_param(self, date_param: str) -> list[str]:
+        """Parse date parameter to list of YYYY-MM-DD strings."""
+        from datetime import datetime, timedelta
+
+        today = datetime.now().date()
+        date_lower = date_param.lower().strip()
+
+        if date_lower == "today" or not date_param:
+            return [today.strftime("%Y-%m-%d")]
+        elif date_lower == "tomorrow":
+            return [(today + timedelta(days=1)).strftime("%Y-%m-%d")]
+        elif date_lower == "yesterday":
+            return [(today - timedelta(days=1)).strftime("%Y-%m-%d")]
+        elif "weekend" in date_lower:
+            # Handles "weekend", "this weekend", "the weekend", etc.
+            # Football weekends run Friday through Monday (full matchday round)
+            days_until_friday = (4 - today.weekday()) % 7
+            if today.weekday() == 4:
+                # It's Friday
+                friday = today
+            elif today.weekday() in (5, 6, 0):
+                # It's Sat/Sun/Mon - we're in the current weekend
+                friday = today - timedelta(days=(today.weekday() - 4) % 7)
+            else:
+                # Tue-Thu - next weekend
+                friday = today + timedelta(days=days_until_friday)
+
+            saturday = friday + timedelta(days=1)
+            sunday = friday + timedelta(days=2)
+            monday = friday + timedelta(days=3)
+            return [
+                friday.strftime("%Y-%m-%d"),
+                saturday.strftime("%Y-%m-%d"),
+                sunday.strftime("%Y-%m-%d"),
+                monday.strftime("%Y-%m-%d"),
+            ]
+        elif "saturday" in date_lower:
+            days_until_saturday = (5 - today.weekday()) % 7
+            if days_until_saturday == 0 and today.weekday() != 5:
+                days_until_saturday = 7  # Next Saturday
+            saturday = today + timedelta(days=days_until_saturday)
+            return [saturday.strftime("%Y-%m-%d")]
+        elif "sunday" in date_lower:
+            days_until_sunday = (6 - today.weekday()) % 7
+            if days_until_sunday == 0 and today.weekday() != 6:
+                days_until_sunday = 7  # Next Sunday
+            sunday = today + timedelta(days=days_until_sunday)
+            return [sunday.strftime("%Y-%m-%d")]
+        else:
+            # Try to parse as YYYY-MM-DD format
+            try:
+                datetime.strptime(date_param, "%Y-%m-%d")
+                return [date_param]
+            except ValueError:
+                # Unknown format - default to today
+                return [today.strftime("%Y-%m-%d")]
+
     def fetch(self, params: dict) -> LiveDataResult:
         """
         Fetch sports data based on parameters.
@@ -1139,6 +1389,8 @@ class SmartSportsLiveSource(PluginLiveSource):
         league_name = params.get("league", "").strip()
         query_type = params.get("query_type", "auto").lower()
         sport = params.get("sport", "").strip() or self.default_sport
+        date_param = params.get("date", "").strip()
+        include_venues = params.get("include_venues", False)
 
         # Handle player queries first
         if player_name or query_type == "player":
@@ -1148,19 +1400,53 @@ class SmartSportsLiveSource(PluginLiveSource):
         if team_name and opponent_name:
             return self._fetch_matchup(team_name, opponent_name, query_type, sport)
 
-        # If no team specified, check for live events or standings
+        # Handle fixture queries (unified: with optional league and/or date)
+        if query_type in [
+            "today",
+            "schedule",
+            "whats_on",
+            "fixtures",
+            "upcoming",
+            "next",
+        ]:
+            return self._fetch_fixtures(
+                sport, league_name or None, date_param or None, include_venues
+            )
+
+        # Handle date-based queries without explicit query_type
+        if date_param and not team_name:
+            return self._fetch_fixtures(
+                sport, league_name or None, date_param, include_venues
+            )
+
+        # If no team specified, check for league data or live events
         if not team_name:
             if league_name:
-                # Get league standings
                 tournament_id = self._resolve_tournament(league_name)
-                if tournament_id:
+                if not tournament_id:
+                    return LiveDataResult(
+                        success=False,
+                        error=f"Could not find league: {league_name}",
+                    )
+                # Handle different query types for leagues
+                if query_type in ["next_match"]:
+                    return self._fetch_fixtures(
+                        sport, league_name, date_param, include_venues
+                    )
+                elif query_type in ["results", "recent", "scores"]:
+                    return self._fetch_league_results(tournament_id, league_name)
+                elif query_type in ["top_scorers", "scorers", "golden_boot"]:
+                    return self._fetch_top_scorers(tournament_id, league_name)
+                else:
+                    # Default to standings for leagues
                     return self._fetch_standings(tournament_id, league_name)
-                return LiveDataResult(
-                    success=False,
-                    error=f"Could not find league: {league_name}",
-                )
             elif query_type == "live_scores":
                 return self._fetch_live_scores(sport)
+            elif query_type in ["top_scorers", "scorers", "golden_boot"]:
+                return LiveDataResult(
+                    success=False,
+                    error="Please specify a league for top scorers, e.g., 'Premier League top scorers'",
+                )
             else:
                 return LiveDataResult(
                     success=False,
@@ -1325,22 +1611,73 @@ class SmartSportsLiveSource(PluginLiveSource):
         if query_type in ["auto", "fixture", "next", "when"]:
             fixture = self._find_fixture_between_teams(team1_id, team2_id)
             if fixture:
+                # Get full event details for richer info (venue, referee, etc.)
+                event_id = fixture.get("id")
+                event_details = self._get_event_details(event_id) if event_id else None
+
                 home = fixture.get("homeTeam", {})
                 away = fixture.get("awayTeam", {})
                 ts = fixture.get("startTimestamp", 0)
                 tournament = fixture.get("tournament", {}).get("name", "")
+                round_info = fixture.get("roundInfo", {})
 
                 lines = [f"**{home.get('name')} vs {away.get('name')}**"]
                 if ts:
                     dt = datetime.fromtimestamp(ts)
                     lines.append(f"📅 {dt.strftime('%A %d %B %Y at %H:%M')}")
                 if tournament:
-                    lines.append(f"🏆 {tournament}")
+                    round_num = round_info.get("round")
+                    if round_num:
+                        lines.append(f"🏆 {tournament} - Round {round_num}")
+                    else:
+                        lines.append(f"🏆 {tournament}")
+
+                # Add venue if available from event details
+                if event_details:
+                    venue = event_details.get("venue", {})
+                    if venue.get("name"):
+                        venue_str = venue.get("name")
+                        city = venue.get("city", {}).get("name")
+                        capacity = venue.get("capacity")
+                        if city and city not in venue_str:
+                            venue_str += f", {city}"
+                        if capacity:
+                            venue_str += f" (capacity: {capacity:,})"
+                        lines.append(f"🏟️ {venue_str}")
+
+                    referee = event_details.get("referee", {})
+                    if referee.get("name"):
+                        lines.append(f"👨‍⚖️ Referee: {referee.get('name')}")
+
+                # Add pre-game form if available
+                if event_id:
+                    pregame = self._get_event_pregame_form(event_id)
+                    if pregame:
+                        home_form = pregame.get("homeTeam", {}).get("form", [])
+                        away_form = pregame.get("awayTeam", {}).get("form", [])
+                        if home_form or away_form:
+                            lines.append("")
+                            lines.append("**Recent Form:**")
+                            if home_form:
+                                form_str = "".join(home_form[:5])
+                                lines.append(
+                                    f"  {home.get('shortName', home.get('name'))}: {form_str}"
+                                )
+                            if away_form:
+                                form_str = "".join(away_form[:5])
+                                lines.append(
+                                    f"  {away.get('shortName', away.get('name'))}: {form_str}"
+                                )
 
                 return LiveDataResult(
                     success=True,
                     formatted="\n".join(lines),
-                    data={"team1": team1, "team2": team2, "fixture": fixture},
+                    data={
+                        "team1": team1,
+                        "team2": team2,
+                        "fixture": fixture,
+                        "details": event_details,
+                    },
                     cache_ttl=300,
                 )
 
@@ -1762,7 +2099,7 @@ class SmartSportsLiveSource(PluginLiveSource):
         )
         lines.append("-" * 60)
 
-        for row in rows[:20]:  # Top 20
+        for row in rows:  # All teams in league
             team_name = row.get("team", {}).get(
                 "shortName", row.get("team", {}).get("name", "?")
             )
@@ -1783,6 +2120,347 @@ class SmartSportsLiveSource(PluginLiveSource):
             formatted="\n".join(lines),
             data={"standings": rows},
             cache_ttl=self.STANDINGS_CACHE_TTL,
+        )
+
+    def _fetch_fixtures(
+        self,
+        sport: str,
+        league_name: str = None,
+        date_param: str = None,
+        include_venues: bool = False,
+    ) -> LiveDataResult:
+        """
+        Unified fixture fetching - handles both league-specific and date-based queries.
+
+        - If league specified (no date): Use tournament endpoint for all upcoming
+        - If date specified (no league): Use date endpoint for all sports matches
+        - If both: Use date endpoint filtered by league
+        - If include_venues: Fetch event details for each fixture (extra API calls)
+        """
+        from datetime import datetime
+
+        tournament_id = None
+        if league_name:
+            tournament_id = self._resolve_tournament(league_name)
+            if not tournament_id and not date_param:
+                return LiveDataResult(
+                    success=False,
+                    error=f"Could not find league: {league_name}",
+                )
+
+        # Decide which data source to use
+        if date_param:
+            # Date-based query - fetch from scheduled events endpoint
+            dates = self._parse_date_param(date_param)
+            all_events = []
+            seen_ids = set()
+            for date_str in dates:
+                events = self._get_scheduled_events(sport, date_str)
+                for e in events:
+                    event_id = e.get("id")
+                    if event_id and event_id not in seen_ids:
+                        seen_ids.add(event_id)
+                        all_events.append(e)
+
+            # Filter by league if specified
+            if tournament_id:
+                all_events = [
+                    e
+                    for e in all_events
+                    if e.get("tournament", {}).get("uniqueTournament", {}).get("id")
+                    == tournament_id
+                ]
+        elif tournament_id:
+            # League-specific query - fetch from tournament endpoint (more complete)
+            all_events = self._get_tournament_fixtures(tournament_id)
+            dates = None
+        else:
+            # No league, no date - default to today
+            dates = self._parse_date_param("today")
+            all_events = []
+            for date_str in dates:
+                events = self._get_scheduled_events(sport, date_str)
+                all_events.extend(events)
+
+        if not all_events:
+            if league_name and date_param:
+                return LiveDataResult(
+                    success=False,
+                    error=f"No {league_name} fixtures found for {date_param}",
+                )
+            elif league_name:
+                return LiveDataResult(
+                    success=False,
+                    error=f"No upcoming fixtures found for {league_name}",
+                )
+            else:
+                return LiveDataResult(
+                    success=False,
+                    error=f"No {sport} fixtures found for {date_param or 'today'}",
+                )
+
+        # Build header
+        if league_name and date_param:
+            if dates and len(dates) > 1:
+                header = f"**{league_name} Weekend Fixtures:**"
+            else:
+                date_display = (
+                    datetime.strptime(dates[0], "%Y-%m-%d").strftime("%A, %B %d")
+                    if dates
+                    else ""
+                )
+                header = f"**{league_name} Fixtures - {date_display}:**"
+        elif league_name:
+            header = f"**{league_name} Upcoming Fixtures:**"
+        elif date_param:
+            if dates and len(dates) > 1:
+                header = f"**{sport.title()} Weekend Fixtures:**"
+            else:
+                date_display = (
+                    datetime.strptime(dates[0], "%Y-%m-%d").strftime("%A, %B %d")
+                    if dates
+                    else ""
+                )
+                header = f"**{sport.title()} Fixtures - {date_display}:**"
+        else:
+            header = f"**{sport.title()} Fixtures - Today:**"
+
+        # Fetch venue details if requested (parallel would be better but keeping simple)
+        event_details_map = {}
+        if (
+            include_venues and len(all_events) <= 20
+        ):  # Limit to avoid too many API calls
+            for event in all_events:
+                event_id = event.get("id")
+                if event_id:
+                    details = self._get_event_details(event_id)
+                    if details:
+                        event_details_map[event_id] = details
+
+        # If league-specific (with or without date), group by date
+        if league_name:
+            return self._format_fixtures_by_date(all_events, header, event_details_map)
+
+        # If date-specific without league filter, group by tournament
+        return self._format_fixtures_by_tournament(all_events, header, False)
+
+    def _format_fixtures_by_date(
+        self, events: list, header: str, event_details_map: dict = None
+    ) -> LiveDataResult:
+        """Format fixtures grouped by date (for single-league queries)."""
+        from datetime import datetime
+
+        event_details_map = event_details_map or {}
+        lines = [header]
+        lines.append("")
+
+        fixtures_by_date: dict[str, list] = {}
+        for event in events:  # No limit - show all matches for the league
+            ts = event.get("startTimestamp", 0)
+            if ts:
+                dt = datetime.fromtimestamp(ts)
+                date_key = dt.strftime("%A, %B %d")
+                if date_key not in fixtures_by_date:
+                    fixtures_by_date[date_key] = []
+                fixtures_by_date[date_key].append((dt, event))
+
+        for date_str, matches in fixtures_by_date.items():
+            lines.append(f"**{date_str}:**")
+            for dt, event in sorted(matches, key=lambda x: x[0]):
+                event_id = event.get("id")
+                details = event_details_map.get(event_id)
+                lines.append(self._format_fixture_line(event, dt, details))
+            lines.append("")
+
+        return LiveDataResult(
+            success=True,
+            formatted="\n".join(lines),
+            data={"fixtures": events, "details": event_details_map},
+            cache_ttl=300,
+        )
+
+    def _format_fixtures_by_tournament(
+        self, events: list, header: str, single_league: bool = False
+    ) -> LiveDataResult:
+        """Format fixtures grouped by tournament (for date-based queries)."""
+        from datetime import datetime
+
+        # Group by tournament
+        tournaments: dict[str, list] = {}
+        for event in events:
+            tournament_name = event.get("tournament", {}).get("name", "Other")
+            if tournament_name not in tournaments:
+                tournaments[tournament_name] = []
+            tournaments[tournament_name].append(event)
+
+        # Sort by match count
+        sorted_tournaments = sorted(
+            tournaments.items(), key=lambda x: len(x[1]), reverse=True
+        )
+
+        lines = [header]
+        if not single_league:
+            lines.append(
+                f"*{len(events)} matches across {len(tournaments)} competitions*"
+            )
+        lines.append("")
+
+        shown_matches = 0
+        max_matches = 50
+
+        for tournament_name, matches in sorted_tournaments:
+            if shown_matches >= max_matches:
+                remaining = len(events) - shown_matches
+                lines.append(f"*...and {remaining} more matches in other competitions*")
+                break
+
+            matches_sorted = sorted(matches, key=lambda e: e.get("startTimestamp", 0))
+
+            if not single_league:
+                lines.append(f"**{tournament_name}:**")
+
+            for event in matches_sorted[:10]:
+                lines.append(self._format_fixture_line(event))
+                shown_matches += 1
+
+            if len(matches) > 10:
+                lines.append(f"  *...and {len(matches) - 10} more matches*")
+            lines.append("")
+
+        return LiveDataResult(
+            success=True,
+            formatted="\n".join(lines),
+            data={"events": events},
+            cache_ttl=300,
+        )
+
+    def _format_fixture_line(
+        self, event: dict, dt: datetime = None, details: dict = None
+    ) -> str:
+        """Format a single fixture line with status awareness and optional venue."""
+        from datetime import datetime as dt_class
+
+        home = event.get("homeTeam", {}).get(
+            "shortName", event.get("homeTeam", {}).get("name", "?")
+        )
+        away = event.get("awayTeam", {}).get(
+            "shortName", event.get("awayTeam", {}).get("name", "?")
+        )
+        status = event.get("status", {})
+        ts = event.get("startTimestamp", 0)
+
+        # Get venue from details if available
+        venue_str = ""
+        if details:
+            venue = details.get("venue", {})
+            if venue.get("name"):
+                venue_str = f" @ {venue.get('name')}"
+
+        if status.get("type") == "inprogress":
+            home_score = event.get("homeScore", {}).get("current", 0)
+            away_score = event.get("awayScore", {}).get("current", 0)
+            status_desc = status.get("description", "Live")
+            return f"  🔴 {home} {home_score}-{away_score} {away} ({status_desc}){venue_str}"
+        elif status.get("type") == "finished":
+            home_score = event.get("homeScore", {}).get("current", 0)
+            away_score = event.get("awayScore", {}).get("current", 0)
+            return f"  ✅ {home} {home_score}-{away_score} {away} (FT)"
+        elif ts:
+            if dt is None:
+                dt = dt_class.fromtimestamp(ts)
+            time_str = dt.strftime("%H:%M")
+            return f"  {time_str} - {home} vs {away}{venue_str}"
+        else:
+            return f"  {home} vs {away}{venue_str}"
+
+    def _fetch_league_results(
+        self, tournament_id: int, league_name: str
+    ) -> LiveDataResult:
+        """Get recent results for a league."""
+        from datetime import datetime
+
+        events = self._get_tournament_results(tournament_id)
+        if not events:
+            return LiveDataResult(
+                success=False,
+                error=f"No recent results found for {league_name}",
+            )
+
+        # Filter to finished matches
+        finished = [e for e in events if e.get("status", {}).get("type") == "finished"]
+
+        lines = [f"**{league_name} Recent Results:**"]
+        lines.append("")
+
+        # Group by date
+        results_by_date: dict[str, list] = {}
+        for event in finished[:20]:  # Limit to 20 results
+            ts = event.get("startTimestamp", 0)
+            if ts:
+                dt = datetime.fromtimestamp(ts)
+                date_key = dt.strftime("%A, %B %d")
+                if date_key not in results_by_date:
+                    results_by_date[date_key] = []
+                results_by_date[date_key].append((dt, event))
+
+        for date_str, matches in results_by_date.items():
+            lines.append(f"**{date_str}:**")
+            for dt, event in sorted(matches, key=lambda x: x[0]):
+                home = event.get("homeTeam", {}).get(
+                    "shortName", event.get("homeTeam", {}).get("name", "?")
+                )
+                away = event.get("awayTeam", {}).get(
+                    "shortName", event.get("awayTeam", {}).get("name", "?")
+                )
+                home_score = event.get("homeScore", {}).get("current", "?")
+                away_score = event.get("awayScore", {}).get("current", "?")
+                lines.append(f"  {home} {home_score} - {away_score} {away}")
+            lines.append("")
+
+        return LiveDataResult(
+            success=True,
+            formatted="\n".join(lines),
+            data={"results": finished},
+            cache_ttl=300,  # 5 minutes
+        )
+
+    def _fetch_top_scorers(
+        self, tournament_id: int, league_name: str
+    ) -> LiveDataResult:
+        """Get top scorers for a league."""
+        scorers = self._get_tournament_top_scorers(tournament_id)
+
+        if not scorers:
+            return LiveDataResult(
+                success=False,
+                error=f"Could not fetch top scorers for {league_name}",
+            )
+
+        lines = [f"**{league_name} Top Scorers:**"]
+        lines.append("")
+
+        # Format depends on API response structure
+        for i, entry in enumerate(scorers[:20], 1):
+            # Handle different API response formats
+            player = entry.get("player", entry)
+            stats = entry.get("statistics", entry)
+
+            name = player.get("name", player.get("shortName", "Unknown"))
+            team = player.get("team", {}).get("name", "")
+
+            # Goals might be in different places
+            goals = stats.get("goals", stats.get("value", entry.get("value", "?")))
+
+            if team:
+                lines.append(f"{i}. **{name}** ({team}) - {goals} goals")
+            else:
+                lines.append(f"{i}. **{name}** - {goals} goals")
+
+        return LiveDataResult(
+            success=True,
+            formatted="\n".join(lines),
+            data={"scorers": scorers},
+            cache_ttl=1800,  # 30 minutes
         )
 
     def _format_live_match(self, team: dict, match: dict) -> LiveDataResult:

@@ -1446,6 +1446,19 @@ class SmartAlias(Base):
 
     # ===== ROUTING SETTINGS (when use_routing=True) =====
     designator_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    # Parallel designators (optional - if not set, falls back to unified designator_model)
+    router_designator_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )
+    rag_designator_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )
+    web_designator_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )
+    live_designator_model: Mapped[Optional[str]] = mapped_column(
+        String(150), nullable=True
+    )
     purpose: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     candidates_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     fallback_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
@@ -1741,6 +1754,11 @@ class SmartAlias(Base):
             "target_model": self.target_model,
             # Routing settings
             "designator_model": self.designator_model,
+            # Parallel designators
+            "router_designator_model": self.router_designator_model,
+            "rag_designator_model": self.rag_designator_model,
+            "web_designator_model": self.web_designator_model,
+            "live_designator_model": self.live_designator_model,
             "purpose": self.purpose,
             "candidates": self.candidates,
             "fallback_model": self.fallback_model,

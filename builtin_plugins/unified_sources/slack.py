@@ -69,6 +69,17 @@ class SlackUnifiedSource(OAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Slack access. Actions: "
+            "action='recent' for recent messages, "
+            "action='search' with query='...' to search message content, "
+            "action='channel' with channel='#channel-name' to list channel messages. "
+            "Optional: user='username' to filter by sender."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

@@ -71,6 +71,18 @@ class OneNoteUnifiedSource(MicrosoftOAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME OneNote access. Actions: "
+            "action='list' to enumerate ALL notes/pages "
+            "(for 'what notes do I have?' queries), "
+            "action='recent' for recently modified pages, "
+            "action='search' with query='...' to search page content. "
+            "Optional: notebook='NotebookName' to filter by notebook."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

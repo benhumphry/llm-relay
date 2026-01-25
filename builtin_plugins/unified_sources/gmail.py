@@ -72,6 +72,19 @@ class GmailUnifiedSource(OAuthMixin, PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME Gmail access. Actions: "
+            "action='recent' for latest emails, "
+            "action='unread' for unread emails, "
+            "action='today' for today's emails, "
+            "action='search' with query='...' using Gmail search syntax "
+            "(e.g. query='from:john@example.com', query='subject:invoice after:2024/01/01'). "
+            "Optional: max_results=N to limit results."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {

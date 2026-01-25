@@ -1087,7 +1087,13 @@ SUMMARY: <content type description>"""
                     if doc.get("metadata"):
                         for key, value in doc["metadata"].items():
                             if value is not None:
-                                meta[key] = value
+                                # ChromaDB only accepts scalar metadata values
+                                # Convert lists to comma-separated strings
+                                if isinstance(value, list):
+                                    meta[key] = ", ".join(str(v) for v in value)
+                                elif isinstance(value, (str, int, float, bool)):
+                                    meta[key] = value
+                                # Skip other non-scalar types
                     metadatas.append(meta)
 
                 collection.add(
@@ -1626,6 +1632,7 @@ SUMMARY: <content type description>"""
 
                     from docx import Document
 
+                    doc = Document(io.BytesIO(content.binary))
                     text = "\n".join(para.text for para in doc.paragraphs)
                     return self._chunk_text(text, chunk_size, chunk_overlap)
                 except Exception as e:

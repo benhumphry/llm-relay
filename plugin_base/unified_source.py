@@ -38,6 +38,7 @@ class QueryRouting(Enum):
     RAG_THEN_LIVE = "rag_then_live"  # Search RAG first, supplement with live
     LIVE_THEN_RAG = "live_then_rag"  # Query live first, supplement with RAG
     BOTH_MERGE = "both_merge"  # Query both simultaneously, merge results
+    TWO_PASS = "two_pass"  # RAG finds documents, live fetches full content
 
 
 class MergeStrategy(Enum):
@@ -79,6 +80,10 @@ class QueryAnalysis:
     max_rag_results: int = 10
     max_live_results: int = 10
     freshness_priority: bool = False  # Prefer fresher results in merge
+
+    # Two-pass retrieval settings
+    # When routing=TWO_PASS, RAG is used to find documents, then live fetches full content
+    two_pass_fetch_full: bool = False  # If True, fetch full document content in pass 2
 
     def to_dict(self) -> dict:
         """Convert to dict for logging/debugging."""
@@ -475,7 +480,10 @@ class PluginUnifiedSource(ABC):
             query: The user's natural language query
             params: Parameters from the designator
             rag_search_fn: Optional function to search RAG index.
-                           Signature: (query: str, limit: int) -> list[str]
+                           Signature: (query: str, limit: int, include_metadata: bool = False)
+                           - If include_metadata=False: returns list[str] (document content)
+                           - If include_metadata=True: returns list[dict] with keys:
+                             content, source_uri, source_file, score
                            If not provided, RAG search is skipped.
 
         Returns:
@@ -487,6 +495,14 @@ class PluginUnifiedSource(ABC):
 
         # Analyze query to determine routing
         analysis = self.analyze_query(query, params)
+
+        import logging
+
+        log = logging.getLogger(__name__)
+        log.info(
+            f"Unified source {self.source_type} routing: {analysis.routing.value}, "
+            f"reason: {analysis.reason}"
+        )
 
         rag_results = []
         live_results = []
@@ -560,6 +576,76 @@ class PluginUnifiedSource(ABC):
                         f"RAG search fallback failed: {e}"
                     )
                 rag_time = int((time.time() - rag_start) * 1000)
+
+        # Handle TWO_PASS: RAG finds documents, live fetches full content
+        if analysis.routing == QueryRouting.TWO_PASS:
+            if rag_search_fn and self.supports_rag and self.supports_live:
+                import logging
+
+                log = logging.getLogger(__name__)
+
+                # Pass 1: RAG semantic search with metadata
+                rag_start = time.time()
+                try:
+                    # Call RAG with metadata to get source URIs
+                    rag_with_meta = rag_search_fn(
+                        analysis.rag_query or query,
+                        analysis.max_rag_results,
+                        include_metadata=True,  # Get source_uri for document resolution
+                    )
+                    rag_time = int((time.time() - rag_start) * 1000)
+
+                    if rag_with_meta:
+                        log.debug(
+                            f"Two-pass: RAG found {len(rag_with_meta)} chunks "
+                            f"from documents"
+                        )
+
+                        # Extract unique document URIs from RAG results
+                        doc_uris = []
+                        seen = set()
+                        for result in rag_with_meta:
+                            if isinstance(result, dict):
+                                uri = result.get("source_uri", "")
+                                if uri and uri not in seen:
+                                    doc_uris.append(uri)
+                                    seen.add(uri)
+                                # Keep chunk content as context
+                                if result.get("content"):
+                                    rag_results.append(result["content"])
+                            else:
+                                # Fallback if rag_search_fn doesn't support metadata
+                                rag_results.append(result)
+
+                        # Pass 2: Fetch full documents for top matches
+                        if doc_uris and analysis.two_pass_fetch_full:
+                            live_start = time.time()
+                            fetched_docs = []
+
+                            for uri in doc_uris[: analysis.max_live_results]:
+                                try:
+                                    # Call fetch with the document URI/path
+                                    fetch_params = {
+                                        "action": "lookup",
+                                        "filename": uri,
+                                        "_two_pass_uri": uri,  # Direct URI for resolution
+                                    }
+                                    live_result = self.fetch(fetch_params)
+                                    if live_result.success and live_result.formatted:
+                                        fetched_docs.append(live_result.formatted)
+                                        log.debug(f"Two-pass: Fetched full doc: {uri}")
+                                except Exception as e:
+                                    log.debug(f"Two-pass: Failed to fetch {uri}: {e}")
+
+                            live_time = int((time.time() - live_start) * 1000)
+                            live_results = fetched_docs
+
+                except Exception as e:
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        f"Two-pass RAG search failed: {e}"
+                    )
 
         # Merge results
         merged, dedupe_count = self._merge_results(

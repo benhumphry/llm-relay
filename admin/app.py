@@ -8922,6 +8922,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 passthrough_model=data.get("passthrough_model", False),
                 # Routing settings
                 designator_model=data.get("designator_model"),
+                # Parallel designators
+                router_designator_model=data.get("router_designator_model"),
+                rag_designator_model=data.get("rag_designator_model"),
+                web_designator_model=data.get("web_designator_model"),
+                live_designator_model=data.get("live_designator_model"),
                 purpose=data.get("purpose"),
                 candidates=data.get("candidates"),
                 fallback_model=data.get("fallback_model"),
@@ -9022,6 +9027,11 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 passthrough_model=data.get("passthrough_model"),
                 # Routing settings
                 designator_model=data.get("designator_model"),
+                # Parallel designators
+                router_designator_model=data.get("router_designator_model"),
+                rag_designator_model=data.get("rag_designator_model"),
+                web_designator_model=data.get("web_designator_model"),
+                live_designator_model=data.get("live_designator_model"),
                 purpose=data.get("purpose"),
                 candidates=data.get("candidates"),
                 fallback_model=data.get("fallback_model"),

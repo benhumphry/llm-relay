@@ -99,6 +99,129 @@ class DocumentSource(ABC):
         """Check if this source is available."""
         pass
 
+    # Live lookup capability for unified sources
+
+    @property
+    def supports_live_lookup(self) -> bool:
+        """
+        Whether this source supports on-demand document fetch.
+
+        Most sources can support this since they implement read_document().
+        Override to return False for sources that can't fetch individual docs.
+        """
+        return True
+
+    def resolve_document(
+        self,
+        query: str,
+        indexed_metadata: Optional[list[dict]] = None,
+    ) -> Optional[str]:
+        """
+        Resolve a natural language reference to a document URI.
+
+        Uses fuzzy matching against indexed document metadata to find the
+        best matching document for a user's reference like "the October invoice"
+        or "INVOICE-2022.docx".
+
+        Args:
+            query: User's reference to a document (filename, title, description)
+            indexed_metadata: Metadata from RAG chunks for this store, each dict
+                              may contain 'source_path', 'title', 'name', etc.
+
+        Returns:
+            Document URI if resolved, None if ambiguous or not found
+        """
+        return self._fuzzy_match_document(query, indexed_metadata or [])
+
+    def _fuzzy_match_document(
+        self,
+        query: str,
+        indexed_metadata: list[dict],
+    ) -> Optional[str]:
+        """
+        Default fuzzy matching implementation using rapidfuzz.
+
+        Builds a candidate list from metadata and finds the best match.
+        """
+        try:
+            from rapidfuzz import fuzz, process
+        except ImportError:
+            logger.warning("rapidfuzz not installed, falling back to exact match")
+            return self._exact_match_document(query, indexed_metadata)
+
+        # Build candidates: {match_target: uri}
+        candidates: dict[str, str] = {}
+        for meta in indexed_metadata:
+            uri = meta.get("source_path") or meta.get("uri") or meta.get("doc_id")
+            if not uri:
+                continue
+
+            # Use multiple fields as match targets
+            targets = []
+            if meta.get("title"):
+                targets.append(meta["title"])
+            if meta.get("name"):
+                targets.append(meta["name"])
+            if uri:
+                # Also match against filename portion of path
+                targets.append(Path(uri).name)
+
+            for target in targets:
+                target_lower = target.lower()
+                if target_lower not in candidates:
+                    candidates[target_lower] = uri
+
+        if not candidates:
+            logger.debug(f"No candidates found for document resolution: {query}")
+            return None
+
+        # Fuzzy match with partial_ratio for better substring matching
+        query_lower = query.lower()
+        match = process.extractOne(
+            query_lower,
+            candidates.keys(),
+            scorer=fuzz.partial_ratio,
+            score_cutoff=70,
+        )
+
+        if match:
+            matched_target, score, _ = match
+            uri = candidates[matched_target]
+            logger.info(
+                f"Resolved document query '{query}' -> '{uri}' (score={score:.0f})"
+            )
+            return uri
+
+        logger.debug(f"No fuzzy match found for document query: {query}")
+        return None
+
+    def _exact_match_document(
+        self,
+        query: str,
+        indexed_metadata: list[dict],
+    ) -> Optional[str]:
+        """Fallback exact substring matching when rapidfuzz is not available."""
+        query_lower = query.lower()
+
+        for meta in indexed_metadata:
+            uri = meta.get("source_path") or meta.get("uri") or meta.get("doc_id")
+            if not uri:
+                continue
+
+            # Check title, name, and filename
+            targets = [
+                meta.get("title", ""),
+                meta.get("name", ""),
+                Path(uri).name,
+            ]
+
+            for target in targets:
+                if query_lower in target.lower() or target.lower() in query_lower:
+                    logger.info(f"Exact match resolved '{query}' -> '{uri}'")
+                    return uri
+
+        return None
+
 
 class LocalDocumentSource(DocumentSource):
     """
@@ -2989,6 +3112,96 @@ class NotionDocumentSource(DocumentSource):
 
         return None
 
+    def _extract_page_properties(self, page: dict) -> dict[str, str]:
+        """Extract all properties from a Notion page as displayable strings.
+
+        Returns a dict of property_name -> displayable_value for non-empty properties.
+        Skips system properties and the title (which is handled separately).
+        """
+        properties = page.get("properties", {})
+        result = {}
+
+        for prop_name, prop_val in properties.items():
+            if not isinstance(prop_val, dict):
+                continue
+
+            prop_type = prop_val.get("type")
+
+            # Skip system properties and title
+            if prop_type in (
+                "title",
+                "created_by",
+                "created_time",
+                "last_edited_by",
+                "last_edited_time",
+                "formula",
+                "rollup",
+                "relation",
+            ):
+                continue
+
+            value = None
+
+            if prop_type == "select":
+                select_data = prop_val.get("select")
+                if select_data:
+                    value = select_data.get("name")
+
+            elif prop_type == "multi_select":
+                multi_data = prop_val.get("multi_select", [])
+                if multi_data:
+                    value = ", ".join(item.get("name", "") for item in multi_data)
+
+            elif prop_type == "status":
+                status_data = prop_val.get("status")
+                if status_data:
+                    value = status_data.get("name")
+
+            elif prop_type == "checkbox":
+                value = "Yes" if prop_val.get("checkbox") else "No"
+
+            elif prop_type == "number":
+                num_val = prop_val.get("number")
+                if num_val is not None:
+                    value = str(num_val)
+
+            elif prop_type == "date":
+                date_data = prop_val.get("date")
+                if date_data:
+                    start = date_data.get("start", "")
+                    end = date_data.get("end")
+                    value = f"{start} - {end}" if end else start
+
+            elif prop_type == "rich_text":
+                rich_text = prop_val.get("rich_text", [])
+                if rich_text:
+                    value = "".join(rt.get("plain_text", "") for rt in rich_text)
+
+            elif prop_type == "url":
+                value = prop_val.get("url")
+
+            elif prop_type == "email":
+                value = prop_val.get("email")
+
+            elif prop_type == "phone_number":
+                value = prop_val.get("phone_number")
+
+            elif prop_type == "people":
+                people = prop_val.get("people", [])
+                if people:
+                    names = [p.get("name", p.get("id", "")) for p in people]
+                    value = ", ".join(names)
+
+            elif prop_type == "files":
+                files = prop_val.get("files", [])
+                if files:
+                    value = ", ".join(f.get("name", "") for f in files)
+
+            if value:
+                result[prop_name] = value
+
+        return result
+
     def read_document(self, uri: str) -> Optional[DocumentContent]:
         """Read a Notion page and convert to markdown."""
         import requests as http_requests
@@ -3009,15 +3222,25 @@ class NotionDocumentSource(DocumentSource):
             )
 
             title = page_id
+            page_properties = {}
             if page_response.status_code == 200:
                 page_data = page_response.json()
                 title = self._extract_page_title(page_data) or page_id
+                page_properties = self._extract_page_properties(page_data)
 
             # Get all blocks (content)
             blocks = self._get_all_blocks(page_id)
 
             # Convert blocks to markdown
             markdown = self._blocks_to_markdown(blocks)
+
+            # Prepend properties as a metadata header if any exist
+            if page_properties:
+                props_lines = [f"**{k}:** {v}" for k, v in page_properties.items()]
+                props_header = "\n".join(props_lines)
+                markdown = (
+                    f"{props_header}\n\n---\n\n{markdown}" if markdown else props_header
+                )
 
             return DocumentContent(
                 uri=uri,
@@ -3063,79 +3286,10 @@ class NotionDocumentSource(DocumentSource):
         return blocks
 
     def _blocks_to_markdown(self, blocks: list) -> str:
-        """Convert Notion blocks to markdown."""
-        lines = []
+        """Convert Notion blocks to markdown with full rich text support."""
+        from utils.notion_markdown import notion_blocks_to_markdown
 
-        for block in blocks:
-            block_type = block.get("type", "")
-            block_data = block.get(block_type, {})
-
-            # Extract rich text
-            rich_text = block_data.get("rich_text", [])
-            text = "".join(rt.get("plain_text", "") for rt in rich_text)
-
-            # Format based on block type
-            if block_type == "paragraph":
-                if text:
-                    lines.append(text)
-                    lines.append("")
-            elif block_type.startswith("heading_"):
-                level = block_type[-1]  # heading_1, heading_2, heading_3
-                prefix = "#" * int(level)
-                lines.append(f"{prefix} {text}")
-                lines.append("")
-            elif block_type == "bulleted_list_item":
-                lines.append(f"- {text}")
-            elif block_type == "numbered_list_item":
-                lines.append(f"1. {text}")
-            elif block_type == "to_do":
-                checked = block_data.get("checked", False)
-                checkbox = "[x]" if checked else "[ ]"
-                lines.append(f"- {checkbox} {text}")
-            elif block_type == "toggle":
-                lines.append(f"<details><summary>{text}</summary></details>")
-                lines.append("")
-            elif block_type == "code":
-                language = block_data.get("language", "")
-                lines.append(f"```{language}")
-                lines.append(text)
-                lines.append("```")
-                lines.append("")
-            elif block_type == "quote":
-                lines.append(f"> {text}")
-                lines.append("")
-            elif block_type == "callout":
-                icon = block_data.get("icon", {}).get("emoji", "")
-                lines.append(f"> {icon} {text}")
-                lines.append("")
-            elif block_type == "divider":
-                lines.append("---")
-                lines.append("")
-            elif block_type == "table_row":
-                cells = block_data.get("cells", [])
-                cell_texts = []
-                for cell in cells:
-                    cell_text = "".join(rt.get("plain_text", "") for rt in cell)
-                    cell_texts.append(cell_text)
-                lines.append("| " + " | ".join(cell_texts) + " |")
-            elif block_type == "child_page":
-                # Reference to child page
-                child_title = block_data.get("title", "Untitled")
-                lines.append(f"📄 [{child_title}](notion://{block.get('id')})")
-                lines.append("")
-            elif block_type == "bookmark":
-                url = block_data.get("url", "")
-                caption = "".join(
-                    rt.get("plain_text", "") for rt in block_data.get("caption", [])
-                )
-                lines.append(f"🔗 [{caption or url}]({url})")
-                lines.append("")
-            elif text:
-                # Fallback for other types with text
-                lines.append(text)
-                lines.append("")
-
-        return "\n".join(lines).strip()
+        return notion_blocks_to_markdown(blocks)
 
 
 class GitHubDocumentSource(DocumentSource):

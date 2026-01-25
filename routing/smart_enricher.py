@@ -5,7 +5,9 @@ Combines RAG document retrieval and web search/scraping into a single enrichment
 Supports RAG-only, web-only, or hybrid (both) modes.
 """
 
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
@@ -433,9 +435,46 @@ class SmartEnricherEngine:
             config = {}
 
             # Google OAuth sources need account ID
+            # First check direct attribute (for DocumentStores)
             google_account_id = getattr(source, "google_account_id", None)
             if google_account_id:
                 config["oauth_account_id"] = google_account_id
+
+            # For LiveDataSources, check auth_config for account_id
+            # (auto-created live sources store google_account_id in auth_config.account_id)
+            if not google_account_id:
+                auth_config = getattr(source, "auth_config", None)
+                if auth_config is None:
+                    # Try auth_config_json attribute
+                    auth_config_json = getattr(source, "auth_config_json", None)
+                    if auth_config_json:
+                        try:
+                            auth_config = json.loads(auth_config_json)
+                        except (json.JSONDecodeError, TypeError):
+                            auth_config = {}
+
+                if auth_config:
+                    oauth_id = auth_config.get("account_id") or auth_config.get(
+                        "oauth_account_id"
+                    )
+                    if oauth_id:
+                        config["oauth_account_id"] = oauth_id
+
+                # Also check config_json for additional settings
+                source_config = getattr(source, "config", None)
+                if source_config is None:
+                    config_json = getattr(source, "config_json", None)
+                    if config_json:
+                        try:
+                            source_config = json.loads(config_json)
+                        except (json.JSONDecodeError, TypeError):
+                            source_config = {}
+
+                if source_config:
+                    # Copy other relevant config fields
+                    for key in ["label_ids", "index_label_ids", "live_max_results"]:
+                        if key in source_config:
+                            config[key] = source_config[key]
 
             # Add any other relevant config from the source
             # The unified source will use these for both RAG and Live operations
@@ -500,12 +539,29 @@ class SmartEnricherEngine:
             )
             return None
 
-        def rag_search(query: str, limit: int = 10) -> list[str]:
-            """Search matching RAG collections."""
+        def rag_search(
+            query: str, limit: int = 10, include_metadata: bool = False
+        ) -> list[str] | list[dict]:
+            """
+            Search matching RAG collections.
+
+            Args:
+                query: Semantic search query
+                limit: Maximum results to return
+                include_metadata: If True, return list of dicts with content and metadata
+                                  If False (default), return list of content strings
+
+            Returns:
+                If include_metadata=False: list[str] - document content only
+                If include_metadata=True: list[dict] with keys:
+                    - content: Document chunk content
+                    - source_uri: Full path/URI of the source document
+                    - source_file: Display name of the source file
+                    - score: Similarity score (0-1)
+            """
             results = []
             try:
                 from context.chroma import get_chroma_client
-                from rag.retriever import RetrievalEngine
 
                 chroma_client = get_chroma_client()
 
@@ -520,12 +576,38 @@ class SmartEnricherEngine:
                         search_results = collection.query(
                             query_texts=[query],
                             n_results=min(limit, 5),  # Cap per store
-                            include=["documents", "metadatas"],
+                            include=["documents", "metadatas", "distances"],
                         )
 
                         if search_results and search_results.get("documents"):
-                            for doc in search_results["documents"][0]:
-                                if doc:
+                            docs = search_results["documents"][0]
+                            metadatas = search_results.get("metadatas", [[]])[0]
+                            distances = search_results.get("distances", [[]])[0]
+
+                            for i, doc in enumerate(docs):
+                                if not doc:
+                                    continue
+
+                                if include_metadata:
+                                    meta = metadatas[i] if i < len(metadatas) else {}
+                                    # Convert distance to similarity (1 - distance for L2)
+                                    dist = distances[i] if i < len(distances) else 1.0
+                                    score = max(0, 1 - dist / 2)  # Normalize to 0-1
+
+                                    results.append(
+                                        {
+                                            "content": doc,
+                                            "source_uri": meta.get(
+                                                "source_uri",
+                                                meta.get("source_file", "unknown"),
+                                            ),
+                                            "source_file": meta.get(
+                                                "source_file", "unknown"
+                                            ),
+                                            "score": score,
+                                        }
+                                    )
+                                else:
                                     results.append(doc)
 
                     except Exception as e:
@@ -533,6 +615,10 @@ class SmartEnricherEngine:
 
             except Exception as e:
                 logger.debug(f"RAG search initialization failed: {e}")
+
+            # Sort by score if metadata included, then limit
+            if include_metadata:
+                results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
             return results[:limit]
 
@@ -619,9 +705,27 @@ class SmartEnricherEngine:
             # Get routing config if provided (for unified designator call)
             routing_config = getattr(self.enricher, "routing_config", None)
 
-            selection = self._select_sources(
-                query, messages=messages, routing_config=routing_config
+            # Check if any parallel designators are configured
+            has_parallel = any(
+                [
+                    getattr(self.enricher, "router_designator_model", None),
+                    getattr(self.enricher, "rag_designator_model", None),
+                    getattr(self.enricher, "web_designator_model", None),
+                    getattr(self.enricher, "live_designator_model", None),
+                ]
             )
+
+            if has_parallel:
+                selection = self._select_sources_parallel(
+                    query,
+                    messages=messages,
+                    routing_config=routing_config,
+                    session_key=session_key,
+                )
+            else:
+                selection = self._select_sources(
+                    query, messages=messages, routing_config=routing_config
+                )
             if selection:
                 use_rag = selection.get("use_rag", use_rag)
                 use_web = selection.get("use_web", use_web)
@@ -673,6 +777,10 @@ class SmartEnricherEngine:
         # Run retrievals in parallel - web is slowest so benefits most from parallelism
         use_live_data = getattr(self.enricher, "use_live_data", False)
 
+        # Check if we have unified source live_params from the designator
+        # Unified sources (from document stores) can be queried even without use_live_data=True
+        has_unified_live_params = bool(live_params)
+
         # Use ThreadPoolExecutor for parallel retrieval
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -690,8 +798,12 @@ class SmartEnricherEngine:
                     max_tokens=web_budget,
                     search_query=search_query,
                 )
-            if use_live_data:
-                logger.info(f"Fetching live data context, live_params={live_params}")
+            # Fetch live data if: use_live_data is enabled OR designator selected unified sources
+            if use_live_data or has_unified_live_params:
+                logger.info(
+                    f"Fetching live data context, live_params={live_params}, "
+                    f"use_live_data={use_live_data}, has_unified={has_unified_live_params}"
+                )
                 futures["live"] = executor.submit(
                     self._retrieve_live_context, query, live_params=live_params
                 )
@@ -746,9 +858,14 @@ class SmartEnricherEngine:
             # Note: designator_model already set in constructor from self.enricher.designator_model
 
         # Process Live data results
-        if use_live_data:
+        # Include live context if: use_live_data is enabled OR we fetched unified source data
+        if use_live_data or has_unified_live_params:
             if live_context:
                 context_parts.append(("live", live_context))
+                logger.info(
+                    f"Injected live context ({len(live_context)} chars) "
+                    f"from unified sources"
+                )
 
             # Also inject any previous session live context (accumulated from prior queries)
             # This preserves context across multiple live data requests (e.g., weather in London then Cornwall)
@@ -839,7 +956,23 @@ class SmartEnricherEngine:
                 try:
                     from actions import get_system_prompt_for_actions
 
-                    action_instructions = get_system_prompt_for_actions(allowed_actions)
+                    # Build accounts first so we can pass to instructions
+                    available_accounts = self._build_available_accounts()
+                    default_accounts = self._build_default_accounts()
+
+                    # Merge default_accounts into available_accounts for instruction generation
+                    # This allows handlers like notes to see their config
+                    merged_accounts = dict(available_accounts)
+                    for category, config in default_accounts.items():
+                        if category not in merged_accounts:
+                            merged_accounts[category] = []
+                        # Add default account info if not already present
+                        if config and isinstance(config, dict):
+                            merged_accounts[category].append(config)
+
+                    action_instructions = get_system_prompt_for_actions(
+                        allowed_actions, merged_accounts
+                    )
                     logger.info(
                         f"Enricher '{self.enricher.name}': Action instructions length={len(action_instructions) if action_instructions else 0}"
                     )
@@ -869,13 +1002,9 @@ class SmartEnricherEngine:
                         result_metadata.action_notification_urls = getattr(
                             self.enricher, "action_notification_urls", None
                         )
-                        # Build available accounts from linked document stores
-                        result_metadata.available_accounts = (
-                            self._build_available_accounts()
-                        )
-                        result_metadata.default_accounts = (
-                            self._build_default_accounts()
-                        )
+                        # Use the accounts we already built above
+                        result_metadata.available_accounts = available_accounts
+                        result_metadata.default_accounts = default_accounts
                         # Scheduled prompts config (for schedule:prompt action)
                         result_metadata.scheduled_prompts_account_id = getattr(
                             self.enricher, "scheduled_prompts_account_id", None
@@ -1044,12 +1173,23 @@ class SmartEnricherEngine:
         # Build list of available RAG stores
         linked_stores = self._get_linked_stores()
         store_info = []
+
+        # Get action defaults to add hints for designator
+        notes_store_id = getattr(self.enricher, "action_notes_store_id", None)
+        tasks_store_id = getattr(self.enricher, "action_tasks_store_id", None)
+        # OAuth account IDs for calendar/email - match to stores by google_account_id
+        email_account_id = getattr(self.enricher, "action_email_account_id", None)
+        calendar_account_id = getattr(self.enricher, "action_calendar_account_id", None)
+        tasks_account_id = getattr(self.enricher, "action_tasks_account_id", None)
+
         for store in linked_stores:
             enabled = getattr(store, "enabled", True)
             status = getattr(store, "index_status", None)
             if enabled and status == "ready":
                 store_id = getattr(store, "id", None)
                 store_name = getattr(store, "name", "unknown")
+                source_type = getattr(store, "source_type", "")
+                google_account_id = getattr(store, "google_account_id", None)
                 description = (
                     getattr(store, "description", None)
                     or f"Document store: {store_name}"
@@ -1057,6 +1197,40 @@ class SmartEnricherEngine:
                 themes = getattr(store, "themes", None) or []
                 best_for = getattr(store, "best_for", None)
                 content_summary = getattr(store, "content_summary", None)
+
+                # Add action hints based on store configuration
+                action_hints = []
+
+                # Notes store (by store ID)
+                if store_id == notes_store_id:
+                    action_hints.append(
+                        "USER'S NOTES - query for any note-related questions"
+                    )
+
+                # Tasks store (by store ID or OAuth account match)
+                if store_id == tasks_store_id:
+                    action_hints.append(
+                        "USER'S TASKS - query for any task-related questions"
+                    )
+                elif tasks_account_id and google_account_id == tasks_account_id:
+                    if source_type in ("mcp:gtasks", "gtasks"):
+                        action_hints.append(
+                            "USER'S TASKS - query for any task-related questions"
+                        )
+
+                # Email store (by OAuth account match)
+                if email_account_id and google_account_id == email_account_id:
+                    if source_type in ("mcp:gmail", "gmail"):
+                        action_hints.append(
+                            "USER'S EMAIL - query for any email-related questions"
+                        )
+
+                # Calendar store (by OAuth account match)
+                if calendar_account_id and google_account_id == calendar_account_id:
+                    if source_type in ("mcp:gcalendar", "gcalendar"):
+                        action_hints.append(
+                            "USER'S CALENDAR - query for any calendar/schedule questions"
+                        )
 
                 store_info.append(
                     {
@@ -1066,6 +1240,7 @@ class SmartEnricherEngine:
                         "themes": themes,
                         "best_for": best_for,
                         "content_summary": content_summary,
+                        "action_hints": action_hints,
                     }
                 )
 
@@ -1171,6 +1346,116 @@ class SmartEnricherEngine:
                     }
                 )
 
+        # Also add unified sources from document stores that support live queries
+        # These allow real-time queries (list, search) on doc stores like Notion
+        # NOTE: This is OUTSIDE the use_live_data check - unified sources work even when
+        # traditional live data is disabled, as they're part of document stores
+        seen_unified = set()  # Avoid duplicates
+        for store in linked_stores:
+            store_type = getattr(store, "source_type", "")
+            store_name = getattr(store, "name", "")
+            store_id = getattr(store, "id", None)
+            google_account_id = getattr(store, "google_account_id", None)
+
+            # Skip if we've already added a unified source for this type+name
+            unified_key = f"{store_type}:{store_name}"
+            if unified_key in seen_unified:
+                continue
+
+            try:
+                from plugin_base.loader import get_unified_source_plugin
+
+                plugin_class = get_unified_source_plugin(store_type)
+                if plugin_class:
+                    logger.info(
+                        f"Store {store_name} ({store_type}): found plugin {plugin_class.__name__}, supports_live={getattr(plugin_class, 'supports_live', False)}"
+                    )
+                if plugin_class and getattr(plugin_class, "supports_live", False):
+                    seen_unified.add(unified_key)
+
+                    # Build config and get param hints
+                    config = plugin_class.build_config_from_store(store)
+
+                    # Get designator hint from unified source
+                    param_hints = ""
+                    if hasattr(plugin_class, "get_designator_hint"):
+                        param_hints = plugin_class.get_designator_hint()
+                    elif hasattr(plugin_class, "get_param_definitions"):
+                        # Build hints from param definitions
+                        params = plugin_class.get_param_definitions()
+                        if params:
+                            param_parts = []
+                            for p in params[:3]:  # Limit to 3 params
+                                examples = (
+                                    f" e.g., {', '.join(str(e) for e in p.examples[:2])}"
+                                    if p.examples
+                                    else ""
+                                )
+                                param_parts.append(f"{p.name}{examples}")
+                            param_hints = f"Parameters: {'; '.join(param_parts)}"
+
+                    # Use unified source metadata
+                    data_type = getattr(plugin_class, "data_type", "documents")
+                    best_for = getattr(plugin_class, "best_for", "")
+                    description = getattr(plugin_class, "description", "")
+
+                    # Build action hints for unified sources based on store config
+                    action_hints = []
+                    if store_id == notes_store_id:
+                        action_hints.append("USER'S NOTES")
+                    # Mark as tasks source if: it's the default tasks store, OR it's a Google Tasks
+                    # matching the default account, OR it's ANY Todoist store (all are task sources)
+                    if (
+                        store_id == tasks_store_id
+                        or (
+                            tasks_account_id
+                            and google_account_id == tasks_account_id
+                            and store_type in ("mcp:gtasks", "gtasks")
+                        )
+                        or store_type == "todoist"
+                    ):
+                        action_hints.append("USER'S TASKS")
+                    if (
+                        email_account_id
+                        and google_account_id == email_account_id
+                        and store_type in ("mcp:gmail", "gmail")
+                    ):
+                        action_hints.append("USER'S EMAIL")
+                    if (
+                        calendar_account_id
+                        and google_account_id == calendar_account_id
+                        and store_type in ("mcp:gcalendar", "gcalendar")
+                    ):
+                        action_hints.append("USER'S CALENDAR")
+
+                    # Build best_for with action hints prominently at start
+                    if action_hints:
+                        hint_topics = [
+                            h.replace("USER'S ", "").lower() for h in action_hints
+                        ]
+                        hint_prefix = f"**{', '.join(action_hints)}** - USE THIS for queries about {', '.join(hint_topics)}. "
+                    else:
+                        hint_prefix = ""
+
+                    # Mark as unified source (from doc store) - designator selects by store name
+                    live_source_info.append(
+                        {
+                            "name": store_name,  # Use doc store name
+                            "source_type": f"unified:{store_type}",
+                            "data_type": data_type,
+                            "best_for": f"{hint_prefix}Real-time queries on '{store_name}' - list pages, search, recent items. {best_for}",
+                            "description": f"Live access to {store_name} ({description})",
+                            "param_hints": param_hints,
+                            "is_unified": True,  # Flag for execution routing
+                            "doc_store_id": store.id,
+                        }
+                    )
+                    logger.debug(
+                        f"Added unified live source for doc store: {store_name} ({store_type})"
+                    )
+            except Exception as e:
+                logger.debug(f"No unified source for {store_type}: {e}")
+
         # Check if we have anything to select from
         has_rag = bool(store_info)
         has_web = self.enricher.use_web
@@ -1212,6 +1497,10 @@ class SmartEnricherEngine:
             sources_text += "DOCUMENT STORES (indexed content for semantic search):\n"
             for s in store_info:
                 sources_text += f"- store_{s['id']}: {s['name']}\n"
+                # Show action hints first (most important for routing)
+                if s.get("action_hints"):
+                    for hint in s["action_hints"]:
+                        sources_text += f"  ** {hint} **\n"
                 sources_text += f"  Description: {s['description']}\n"
                 if s.get("themes"):
                     sources_text += f"  Themes: {', '.join(s['themes'])}\n"
@@ -1221,9 +1510,12 @@ class SmartEnricherEngine:
                     sources_text += f"  Content: {s['content_summary']}\n"
                 store_samples = preview_samples.get(s["id"], [])
                 if store_samples:
-                    sources_text += f"  SAMPLE CONTENT ({len(store_samples)} chunks):\n"
-                    for i, sample in enumerate(store_samples, 1):
-                        sample_text = sample.replace("\n", " ")[:250]
+                    # Limit to 3 samples, 150 chars each to avoid prompt overflow
+                    sources_text += (
+                        f"  SAMPLE CONTENT ({min(len(store_samples), 3)} chunks):\n"
+                    )
+                    for i, sample in enumerate(store_samples[:3], 1):
+                        sample_text = sample.replace("\n", " ")[:150]
                         sources_text += f"    [{i}] {sample_text}\n"
             sources_text += "\n"
 
@@ -1396,6 +1688,10 @@ Respond with ONLY the JSON object."""
             )
             provider = designator_resolved.provider
 
+            logger.info(
+                f"Designator prompt length: {len(prompt)} chars (~{len(prompt) // 4} tokens)"
+            )
+
             result = provider.chat_completion(
                 model=designator_resolved.model_id,
                 messages=[{"role": "user", "content": prompt}],
@@ -1565,6 +1861,949 @@ Respond with ONLY the JSON object."""
         except Exception as e:
             logger.error(f"Source selection failed: {e}")
             return None
+
+    # =========================================================================
+    # PARALLEL DESIGNATORS - Focused designator functions for each domain
+    # =========================================================================
+
+    def _designate_routing(
+        self,
+        query: str,
+        messages: list[dict] | None,
+        candidates: list[dict],
+        token_count: int,
+        has_images: bool,
+    ) -> tuple[str | None, dict | None]:
+        """
+        Focused routing designator - selects best model from candidates.
+
+        Returns:
+            (selected_model, usage_dict) or (None, None) on failure
+        """
+        model = getattr(self.enricher, "router_designator_model", None)
+        if not model:
+            return None, None
+
+        # Format candidates with full details like unified designator
+        models_section = []
+        for c in candidates:
+            line = f"- {c['model']}"
+            caps = []
+            if c.get("context_length"):
+                caps.append(f"context: {c['context_length']}")
+            if c.get("capabilities"):
+                caps.append(f"caps: {','.join(c['capabilities'])}")
+            if caps:
+                line += f" ({', '.join(caps)})"
+
+            # Include notes/description if available
+            notes = c.get("notes", "")
+            if notes:
+                if len(notes) > 300:
+                    notes = notes[:297] + "..."
+                line += f"\n  Notes: {notes}"
+
+            models_section.append(line)
+
+        # Get query preview from last user message
+        query_preview = query[:500] if query else ""
+        if messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        query_preview = content[:500]
+                    break
+
+        # Get user context
+        intelligence = getattr(self.enricher, "intelligence", "") or ""
+        memory = getattr(self.enricher, "memory", "") or ""
+        user_context = ""
+        if intelligence or memory:
+            user_context = "\nUSER CONTEXT:\n"
+            if intelligence:
+                user_context += f"{intelligence}\n"
+            if memory:
+                user_context += f"{memory}\n"
+
+        prompt = f"""Select the best model for this query.
+
+PURPOSE: {self.enricher.purpose or "General assistant"}
+{user_context}
+AVAILABLE MODELS:
+{chr(10).join(models_section)}
+
+QUERY INFO:
+- Estimated tokens: {token_count}
+- Contains images: {has_images}
+- Query: {query_preview}
+
+Respond with ONLY the model identifier (e.g., "anthropic/claude-sonnet-4"). No explanation."""
+
+        try:
+            resolved = self.registry._resolve_actual_model(model)
+            provider = resolved.provider
+
+            result = provider.chat_completion(
+                model=resolved.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                system=None,
+                options={"max_tokens": 100, "temperature": 0},
+            )
+
+            selected = result.get("content", "").strip()
+            usage = {
+                "prompt_tokens": result.get("input_tokens", 0),
+                "completion_tokens": result.get("output_tokens", 0),
+                "purpose": "routing",
+                "model": model,  # Track which model was used
+            }
+
+            # Validate against candidates
+            valid_models = [c["model"] for c in candidates]
+            if selected in valid_models:
+                logger.info(f"Parallel router designator selected: {selected}")
+                return selected, usage
+            else:
+                logger.warning(f"Router designator returned invalid model: {selected}")
+                return None, usage
+
+        except Exception as e:
+            logger.error(f"Router designator failed: {e}")
+            return None, None
+
+    def _designate_rag(
+        self,
+        query: str,
+        store_info: list[dict],
+        total_budget: int,
+        preview_samples: dict[int, list[str]] | None = None,
+    ) -> tuple[dict[int, int] | None, dict | None]:
+        """
+        Focused RAG designator - selects stores and allocates token budgets.
+
+        Returns:
+            (store_budgets dict, usage_dict) or (None, None) on failure
+        """
+        model = getattr(self.enricher, "rag_designator_model", None)
+        if not model:
+            return None, None
+
+        # Get action store IDs to mark special stores
+        notes_store_id = getattr(self.enricher, "action_notes_store_id", None)
+
+        # Format store descriptions
+        stores_section = []
+        for store in store_info:
+            store_id = store["id"]
+            store_name = store["name"]
+
+            # Add markers for special stores
+            markers = []
+            if store_id == notes_store_id:
+                markers.append("USER'S NOTES - has LIVE query support")
+            if store.get("supports_live"):
+                markers.append("LIVE QUERY AVAILABLE")
+
+            marker_str = f" [{', '.join(markers)}]" if markers else ""
+            lines = [f"- store_{store_id}: {store_name}{marker_str}"]
+            if store.get("description"):
+                lines.append(f"  Description: {store['description']}")
+            if store.get("themes"):
+                lines.append(f"  Themes: {store['themes']}")
+            if preview_samples and store_id in preview_samples:
+                samples = preview_samples[store_id][:2]
+                if samples:
+                    lines.append(f"  Sample: {samples[0][:200]}...")
+            stores_section.append("\n".join(lines))
+
+        # Get user context (memory only - intelligence goes to router)
+        memory = getattr(self.enricher, "memory", "") or ""
+        user_context = ""
+        if memory:
+            user_context = f"\nUSER CONTEXT:\n{memory}\n"
+
+        prompt = f"""Allocate {total_budget} tokens across document stores for this query.
+{user_context}
+DOCUMENT STORES:
+{chr(10).join(stores_section)}
+
+USER QUERY: {query}
+
+Respond with JSON only: {{"store_ID": tokens, ...}}
+
+RULES:
+- Only include stores relevant to the query
+- Allocate 0 to irrelevant stores (or omit them)
+- For "list my notes", "what notes do I have", etc.: allocate 0 to USER'S NOTES store (live query handles it)
+- Stores marked "LIVE QUERY AVAILABLE" can enumerate their contents directly - prefer 0 allocation for listing queries
+- Total should use most of {total_budget} for semantic search queries"""
+
+        try:
+            resolved = self.registry._resolve_actual_model(model)
+            provider = resolved.provider
+
+            result = provider.chat_completion(
+                model=resolved.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                system=None,
+                options={"max_tokens": 300, "temperature": 0},
+            )
+
+            response_text = result.get("content", "").strip()
+            usage = {
+                "prompt_tokens": result.get("input_tokens", 0),
+                "completion_tokens": result.get("output_tokens", 0),
+                "purpose": "rag_selection",
+                "model": model,
+            }
+
+            # Parse JSON
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if json_match:
+                allocations = json.loads(json_match.group())
+                # Convert store_X keys to int IDs
+                store_budgets = {}
+                for key, value in allocations.items():
+                    try:
+                        store_id = int(
+                            str(key).replace("store_", "").replace("store", "")
+                        )
+                        store_budgets[store_id] = int(value)
+                    except (ValueError, TypeError):
+                        pass
+
+                if store_budgets:
+                    logger.info(f"Parallel RAG designator: {store_budgets}")
+                    return store_budgets, usage
+
+            return None, usage
+
+        except Exception as e:
+            logger.error(f"RAG designator failed: {e}")
+            return None, None
+
+    def _designate_web(
+        self,
+        query: str,
+    ) -> tuple[bool | None, str | None, dict | None]:
+        """
+        Focused web designator - decides if web search needed and generates query.
+
+        Returns:
+            (use_web, search_query, usage_dict)
+        """
+        model = getattr(self.enricher, "web_designator_model", None)
+        if not model:
+            return None, None, None
+
+        # Get user context (memory only - intelligence goes to router)
+        memory = getattr(self.enricher, "memory", "") or ""
+        user_context = ""
+        if memory:
+            user_context = f"\nUSER CONTEXT:\n{memory}\n"
+
+        prompt = f"""Analyze if web search would help answer this query.
+{user_context}
+USER QUERY: {query}
+
+Respond with JSON only:
+{{"use_web": true/false, "search_query": "optimized 3-8 word query"}}
+
+Rules:
+- use_web=true for: current events, recent news, real-time data, facts that change
+- use_web=false for: general knowledge, coding, math, creative writing, personal data
+- search_query: Only needed if use_web=true, optimize for search engines"""
+
+        try:
+            resolved = self.registry._resolve_actual_model(model)
+            provider = resolved.provider
+
+            result = provider.chat_completion(
+                model=resolved.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                system=None,
+                options={"max_tokens": 150, "temperature": 0},
+            )
+
+            response_text = result.get("content", "").strip()
+            usage = {
+                "prompt_tokens": result.get("input_tokens", 0),
+                "completion_tokens": result.get("output_tokens", 0),
+                "purpose": "web_decision",
+                "model": model,
+            }
+
+            # Parse JSON
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                use_web = data.get("use_web", False)
+                search_query = data.get("search_query") if use_web else None
+                logger.info(
+                    f"Parallel web designator: use_web={use_web}, query={search_query}"
+                )
+                return use_web, search_query, usage
+
+            return None, None, usage
+
+        except Exception as e:
+            logger.error(f"Web designator failed: {e}")
+            return None, None, None
+
+    def _designate_live(
+        self,
+        query: str,
+        live_source_info: list[dict],
+        mcp_tool_info: list[dict],
+    ) -> tuple[dict[str, list[dict]] | None, dict | None]:
+        """
+        Focused live data designator - selects sources and extracts parameters.
+
+        Args:
+            query: User's query
+            live_source_info: List of builtin live source info dicts
+            mcp_tool_info: List of MCP tool info dicts
+
+        Returns:
+            (live_params dict, usage_dict) or (None, None) on failure
+        """
+        model = getattr(self.enricher, "live_designator_model", None)
+        if not model:
+            return None, None
+
+        # Build comprehensive sources text like unified designator
+        sources_text = ""
+
+        # Builtin live data sources
+        if live_source_info:
+            sources_text += "LIVE DATA SOURCES (real-time API queries - READ ONLY):\n"
+            sources_text += "(Use the source NAME in live_params)\n"
+            for s in live_source_info:
+                sources_text += f"- {s['name']}"
+                if s.get("data_type"):
+                    sources_text += f" [{s['data_type']}]"
+                sources_text += "\n"
+                if s.get("description"):
+                    sources_text += f"  Description: {s['description']}\n"
+                if s.get("best_for"):
+                    sources_text += f"  Best for: {s['best_for']}\n"
+                if s.get("param_hints"):
+                    sources_text += f"  {s['param_hints']}\n"
+            sources_text += "\n"
+
+        # MCP API tools section
+        if mcp_tool_info:
+            mcp_by_source: dict[str, list] = {}
+            mcp_source_meta: dict[str, dict] = {}
+            for tool in mcp_tool_info:
+                src = tool["source_name"]
+                if src not in mcp_by_source:
+                    mcp_by_source[src] = []
+                    mcp_source_meta[src] = {
+                        "description": tool.get("source_description", ""),
+                        "data_type": tool.get("source_data_type", ""),
+                        "best_for": tool.get("source_best_for", ""),
+                    }
+                mcp_by_source[src].append(tool)
+
+            sources_text += "MCP API TOOLS (call specific API endpoints):\n"
+            sources_text += "IMPORTANT: Most MCP APIs require ID lookups. Use agentic mode for multi-step queries:\n"
+            sources_text += '  {"source_name": [{"agentic": true, "goal": "describe what you need"}]}\n'
+            sources_text += (
+                "Or call specific tools directly if you know the parameters:\n"
+            )
+            sources_text += '  {"source_name": [{"tool_name": "ToolName", "tool_args": {"param": "value"}}]}\n\n'
+
+            for src_name, tools in mcp_by_source.items():
+                meta = mcp_source_meta.get(src_name, {})
+                sources_text += f"{src_name} API"
+                if meta.get("data_type"):
+                    sources_text += f" [{meta['data_type']}]"
+                sources_text += f" ({len(tools)} tools):\n"
+                if meta.get("description"):
+                    sources_text += f"  Description: {meta['description']}\n"
+                if meta.get("best_for"):
+                    sources_text += f"  Best for: {meta['best_for']}\n"
+                sources_text += "  Tools:\n"
+                for tool in tools:
+                    sources_text += (
+                        f"    - {tool['tool_name']}: {tool['description']}\n"
+                    )
+                    if tool.get("params"):
+                        sources_text += f"      Required: {', '.join(tool['params'])}\n"
+                sources_text += "\n"
+
+        # Get user context (memory only - intelligence goes to router)
+        memory = getattr(self.enricher, "memory", "") or ""
+        user_context = ""
+        if memory:
+            user_context = f"USER CONTEXT:\n{memory}\n\n"
+
+        # Log what live sources the designator will see
+        logger.info(f"Live designator sources: {[s['name'] for s in live_source_info]}")
+        for s in live_source_info:
+            if "USER'S" in s.get("best_for", ""):
+                logger.info(f"  {s['name']}: {s.get('best_for', '')[:100]}")
+
+        prompt = f"""You are a live data parameter extractor. Select the relevant live data sources and extract specific parameters needed for this query.
+
+{user_context}{sources_text}
+USER QUERY: {query}
+
+OUTPUT FORMAT - respond with ONLY a JSON object, nothing else:
+{{"source_name": [{{"param": "value"}}]}}
+
+CRITICAL RULES:
+1. Keys in your JSON MUST be source names from the lists above. Do NOT invent keys like "follow_ups", "suggestions", etc.
+2. For "what notes do I have", "list my notes", "show my notes" queries → use the source marked **USER'S NOTES** with action="list"
+3. For "what tasks do I have" queries → use the source marked **USER'S TASKS** with action="list"
+4. Return empty {{}} ONLY if no live data source is relevant
+
+EXAMPLES:
+- List user's notes: {{"ben-notes": [{{"action": "list"}}]}} (use actual source name from USER'S NOTES)
+- List user's tasks (generic): Query ALL sources marked **USER'S TASKS** - e.g. {{"personal-todoist": [{{"action": "pending"}}], "work-todoist": [{{"action": "pending"}}], "my-tasks": [{{"action": "list"}}]}}
+- List tasks from specific source: {{"bh-ltd-todoist": [{{"action": "pending"}}]}} (when user names a specific source)
+- Weather: {{"weather": [{{"location": "London"}}]}}
+- Stocks: {{"stocks": [{{"symbol": "AAPL"}}]}}
+- MCP agentic: {{"sofasport": [{{"agentic": true, "goal": "get QPR results"}}]}}
+
+IMPORTANT: When user asks for "all tasks", "my tasks", "what tasks do I have" without specifying a source, include ALL sources marked **USER'S TASKS** in your response.
+
+RESPOND WITH JSON ONLY - no explanations, no follow-up suggestions."""
+
+        try:
+            resolved = self.registry._resolve_actual_model(model)
+            provider = resolved.provider
+
+            result = provider.chat_completion(
+                model=resolved.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                system=None,
+                options={"max_tokens": 500, "temperature": 0},
+            )
+
+            response_text = result.get("content", "").strip()
+            logger.info(f"Live designator raw response: {response_text[:200]}")
+            usage = {
+                "prompt_tokens": result.get("input_tokens", 0),
+                "completion_tokens": result.get("output_tokens", 0),
+                "purpose": "live_extraction",
+                "model": model,
+            }
+
+            # Parse JSON
+            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if json_match:
+                raw_params = json.loads(json_match.group())
+
+                # Validate against actual source names
+                valid_names = {s["name"] for s in live_source_info}
+                valid_names.update({t["source_name"] for t in mcp_tool_info})
+
+                live_params = {}
+                for name, params_data in raw_params.items():
+                    if name not in valid_names:
+                        logger.warning(
+                            f"Live designator returned invalid source name: {name} (not in valid sources)"
+                        )
+                        continue
+                    # Normalize to list format
+                    if isinstance(params_data, list):
+                        live_params[name] = params_data
+                    elif isinstance(params_data, dict):
+                        live_params[name] = [params_data]
+
+                if live_params:
+                    logger.info(f"Parallel live designator: {list(live_params.keys())}")
+                elif raw_params:
+                    # Model returned something but all keys were invalid
+                    logger.warning(
+                        f"Live designator returned no valid sources. Raw keys: {list(raw_params.keys())}"
+                    )
+                return live_params, usage
+
+            return {}, usage
+
+        except Exception as e:
+            logger.error(f"Live designator failed: {e}")
+            return None, None
+
+    # Session cache for per_session routing strategy
+    _routing_session_cache: dict[str, str] = {}
+
+    def _select_sources_parallel(
+        self,
+        query: str,
+        messages: list[dict] | None = None,
+        routing_config: dict | None = None,
+        session_key: str | None = None,
+    ) -> dict | None:
+        """
+        Execute focused designators in parallel, falling back to unified for
+        unconfigured domains.
+
+        Returns dict with keys: allocations, search_query, live_params, selected_model
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Check which parallel designators are configured
+        has_router = bool(getattr(self.enricher, "router_designator_model", None))
+        has_rag = bool(getattr(self.enricher, "rag_designator_model", None))
+        has_web = bool(getattr(self.enricher, "web_designator_model", None))
+        has_live = bool(getattr(self.enricher, "live_designator_model", None))
+
+        # If none configured, use unified call
+        if not any([has_router, has_rag, has_web, has_live]):
+            return self._select_sources(query, messages, routing_config)
+
+        # Check for per_session routing cache
+        routing_strategy = getattr(self.enricher, "routing_strategy", "per_request")
+        cached_model = None
+        if routing_strategy == "per_session" and session_key and routing_config:
+            cache_key = f"{self.enricher.id}:{session_key}"
+            cached_model = SmartEnricherEngine._routing_session_cache.get(cache_key)
+            if cached_model:
+                logger.info(
+                    f"Using cached routing decision for session: {cached_model}"
+                )
+                has_router = False  # Skip routing call, use cached result
+
+        logger.info(
+            f"Using parallel designators: router={has_router}, rag={has_rag}, "
+            f"web={has_web}, live={has_live}"
+        )
+
+        # Prepare data for designators
+        stores = self._get_linked_stores()
+        store_info = []
+        for store in stores:
+            # Check if this store has live query support via unified source
+            store_type = getattr(store, "source_type", "")
+            supports_live = False
+            try:
+                from plugin_base.loader import get_unified_source_plugin
+
+                plugin_class = get_unified_source_plugin(store_type)
+                if plugin_class and getattr(plugin_class, "supports_live", False):
+                    supports_live = True
+            except Exception:
+                pass
+
+            store_info.append(
+                {
+                    "id": store.id,
+                    "name": store.name or store.display_name or f"Store {store.id}",
+                    "description": getattr(store, "description", None),
+                    "themes": getattr(store, "themes", None),
+                    "supports_live": supports_live,
+                }
+            )
+
+        # Build live source info (full details like unified designator)
+        live_source_info = []
+        mcp_tool_info = []
+        live_sources = self._get_linked_live_sources()
+        use_live_data = getattr(self.enricher, "use_live_data", False)
+
+        if use_live_data:
+            for source in live_sources:
+                if not getattr(source, "enabled", True):
+                    continue
+                name = getattr(source, "name", "")
+                source_type = getattr(source, "source_type", "")
+                data_type = getattr(source, "data_type", "")
+                best_for = getattr(source, "best_for", "")
+                description = getattr(source, "description", "")
+
+                # MCP sources provide their own tool descriptions
+                if source_type == "mcp_server":
+                    from live.sources import MCPProvider
+
+                    try:
+                        provider = MCPProvider(source)
+                        if provider.is_available():
+                            tools = provider.list_tools()
+                            for tool in tools:
+                                tool_name = tool.get("name", "")
+                                tool_desc = tool.get("description", "No description")
+                                if len(tool_desc) > 150:
+                                    tool_desc = tool_desc[:147] + "..."
+                                schema = tool.get("inputSchema", {})
+                                required = schema.get("required", [])
+                                properties = schema.get("properties", {})
+
+                                param_parts = []
+                                for param_name in required:
+                                    prop = properties.get(param_name, {})
+                                    param_type = prop.get("type", "string")
+                                    param_parts.append(f"{param_name} ({param_type})")
+
+                                mcp_tool_info.append(
+                                    {
+                                        "source_name": name,
+                                        "source_description": description,
+                                        "source_data_type": data_type,
+                                        "source_best_for": best_for,
+                                        "tool_name": tool_name,
+                                        "description": tool_desc,
+                                        "params": param_parts,
+                                    }
+                                )
+                    except Exception as e:
+                        logger.warning(f"Failed to get MCP tools from {name}: {e}")
+                    continue
+
+                # Parameter hints based on source type
+                param_hints = ""
+                try:
+                    from plugin_base.loader import get_live_source_plugin
+
+                    plugin_class = get_live_source_plugin(source_type)
+                    if plugin_class:
+                        param_hints = plugin_class.get_designator_hint()
+                        if not data_type:
+                            data_type = getattr(plugin_class, "data_type", "")
+                        if not best_for:
+                            best_for = getattr(plugin_class, "best_for", "")
+                except ImportError:
+                    pass
+
+                # Fallback to hardcoded hints for non-plugin sources
+                if not param_hints:
+                    if source_type == "builtin_weather":
+                        param_hints = (
+                            "Parameters: location (city name), type (current|forecast)"
+                        )
+                    elif source_type == "builtin_stocks":
+                        param_hints = (
+                            "Parameters: symbol (US stock ticker like AAPL, MSFT, NVDA)"
+                        )
+                    elif source_type == "builtin_alpha_vantage":
+                        param_hints = (
+                            "Parameters: symbol (UK stock ticker like LGEN.LON)"
+                        )
+                    elif source_type == "builtin_transport":
+                        param_hints = "Parameters: station (3-letter code), type (departures|arrivals)"
+                    elif source_type == "gmail":
+                        param_hints = "Parameters: action (today|unread|recent|search)"
+                    elif source_type == "builtin_routes":
+                        param_hints = "Parameters: origin, destination, mode (drive|walk|bicycle|transit), arrival_time or departure_time"
+                    elif source_type == "builtin_google_maps":
+                        param_hints = "Parameters: action (search|details|nearby|directions), query, location"
+
+                live_source_info.append(
+                    {
+                        "name": name,
+                        "source_type": source_type,
+                        "data_type": data_type,
+                        "best_for": best_for,
+                        "description": description,
+                        "param_hints": param_hints,
+                    }
+                )
+
+        # Also add unified sources from document stores that support live queries
+        # These allow real-time queries (list, search) on doc stores like Notion
+        # NOTE: This is OUTSIDE the use_live_data check - unified sources work even when
+        # traditional live data is disabled, as they're part of document stores
+        notes_store_id = getattr(self.enricher, "action_notes_store_id", None)
+        tasks_store_id = getattr(self.enricher, "action_tasks_store_id", None)
+        email_account_id = getattr(self.enricher, "action_email_account_id", None)
+        calendar_account_id = getattr(self.enricher, "action_calendar_account_id", None)
+        tasks_account_id = getattr(self.enricher, "action_tasks_account_id", None)
+
+        logger.info(
+            f"Checking {len(stores)} stores for unified sources, notes_store_id={notes_store_id}"
+        )
+
+        seen_unified = set()
+        for store in stores:
+            store_type = getattr(store, "source_type", "")
+            store_name = getattr(store, "name", "")
+            store_id = getattr(store, "id", None)
+            google_account_id = getattr(store, "google_account_id", None)
+
+            unified_key = f"{store_type}:{store_name}"
+            if unified_key in seen_unified:
+                continue
+
+            try:
+                from plugin_base.loader import get_unified_source_plugin
+
+                plugin_class = get_unified_source_plugin(store_type)
+                if plugin_class:
+                    logger.info(
+                        f"[parallel] Store {store_name} ({store_type}): found plugin {plugin_class.__name__}, supports_live={getattr(plugin_class, 'supports_live', False)}"
+                    )
+                if plugin_class and getattr(plugin_class, "supports_live", False):
+                    seen_unified.add(unified_key)
+
+                    # Get designator hint from unified source
+                    param_hints = ""
+                    if hasattr(plugin_class, "get_designator_hint"):
+                        param_hints = plugin_class.get_designator_hint()
+
+                    data_type = getattr(plugin_class, "data_type", "documents")
+                    best_for = getattr(plugin_class, "best_for", "")
+                    description = getattr(plugin_class, "description", "")
+
+                    # Build action hints based on store config
+                    action_hints = []
+                    if store_id == notes_store_id:
+                        action_hints.append("USER'S NOTES")
+                    # Mark as tasks source if: it's the default tasks store, OR it's a Google Tasks
+                    # matching the default account, OR it's ANY Todoist store (all are task sources)
+                    if (
+                        store_id == tasks_store_id
+                        or (
+                            tasks_account_id
+                            and google_account_id == tasks_account_id
+                            and store_type in ("mcp:gtasks", "gtasks")
+                        )
+                        or store_type == "todoist"
+                    ):
+                        action_hints.append("USER'S TASKS")
+                    if (
+                        email_account_id
+                        and google_account_id == email_account_id
+                        and store_type in ("mcp:gmail", "gmail")
+                    ):
+                        action_hints.append("USER'S EMAIL")
+                    if (
+                        calendar_account_id
+                        and google_account_id == calendar_account_id
+                        and store_type in ("mcp:gcalendar", "gcalendar")
+                    ):
+                        action_hints.append("USER'S CALENDAR")
+
+                    # Build best_for with action hints prominently at start
+                    if action_hints:
+                        hint_topics = [
+                            h.replace("USER'S ", "").lower() for h in action_hints
+                        ]
+                        hint_prefix = f"**{', '.join(action_hints)}** - USE THIS for queries about {', '.join(hint_topics)}. "
+                    else:
+                        hint_prefix = ""
+
+                    live_source_info.append(
+                        {
+                            "name": store_name,
+                            "source_type": f"unified:{store_type}",
+                            "data_type": data_type,
+                            "best_for": f"{hint_prefix}Real-time queries on '{store_name}' - list pages, search, recent items. {best_for}",
+                            "description": f"Live access to {store_name} ({description})",
+                            "param_hints": param_hints,
+                            "is_unified": True,
+                            "doc_store_id": store.id,
+                        }
+                    )
+                    logger.info(
+                        f"Added unified live source for parallel designator: {store_name} ({store_type}) action_hints={action_hints}"
+                    )
+            except Exception as e:
+                logger.debug(f"No unified source for {store_type}: {e}")
+
+        # Get preview samples if two-pass enabled
+        preview_samples = {}
+        if getattr(self.enricher, "use_two_pass_retrieval", False) and has_rag:
+            preview_samples = self._get_preview_samples(query, stores)
+
+        # Results - use cached model if available from per_session
+        results = {
+            "allocations": {},
+            "search_query": None,
+            "live_params": {},
+            "selected_model": cached_model,  # May be None or cached value
+        }
+        designator_calls = []
+        unified_domains = []  # Domains needing unified fallback
+
+        # Determine what needs parallel vs unified
+        needs_routing = routing_config and routing_config.get("candidates")
+        needs_rag = getattr(self.enricher, "use_rag", False) and store_info
+        needs_web = getattr(self.enricher, "use_web", False)
+        # Live designator runs if: traditional live sources enabled, OR unified sources exist
+        # Unified sources (like Notion) support live queries even without use_live_data=True
+        has_unified_sources = any(s.get("is_unified") for s in live_source_info)
+        needs_live = (
+            use_live_data and (live_source_info or mcp_tool_info)
+        ) or has_unified_sources
+
+        futures = {}
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # Submit parallel designator calls
+            if needs_routing:
+                if has_router:
+                    futures["router"] = executor.submit(
+                        self._designate_routing,
+                        query,
+                        messages,
+                        routing_config["candidates"],
+                        routing_config.get("token_count", 0),
+                        routing_config.get("has_images", False),
+                    )
+                else:
+                    unified_domains.append("routing")
+
+            if needs_rag:
+                if has_rag:
+                    futures["rag"] = executor.submit(
+                        self._designate_rag,
+                        query,
+                        store_info,
+                        getattr(self.enricher, "max_context_tokens", 4000),
+                        preview_samples,
+                    )
+                else:
+                    unified_domains.append("rag")
+
+            if needs_web:
+                if has_web:
+                    futures["web"] = executor.submit(
+                        self._designate_web,
+                        query,
+                    )
+                else:
+                    unified_domains.append("web")
+
+            if needs_live:
+                if has_live:
+                    futures["live"] = executor.submit(
+                        self._designate_live,
+                        query,
+                        live_source_info,
+                        mcp_tool_info,
+                    )
+                else:
+                    unified_domains.append("live")
+
+            # Collect parallel results
+            for key, future in futures.items():
+                try:
+                    if key == "router":
+                        model, usage = future.result(timeout=30)
+                        if model:
+                            results["selected_model"] = model
+                            # Cache for per_session strategy
+                            if routing_strategy == "per_session" and session_key:
+                                cache_key = f"{self.enricher.id}:{session_key}"
+                                SmartEnricherEngine._routing_session_cache[
+                                    cache_key
+                                ] = model
+                                logger.info(
+                                    f"Cached routing decision for session: {model}"
+                                )
+                        if usage:
+                            designator_calls.append(usage)
+
+                    elif key == "rag":
+                        budgets, usage = future.result(timeout=30)
+                        if budgets:
+                            # Convert to allocations format
+                            for store_id, tokens in budgets.items():
+                                results["allocations"][str(store_id)] = tokens
+                        if usage:
+                            designator_calls.append(usage)
+
+                    elif key == "web":
+                        use_web, search_query, usage = future.result(timeout=30)
+                        if use_web:
+                            results["allocations"]["web"] = (
+                                getattr(self.enricher, "max_context_tokens", 4000) // 4
+                            )  # Default 25% to web
+                            results["search_query"] = search_query
+                        if usage:
+                            designator_calls.append(usage)
+
+                    elif key == "live":
+                        params, usage = future.result(timeout=30)
+                        if params:
+                            results["live_params"] = params
+                        if usage:
+                            designator_calls.append(usage)
+
+                except Exception as e:
+                    logger.error(f"Parallel designator '{key}' failed: {e}")
+                    # Add to unified domains as fallback
+                    domain = "routing" if key == "router" else key
+                    if domain not in unified_domains:
+                        unified_domains.append(domain)
+
+        # Handle unified call for remaining domains
+        if unified_domains and self.enricher.designator_model:
+            logger.info(f"Unified fallback for domains: {unified_domains}")
+            # Use the existing _select_sources for fallback
+            unified_result = self._select_sources(
+                query,
+                messages,
+                routing_config if "routing" in unified_domains else None,
+            )
+            if unified_result:
+                # Merge unified results
+                if "routing" in unified_domains and unified_result.get(
+                    "selected_model"
+                ):
+                    results["selected_model"] = unified_result["selected_model"]
+                if "rag" in unified_domains:
+                    for k, v in unified_result.get("allocations", {}).items():
+                        if k != "web" and k not in results["allocations"]:
+                            results["allocations"][k] = v
+                if "web" in unified_domains:
+                    if unified_result.get("allocations", {}).get("web"):
+                        results["allocations"]["web"] = unified_result["allocations"][
+                            "web"
+                        ]
+                        results["search_query"] = unified_result.get("search_query")
+                if "live" in unified_domains and unified_result.get("live_params"):
+                    results["live_params"] = unified_result["live_params"]
+
+                if unified_result.get("designator_usage"):
+                    designator_calls.append(unified_result["designator_usage"])
+
+        # Attach designator calls for tracking
+        results["designator_calls"] = designator_calls
+
+        # Convert allocations to store_budgets format
+        store_budgets = {}
+        web_budget = 0
+        for k, v in results["allocations"].items():
+            if k == "web":
+                web_budget = v
+            else:
+                try:
+                    store_budgets[int(k)] = v
+                except ValueError:
+                    pass
+
+        logger.info(
+            f"Parallel selection complete: stores={list(store_budgets.keys())}, "
+            f"web={web_budget > 0}, live={list(results['live_params'].keys())}, "
+            f"model={results['selected_model']}"
+        )
+
+        return {
+            "store_budgets": store_budgets if store_budgets else None,
+            "web_budget": web_budget if web_budget > 0 else None,
+            "search_query": results["search_query"],
+            "live_params": results["live_params"] if results["live_params"] else None,
+            "selected_model": results["selected_model"],
+            "designator_usage": {
+                "prompt_tokens": sum(
+                    c.get("prompt_tokens", 0) for c in designator_calls
+                ),
+                "completion_tokens": sum(
+                    c.get("completion_tokens", 0) for c in designator_calls
+                ),
+            }
+            if designator_calls
+            else None,
+            "designator_model": "parallel",
+        }
+
+    # =========================================================================
+    # END PARALLEL DESIGNATORS
+    # =========================================================================
 
     def _retrieve_rag_context(
         self,
@@ -1838,6 +3077,49 @@ Respond with ONLY the JSON object."""
             # (e.g., weather API called with "what size strap does watch use?" as location)
             sources_to_query = []
 
+        # Also check unified sources from document stores (e.g., Notion)
+        # These may have been selected by the designator using the doc store name
+        if live_params:
+            linked_stores = self._get_linked_stores()
+            for store in linked_stores:
+                store_name = getattr(store, "name", "")
+                if store_name in source_params and store_name not in [
+                    getattr(s, "name", "") for s, _ in sources_to_query
+                ]:
+                    # This is a unified source from a document store
+                    store_type = getattr(store, "source_type", "")
+                    try:
+                        from plugin_base.loader import get_unified_source_plugin
+
+                        plugin_class = get_unified_source_plugin(store_type)
+                        if plugin_class and getattr(
+                            plugin_class, "supports_live", False
+                        ):
+                            params_list = source_params[store_name]
+                            if isinstance(params_list, list):
+                                for params in params_list:
+                                    # Use store as source with special marker
+                                    sources_to_query.append(
+                                        (
+                                            store,
+                                            {**params, "_is_unified_doc_store": True},
+                                        )
+                                    )
+                            elif isinstance(params_list, dict):
+                                sources_to_query.append(
+                                    (
+                                        store,
+                                        {**params_list, "_is_unified_doc_store": True},
+                                    )
+                                )
+                            logger.info(
+                                f"Added unified doc store to live query: {store_name} ({store_type})"
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            f"Could not check unified source for {store_name}: {e}"
+                        )
+
         if not sources_to_query:
             logger.debug(
                 f"Enricher '{self.enricher.name}': Designator found no relevant live sources"
@@ -1863,12 +3145,40 @@ Respond with ONLY the JSON object."""
                     sources_already_logged.add(source_name)
 
                 try:
-                    # Check if a unified source plugin exists for this live source
-                    # Unified sources combine RAG + Live with smart routing
-                    unified_source = self._get_unified_source_for_live(source)
+                    # Check if this is a unified doc store (from document store, not live source)
+                    is_unified_doc_store = params.pop("_is_unified_doc_store", False)
+
+                    unified_source = None
+                    if is_unified_doc_store:
+                        # Source is actually a DocumentStore - instantiate unified source directly
+                        store_type = getattr(source, "source_type", "")
+                        try:
+                            from plugin_base.loader import get_unified_source_plugin
+
+                            plugin_class = get_unified_source_plugin(store_type)
+                            if plugin_class and getattr(
+                                plugin_class, "supports_live", False
+                            ):
+                                config = plugin_class.build_config_from_store(source)
+                                unified_source = plugin_class(config)
+                                logger.info(
+                                    f"Created unified source from doc store: {source_name} ({store_type})"
+                                )
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to create unified source from doc store {source_name}: {e}"
+                            )
+                            # Skip to next source - can't use legacy path for doc stores
+                            metadata["errors"].append(f"{source_name}: {e}")
+                            continue
+                    else:
+                        # Check if a unified source plugin exists for this live source
+                        # Unified sources combine RAG + Live with smart routing
+                        unified_source = self._get_unified_source_for_live(source)
+
                     if unified_source:
                         # Use unified source's query() method with smart routing
-                        logger.debug(
+                        logger.info(
                             f"Using unified source for {source_name} ({getattr(source, 'source_type', '')})"
                         )
 
@@ -1992,7 +3302,10 @@ Respond with ONLY the JSON object."""
                     logger.error(f"Error fetching from {source_name}: {e}")
 
             if context_parts:
-                live_context = "=== Live Data ===\n" + "\n\n".join(context_parts)
+                live_context = (
+                    "=== Live Data (REAL-TIME - fetched just now, use for current values) ===\n"
+                    + "\n\n".join(context_parts)
+                )
                 return live_context, metadata
 
         except Exception as e:
@@ -2488,15 +3801,19 @@ SEARCH QUERY:"""
         merged = []
         for source_type, context in context_parts:
             if source_type == "rag":
-                merged.append(f"=== Document Context ===\n{context}")
+                merged.append(
+                    f"=== Document Context (user's stored documents - check dates for freshness) ===\n{context}"
+                )
             elif source_type == "web":
-                merged.append(f"=== Web Context ===\n{context}")
+                merged.append(f"=== Web Context (recently searched) ===\n{context}")
             elif source_type == "live":
                 # Live context already has its header from _retrieve_live_context
                 merged.append(context)
             elif source_type == "live_history":
                 # Prior live data from this session
-                merged.append(f"=== Previous Live Data (this session) ===\n{context}")
+                merged.append(
+                    f"=== Previous Live Data (earlier in this session) ===\n{context}"
+                )
             else:
                 merged.append(context)
 
@@ -2522,7 +3839,13 @@ SEARCH QUERY:"""
 
         instruction = """IMPORTANT: The following information has been specifically retrieved to answer the user's question.
 You should strongly prefer information from this context over your general knowledge.
-If the context contains relevant details, reference them directly in your response."""
+If the context contains relevant details, reference them directly in your response.
+
+DATA FRESHNESS PRIORITY:
+- Live Data: Real-time information fetched just now (stock prices, weather, sports scores, etc.) - ALWAYS use this for current values
+- Web Context: Recently searched web content - use for current events and recent information
+- Document Context: User's stored documents - may contain historical data; check dates carefully
+When the same information appears in multiple sources, prefer the most recent/live source."""
 
         if priority_hint:
             instruction = f"{instruction}\n{priority_hint}"

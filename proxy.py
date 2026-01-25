@@ -1553,7 +1553,7 @@ def chat():
         # Log designator usage for enricher - log each call separately
         designator_calls = getattr(enrichment_result, "designator_calls", [])
         if designator_calls:
-            designator_model = enrichment_result.designator_model or "unknown"
+            default_model = enrichment_result.designator_model or "unknown"
 
             # Merge enricher tags with request tags for designator logging
             designator_tag = tag
@@ -1563,21 +1563,27 @@ def chat():
                 designator_tag = ",".join(all_tags)
 
             for call in designator_calls:
+                # Use the model from the call if available (parallel designators)
+                call_model = call.get("model") or default_model
+                # Include purpose in request_type for better tracking
+                purpose = call.get("purpose", "designator")
+                request_type = f"designator:{purpose}" if purpose else "designator"
+
                 track_completion(
-                    provider_id=designator_model.split("/")[0]
-                    if "/" in designator_model
+                    provider_id=call_model.split("/")[0]
+                    if "/" in call_model
                     else "unknown",
-                    model_id=designator_model.split("/")[1]
-                    if "/" in designator_model
-                    else designator_model,
-                    model_name=designator_model,
+                    model_id=call_model.split("/")[1]
+                    if "/" in call_model
+                    else call_model,
+                    model_name=call_model,
                     endpoint="/api/chat",
                     input_tokens=call.get("prompt_tokens", 0),
                     output_tokens=call.get("completion_tokens", 0),
                     status_code=200,
                     tag=designator_tag,
                     is_designator=True,
-                    request_type="designator",
+                    request_type=request_type,
                 )
         # Fallback for legacy single designator_usage (shouldn't happen with new code)
         elif enrichment_result.designator_usage:
@@ -2425,7 +2431,7 @@ def openai_chat_completions():
         # Log designator usage for enricher - log each call separately
         designator_calls = getattr(enrichment_result, "designator_calls", [])
         if designator_calls:
-            designator_model = enrichment_result.designator_model or "unknown"
+            default_model = enrichment_result.designator_model or "unknown"
 
             # Merge enricher tags with request tags for designator logging
             designator_tag = tag
@@ -2435,21 +2441,27 @@ def openai_chat_completions():
                 designator_tag = ",".join(all_tags)
 
             for call in designator_calls:
+                # Use the model from the call if available (parallel designators)
+                call_model = call.get("model") or default_model
+                # Include purpose in request_type for better tracking
+                purpose = call.get("purpose", "designator")
+                request_type = f"designator:{purpose}" if purpose else "designator"
+
                 track_completion(
-                    provider_id=designator_model.split("/")[0]
-                    if "/" in designator_model
+                    provider_id=call_model.split("/")[0]
+                    if "/" in call_model
                     else "unknown",
-                    model_id=designator_model.split("/")[1]
-                    if "/" in designator_model
-                    else designator_model,
-                    model_name=designator_model,
+                    model_id=call_model.split("/")[1]
+                    if "/" in call_model
+                    else call_model,
+                    model_name=call_model,
                     endpoint="/v1/chat/completions",
                     input_tokens=call.get("prompt_tokens", 0),
                     output_tokens=call.get("completion_tokens", 0),
                     status_code=200,
                     tag=designator_tag,
                     is_designator=True,
-                    request_type="designator",
+                    request_type=request_type,
                 )
         # Fallback for legacy single designator_usage
         elif enrichment_result.designator_usage:
@@ -3331,10 +3343,10 @@ def anthropic_messages():
                 increment_scrape=1 if enrichment_result.scraped_urls else 0,
             )
 
-        # Log designator usage for enricher
+        # Log designator usage for enricher - log each call separately
         designator_calls = getattr(enrichment_result, "designator_calls", [])
         if designator_calls:
-            designator_model = enrichment_result.designator_model or "unknown"
+            default_model = enrichment_result.designator_model or "unknown"
             designator_tag = tag
             if enricher_tags:
                 existing_tags = [t.strip() for t in tag.split(",") if t.strip()]
@@ -3342,21 +3354,27 @@ def anthropic_messages():
                 designator_tag = ",".join(all_tags)
 
             for call in designator_calls:
+                # Use the model from the call if available (parallel designators)
+                call_model = call.get("model") or default_model
+                # Include purpose in request_type for better tracking
+                purpose = call.get("purpose", "designator")
+                request_type = f"designator:{purpose}" if purpose else "designator"
+
                 track_completion(
-                    provider_id=designator_model.split("/")[0]
-                    if "/" in designator_model
+                    provider_id=call_model.split("/")[0]
+                    if "/" in call_model
                     else "unknown",
-                    model_id=designator_model.split("/")[1]
-                    if "/" in designator_model
-                    else designator_model,
-                    model_name=designator_model,
+                    model_id=call_model.split("/")[1]
+                    if "/" in call_model
+                    else call_model,
+                    model_name=call_model,
                     endpoint="/v1/messages",
                     input_tokens=call.get("prompt_tokens", 0),
                     output_tokens=call.get("completion_tokens", 0),
                     status_code=200,
                     tag=designator_tag,
                     is_designator=True,
-                    request_type="designator",
+                    request_type=request_type,
                 )
         elif enrichment_result.designator_usage:
             designator_model = enrichment_result.designator_model or "unknown"

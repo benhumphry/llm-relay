@@ -68,6 +68,18 @@ class GitHubUnifiedSource(PluginUnifiedSource):
     _abstract = False
 
     @classmethod
+    def get_designator_hint(cls) -> str:
+        """Generate hint for designator prompt."""
+        return (
+            "REAL-TIME GitHub access. Actions: "
+            "action='issues' for open issues, "
+            "action='prs' for pull requests, "
+            "action='activity' for recent activity (commits, issues, PRs), "
+            "action='search' with query='...' to search issues/PRs. "
+            "Optional: state='open'|'closed'|'all', repo='owner/repo'."
+        )
+
+    @classmethod
     def build_config_from_store(cls, store) -> dict:
         """Build unified source config from a document store."""
         return {
