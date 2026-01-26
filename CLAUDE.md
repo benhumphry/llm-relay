@@ -54,8 +54,18 @@ rag/                  # Document processing for RAG
   retriever.py        # ChromaDB semantic search with reranking
   reranker.py         # Cross-encoder reranking (local + Jina)
   model_cache.py      # GPU model cache with TTL-based eviction
-mcp/                  # Document sources (direct APIs)
-  sources.py          # Document source classes for RAG indexing
+mcp/                  # Legacy module (mostly migrated to plugins)
+  __init__.py         # Minimal exports for backwards compatibility
+prompts/              # Prompt Library (Jinja2 templates)
+  __init__.py         # Convenience functions (render, get_library, match_keyword)
+  loader.py           # PromptLibrary class with YAML loading and caching
+  filters.py          # Custom Jinja2 filters
+  defaults/           # Default templates (shipped with app)
+    designators/      # Designator prompts (live, router, rag, web)
+    context/          # Context injection templates
+    actions/          # Action instruction templates
+    keywords/         # Keyword/synonym patterns
+  overrides/          # User overrides (gitignored)
 plugin_base/          # Plugin framework (v2.0)
   common.py           # Shared dataclasses (FieldDefinition, ValidationResult)
   loader.py           # Plugin discovery and registration
@@ -189,19 +199,27 @@ Transparent model name mappings checked first in resolution:
 
 Indexed document collections for RAG. Documents are parsed, chunked, and embedded into ChromaDB.
 
-**Document sources (mcp/sources.py):**
-- `local` - Docker-mounted folder
+**Unified sources (builtin_plugins/unified_sources/):**
+- `local_filesystem` - Docker-mounted folder
 - `website` - Crawled websites (trafilatura-based crawler)
-- `mcp:gdrive` - Google Drive via OAuth
-- `mcp:gmail` - Gmail via OAuth  
-- `mcp:gcalendar` - Google Calendar via OAuth
-- `mcp:gtasks` - Google Tasks via OAuth
-- `mcp:gcontacts` - Google Contacts via OAuth (People API)
+- `gdrive` - Google Drive via OAuth
+- `gmail` - Gmail via OAuth  
+- `gcalendar` - Google Calendar via OAuth
+- `gtasks` - Google Tasks via OAuth
+- `gcontacts` - Google Contacts via OAuth (People API)
 - `paperless` - Paperless-ngx via REST API
 - `notion` - Notion via direct REST API
 - `nextcloud` - Nextcloud via WebDAV
-- `mcp:github` - GitHub via REST API
+- `github` - GitHub via REST API
 - `slack` - Slack via Bot OAuth
+- `imap` - Generic IMAP email servers
+- `onedrive` - OneDrive via Microsoft Graph
+- `onenote` - OneNote via Microsoft Graph
+- `outlook` - Outlook email via Microsoft Graph
+- `outlook_calendar` - Outlook Calendar via Microsoft Graph
+- `teams` - Microsoft Teams via Microsoft Graph
+- `todoist` - Todoist tasks via REST API
+- `websearch` - Web search results as documents
 
 **Key settings:**
 - `embedding_provider` / `embedding_model` - How to embed chunks
@@ -270,11 +288,14 @@ docker logs -f llm-relay-dev
 2. Implement required methods: `chat()`, `chat_stream()`, `list_models()`
 3. Register in `providers/loader.py`
 
-### Adding a new document source
-1. Create class in `mcp/sources.py` extending `DocumentSource`
-2. Implement `list_documents()` and `read_document()` methods
-3. Add to `get_document_source()` factory function
-4. Add UI form fields in `admin/templates/document_stores.html`
+### Adding a new unified source (document + live)
+1. Create `builtin_plugins/unified_sources/my_source.py` extending `PluginUnifiedSource`
+2. Set class attributes: `source_type`, `display_name`, `description`
+3. Define `config_fields` for admin UI configuration
+4. Implement `list_documents()` and `read_document()` for RAG indexing
+5. Optionally implement `fetch()` and set `supports_live = True` for live queries
+6. Add `build_config_from_store()` classmethod to extract config from DocumentStore
+7. Plugin is auto-discovered on restart (no registration needed)
 
 ### Database changes
 1. Add/modify models in `db/models.py`
@@ -909,3 +930,125 @@ Two-pass retrieval combines semantic RAG search with live document fetch for ful
 - User asks for full content of specific documents
 - Semantic search can identify relevant documents but chunks are insufficient
 - Need to combine RAG context with complete document content
+
+---
+
+## Development Session (2026-01-26) - Prompt Library & Unified Source Cleanup
+
+### Prompt Library System
+
+Implemented a Jinja2-based prompt templating system for designator prompts. Templates are stored as YAML files with metadata and can be overridden by users.
+
+**Directory structure:**
+```
+prompts/
+  __init__.py         # Convenience functions
+  loader.py           # PromptLibrary class
+  filters.py          # Custom Jinja2 filters
+  defaults/           # Default templates
+    designators/      # live.yaml, router.yaml, rag.yaml, web.yaml
+    context/          # priorities.yaml
+    actions/          # instructions.yaml
+    keywords/         # dates.yaml (synonym patterns)
+  overrides/          # User overrides (gitignored)
+```
+
+**Usage:**
+```python
+from prompts import render, get_library, match_keyword
+
+# Render a template
+prompt = render(
+    "designators",      # category
+    "live",             # name
+    "user_template",    # template key within YAML
+    user_context="...", # template variables
+    live_sources=[...],
+    query="..."
+)
+
+# Get the library singleton
+lib = get_library()
+configs = lib.list_configs("designators")  # ['designators/live', ...]
+
+# Match keywords (for date synonyms etc.)
+match, metadata = match_keyword("keywords", "dates", "tomorrow")
+```
+
+**Custom Jinja2 filters (`prompts/filters.py`):**
+- `format_datetime` - Format datetime objects
+- `format_number` - Number formatting with commas (e.g., 128,000)
+- `truncate` - Truncate with ellipsis
+- `indent` - Indent text blocks
+- `json_escape` - Escape for JSON strings
+- `pluralize` - Simple pluralization
+
+**Template YAML structure:**
+```yaml
+name: live
+description: Live data source selector
+version: "1.0"
+
+user_template: |
+  {% if user_context %}
+  USER CONTEXT:
+  {{ user_context }}
+  {% endif %}
+  ...
+
+variables:
+  - name: user_context
+    type: string
+    optional: true
+    description: User memory context
+```
+
+**Override system:**
+- Place custom templates in `prompts/overrides/` with same path
+- Example: `prompts/overrides/designators/live.yaml` overrides default
+- Overrides take precedence over defaults
+
+**Integration in smart_enricher.py:**
+All four designator methods now use templates:
+- `_designate_routing()` → `designators/router`
+- `_designate_rag()` → `designators/rag`
+- `_designate_web()` → `designators/web`
+- `_designate_live()` → `designators/live`
+
+### Unified Source Migration Complete
+
+Removed legacy `mcp/sources.py` - all document sources now use the unified plugin architecture in `builtin_plugins/unified_sources/`.
+
+**Unified sources available:**
+- `gcalendar` - Google Calendar
+- `gcontacts` - Google Contacts
+- `gdrive` - Google Drive
+- `github` - GitHub repositories
+- `gmail` - Gmail
+- `gtasks` - Google Tasks
+- `imap` - Generic IMAP email (NEW)
+- `local_filesystem` - Local folders
+- `nextcloud` - Nextcloud/WebDAV
+- `notion` - Notion
+- `onedrive` - OneDrive
+- `onenote` - OneNote
+- `outlook` - Outlook email
+- `outlook_calendar` - Outlook Calendar
+- `paperless` - Paperless-ngx
+- `slack` - Slack
+- `teams` - Microsoft Teams
+- `todoist` - Todoist tasks
+- `website` - Web crawling
+- `websearch` - Web search results
+
+**Key changes:**
+- Each unified source handles both RAG indexing AND live queries
+- `build_config_from_store()` extracts config from DocumentStore model
+- `supports_live` property indicates live query capability
+- Live params defined via `live_params` property
+
+### Files Modified
+- `prompts/` - New module (all files)
+- `routing/smart_enricher.py` - Use prompt templates for designators
+- `mcp/sources.py` - DELETED
+- `builtin_plugins/unified_sources/*.py` - Various fixes and improvements
