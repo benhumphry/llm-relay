@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.unified_source import PluginUnifiedSource, QueryAnalysis, QueryRouting
@@ -29,6 +29,7 @@ class WebsiteUnifiedSource(PluginUnifiedSource):
     description = "Crawl and index web pages for semantic search"
     category = "web"
     icon = "🌐"
+    content_category = ContentCategory.WEBSITES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["website"]

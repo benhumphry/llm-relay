@@ -24,7 +24,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.unified_source import (
@@ -54,6 +54,7 @@ class NotionUnifiedSource(PluginUnifiedSource):
     )
     category = "productivity"
     icon = "📝"
+    content_category = ContentCategory.FILES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["notion"]
@@ -96,10 +97,11 @@ class NotionUnifiedSource(PluginUnifiedSource):
         return [
             FieldDefinition(
                 name="api_token",
-                label="Integration Token",
+                label="Notion Integration Token",
                 field_type=FieldType.PASSWORD,
                 required=False,
-                help_text="Notion integration token (or set NOTION_TOKEN/NOTION_API_KEY env var)",
+                help_text="Notion integration token (leave empty to use env var)",
+                env_var="NOTION_TOKEN",
             ),
             FieldDefinition(
                 name="root_page_id",

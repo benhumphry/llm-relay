@@ -12,6 +12,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
+from prompts import get_library
+
+# Prompt library for templated designator prompts
+from prompts import render as render_prompt
+
 if TYPE_CHECKING:
     from db.models import SmartAlias
     from providers.registry import ProviderRegistry, ResolvedModel
@@ -158,9 +163,12 @@ class SmartEnricherEngine:
         """
         Build available_accounts dict from linked document stores.
 
+        Uses plugin's get_account_info() method when available, with fallback
+        to legacy hardcoded logic for backwards compatibility.
+
         Maps document stores to action categories based on source_type:
-        - mcp:gmail -> email
-        - mcp:gcalendar -> calendar
+        - mcp:gmail, imap -> email
+        - mcp:gcalendar, mcp:outlook_calendar -> calendar
         - mcp:gtasks, todoist -> tasks
 
         Returns:
@@ -168,8 +176,8 @@ class SmartEnricherEngine:
             Each account has: store_id, name, slug, source_type, oauth_account_id,
             provider, email, and source-specific fields (project_id, tasklist_id, etc.)
         """
-        from db.oauth_tokens import get_oauth_token_info
         from plugin_base.common import ContentCategory, get_content_category
+        from plugin_base.loader import get_unified_source_for_doc_type
 
         available_accounts: dict[str, list[dict]] = {
             "email": [],
@@ -207,77 +215,36 @@ class SmartEnricherEngine:
                 if not category:
                     continue  # Not an actionable source type
 
-                # Use display_name if set, otherwise fall back to name
-                display_name = getattr(store, "display_name", None) or store_name
-                store_id = getattr(store, "id", None)
+                # Try to get account info from plugin first
+                account_info = None
+                plugin_class = get_unified_source_for_doc_type(source_type)
 
-                # Determine OAuth info based on source type
-                oauth_account_id = None
-                oauth_provider = ""
-                oauth_email = ""
+                if plugin_class and hasattr(plugin_class, "get_account_info"):
+                    try:
+                        account_info = plugin_class.get_account_info(store)
+                        if account_info:
+                            # Add common fields that plugins may not set
+                            account_info.setdefault(
+                                "store_id", getattr(store, "id", None)
+                            )
+                            account_info.setdefault("slug", store_name)
+                            account_info.setdefault("source_type", source_type)
+                            # Use display_name if available
+                            if not account_info.get("name"):
+                                account_info["name"] = (
+                                    getattr(store, "display_name", None) or store_name
+                                )
+                            logger.debug(
+                                f"  Plugin account info for '{store_name}': {account_info.get('provider')}"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"Plugin get_account_info failed for {source_type}: {e}"
+                        )
+                        account_info = None
 
-                if source_type.startswith("mcp:g"):
-                    # Google source
-                    oauth_account_id = getattr(store, "google_account_id", None)
-                    oauth_provider = "google"
-                elif source_type.startswith("mcp:o"):
-                    # Microsoft/Outlook source
-                    oauth_account_id = getattr(store, "microsoft_account_id", None)
-                    oauth_provider = "microsoft"
-                elif source_type == "todoist":
-                    # Todoist uses API key, not OAuth
-                    oauth_provider = "todoist"
-                elif source_type == "notion":
-                    # Notion uses API key, not OAuth
-                    oauth_provider = "notion"
-
-                # Get email from OAuth token if we have an account ID
-                if oauth_account_id:
-                    token_info = get_oauth_token_info(oauth_account_id)
-                    if token_info:
-                        oauth_email = token_info.get("account_email", "")
-
-                # Build account info with both slug and display name
-                account_info = {
-                    "store_id": store_id,
-                    "name": display_name,  # Friendly name
-                    "slug": store_name,  # Original slug for matching
-                    "source_type": source_type,
-                    "oauth_account_id": oauth_account_id,
-                    "provider": oauth_provider,
-                    "email": oauth_email,
-                }
-
-                # Add source-specific fields
-                if source_type == "mcp:gcalendar":
-                    account_info["calendar_id"] = getattr(
-                        store, "gcalendar_calendar_id", None
-                    )
-                elif source_type == "mcp:gtasks":
-                    account_info["tasklist_id"] = getattr(
-                        store, "gtasks_tasklist_id", None
-                    )
-                elif source_type == "todoist":
-                    # Include project_id so tasks go to the right project
-                    account_info["project_id"] = getattr(
-                        store, "todoist_project_id", None
-                    )
-                    account_info["project_name"] = getattr(
-                        store, "todoist_project_name", None
-                    )
-                    logger.info(
-                        f"  Todoist store '{store_name}': project_id={account_info['project_id']}"
-                    )
-                elif source_type == "notion" and category == "tasks":
-                    # Notion task database - include database_id
-                    account_info["database_id"] = getattr(
-                        store, "notion_database_id", None
-                    )
-                    logger.info(
-                        f"  Notion tasks store '{store_name}': database_id={account_info['database_id']}"
-                    )
-
-                available_accounts[category].append(account_info)
+                if account_info:
+                    available_accounts[category].append(account_info)
                 logger.debug(f"  -> Added to {category}: {store_name}")
 
         except Exception as e:
@@ -290,6 +257,95 @@ class SmartEnricherEngine:
                 logger.info(f"Available {cat} accounts: {names}")
 
         return available_accounts
+
+    def _build_legacy_account_info(
+        self, store, source_type: str, category: str
+    ) -> dict | None:
+        """
+        Build account info using legacy hardcoded logic.
+
+        This is the fallback when a plugin doesn't implement get_account_info().
+        Used for backwards compatibility during the plugin migration.
+
+        Args:
+            store: DocumentStore model instance
+            source_type: The store's source_type (e.g., "mcp:gmail", "todoist")
+            category: Action category ("email", "calendar", "tasks")
+
+        Returns:
+            Account info dict or None if not applicable
+        """
+        from db.oauth_tokens import get_oauth_token_info
+
+        store_name = getattr(store, "name", "unknown")
+        display_name = getattr(store, "display_name", None) or store_name
+        store_id = getattr(store, "id", None)
+
+        # Determine OAuth info based on source type
+        oauth_account_id = None
+        oauth_provider = ""
+        oauth_email = ""
+
+        if source_type.startswith("mcp:g"):
+            # Google source
+            oauth_account_id = getattr(store, "google_account_id", None)
+            oauth_provider = "google"
+        elif source_type.startswith("mcp:o"):
+            # Microsoft/Outlook source
+            oauth_account_id = getattr(store, "microsoft_account_id", None)
+            oauth_provider = "microsoft"
+        elif source_type == "todoist":
+            # Todoist uses API key, not OAuth
+            oauth_provider = "todoist"
+        elif source_type == "notion":
+            # Notion uses API key, not OAuth
+            oauth_provider = "notion"
+        elif source_type == "imap":
+            # IMAP uses direct credentials, not OAuth
+            oauth_provider = "imap"
+            # Get email from IMAP username
+            oauth_email = getattr(store, "imap_username", "") or ""
+
+        # Get email from OAuth token if we have an account ID
+        if oauth_account_id:
+            token_info = get_oauth_token_info(oauth_account_id)
+            if token_info:
+                oauth_email = token_info.get("account_email", "")
+
+        # Build account info with both slug and display name
+        account_info = {
+            "store_id": store_id,
+            "name": display_name,  # Friendly name
+            "slug": store_name,  # Original slug for matching
+            "source_type": source_type,
+            "oauth_account_id": oauth_account_id,
+            "provider": oauth_provider,
+            "email": oauth_email,
+        }
+
+        # Add source-specific fields
+        if source_type == "mcp:gcalendar":
+            account_info["calendar_id"] = getattr(store, "gcalendar_calendar_id", None)
+        elif source_type == "mcp:gtasks":
+            account_info["tasklist_id"] = getattr(store, "gtasks_tasklist_id", None)
+        elif source_type == "todoist":
+            # Include project_id so tasks go to the right project
+            account_info["project_id"] = getattr(store, "todoist_project_id", None)
+            account_info["project_name"] = getattr(store, "todoist_project_name", None)
+            logger.debug(
+                f"  Todoist store '{store_name}': project_id={account_info['project_id']}"
+            )
+        elif source_type == "notion" and category == "tasks":
+            # Notion task database - include database_id
+            account_info["database_id"] = getattr(store, "notion_database_id", None)
+            logger.debug(
+                f"  Notion tasks store '{store_name}': database_id={account_info['database_id']}"
+            )
+        elif source_type == "imap":
+            # IMAP email - uses store_id to load credentials
+            logger.debug(f"  IMAP store '{store_name}': email={oauth_email}")
+
+        return account_info
 
     def _build_default_accounts(self) -> dict[str, dict]:
         """
@@ -1884,27 +1940,6 @@ Respond with ONLY the JSON object."""
         if not model:
             return None, None
 
-        # Format candidates with full details like unified designator
-        models_section = []
-        for c in candidates:
-            line = f"- {c['model']}"
-            caps = []
-            if c.get("context_length"):
-                caps.append(f"context: {c['context_length']}")
-            if c.get("capabilities"):
-                caps.append(f"caps: {','.join(c['capabilities'])}")
-            if caps:
-                line += f" ({', '.join(caps)})"
-
-            # Include notes/description if available
-            notes = c.get("notes", "")
-            if notes:
-                if len(notes) > 300:
-                    notes = notes[:297] + "..."
-                line += f"\n  Notes: {notes}"
-
-            models_section.append(line)
-
         # Get query preview from last user message
         query_preview = query[:500] if query else ""
         if messages:
@@ -1919,26 +1954,23 @@ Respond with ONLY the JSON object."""
         intelligence = getattr(self.enricher, "intelligence", "") or ""
         memory = getattr(self.enricher, "memory", "") or ""
         user_context = ""
-        if intelligence or memory:
-            user_context = "\nUSER CONTEXT:\n"
-            if intelligence:
-                user_context += f"{intelligence}\n"
-            if memory:
-                user_context += f"{memory}\n"
+        if intelligence:
+            user_context += intelligence + "\n"
+        if memory:
+            user_context += memory
 
-        prompt = f"""Select the best model for this query.
-
-PURPOSE: {self.enricher.purpose or "General assistant"}
-{user_context}
-AVAILABLE MODELS:
-{chr(10).join(models_section)}
-
-QUERY INFO:
-- Estimated tokens: {token_count}
-- Contains images: {has_images}
-- Query: {query_preview}
-
-Respond with ONLY the model identifier (e.g., "anthropic/claude-sonnet-4"). No explanation."""
+        # Render prompt from template
+        prompt = render_prompt(
+            "designators",
+            "router",
+            "user_template",
+            purpose=self.enricher.purpose or "General assistant",
+            user_context=user_context.strip() if user_context else None,
+            candidates=candidates,
+            token_count=token_count,
+            has_images=has_images,
+            query=query_preview,
+        )
 
         try:
             resolved = self.registry._resolve_actual_model(model)
@@ -1992,52 +2024,45 @@ Respond with ONLY the model identifier (e.g., "anthropic/claude-sonnet-4"). No e
         # Get action store IDs to mark special stores
         notes_store_id = getattr(self.enricher, "action_notes_store_id", None)
 
-        # Format store descriptions
-        stores_section = []
+        # Build store info with markers for template
+        stores_for_template = []
         for store in store_info:
             store_id = store["id"]
-            store_name = store["name"]
+            store_data = {
+                "id": store_id,
+                "name": store["name"],
+                "description": store.get("description"),
+                "themes": store.get("themes"),
+                "markers": [],
+            }
 
             # Add markers for special stores
-            markers = []
             if store_id == notes_store_id:
-                markers.append("USER'S NOTES - has LIVE query support")
+                store_data["markers"].append("USER'S NOTES - has LIVE query support")
             if store.get("supports_live"):
-                markers.append("LIVE QUERY AVAILABLE")
+                store_data["markers"].append("LIVE QUERY AVAILABLE")
 
-            marker_str = f" [{', '.join(markers)}]" if markers else ""
-            lines = [f"- store_{store_id}: {store_name}{marker_str}"]
-            if store.get("description"):
-                lines.append(f"  Description: {store['description']}")
-            if store.get("themes"):
-                lines.append(f"  Themes: {store['themes']}")
+            # Add sample if available
             if preview_samples and store_id in preview_samples:
                 samples = preview_samples[store_id][:2]
                 if samples:
-                    lines.append(f"  Sample: {samples[0][:200]}...")
-            stores_section.append("\n".join(lines))
+                    store_data["sample"] = samples[0]
+
+            stores_for_template.append(store_data)
 
         # Get user context (memory only - intelligence goes to router)
         memory = getattr(self.enricher, "memory", "") or ""
-        user_context = ""
-        if memory:
-            user_context = f"\nUSER CONTEXT:\n{memory}\n"
 
-        prompt = f"""Allocate {total_budget} tokens across document stores for this query.
-{user_context}
-DOCUMENT STORES:
-{chr(10).join(stores_section)}
-
-USER QUERY: {query}
-
-Respond with JSON only: {{"store_ID": tokens, ...}}
-
-RULES:
-- Only include stores relevant to the query
-- Allocate 0 to irrelevant stores (or omit them)
-- For "list my notes", "what notes do I have", etc.: allocate 0 to USER'S NOTES store (live query handles it)
-- Stores marked "LIVE QUERY AVAILABLE" can enumerate their contents directly - prefer 0 allocation for listing queries
-- Total should use most of {total_budget} for semantic search queries"""
+        # Render prompt from template
+        prompt = render_prompt(
+            "designators",
+            "rag",
+            "user_template",
+            total_budget=total_budget,
+            user_context=memory if memory else None,
+            stores=stores_for_template,
+            query=query,
+        )
 
         try:
             resolved = self.registry._resolve_actual_model(model)
@@ -2099,21 +2124,15 @@ RULES:
 
         # Get user context (memory only - intelligence goes to router)
         memory = getattr(self.enricher, "memory", "") or ""
-        user_context = ""
-        if memory:
-            user_context = f"\nUSER CONTEXT:\n{memory}\n"
 
-        prompt = f"""Analyze if web search would help answer this query.
-{user_context}
-USER QUERY: {query}
-
-Respond with JSON only:
-{{"use_web": true/false, "search_query": "optimized 3-8 word query"}}
-
-Rules:
-- use_web=true for: current events, recent news, real-time data, facts that change
-- use_web=false for: general knowledge, coding, math, creative writing, personal data
-- search_query: Only needed if use_web=true, optimize for search engines"""
+        # Render prompt from template
+        prompt = render_prompt(
+            "designators",
+            "web",
+            "user_template",
+            user_context=memory if memory else None,
+            query=query,
+        )
 
         try:
             resolved = self.registry._resolve_actual_model(model)
@@ -2172,73 +2191,17 @@ Rules:
         if not model:
             return None, None
 
-        # Build comprehensive sources text like unified designator
-        sources_text = ""
-
-        # Builtin live data sources
-        if live_source_info:
-            sources_text += "LIVE DATA SOURCES (real-time API queries - READ ONLY):\n"
-            sources_text += "(Use the source NAME in live_params)\n"
-            for s in live_source_info:
-                sources_text += f"- {s['name']}"
-                if s.get("data_type"):
-                    sources_text += f" [{s['data_type']}]"
-                sources_text += "\n"
-                if s.get("description"):
-                    sources_text += f"  Description: {s['description']}\n"
-                if s.get("best_for"):
-                    sources_text += f"  Best for: {s['best_for']}\n"
-                if s.get("param_hints"):
-                    sources_text += f"  {s['param_hints']}\n"
-            sources_text += "\n"
-
-        # MCP API tools section
+        # Group MCP tools by source for template
+        mcp_tools_by_source: dict[str, list] = {}
         if mcp_tool_info:
-            mcp_by_source: dict[str, list] = {}
-            mcp_source_meta: dict[str, dict] = {}
             for tool in mcp_tool_info:
                 src = tool["source_name"]
-                if src not in mcp_by_source:
-                    mcp_by_source[src] = []
-                    mcp_source_meta[src] = {
-                        "description": tool.get("source_description", ""),
-                        "data_type": tool.get("source_data_type", ""),
-                        "best_for": tool.get("source_best_for", ""),
-                    }
-                mcp_by_source[src].append(tool)
-
-            sources_text += "MCP API TOOLS (call specific API endpoints):\n"
-            sources_text += "IMPORTANT: Most MCP APIs require ID lookups. Use agentic mode for multi-step queries:\n"
-            sources_text += '  {"source_name": [{"agentic": true, "goal": "describe what you need"}]}\n'
-            sources_text += (
-                "Or call specific tools directly if you know the parameters:\n"
-            )
-            sources_text += '  {"source_name": [{"tool_name": "ToolName", "tool_args": {"param": "value"}}]}\n\n'
-
-            for src_name, tools in mcp_by_source.items():
-                meta = mcp_source_meta.get(src_name, {})
-                sources_text += f"{src_name} API"
-                if meta.get("data_type"):
-                    sources_text += f" [{meta['data_type']}]"
-                sources_text += f" ({len(tools)} tools):\n"
-                if meta.get("description"):
-                    sources_text += f"  Description: {meta['description']}\n"
-                if meta.get("best_for"):
-                    sources_text += f"  Best for: {meta['best_for']}\n"
-                sources_text += "  Tools:\n"
-                for tool in tools:
-                    sources_text += (
-                        f"    - {tool['tool_name']}: {tool['description']}\n"
-                    )
-                    if tool.get("params"):
-                        sources_text += f"      Required: {', '.join(tool['params'])}\n"
-                sources_text += "\n"
+                if src not in mcp_tools_by_source:
+                    mcp_tools_by_source[src] = []
+                mcp_tools_by_source[src].append(tool)
 
         # Get user context (memory only - intelligence goes to router)
         memory = getattr(self.enricher, "memory", "") or ""
-        user_context = ""
-        if memory:
-            user_context = f"USER CONTEXT:\n{memory}\n\n"
 
         # Log what live sources the designator will see
         logger.info(f"Live designator sources: {[s['name'] for s in live_source_info]}")
@@ -2246,31 +2209,17 @@ Rules:
             if "USER'S" in s.get("best_for", ""):
                 logger.info(f"  {s['name']}: {s.get('best_for', '')[:100]}")
 
-        prompt = f"""You are a live data parameter extractor. Select the relevant live data sources and extract specific parameters needed for this query.
-
-{user_context}{sources_text}
-USER QUERY: {query}
-
-OUTPUT FORMAT - respond with ONLY a JSON object, nothing else:
-{{"source_name": [{{"param": "value"}}]}}
-
-CRITICAL RULES:
-1. Keys in your JSON MUST be source names from the lists above. Do NOT invent keys like "follow_ups", "suggestions", etc.
-2. For "what notes do I have", "list my notes", "show my notes" queries → use the source marked **USER'S NOTES** with action="list"
-3. For "what tasks do I have" queries → use the source marked **USER'S TASKS** with action="list"
-4. Return empty {{}} ONLY if no live data source is relevant
-
-EXAMPLES:
-- List user's notes: {{"ben-notes": [{{"action": "list"}}]}} (use actual source name from USER'S NOTES)
-- List user's tasks (generic): Query ALL sources marked **USER'S TASKS** - e.g. {{"personal-todoist": [{{"action": "pending"}}], "work-todoist": [{{"action": "pending"}}], "my-tasks": [{{"action": "list"}}]}}
-- List tasks from specific source: {{"bh-ltd-todoist": [{{"action": "pending"}}]}} (when user names a specific source)
-- Weather: {{"weather": [{{"location": "London"}}]}}
-- Stocks: {{"stocks": [{{"symbol": "AAPL"}}]}}
-- MCP agentic: {{"sofasport": [{{"agentic": true, "goal": "get QPR results"}}]}}
-
-IMPORTANT: When user asks for "all tasks", "my tasks", "what tasks do I have" without specifying a source, include ALL sources marked **USER'S TASKS** in your response.
-
-RESPOND WITH JSON ONLY - no explanations, no follow-up suggestions."""
+        # Render prompt from template
+        prompt = render_prompt(
+            "designators",
+            "live",
+            "user_template",
+            user_context=memory,
+            live_sources=live_source_info,
+            mcp_tools=mcp_tool_info,
+            mcp_tools_by_source=mcp_tools_by_source,
+            query=query,
+        )
 
         try:
             resolved = self.registry._resolve_actual_model(model)

@@ -33,6 +33,8 @@ class OllamaProvider(LLMProvider):
 
     # Provider type identifier for dynamic model discovery
     type = "ollama"
+    display_name = "Ollama"
+    icon = "🦙"  # Llama
 
     # How often to refresh the model list (seconds)
     REFRESH_INTERVAL = 60

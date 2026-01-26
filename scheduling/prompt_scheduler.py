@@ -545,9 +545,32 @@ def get_prompt_scheduler() -> PromptScheduler:
 
 
 def start_prompt_scheduler():
-    """Start the global prompt scheduler."""
-    scheduler = get_prompt_scheduler()
-    scheduler.start()
+    """
+    Start the global prompt scheduler if any aliases need it.
+
+    Only starts the scheduler if at least one Smart Alias has
+    scheduled_prompts_enabled=True. This avoids running background
+    threads when the feature isn't being used.
+    """
+    try:
+        from db import get_all_smart_aliases
+
+        aliases = get_all_smart_aliases()
+        needs_scheduler = any(
+            alias.enabled and alias.scheduled_prompts_enabled for alias in aliases
+        )
+
+        if not needs_scheduler:
+            logger.info(
+                "Prompt scheduler not started - no aliases with scheduled prompts enabled"
+            )
+            return
+
+        scheduler = get_prompt_scheduler()
+        scheduler.start()
+
+    except Exception as e:
+        logger.warning(f"Failed to check for scheduled prompts: {e}")
 
 
 def stop_prompt_scheduler():

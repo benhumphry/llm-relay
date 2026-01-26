@@ -117,6 +117,16 @@ def create_document_store(
     todoist_project_name: Optional[str] = None,
     todoist_filter: Optional[str] = None,
     todoist_include_completed: bool = False,
+    imap_host: Optional[str] = None,
+    imap_port: int = 993,
+    imap_username: Optional[str] = None,
+    imap_password: Optional[str] = None,
+    imap_use_ssl: bool = True,
+    imap_allow_insecure: bool = False,
+    imap_folders: Optional[str] = None,
+    imap_index_days: int = 90,
+    smtp_host: Optional[str] = None,
+    smtp_port: int = 587,
     websearch_query: Optional[str] = None,
     websearch_max_results: int = 10,
     websearch_pages_to_scrape: int = 5,
@@ -201,6 +211,16 @@ def create_document_store(
             todoist_project_name=todoist_project_name,
             todoist_filter=todoist_filter,
             todoist_include_completed=todoist_include_completed,
+            imap_host=imap_host,
+            imap_port=imap_port,
+            imap_username=imap_username,
+            imap_password=imap_password,
+            imap_use_ssl=imap_use_ssl,
+            imap_allow_insecure=imap_allow_insecure,
+            imap_folders=imap_folders,
+            imap_index_days=imap_index_days,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
             websearch_query=websearch_query,
             websearch_max_results=websearch_max_results,
             websearch_pages_to_scrape=websearch_pages_to_scrape,
@@ -222,6 +242,90 @@ def create_document_store(
         )
         session.add(store)
         session.flush()  # Get the ID
+
+        # Auto-generate collection name
+        store.collection_name = f"docstore_{store.id}"
+
+        # Also populate config_json from the legacy columns for future-proofing
+        config = store._build_config_from_legacy_columns()
+        if config:
+            store.config_json = json.dumps(config)
+
+        session.commit()
+
+        logger.info(f"Created document store: {store.name} (ID: {store.id})")
+        return store
+
+    if db:
+        return _create(db)
+    with get_db_context() as session:
+        store = _create(session)
+        return _store_to_detached(store)
+
+
+def create_document_store_simple(
+    name: str,
+    source_type: str,
+    config: dict,
+    display_name: Optional[str] = None,
+    embedding_provider: str = "local",
+    embedding_model: Optional[str] = None,
+    ollama_url: Optional[str] = None,
+    chunk_size: int = 512,
+    chunk_overlap: int = 50,
+    index_schedule: Optional[str] = None,
+    max_documents: Optional[int] = None,
+    description: Optional[str] = None,
+    enabled: bool = True,
+    use_temporal_filtering: bool = False,
+    db: Optional[Session] = None,
+) -> DocumentStore:
+    """
+    Create a new document store with unified config dict.
+
+    This is the simplified version that accepts a single config dict instead of
+    50+ individual parameters. Use this for new code.
+
+    Args:
+        name: Unique name for the document store
+        source_type: Type of source (e.g., "local", "gmail", "todoist")
+        config: Source-specific configuration as a dict
+        display_name: Friendly display name for the store
+        embedding_provider: Embedding provider ("local", "ollama", etc.)
+        embedding_model: Model name for embeddings
+        ollama_url: URL for Ollama if using ollama embedding
+        chunk_size: Size of text chunks
+        chunk_overlap: Overlap between chunks
+        index_schedule: Cron expression for scheduled indexing
+        max_documents: Maximum documents to index
+        description: Description of the store
+        enabled: Whether the store is enabled
+        use_temporal_filtering: Enable date-based filtering
+        db: Optional database session
+
+    Returns:
+        Created DocumentStore
+    """
+
+    def _create(session: Session) -> DocumentStore:
+        store = DocumentStore(
+            name=name.lower().strip(),
+            display_name=display_name.strip() if display_name else None,
+            source_type=source_type,
+            config_json=json.dumps(config) if config else None,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+            ollama_url=ollama_url,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            index_schedule=index_schedule,
+            max_documents=max_documents,
+            description=description,
+            enabled=enabled,
+            use_temporal_filtering=use_temporal_filtering,
+        )
+        session.add(store)
+        session.flush()
 
         # Auto-generate collection name
         store.collection_name = f"docstore_{store.id}"
@@ -293,6 +397,16 @@ def update_document_store(
     todoist_project_name: Optional[str] = None,
     todoist_filter: Optional[str] = None,
     todoist_include_completed: Optional[bool] = None,
+    imap_host: Optional[str] = None,
+    imap_port: Optional[int] = None,
+    imap_username: Optional[str] = None,
+    imap_password: Optional[str] = None,
+    imap_use_ssl: Optional[bool] = None,
+    imap_allow_insecure: Optional[bool] = None,
+    imap_folders: Optional[str] = None,
+    imap_index_days: Optional[int] = None,
+    smtp_host: Optional[str] = None,
+    smtp_port: Optional[int] = None,
     websearch_query: Optional[str] = None,
     websearch_max_results: Optional[int] = None,
     websearch_pages_to_scrape: Optional[int] = None,
@@ -469,6 +583,26 @@ def update_document_store(
             store.todoist_filter = todoist_filter if todoist_filter else None
         if todoist_include_completed is not None:
             store.todoist_include_completed = todoist_include_completed
+        if imap_host is not None:
+            store.imap_host = imap_host if imap_host else None
+        if imap_port is not None:
+            store.imap_port = imap_port
+        if imap_username is not None:
+            store.imap_username = imap_username if imap_username else None
+        if imap_password is not None:
+            store.imap_password = imap_password if imap_password else None
+        if imap_use_ssl is not None:
+            store.imap_use_ssl = imap_use_ssl
+        if imap_allow_insecure is not None:
+            store.imap_use_ssl = imap_use_ssl
+        if imap_folders is not None:
+            store.imap_folders = imap_folders if imap_folders else None
+        if imap_index_days is not None:
+            store.imap_index_days = imap_index_days
+        if smtp_host is not None:
+            store.smtp_host = smtp_host if smtp_host else None
+        if smtp_port is not None:
+            store.smtp_port = smtp_port
         if websearch_query is not None:
             store.websearch_query = websearch_query if websearch_query else None
         if websearch_max_results is not None:
@@ -503,6 +637,84 @@ def update_document_store(
             store.index_schedule = index_schedule
         if max_documents is not None:
             # 0 or None means no limit
+            store.max_documents = max_documents if max_documents > 0 else None
+        if description is not None:
+            store.description = description
+        if enabled is not None:
+            store.enabled = enabled
+        if use_temporal_filtering is not None:
+            store.use_temporal_filtering = use_temporal_filtering
+
+        # Also update config_json from the legacy columns for future-proofing
+        config = store._build_config_from_legacy_columns()
+        if config:
+            store.config_json = json.dumps(config)
+
+        store.updated_at = datetime.utcnow()
+        session.commit()
+
+        logger.info(f"Updated document store: {store.name} (ID: {store.id})")
+        return store
+
+    if db:
+        return _update(db)
+    with get_db_context() as session:
+        store = _update(session)
+        return _store_to_detached(store) if store else None
+
+
+def update_document_store_simple(
+    store_id: int,
+    config: Optional[dict] = None,
+    name: Optional[str] = None,
+    display_name: Optional[str] = None,
+    source_type: Optional[str] = None,
+    embedding_provider: Optional[str] = None,
+    embedding_model: Optional[str] = None,
+    ollama_url: Optional[str] = None,
+    chunk_size: Optional[int] = None,
+    chunk_overlap: Optional[int] = None,
+    index_schedule: Optional[str] = None,
+    max_documents: Optional[int] = None,
+    description: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    use_temporal_filtering: Optional[bool] = None,
+    db: Optional[Session] = None,
+) -> Optional[DocumentStore]:
+    """
+    Update a document store with unified config dict.
+
+    This is the simplified version that accepts a single config dict instead of
+    50+ individual parameters. Use this for new code.
+    """
+
+    def _update(session: Session) -> Optional[DocumentStore]:
+        stmt = select(DocumentStore).where(DocumentStore.id == store_id)
+        store = session.execute(stmt).scalar_one_or_none()
+        if not store:
+            return None
+
+        if name is not None:
+            store.name = name.lower().strip()
+        if display_name is not None:
+            store.display_name = display_name.strip() if display_name else None
+        if source_type is not None:
+            store.source_type = source_type
+        if config is not None:
+            store.config_json = json.dumps(config) if config else None
+        if embedding_provider is not None:
+            store.embedding_provider = embedding_provider
+        if embedding_model is not None:
+            store.embedding_model = embedding_model
+        if ollama_url is not None:
+            store.ollama_url = ollama_url
+        if chunk_size is not None:
+            store.chunk_size = chunk_size
+        if chunk_overlap is not None:
+            store.chunk_overlap = chunk_overlap
+        if index_schedule is not None:
+            store.index_schedule = index_schedule
+        if max_documents is not None:
             store.max_documents = max_documents if max_documents > 0 else None
         if description is not None:
             store.description = description
@@ -674,6 +886,7 @@ def _store_to_detached(
         display_name=store.display_name,
         source_type=store.source_type,
         plugin_config_id=store.plugin_config_id,
+        config_json=store.config_json,
         source_path=store.source_path,
         mcp_server_config_json=store.mcp_server_config_json,
         google_account_id=store.google_account_id,
@@ -724,6 +937,16 @@ def _store_to_detached(
         todoist_project_name=store.todoist_project_name,
         todoist_filter=store.todoist_filter,
         todoist_include_completed=store.todoist_include_completed,
+        imap_host=store.imap_host,
+        imap_port=store.imap_port,
+        imap_username=store.imap_username,
+        imap_password=store.imap_password,
+        imap_use_ssl=store.imap_use_ssl,
+        imap_allow_insecure=store.imap_allow_insecure,
+        imap_folders=store.imap_folders,
+        imap_index_days=store.imap_index_days,
+        smtp_host=store.smtp_host,
+        smtp_port=store.smtp_port,
         websearch_query=store.websearch_query,
         websearch_max_results=store.websearch_max_results,
         websearch_pages_to_scrape=store.websearch_pages_to_scrape,

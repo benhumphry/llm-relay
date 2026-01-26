@@ -25,7 +25,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.oauth import OAuthMixin
@@ -54,6 +54,7 @@ class GmailUnifiedSource(OAuthMixin, PluginUnifiedSource):
     description = "Gmail with historical search (RAG) and real-time queries"
     category = "google"
     icon = "📧"
+    content_category = ContentCategory.EMAILS
 
     # Document store types this unified source handles
     handles_doc_source_types = ["mcp:gmail"]
@@ -93,6 +94,29 @@ class GmailUnifiedSource(OAuthMixin, PluginUnifiedSource):
             "index_days": 90,
             "index_schedule": store.index_schedule or "",
             "live_max_results": 20,
+        }
+
+    @classmethod
+    def get_account_info(cls, store) -> dict | None:
+        """Extract account info for action handlers."""
+        if not store.google_account_id:
+            return None
+
+        # Get email from OAuth token
+        try:
+            from db.oauth_tokens import get_oauth_token_info
+
+            token_info = get_oauth_token_info(store.google_account_id)
+            email = token_info.get("account_email", "") if token_info else ""
+        except Exception:
+            email = ""
+
+        return {
+            "provider": "google",
+            "email": email,
+            "name": store.display_name or store.name,
+            "store_id": store.id,
+            "oauth_account_id": store.google_account_id,
         }
 
     # Gmail API endpoints

@@ -1,0 +1,60 @@
+# Router Designator Prompt
+# Selects the best model from candidates based on query characteristics
+
+name: router
+description: Model selection designator
+
+system_prompt: |
+  You are a model routing expert. Select the best LLM for the query based on
+  the candidates' strengths, weaknesses, and the query characteristics.
+
+user_template: |
+  Select the best model for this query.
+
+  PURPOSE: {{ purpose | default('General assistant') }}
+  {% if user_context %}
+
+  USER CONTEXT:
+  {{ user_context }}
+  {% endif %}
+
+  AVAILABLE MODELS:
+  {% for model in candidates %}
+  - {{ model.model }}{% if model.context_length or model.capabilities %} ({% if model.context_length %}context: {{ model.context_length | format_number }}{% endif %}{% if model.context_length and model.capabilities %}, {% endif %}{% if model.capabilities %}caps: {{ model.capabilities | join(',') }}{% endif %}){% endif %}
+
+  {% if model.notes %}  Notes: {{ model.notes | truncate(300) }}
+  {% endif %}
+  {% endfor %}
+
+  QUERY INFO:
+  - Estimated tokens: {{ token_count | format_number }}
+  - Contains images: {{ has_images }}
+  - Query: {{ query | truncate(500) }}
+
+  Respond with ONLY the model identifier (e.g., "anthropic/claude-sonnet-4"). No explanation.
+
+response_format:
+  type: text
+  description: Just the model identifier, no explanation
+
+variables:
+  - name: purpose
+    type: string
+    optional: true
+    description: The Smart Alias purpose/description
+  - name: user_context
+    type: string
+    optional: true
+    description: Combined intelligence and memory context
+  - name: candidates
+    type: list[dict]
+    description: Available models with model, context_length, capabilities, notes
+  - name: token_count
+    type: int
+    description: Estimated tokens in the conversation
+  - name: has_images
+    type: bool
+    description: Whether the request contains images
+  - name: query
+    type: string
+    description: The user's query (preview)

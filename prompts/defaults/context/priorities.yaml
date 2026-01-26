@@ -1,0 +1,108 @@
+# Context Priorities and Injection Templates
+# Defines data freshness rules and section headers for context injection
+
+name: priorities
+description: Data freshness priorities and context injection templates
+
+# Instruction about data freshness for the LLM
+freshness_instruction: |
+  DATA FRESHNESS PRIORITY:
+  - Live Data: Real-time information fetched just now (stock prices, weather,
+    sports scores, etc.) - ALWAYS use this for current values
+  - Web Context: Recently searched web content - use for current events
+  - Document Context: User's stored documents - may contain historical data;
+    check dates carefully
+
+  When the same information appears in multiple sources, prefer the most
+  recent/live source.
+
+# Section headers for different context types
+section_headers:
+  live: "Live Data (REAL-TIME - fetched just now, use for current values)"
+  rag: "Document Context (user's stored documents - check dates for freshness)"
+  web: "Web Context (recently searched)"
+  live_history: "Previous Live Data (earlier in this session)"
+  actions: "Available Actions"
+
+# Template for assembling the full context block
+context_template: |
+  {% if include_freshness_note %}
+  {{ freshness_instruction }}
+
+  {% endif %}
+  {% if live_context %}
+  === {{ section_headers.live }} ===
+  {{ live_context }}
+
+  {% endif %}
+  {% if web_context %}
+  === {{ section_headers.web }} ===
+  {{ web_context }}
+
+  {% endif %}
+  {% if rag_context %}
+  === {{ section_headers.rag }} ===
+  {{ rag_context }}
+
+  {% endif %}
+  {% if live_history %}
+  === {{ section_headers.live_history }} ===
+  {{ live_history }}
+
+  {% endif %}
+  {% if action_instructions %}
+  === {{ section_headers.actions }} ===
+  {{ action_instructions }}
+  {% endif %}
+
+# Template for the system prompt prefix (injected before user's system prompt)
+system_prefix_template: |
+  {% if current_time %}
+  Current date/time: {{ current_time | format_datetime('%A, %B %d, %Y at %H:%M %Z') }}
+  {% endif %}
+  {% if user_name %}
+  User: {{ user_name }}
+  {% endif %}
+  {% if user_context %}
+
+  USER CONTEXT:
+  {{ user_context }}
+  {% endif %}
+
+variables:
+  - name: include_freshness_note
+    type: bool
+    default: true
+    description: Whether to include the data freshness instruction
+  - name: live_context
+    type: string
+    optional: true
+    description: Live data context (real-time API results)
+  - name: web_context
+    type: string
+    optional: true
+    description: Web search results context
+  - name: rag_context
+    type: string
+    optional: true
+    description: RAG document retrieval context
+  - name: live_history
+    type: string
+    optional: true
+    description: Previous live data from earlier in the session
+  - name: action_instructions
+    type: string
+    optional: true
+    description: Action block instructions if actions are enabled
+  - name: current_time
+    type: datetime
+    optional: true
+    description: Current date/time for system prompt
+  - name: user_name
+    type: string
+    optional: true
+    description: User's name if known
+  - name: user_context
+    type: string
+    optional: true
+    description: User memory/intelligence context

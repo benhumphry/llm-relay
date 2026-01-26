@@ -163,6 +163,12 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
         """Settings page."""
         return render_template("settings.html")
 
+    @admin.route("/credentials")
+    @require_auth
+    def credentials_page():
+        """Credentials management page - API keys and OAuth accounts."""
+        return render_template("credentials.html")
+
     @admin.route("/ollama")
     @require_auth
     def ollama_page():
@@ -1492,6 +1498,9 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                         os.environ.get("TODOIST_API_TOKEN")
                         or os.environ.get("TODOIST_API_KEY")
                     ),
+                },
+                "imap": {
+                    "configured": True,  # IMAP uses per-store credentials, always available
                 },
             },
         }
@@ -5572,6 +5581,105 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             result.append(store_dict)
         return jsonify(result)
 
+    @admin.route("/api/document-sources/types", methods=["GET"])
+    @require_auth_api
+    def list_document_source_types():
+        """
+        List all available document source types with their metadata.
+
+        Returns a list of source types that can be used when creating document stores,
+        including both unified source plugins and legacy source types.
+        """
+        import os
+
+        from plugin_base.loader import unified_source_registry
+
+        source_types = []
+
+        # Get all unified source plugins
+        for source_type, plugin_class in unified_source_registry.get_all().items():
+            # Get the document source types this plugin handles
+            doc_types = plugin_class.get_handled_doc_source_types()
+            if not doc_types:
+                continue  # Skip live-only sources
+
+            source_types.append(
+                {
+                    "source_type": doc_types[0] if doc_types else source_type,
+                    "plugin_type": source_type,
+                    "display_name": getattr(
+                        plugin_class, "display_name", source_type.title()
+                    ),
+                    "description": getattr(plugin_class, "description", ""),
+                    "icon": getattr(plugin_class, "icon", "📦"),
+                    "supports_rag": getattr(plugin_class, "supports_rag", True),
+                    "supports_live": getattr(plugin_class, "supports_live", False),
+                    "supports_actions": getattr(
+                        plugin_class, "supports_actions", False
+                    ),
+                    "content_category": getattr(plugin_class, "content_category", None),
+                    "is_plugin": True,
+                }
+            )
+
+        # Sort by display name
+        source_types.sort(key=lambda x: x["display_name"])
+
+        return jsonify(source_types)
+
+    @admin.route("/api/document-sources/<source_type>/fields", methods=["GET"])
+    @require_auth_api
+    def get_document_source_fields(source_type: str):
+        """
+        Get configuration fields for a document source type.
+
+        Returns field definitions that the admin UI uses to dynamically render
+        the configuration form for this source type.
+        """
+        import os
+
+        from plugin_base.loader import (
+            get_unified_source_for_doc_type,
+            get_unified_source_plugin,
+        )
+
+        # Try to find the plugin - first by exact match, then by doc type
+        plugin_class = get_unified_source_plugin(source_type)
+        if not plugin_class:
+            plugin_class = get_unified_source_for_doc_type(source_type)
+
+        if not plugin_class:
+            return jsonify({"error": f"Unknown source type: {source_type}"}), 404
+
+        # Get field definitions
+        fields = plugin_class.get_config_fields()
+
+        # Check which fields have env vars set (to hide them in UI)
+        fields_with_env = []
+        for field in fields:
+            field_dict = field.to_dict()
+            # Check if env_var is set and the env var exists
+            if field.env_var and os.environ.get(field.env_var):
+                field_dict["env_var_set"] = True
+            fields_with_env.append(field_dict)
+
+        return jsonify(
+            {
+                "source_type": source_type,
+                "plugin_type": plugin_class.source_type,
+                "display_name": getattr(
+                    plugin_class, "display_name", source_type.title()
+                ),
+                "description": getattr(plugin_class, "description", ""),
+                "icon": getattr(plugin_class, "icon", "📦"),
+                "supports_rag": getattr(plugin_class, "supports_rag", True),
+                "supports_live": getattr(plugin_class, "supports_live", False),
+                "supports_actions": getattr(plugin_class, "supports_actions", False),
+                "content_category": getattr(plugin_class, "content_category", None),
+                "fields": fields_with_env,
+            }
+        )
+
     @admin.route("/api/document-stores/<int:store_id>", methods=["GET"])
     @require_auth_api
     def get_document_store(store_id: int):
@@ -5705,6 +5813,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 return jsonify(
                     {"error": "Search query is required for web search sources"}
                 ), 400
+        elif source_type == "imap":
+            # IMAP - requires host and credentials (stored per-store)
+            if not data.get("imap_host"):
+                return jsonify(
+                    {"error": "IMAP host is required for IMAP sources"}
+                ), 400
+            if not data.get("imap_username"):
+                return jsonify(
+                    {"error": "IMAP username is required for IMAP sources"}
+                ), 400
         else:
             return jsonify({"error": f"Invalid source type: {source_type}"}), 400
 
@@ -5762,6 +5880,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 todoist_project_name=data.get("todoist_project_name"),
                 todoist_filter=data.get("todoist_filter"),
                 todoist_include_completed=data.get("todoist_include_completed", False),
+                imap_host=data.get("imap_host"),
+                imap_port=data.get("imap_port", 993),
+                imap_username=data.get("imap_username"),
+                imap_password=data.get("imap_password"),
+                imap_use_ssl=data.get("imap_use_ssl", True),
+                imap_allow_insecure=data.get("imap_allow_insecure", False),
+                imap_folders=data.get("imap_folders", "INBOX"),
+                imap_index_days=data.get("imap_index_days", 90),
+                smtp_host=data.get("smtp_host"),
+                smtp_port=data.get("smtp_port", 587),
                 websearch_query=data.get("websearch_query"),
                 websearch_max_results=data.get("websearch_max_results", 10),
                 websearch_pages_to_scrape=data.get("websearch_pages_to_scrape", 5),
@@ -5869,6 +5997,16 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
                 todoist_project_name=data.get("todoist_project_name"),
                 todoist_filter=data.get("todoist_filter"),
                 todoist_include_completed=data.get("todoist_include_completed"),
+                imap_host=data.get("imap_host"),
+                imap_port=data.get("imap_port"),
+                imap_username=data.get("imap_username"),
+                imap_password=data.get("imap_password"),
+                imap_use_ssl=data.get("imap_use_ssl"),
+                imap_allow_insecure=data.get("imap_allow_insecure"),
+                imap_folders=data.get("imap_folders"),
+                imap_index_days=data.get("imap_index_days"),
+                smtp_host=data.get("smtp_host"),
+                smtp_port=data.get("smtp_port"),
                 websearch_query=data.get("websearch_query"),
                 websearch_max_results=data.get("websearch_max_results"),
                 websearch_pages_to_scrape=data.get("websearch_pages_to_scrape"),
@@ -6454,6 +6592,175 @@ def create_admin_blueprint(url_prefix: str = "/admin") -> Blueprint:
             "https://www.googleapis.com/auth/userinfo.email",
         ],
     }
+
+    @admin.route("/api/credentials/api-keys", methods=["GET"])
+    @require_auth_api
+    def list_api_keys():
+        """
+        List all API keys with their status (set/not set).
+
+        Returns API keys from:
+        1. LLM providers (dynamic from registry)
+        2. Data plugins (dynamic from plugin registry)
+        3. OAuth client credentials
+        4. Service credentials (from plugins that define env vars)
+        """
+        from providers import registry
+
+        def redact_key(key_value):
+            """Redact API key showing only first/last few chars."""
+            if not key_value:
+                return None
+            if len(key_value) <= 8:
+                return "****"
+            return key_value[:4] + "****" + key_value[-4:]
+
+        # Fallback icons for providers without icon attribute
+        PROVIDER_ICON_FALLBACKS = {
+            "openai": "🟢",
+            "deepseek": "🔷",
+            "mistral": "🟠",
+            "groq": "⚡",
+            "xai": "✖️",
+            "together": "🤝",
+            "cohere": "🌊",
+            "fireworks": "🎆",
+            "anyscale": "📐",
+            "replicate": "🔄",
+        }
+
+        api_keys = []
+        seen_env_vars = set()
+
+        # LLM Providers - get dynamically from registry
+        for provider in registry.get_all_providers():
+            if hasattr(provider, "api_key_env") and provider.api_key_env:
+                env_var = provider.api_key_env
+                if env_var in seen_env_vars:
+                    continue
+                seen_env_vars.add(env_var)
+                value = os.environ.get(env_var, "")
+                # Get display name - prefer attribute, fall back to capitalized name
+                display_name = (
+                    getattr(provider, "display_name", None) or provider.name.title()
+                )
+                # Get icon - prefer attribute, fall back to provider-specific fallback
+                icon = getattr(provider, "icon", None) or PROVIDER_ICON_FALLBACKS.get(
+                    provider.name, "🤖"
+                )
+                api_keys.append(
+                    {
+                        "name": display_name,
+                        "env_var": env_var,
+                        "is_set": bool(value),
+                        "redacted": redact_key(value) if value else None,
+                        "category": "llm",
+                        "icon": icon,
+                        "provider_id": provider.name,
+                    }
+                )
+
+        # Data Plugins - get from plugin registry
+        plugin_env_vars = set()
+        try:
+            from plugin_base.loader import (
+                action_registry,
+                live_source_registry,
+                unified_source_registry,
+            )
+
+            # Collect env_vars from all plugin types
+            for registry_obj in [
+                live_source_registry,
+                unified_source_registry,
+                action_registry,
+            ]:
+                for source_type, plugin_class in registry_obj.get_all().items():
+                    if hasattr(plugin_class, "get_config_fields"):
+                        # Get plugin icon and display name
+                        plugin_icon = getattr(plugin_class, "icon", "📊")
+                        plugin_display_name = getattr(
+                            plugin_class, "display_name", source_type
+                        )
+
+                        for field in plugin_class.get_config_fields():
+                            if (
+                                hasattr(field, "env_var")
+                                and field.env_var
+                                and field.env_var not in seen_env_vars
+                                and field.env_var not in plugin_env_vars
+                            ):
+                                plugin_env_vars.add(field.env_var)
+                                value = os.environ.get(field.env_var, "")
+                                api_keys.append(
+                                    {
+                                        "name": field.label or field.name,
+                                        "env_var": field.env_var,
+                                        "is_set": bool(value),
+                                        "redacted": redact_key(value)
+                                        if value
+                                        else None,
+                                        "category": "data",
+                                        "icon": plugin_icon,
+                                        "plugin": plugin_display_name,
+                                    }
+                                )
+        except ImportError:
+            pass
+
+        # Add plugin env vars to seen set
+        seen_env_vars.update(plugin_env_vars)
+
+        # OAuth Client Credentials - these are fixed OAuth providers
+        oauth_creds = [
+            ("Google Client ID", "GOOGLE_CLIENT_ID", "🔵"),
+            ("Google Client Secret", "GOOGLE_CLIENT_SECRET", "🔵"),
+            ("Microsoft Client ID", "MICROSOFT_CLIENT_ID", "🟦"),
+            ("Microsoft Client Secret", "MICROSOFT_CLIENT_SECRET", "🟦"),
+            ("Slack Client ID", "SLACK_CLIENT_ID", "💬"),
+            ("Slack Client Secret", "SLACK_CLIENT_SECRET", "💬"),
+            ("Oura Client ID", "OURA_CLIENT_ID", "💍"),
+            ("Oura Client Secret", "OURA_CLIENT_SECRET", "💍"),
+            ("Withings Client ID", "WITHINGS_CLIENT_ID", "⚖️"),
+            ("Withings Client Secret", "WITHINGS_CLIENT_SECRET", "⚖️"),
+        ]
+
+        for name, env_var, icon in oauth_creds:
+            if env_var not in seen_env_vars:
+                value = os.environ.get(env_var, "")
+                api_keys.append(
+                    {
+                        "name": name,
+                        "env_var": env_var,
+                        "is_set": bool(value),
+                        "redacted": redact_key(value) if value else None,
+                        "category": "oauth",
+                        "icon": icon,
+                    }
+                )
+
+        # Service Credentials - core infrastructure not covered by plugins
+        service_creds = [
+            ("ChromaDB URL", "CHROMA_URL", "🗄️"),
+            ("SearXNG URL", "SEARXNG_URL", "🔍"),
+            ("Jina API Key", "JINA_API_KEY", "🔎"),
+        ]
+
+        for name, env_var, icon in service_creds:
+            if env_var not in seen_env_vars:
+                value = os.environ.get(env_var, "")
+                api_keys.append(
+                    {
+                        "name": name,
+                        "env_var": env_var,
+                        "is_set": bool(value),
+                        "redacted": redact_key(value) if value else None,
+                        "category": "service",
+                        "icon": icon,
+                    }
+                )
+
+        return jsonify(api_keys)
 
     @admin.route("/api/oauth/tokens", methods=["GET"])
     @require_auth_api

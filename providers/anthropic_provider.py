@@ -19,6 +19,8 @@ class AnthropicProvider(LLMProvider):
     """Provider for Anthropic Claude models."""
 
     name = "anthropic"
+    display_name = "Anthropic"
+    icon = "🟤"  # Anthropic brown
     api_key_env = "ANTHROPIC_API_KEY"
     has_custom_cost_calculation = True  # Complex pricing: cache read/write tokens
 

@@ -54,50 +54,39 @@ class ContentCategory(Enum):
     OTHER = "other"  # Anything else
 
 
-# Legacy source_type to ContentCategory mapping
-# Used for legacy sources that haven't been migrated to plugins yet
-# Plugins should define content_category directly as a class attribute
-LEGACY_SOURCE_TYPE_CATEGORIES: dict[str, ContentCategory] = {
-    # Files (documents, notes, etc.)
-    "local": ContentCategory.FILES,
-    "mcp:gdrive": ContentCategory.FILES,
-    "mcp:onedrive": ContentCategory.FILES,
-    "notion": ContentCategory.FILES,
-    "paperless": ContentCategory.FILES,
-    "nextcloud": ContentCategory.FILES,
-    "mcp:onenote": ContentCategory.FILES,
-    "mcp:github": ContentCategory.FILES,
-    # Emails
-    "mcp:gmail": ContentCategory.EMAILS,
-    "mcp:outlook": ContentCategory.EMAILS,
-    # Calendars
-    "mcp:gcalendar": ContentCategory.CALENDARS,
-    "mcp:ocalendar": ContentCategory.CALENDARS,
-    # Tasks
-    "mcp:gtasks": ContentCategory.TASKS,
-    "todoist": ContentCategory.TASKS,
-    # Websites
-    "website": ContentCategory.WEBSITES,
-    "websearch": ContentCategory.WEBSITES,
-    # Contacts
-    "mcp:gcontacts": ContentCategory.CONTACTS,
-    # Messages
-    "slack": ContentCategory.MESSAGES,
-    "mcp:teams": ContentCategory.MESSAGES,
-}
-
-
 def get_content_category(source_type: str) -> ContentCategory:
     """
     Get the content category for a source type.
+
+    Queries the unified source plugin's content_category attribute.
 
     Args:
         source_type: The source type identifier (e.g., "mcp:gmail", "local")
 
     Returns:
-        ContentCategory enum value, defaults to OTHER if not mapped
+        ContentCategory enum value, defaults to OTHER if not found
     """
-    return LEGACY_SOURCE_TYPE_CATEGORIES.get(source_type, ContentCategory.OTHER)
+    try:
+        from plugin_base.loader import (
+            get_unified_source_for_doc_type,
+            get_unified_source_plugin,
+        )
+
+        # Try exact match first
+        plugin_class = get_unified_source_plugin(source_type)
+        if not plugin_class:
+            # Try to find by doc source type
+            plugin_class = get_unified_source_for_doc_type(source_type)
+
+        if plugin_class:
+            category = getattr(plugin_class, "content_category", None)
+            if category is not None:
+                return category
+    except ImportError:
+        # Plugin system not available (e.g., during testing)
+        pass
+
+    return ContentCategory.OTHER
 
 
 @dataclass

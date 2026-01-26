@@ -1,0 +1,63 @@
+# Web Designator Prompt
+# Decides if web search is needed and generates search query
+
+name: web
+description: Web search decision and query generation
+
+system_prompt: |
+  You are a web search expert. Decide if web search would help answer the query
+  and generate an optimized search query if needed.
+
+user_template: |
+  Analyze if web search would help answer this query.
+  {% if user_context %}
+
+  USER CONTEXT:
+  {{ user_context }}
+  {% endif %}
+
+  USER QUERY: {{ query }}
+
+  Respond with JSON only:
+  {"use_web": true/false, "search_query": "optimized 3-8 word query"}
+
+  Rules:
+  - use_web=true for: current events, recent news, real-time data, facts that change
+  - use_web=false for: general knowledge, coding, math, creative writing, personal data
+  - search_query: Only needed if use_web=true, optimize for search engines
+
+response_format:
+  type: json
+  schema:
+    use_web:
+      type: boolean
+      description: Whether to perform web search
+    search_query:
+      type: string
+      description: Optimized search query (only if use_web is true)
+
+variables:
+  - name: user_context
+    type: string
+    optional: true
+    description: User memory context
+  - name: query
+    type: string
+    description: User's query
+
+examples:
+  - description: Current events query
+    input: "What happened in the news today?"
+    output: '{"use_web": true, "search_query": "latest news today 2026"}'
+
+  - description: Coding question
+    input: "How do I reverse a list in Python?"
+    output: '{"use_web": false, "search_query": ""}'
+
+  - description: Recent information
+    input: "What's the latest iPhone model?"
+    output: '{"use_web": true, "search_query": "latest iPhone model 2026"}'
+
+  - description: Personal data
+    input: "What tasks do I have?"
+    output: '{"use_web": false, "search_query": ""}'

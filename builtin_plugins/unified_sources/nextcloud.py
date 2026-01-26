@@ -17,7 +17,7 @@ from xml.etree import ElementTree as ET
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.unified_source import (
@@ -38,6 +38,7 @@ class NextcloudUnifiedSource(PluginUnifiedSource):
     description = "Index files from Nextcloud with full document lookup"
     category = "storage"
     icon = "☁️"
+    content_category = ContentCategory.FILES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["nextcloud"]
@@ -105,22 +106,25 @@ class NextcloudUnifiedSource(PluginUnifiedSource):
                 name="url",
                 label="Nextcloud URL",
                 field_type=FieldType.TEXT,
-                required=True,
+                required=False,
                 help_text="URL of your Nextcloud instance",
+                env_var="NEXTCLOUD_URL",
             ),
             FieldDefinition(
                 name="username",
-                label="Username",
+                label="Nextcloud Username",
                 field_type=FieldType.TEXT,
-                required=True,
+                required=False,
                 help_text="Nextcloud username",
+                env_var="NEXTCLOUD_USERNAME",
             ),
             FieldDefinition(
                 name="password",
-                label="Password/App Password",
+                label="Nextcloud Password",
                 field_type=FieldType.PASSWORD,
-                required=True,
+                required=False,
                 help_text="Password or app password for WebDAV access",
+                env_var="NEXTCLOUD_PASSWORD",
             ),
             FieldDefinition(
                 name="folder_path",

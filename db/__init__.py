@@ -14,6 +14,7 @@ from .connection import (
 )
 from .document_stores import (
     create_document_store,
+    create_document_store_simple,
     delete_document_store,
     get_all_document_stores,
     get_document_store_by_id,
@@ -23,6 +24,7 @@ from .document_stores import (
     store_name_available,
     update_document_store,
     update_document_store_index_status,
+    update_document_store_simple,
 )
 from .live_cache import (
     DEFAULT_TTLS,
@@ -198,7 +200,9 @@ __all__ = [
     "get_document_store_by_name",
     "get_document_store_by_id",
     "create_document_store",
+    "create_document_store_simple",
     "update_document_store",
+    "update_document_store_simple",
     "update_document_store_index_status",
     "delete_document_store",
     "store_name_available",

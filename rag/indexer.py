@@ -43,7 +43,6 @@ class RAGIndexer:
     Background service for indexing documents into ChromaDB.
 
     Uses Docling for document parsing and supports scheduled re-indexing.
-    Indexes both legacy SmartRAGs and new DocumentStores.
     """
 
     def __init__(self):
@@ -365,16 +364,30 @@ SUMMARY: <content type description>"""
         # (e.g., if container was restarted mid-indexing)
         self._reset_stuck_indexing_jobs()
 
-        # Initialize scheduler
+        # Initialize scheduler only if there are stores with schedules
+        # This avoids CPU overhead from APScheduler when not needed
+        from db import get_stores_with_schedule
+
+        stores_with_schedule = get_stores_with_schedule()
+        if not stores_with_schedule:
+            logger.info(
+                "RAG Indexer scheduler not started - no document stores have schedules"
+            )
+            self._scheduler = None
+            return
+
         try:
             from apscheduler.schedulers.background import BackgroundScheduler
 
             self._scheduler = BackgroundScheduler()
             self._scheduler.start()
-            logger.info("RAG Indexer scheduler started")
+            logger.info(
+                f"RAG Indexer scheduler started for {len(stores_with_schedule)} store(s)"
+            )
 
             # Schedule existing document stores
-            self._schedule_all_stores()
+            for store in stores_with_schedule:
+                self.schedule_store(store.id, store.index_schedule)
         except ImportError as e:
             logger.warning(
                 f"APScheduler not installed - scheduled indexing disabled: {e}"
@@ -437,75 +450,6 @@ SUMMARY: <content type description>"""
         stores = get_stores_with_schedule()
         for store in stores:
             self.schedule_store(store.id, store.index_schedule)
-
-    def schedule_rag(self, rag_id: int, cron_expression: str):
-        """
-        Schedule periodic indexing for a legacy RAG.
-
-        Args:
-            rag_id: ID of the SmartRAG
-            cron_expression: Cron expression (e.g., "0 2 * * *" for 2 AM daily)
-
-        Note:
-            When minute is "0", a stagger offset is added based on rag_id
-            to prevent all RAGs from indexing simultaneously (thundering herd).
-        """
-        if not self._scheduler:
-            logger.warning("Scheduler not available - cannot schedule RAG indexing")
-            return
-
-        job_id = f"rag_index_{rag_id}"
-
-        # Remove existing job if any
-        try:
-            self._scheduler.remove_job(job_id)
-        except Exception:
-            pass
-
-        if not cron_expression:
-            return
-
-        try:
-            # Parse cron expression (minute hour day month day_of_week)
-            parts = cron_expression.split()
-            if len(parts) != 5:
-                logger.error(f"Invalid cron expression: {cron_expression}")
-                return
-
-            minute = parts[0]
-            hour = parts[1]
-            second = 0
-
-            # Stagger jobs scheduled at minute 0 to prevent thundering herd
-            # Use rag_id to generate deterministic offset across full hour
-            if minute == "0":
-                total_offset = rag_id % 3600
-                stagger_minute = total_offset // 60
-                second = total_offset % 60
-                minute = str(stagger_minute)
-
-            from apscheduler.triggers.cron import CronTrigger
-
-            trigger = CronTrigger(
-                second=second,
-                minute=minute,
-                hour=hour,
-                day=parts[2],
-                month=parts[3],
-                day_of_week=parts[4],
-            )
-
-            self._scheduler.add_job(
-                self._run_rag_index_job,
-                trigger,
-                args=[rag_id],
-                id=job_id,
-                replace_existing=True,
-            )
-            actual_cron = f"{minute} {hour} {parts[2]} {parts[3]} {parts[4]}"
-            logger.info(f"Scheduled indexing for RAG {rag_id}: {actual_cron}")
-        except Exception as e:
-            logger.error(f"Failed to schedule RAG {rag_id}: {e}")
 
     def schedule_store(self, store_id: int, cron_expression: str):
         """
@@ -580,18 +524,6 @@ SUMMARY: <content type description>"""
         except Exception as e:
             logger.error(f"Failed to schedule store {store_id}: {e}")
 
-    def unschedule_rag(self, rag_id: int):
-        """Remove scheduled indexing for a legacy RAG."""
-        if not self._scheduler:
-            return
-
-        job_id = f"rag_index_{rag_id}"
-        try:
-            self._scheduler.remove_job(job_id)
-            logger.info(f"Unscheduled indexing for RAG {rag_id}")
-        except Exception:
-            pass
-
     def unschedule_store(self, store_id: int):
         """Remove scheduled indexing for a document store."""
         if not self._scheduler:
@@ -604,32 +536,9 @@ SUMMARY: <content type description>"""
         except Exception:
             pass
 
-    def _run_rag_index_job(self, rag_id: int):
-        """Run legacy RAG indexing job (called by scheduler)."""
-        self.index_rag(rag_id, background=True)
-
     def _run_store_index_job(self, store_id: int):
         """Run document store indexing job (called by scheduler)."""
         self.index_store(store_id, background=True)
-
-    def cancel_indexing(self, rag_id: int) -> bool:
-        """
-        Cancel and reset a stuck legacy RAG indexing job.
-
-        This doesn't actually kill the thread (Python threads can't be killed),
-        but it resets the status so a new indexing job can be started.
-        """
-        from db import update_smart_rag_index_status
-
-        job_key = f"rag_{rag_id}"
-        with self._lock:
-            if job_key in self._indexing_jobs:
-                del self._indexing_jobs[job_key]
-
-        # Reset status to pending
-        update_smart_rag_index_status(rag_id, "pending")
-        logger.info(f"Cancelled/reset indexing for RAG {rag_id}")
-        return True
 
     def cancel_store_indexing(self, store_id: int) -> bool:
         """
@@ -649,14 +558,6 @@ SUMMARY: <content type description>"""
         logger.info(f"Cancelled/reset indexing for store {store_id}")
         return True
 
-    def is_indexing(self, rag_id: int) -> bool:
-        """Check if a legacy RAG is currently being indexed."""
-        job_key = f"rag_{rag_id}"
-        with self._lock:
-            if job_key in self._indexing_jobs:
-                return self._indexing_jobs[job_key].is_alive()
-        return False
-
     def is_store_indexing(self, store_id: int) -> bool:
         """Check if a document store is currently being indexed."""
         job_key = f"store_{store_id}"
@@ -664,43 +565,6 @@ SUMMARY: <content type description>"""
             if job_key in self._indexing_jobs:
                 return self._indexing_jobs[job_key].is_alive()
         return False
-
-    def index_rag(self, rag_id: int, background: bool = False) -> bool:
-        """
-        Index all documents for a legacy SmartRAG.
-
-        Args:
-            rag_id: ID of the SmartRAG to index
-            background: If True, run in background thread
-
-        Returns:
-            True if indexing started/completed successfully
-        """
-        if not self._chroma_client:
-            logger.error("ChromaDB not available - cannot index")
-            return False
-
-        job_key = f"rag_{rag_id}"
-
-        if background:
-            # Check if already indexing
-            with self._lock:
-                if job_key in self._indexing_jobs:
-                    thread = self._indexing_jobs[job_key]
-                    if thread.is_alive():
-                        logger.warning(f"RAG {rag_id} is already being indexed")
-                        return False
-
-                thread = threading.Thread(
-                    target=self._index_rag_impl,
-                    args=[rag_id],
-                    daemon=True,
-                )
-                self._indexing_jobs[job_key] = thread
-                thread.start()
-            return True
-        else:
-            return self._index_rag_impl(rag_id)
 
     def index_store(self, store_id: int, background: bool = False) -> bool:
         """
@@ -782,66 +646,14 @@ SUMMARY: <content type description>"""
             vision_model = global_vision.model_name
             vision_ollama_url = global_vision.base_url
 
-            # Check if a unified source plugin exists for this store type
-            # Unified sources combine RAG + Live into a single plugin
+            # Get unified source plugin for this store type
+            # All source types must have a unified source plugin
             source = self._get_unified_source_for_store(store)
 
             if not source:
-                # Fall back to legacy document source
-                from mcp.sources import get_document_source
-
-                if vision_provider != "local":
-                    logger.info(
-                        f"Using global vision settings: {vision_provider}/{vision_model}"
-                    )
-
-                source = get_document_source(
-                    source_type=store.source_type,
-                    source_path=store.source_path,
-                    mcp_config=store.mcp_server_config,
-                    google_account_id=store.google_account_id,
-                    gdrive_folder_id=store.gdrive_folder_id,
-                    gmail_label_id=store.gmail_label_id,
-                    gcalendar_calendar_id=store.gcalendar_calendar_id,
-                    gtasks_tasklist_id=store.gtasks_tasklist_id,
-                    gcontacts_group_id=store.gcontacts_group_id,
-                    microsoft_account_id=store.microsoft_account_id,
-                    onedrive_folder_id=store.onedrive_folder_id,
-                    outlook_folder_id=store.outlook_folder_id,
-                    outlook_days_back=store.outlook_days_back,
-                    onenote_notebook_id=store.onenote_notebook_id,
-                    teams_team_id=store.teams_team_id,
-                    teams_channel_id=store.teams_channel_id,
-                    teams_days_back=store.teams_days_back,
-                    paperless_url=store.paperless_url,
-                    paperless_token=store.paperless_token,
-                    paperless_tag_id=store.paperless_tag_id,
-                    github_repo=store.github_repo,
-                    github_branch=store.github_branch,
-                    github_path=store.github_path,
-                    notion_database_id=store.notion_database_id,
-                    notion_page_id=store.notion_page_id,
-                    nextcloud_folder=store.nextcloud_folder,
-                    website_url=store.website_url,
-                    website_crawl_depth=store.website_crawl_depth,
-                    website_max_pages=store.website_max_pages,
-                    website_include_pattern=store.website_include_pattern,
-                    website_exclude_pattern=store.website_exclude_pattern,
-                    website_crawler_override=store.website_crawler_override,
-                    slack_channel_id=store.slack_channel_id,
-                    slack_channel_types=store.slack_channel_types,
-                    slack_days_back=store.slack_days_back,
-                    todoist_project_id=store.todoist_project_id,
-                    todoist_filter=store.todoist_filter,
-                    todoist_include_completed=store.todoist_include_completed,
-                    websearch_query=store.websearch_query,
-                    websearch_max_results=store.websearch_max_results,
-                    websearch_pages_to_scrape=store.websearch_pages_to_scrape,
-                    websearch_time_range=store.websearch_time_range,
-                    websearch_category=store.websearch_category,
-                    vision_provider=vision_provider,
-                    vision_model=vision_model,
-                    vision_ollama_url=vision_ollama_url,
+                raise ValueError(
+                    f"No unified source plugin found for source type '{store.source_type}'. "
+                    f"All document sources must have a plugin in builtin_plugins/unified_sources/."
                 )
 
             if not source.is_available():
@@ -1149,208 +961,6 @@ SUMMARY: <content type description>"""
             with self._lock:
                 self._indexing_jobs.pop(job_key, None)
 
-    def _index_rag_impl(self, rag_id: int) -> bool:
-        """Implementation of legacy RAG indexing."""
-        from db import get_smart_rag_by_id, update_smart_rag_index_status
-
-        from .retriever import _get_embedding_provider_for_rag
-
-        embedding_provider = None  # Initialize for cleanup in finally block
-
-        # Get RAG config
-        rag = get_smart_rag_by_id(rag_id)
-        if not rag:
-            logger.error(f"RAG {rag_id} not found")
-            return False
-
-        source_desc = (
-            rag.source_path
-            if rag.source_type == "local"
-            else f"MCP:{rag.mcp_server_config.get('name', 'unknown') if rag.mcp_server_config else 'unknown'}"
-        )
-        logger.info(f"Starting indexing for RAG '{rag.name}' from {source_desc}")
-
-        # Update status to indexing
-        update_smart_rag_index_status(rag_id, "indexing")
-
-        try:
-            # Get document source based on source_type
-            from mcp.sources import get_document_source
-
-            source = get_document_source(
-                source_type=rag.source_type,
-                source_path=rag.source_path,
-                mcp_config=rag.mcp_server_config,
-            )
-
-            if not source.is_available():
-                raise ValueError(f"Document source not available: {source_desc}")
-
-            # Get embedding provider
-            embedding_provider = _get_embedding_provider_for_rag(
-                rag.embedding_provider,
-                rag.embedding_model,
-                rag.ollama_url,
-            )
-
-            if not embedding_provider.is_available():
-                raise ValueError(
-                    f"Embedding provider '{rag.embedding_provider}' is not available"
-                )
-
-            # Get or create ChromaDB collection
-            collection_name = rag.collection_name or f"smartrag_{rag_id}"
-            collection = self._chroma_client.get_or_create_collection(
-                name=collection_name,
-                metadata={"hnsw:space": "cosine"},
-            )
-
-            # Clear existing documents
-            try:
-                collection.delete(where={})
-            except Exception:
-                # Collection might be empty
-                pass
-
-            # Find and process documents
-            documents = []
-            doc_count = 0
-
-            # List all documents from the source
-            all_docs = list(source.list_documents())
-            total_files = len(all_docs)
-            logger.info(f"Found {total_files} documents to index")
-
-            for file_idx, doc_info in enumerate(all_docs):
-                logger.info(
-                    f"Processing document {file_idx + 1}/{total_files}: {doc_info.name}"
-                )
-                try:
-                    # Process document based on source type
-                    if rag.source_type == "local":
-                        # For local files, use the existing file-based processing
-                        chunks = self._process_document(
-                            Path(doc_info.uri),
-                            rag.chunk_size,
-                            rag.chunk_overlap,
-                            vision_provider=rag.vision_provider,
-                            vision_model=rag.vision_model,
-                            vision_ollama_url=rag.vision_ollama_url,
-                        )
-                    else:
-                        # For MCP sources, read content and process
-                        content = source.read_document(doc_info.uri)
-                        if content:
-                            chunks = self._process_content(
-                                content,
-                                rag.chunk_size,
-                                rag.chunk_overlap,
-                            )
-                        else:
-                            chunks = []
-
-                    for chunk in chunks:
-                        chunk["source_file"] = doc_info.name
-                    documents.extend(chunks)
-                    doc_count += 1
-                    logger.info(
-                        f"Completed {doc_info.name}: {len(chunks)} chunks "
-                        f"(total: {len(documents)} chunks from {doc_count} docs)"
-                    )
-
-                    # Update progress after each document
-                    update_smart_rag_index_status(
-                        rag_id,
-                        "indexing",
-                        document_count=doc_count,
-                        chunk_count=len(documents),
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to process {doc_info.uri}: {e}")
-
-            if not documents:
-                logger.warning(f"No documents found in {source_desc}")
-                update_smart_rag_index_status(
-                    rag_id,
-                    "ready",
-                    document_count=0,
-                    chunk_count=0,
-                    collection_name=collection_name,
-                )
-                return True
-
-            # Generate embeddings and store in ChromaDB
-            logger.info(f"Generating embeddings for {len(documents)} chunks...")
-
-            # Process in batches
-            batch_size = 100
-            total_chunks = 0
-
-            for i in range(0, len(documents), batch_size):
-                batch = documents[i : i + batch_size]
-                texts = [doc["content"] for doc in batch]
-
-                # Generate embeddings
-                embed_result = embedding_provider.embed(texts)
-
-                # Prepare for ChromaDB
-                ids = [
-                    hashlib.md5(
-                        f"{doc['source_file']}:{doc['chunk_index']}".encode()
-                    ).hexdigest()
-                    for doc in batch
-                ]
-                metadatas = [
-                    {
-                        "source_file": doc["source_file"],
-                        "chunk_index": doc["chunk_index"],
-                        "indexed_at": datetime.utcnow().isoformat(),
-                    }
-                    for doc in batch
-                ]
-
-                # Add to collection
-                collection.add(
-                    ids=ids,
-                    embeddings=embed_result.embeddings,
-                    documents=texts,
-                    metadatas=metadatas,
-                )
-
-                total_chunks += len(batch)
-                logger.debug(f"Indexed {total_chunks}/{len(documents)} chunks")
-
-            # Update status
-            update_smart_rag_index_status(
-                rag_id,
-                "ready",
-                document_count=doc_count,
-                chunk_count=total_chunks,
-                collection_name=collection_name,
-            )
-
-            logger.info(
-                f"Indexing complete for RAG '{rag.name}': "
-                f"{doc_count} documents, {total_chunks} chunks"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(f"Indexing failed for RAG {rag_id}: {e}")
-            update_smart_rag_index_status(rag_id, "error", error=str(e))
-            return False
-
-        finally:
-            # Clean up GPU memory
-            if embedding_provider and hasattr(embedding_provider, "unload"):
-                embedding_provider.unload()
-            self._clear_gpu_memory()
-
-            # Clean up job reference
-            job_key = f"rag_{rag_id}"
-            with self._lock:
-                self._indexing_jobs.pop(job_key, None)
-
     def _find_documents(self, source_path: Path):
         """Find all supported documents in a directory."""
         for file_path in source_path.rglob("*"):
@@ -1580,7 +1190,7 @@ SUMMARY: <content type description>"""
         Returns:
             List of chunk dicts with 'content', 'chunk_index', and optional metadata
         """
-        from mcp.sources import DocumentContent
+        from plugin_base.document_source import DocumentContent
 
         # If we have text content, chunk it directly
         if content.text:
@@ -1626,7 +1236,7 @@ SUMMARY: <content type description>"""
                     return []
 
             # DOCX
-            if "wordprocessingml" in mime.lower() or content.name.endswith(".docx"):
+            if "wordprocessingml" in mime.lower() or content.metadata.get("filename", "").endswith(".docx"):
                 try:
                     import io
 

@@ -15,7 +15,7 @@ from typing import Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.unified_source import (
@@ -36,6 +36,7 @@ class PaperlessUnifiedSource(PluginUnifiedSource):
     description = "Index documents from Paperless-ngx with full document lookup"
     category = "documents"
     icon = "📄"
+    content_category = ContentCategory.FILES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["paperless"]
@@ -77,15 +78,17 @@ class PaperlessUnifiedSource(PluginUnifiedSource):
                 name="url",
                 label="Paperless URL",
                 field_type=FieldType.TEXT,
-                required=True,
+                required=False,
                 help_text="URL of your Paperless-ngx instance",
+                env_var="PAPERLESS_URL",
             ),
             FieldDefinition(
                 name="api_token",
-                label="API Token",
+                label="Paperless API Token",
                 field_type=FieldType.PASSWORD,
                 required=False,
-                help_text="Paperless API token (or set PAPERLESS_TOKEN env var)",
+                help_text="Paperless API token (leave empty to use env var)",
+                env_var="PAPERLESS_TOKEN",
             ),
             FieldDefinition(
                 name="tag_ids",

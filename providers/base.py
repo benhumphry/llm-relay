@@ -59,6 +59,10 @@ class LLMProvider(ABC):
     """Abstract base class for LLM providers."""
 
     name: str  # Provider identifier (e.g., "anthropic", "openai", "gemini")
+    display_name: str = (
+        ""  # Human-readable name for admin UI (defaults to name.title())
+    )
+    icon: str = "🤖"  # Icon for admin UI display
 
     # Whether this provider calculates costs dynamically (vs using static database rates)
     # Providers with custom cost calculation (Anthropic, Gemini, Perplexity, OpenRouter)

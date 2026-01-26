@@ -24,7 +24,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.unified_source import (
@@ -54,6 +54,7 @@ class GitHubUnifiedSource(PluginUnifiedSource):
     )
     category = "development"
     icon = "🐙"
+    content_category = ContentCategory.FILES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["mcp:github"]
@@ -98,10 +99,11 @@ class GitHubUnifiedSource(PluginUnifiedSource):
         return [
             FieldDefinition(
                 name="api_token",
-                label="Personal Access Token",
+                label="GitHub Personal Access Token",
                 field_type=FieldType.PASSWORD,
                 required=False,
-                help_text="GitHub PAT (or set GITHUB_TOKEN env var). Needs repo scope for private repos.",
+                help_text="GitHub PAT (leave empty to use env var). Needs repo scope for private repos.",
+                env_var="GITHUB_TOKEN",
             ),
             FieldDefinition(
                 name="repositories",

@@ -23,7 +23,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.oauth import OAuthMixin
@@ -54,6 +54,7 @@ class SlackUnifiedSource(OAuthMixin, PluginUnifiedSource):
     )
     category = "communication"
     icon = "💬"
+    content_category = ContentCategory.MESSAGES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["slack"]
@@ -100,9 +101,17 @@ class SlackUnifiedSource(OAuthMixin, PluginUnifiedSource):
                 name="oauth_account_id",
                 label="Slack Workspace",
                 field_type=FieldType.OAUTH_ACCOUNT,
-                required=True,
+                required=False,
                 picker_options={"provider": "slack"},
-                help_text="Select a connected Slack workspace",
+                help_text="Select a connected Slack workspace (or use bot token env var)",
+            ),
+            FieldDefinition(
+                name="bot_token",
+                label="Slack Bot Token",
+                field_type=FieldType.PASSWORD,
+                required=False,
+                help_text="Bot token (leave empty to use OAuth or env var)",
+                env_var="SLACK_BOT_TOKEN",
             ),
             FieldDefinition(
                 name="channel_ids",
@@ -203,6 +212,9 @@ class SlackUnifiedSource(OAuthMixin, PluginUnifiedSource):
         self.index_schedule = config.get("index_schedule", "")
         self.live_max_results = config.get("live_max_results", 30)
 
+        # Bot token - can be set directly or via env var
+        self.bot_token = config.get("bot_token") or os.environ.get("SLACK_BOT_TOKEN")
+
         # Parse channel IDs
         channel_str = config.get("channel_ids", "")
         self.channel_ids = (
@@ -215,19 +227,36 @@ class SlackUnifiedSource(OAuthMixin, PluginUnifiedSource):
         self._user_cache: dict[str, str] = {}
         self._channel_cache: dict[str, str] = {}
 
-        self._init_oauth_client()
+        # Use OAuth if account is configured, otherwise use bot token
+        if self.oauth_account_id:
+            self._init_oauth_client()
+        else:
+            self._oauth_client = None
 
     def _slack_request(self, endpoint: str, params: dict = None) -> dict:
         """Make a Slack API request."""
-        if not self._refresh_token_if_needed():
-            raise Exception("No valid Slack access token")
-
         url = f"{self.SLACK_API_BASE}/{endpoint}"
-        response = self._oauth_client.get(
-            url,
-            headers=self._get_auth_headers(),
-            params=params or {},
-        )
+
+        # Use OAuth if configured, otherwise use bot token
+        if self._oauth_client and self.oauth_account_id:
+            if not self._refresh_token_if_needed():
+                raise Exception("No valid Slack access token")
+            response = self._oauth_client.get(
+                url,
+                headers=self._get_auth_headers(),
+                params=params or {},
+            )
+        elif self.bot_token:
+            import httpx
+
+            response = httpx.get(
+                url,
+                headers={"Authorization": f"Bearer {self.bot_token}"},
+                params=params or {},
+            )
+        else:
+            raise Exception("No Slack authentication configured (OAuth or bot token)")
+
         response.raise_for_status()
         data = response.json()
 

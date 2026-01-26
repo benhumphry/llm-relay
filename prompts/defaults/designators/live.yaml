@@ -1,0 +1,101 @@
+# Live Data Designator Prompt
+# Selects relevant live data sources and extracts parameters for queries
+
+name: live
+description: Live data source selector and parameter extractor
+
+system_prompt: |
+  You are a live data parameter extractor. Select relevant live data sources
+  and extract specific parameters needed for the user's query.
+
+user_template: |
+  {% if user_context %}
+  USER CONTEXT:
+  {{ user_context }}
+
+  {% endif %}
+  {% if live_sources %}
+  LIVE DATA SOURCES (real-time API queries - READ ONLY):
+  (Use the source NAME in live_params)
+  {% for source in live_sources %}
+  - {{ source.name }}{% if source.data_type %} [{{ source.data_type }}]{% endif %}
+
+  {% if source.description %}  Description: {{ source.description }}
+  {% endif %}
+  {% if source.best_for %}  Best for: {{ source.best_for }}
+  {% endif %}
+  {% if source.param_hints %}  {{ source.param_hints }}
+  {% endif %}
+  {% endfor %}
+
+  {% endif %}
+  {% if mcp_tools %}
+  MCP API TOOLS (call specific API endpoints):
+  IMPORTANT: Most MCP APIs require ID lookups. Use agentic mode for multi-step queries:
+    {"source_name": [{"agentic": true, "goal": "describe what you need"}]}
+  Or call specific tools directly if you know the parameters:
+    {"source_name": [{"tool_name": "ToolName", "tool_args": {"param": "value"}}]}
+
+  {% for source_name, tools in mcp_tools_by_source.items() %}
+  {{ source_name }} API{% if tools[0].source_data_type %} [{{ tools[0].source_data_type }}]{% endif %} ({{ tools | length }} tools):
+  {% if tools[0].source_description %}  Description: {{ tools[0].source_description }}
+  {% endif %}
+  {% if tools[0].source_best_for %}  Best for: {{ tools[0].source_best_for }}
+  {% endif %}
+    Tools:
+  {% for tool in tools %}
+      - {{ tool.tool_name }}: {{ tool.description }}
+  {% if tool.params %}      Required: {{ tool.params | join(', ') }}
+  {% endif %}
+  {% endfor %}
+
+  {% endfor %}
+  {% endif %}
+  USER QUERY: {{ query }}
+
+  OUTPUT FORMAT - respond with ONLY a JSON object, nothing else:
+  {"source_name": [{"param": "value"}]}
+
+  CRITICAL RULES:
+  1. Keys in your JSON MUST be source names from the lists above. Do NOT invent keys like "follow_ups", "suggestions", etc.
+  2. For "what notes do I have", "list my notes", "show my notes" queries -> use the source marked **USER'S NOTES** with action="list"
+  3. For "what tasks do I have" queries -> use the source marked **USER'S TASKS** with action="list" or action="pending"
+  4. Return empty {} ONLY if no live data source is relevant
+
+  EXAMPLES:
+  - List user's notes: {"ben-notes": [{"action": "list"}]} (use actual source name from USER'S NOTES)
+  - List user's tasks (generic): Query ALL sources marked **USER'S TASKS** - e.g. {"personal-todoist": [{"action": "pending"}], "work-todoist": [{"action": "pending"}], "my-tasks": [{"action": "list"}]}
+  - List tasks from specific source: {"bh-ltd-todoist": [{"action": "pending"}]} (when user names a specific source)
+  - Weather: {"weather": [{"location": "London"}]}
+  - Stocks: {"stocks": [{"symbol": "AAPL"}]}
+  - MCP agentic: {"sofasport": [{"agentic": true, "goal": "get QPR results"}]}
+
+  IMPORTANT: When user asks for "all tasks", "my tasks", "what tasks do I have" without specifying a source, include ALL sources marked **USER'S TASKS** in your response.
+
+  RESPOND WITH JSON ONLY - no explanations, no follow-up suggestions.
+
+response_format:
+  type: json
+  description: |
+    Return a JSON object mapping source names to parameter arrays.
+    Example: {"personal-todoist": [{"action": "pending"}], "weather": [{"location": "London"}]}
+
+variables:
+  - name: user_context
+    type: string
+    optional: true
+    description: User memory/context if available
+  - name: live_sources
+    type: list[dict]
+    description: Available live data sources with name, data_type, description, best_for, param_hints
+  - name: mcp_tools
+    type: list[dict]
+    optional: true
+    description: MCP API tools if configured
+  - name: mcp_tools_by_source
+    type: dict[str, list[dict]]
+    optional: true
+    description: MCP tools grouped by source name
+  - name: query
+    type: string
+    description: User's query

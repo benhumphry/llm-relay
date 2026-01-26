@@ -340,6 +340,42 @@ class PluginUnifiedSource(ABC):
         # Fall back to legacy column-based config
         return cls.build_config_from_store(store)
 
+    @classmethod
+    def get_account_info(cls, store) -> Optional[dict]:
+        """
+        Extract account info from a document store for action handlers.
+
+        This method enables action handlers to discover available accounts
+        from linked document stores. Each unified source knows how to extract
+        the account information from its configuration.
+
+        Args:
+            store: DocumentStore model instance
+
+        Returns:
+            Dict with account info if this store provides an actionable account:
+            - provider: str - OAuth provider or source type (e.g., "google", "imap")
+            - email: str - Account email or identifier
+            - name: str - Friendly display name for the account
+            - store_id: int - The document store ID
+            - oauth_account_id: Optional[int] - OAuth token ID if applicable
+            - Extra source-specific fields (calendar_id, project_id, etc.)
+
+            Returns None if this store doesn't provide an actionable account.
+
+        Example (Gmail):
+            return {
+                "provider": "google",
+                "email": "user@gmail.com",
+                "name": store.display_name or store.name,
+                "store_id": store.id,
+                "oauth_account_id": store.google_account_id,
+            }
+        """
+        # Default implementation - subclasses should override
+        # to provide account info for action handlers
+        return None
+
     @abstractmethod
     def __init__(self, config: dict):
         """

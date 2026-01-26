@@ -1,0 +1,73 @@
+# Action Instructions Template
+# Provides instructions to the LLM on how to use action blocks
+
+name: instructions
+description: Instructions for LLM on using smart action blocks
+version: "1.0"
+
+# Variables expected:
+#   available_actions: list of dicts with handler, action, description, parameters
+#   action_format: string showing the action block format
+#   examples: list of example action blocks (optional)
+
+user_template: |
+  {% if available_actions %}
+  ## Available Actions
+
+  You can perform actions by including action blocks in your response. Actions allow you to interact with external services on behalf of the user.
+
+  ### Action Block Format
+  ```
+  [action:handler:action_name]
+  parameter1: value1
+  parameter2: value2
+  [/action]
+  ```
+
+  ### Available Actions by Handler
+
+  {% for handler, actions in available_actions | groupby('handler') %}
+  **{{ handler | title }}**
+  {% for action in actions %}
+  - `{{ action.handler }}:{{ action.action }}` - {{ action.description }}
+    {%- if action.parameters %}
+    Parameters: {{ action.parameters | join(', ') }}
+    {%- endif %}
+  {% endfor %}
+
+  {% endfor %}
+  ### Important Guidelines
+
+  1. **Always confirm before destructive actions** - Ask the user before deleting, sending, or modifying data
+  2. **One action per block** - Each action block should contain exactly one action
+  3. **Use exact parameter names** - Parameter names are case-sensitive
+  4. **Provide complete information** - Include all required parameters
+  5. **Actions execute after your response** - The user will see action results after your message
+
+  {% if examples %}
+  ### Examples
+
+  {% for example in examples %}
+  {{ example }}
+
+  {% endfor %}
+  {% endif %}
+  {% else %}
+  No actions are currently available.
+  {% endif %}
+
+# Minimal version for context-constrained situations
+minimal_template: |
+  {% if available_actions %}
+  Actions: Use `[action:handler:name]...[/action]` blocks.
+  Available: {% for action in available_actions %}{{ action.handler }}:{{ action.action }}{% if not loop.last %}, {% endif %}{% endfor %}
+  {% endif %}
+
+# System prompt addition for action-enabled aliases
+system_template: |
+  {% if available_actions %}
+  You have access to actions that can interact with external services. Use action blocks sparingly and only when the user's request clearly requires an action. For read-only queries (listing tasks, showing calendar, checking email), prefer using the injected context data rather than actions.
+
+  Actions are for MUTATIONS: creating, updating, deleting, sending.
+  Context injection handles READS: listing, showing, displaying.
+  {% endif %}

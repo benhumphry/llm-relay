@@ -54,19 +54,23 @@ def _plain_to_html(text: str) -> str:
 
 class EmailActionHandler(OAuthMixin, PluginActionHandler):
     """
-    Unified email management across Gmail and Outlook.
+    Unified email management across Gmail, Outlook, and IMAP.
 
     Provider is determined at runtime from Smart Alias context - no plugin config needed.
+    Supports:
+    - Gmail (via OAuth)
+    - Outlook (via OAuth)
+    - IMAP/SMTP (via direct credentials - any email provider)
     """
 
     action_type = "email"
     display_name = "Email"
-    description = "Create drafts, send emails, manage labels (Gmail or Outlook)"
+    description = "Create drafts, send emails, manage labels (Gmail, Outlook, or IMAP)"
     icon = "✉️"
     category = "communication"
-    supported_sources = ["Gmail", "Outlook"]
+    supported_sources = ["Gmail", "Outlook", "IMAP"]
     # Document store source_type values that provide email accounts
-    supported_source_types = ["mcp:gmail", "outlook"]
+    supported_source_types = ["mcp:gmail", "outlook", "imap"]
 
     _abstract = False
 
@@ -83,8 +87,8 @@ class EmailActionHandler(OAuthMixin, PluginActionHandler):
                 key="email",
                 label="Email Account",
                 resource_type=ResourceType.OAUTH_ACCOUNT,
-                providers=["google", "microsoft"],
-                help_text="Account for email actions (Gmail or Outlook)",
+                providers=["google", "microsoft", "imap"],
+                help_text="Account for email actions (Gmail, Outlook, or IMAP)",
                 required=True,
             ),
         ]
@@ -517,6 +521,9 @@ Same as above but saves to drafts instead of sending.
         # These will be set from context at execution time
         self.oauth_account_id: Optional[int] = None
         self.oauth_provider: Optional[str] = None
+        # For IMAP accounts (no OAuth)
+        self.imap_store_id: Optional[int] = None
+        self._imap_source = None  # Will be set when using IMAP
 
     def _find_account(
         self, account_identifier: str, context: ActionContext
@@ -565,8 +572,15 @@ Same as above but saves to drafts instead of sending.
         Returns:
             (success, error_message)
         """
+        # Reset state
+        self.oauth_account_id = None
+        self.oauth_provider = None
+        self.imap_store_id = None
+        self._imap_source = None
+
         # Check if LLM specified an account
         account_param = params.get("account")
+        account = None
 
         if account_param:
             # Look up the specified account
@@ -577,10 +591,6 @@ Same as above but saves to drafts instead of sending.
                     False,
                     f"Account '{account_param}' not found. Available: {available}",
                 )
-
-            # Store-based accounts use oauth_account_id, legacy uses id
-            self.oauth_account_id = account.get("oauth_account_id", account.get("id"))
-            self.oauth_provider = account.get("provider", "google")
         else:
             # Fall back to default account
             default_accounts = getattr(context, "default_accounts", {})
@@ -591,10 +601,6 @@ Same as above but saves to drafts instead of sending.
                 available_accounts = context.available_accounts.get("email", [])
                 if len(available_accounts) == 1:
                     account = available_accounts[0]
-                    self.oauth_account_id = account.get(
-                        "oauth_account_id", account.get("id")
-                    )
-                    self.oauth_provider = account.get("provider", "google")
                     logger.info(
                         f"Email: Using only available account: {account.get('name', account.get('email'))}"
                     )
@@ -607,21 +613,71 @@ Same as above but saves to drafts instead of sending.
                         f"Multiple email accounts available. Specify 'account' parameter: {available}",
                     )
             else:
-                # Default account uses oauth_account_id or id
-                self.oauth_account_id = email_config.get(
-                    "oauth_account_id", email_config.get("id")
-                )
-                self.oauth_provider = email_config.get("provider", "google")
+                account = email_config
 
-        if not self.oauth_account_id:
-            return False, "Could not determine email account ID"
+        if not account:
+            return False, "Could not determine email account"
 
-        logger.info(
-            f"Email: Using provider '{self.oauth_provider}' account {self.oauth_account_id}"
-        )
+        # Configure based on provider type
+        provider = account.get("provider", "google")
 
-        self._init_oauth_client()
+        if provider == "imap":
+            # IMAP account - use direct credentials via unified source
+            self.imap_store_id = account.get("store_id")
+            self.oauth_provider = "imap"
+
+            if not self.imap_store_id:
+                return False, "IMAP account missing store_id"
+
+            # Initialize IMAP source from document store
+            success, error = self._init_imap_source()
+            if not success:
+                return False, error
+
+            logger.info(f"Email: Using IMAP store {self.imap_store_id}")
+        else:
+            # OAuth-based account (Gmail or Outlook)
+            self.oauth_account_id = account.get("oauth_account_id", account.get("id"))
+            self.oauth_provider = provider
+
+            if not self.oauth_account_id:
+                return False, "Could not determine email account ID"
+
+            logger.info(
+                f"Email: Using provider '{self.oauth_provider}' account {self.oauth_account_id}"
+            )
+            self._init_oauth_client()
+
         return True, ""
+
+    def _init_imap_source(self) -> tuple[bool, str]:
+        """Initialize IMAP unified source from document store."""
+        if not self.imap_store_id:
+            return False, "No IMAP store ID configured"
+
+        try:
+            from builtin_plugins.unified_sources.imap import IMAPUnifiedSource
+            from db.document_stores import get_document_store_by_id
+
+            store = get_document_store_by_id(self.imap_store_id)
+            if not store:
+                return False, f"Document store {self.imap_store_id} not found"
+
+            if store.source_type != "imap":
+                return False, f"Store {self.imap_store_id} is not an IMAP store"
+
+            # Build config from store
+            config = IMAPUnifiedSource.build_config_from_store(store)
+            self._imap_source = IMAPUnifiedSource(config)
+
+            if not self._imap_source.is_available():
+                return False, "IMAP credentials not configured"
+
+            return True, ""
+
+        except Exception as e:
+            logger.error(f"Failed to initialize IMAP source: {e}")
+            return False, f"Failed to initialize IMAP: {str(e)}"
 
     def execute(
         self, action: str, params: dict, context: ActionContext
@@ -637,7 +693,9 @@ Same as above but saves to drafts instead of sending.
             )
 
         try:
-            if self.oauth_provider == "microsoft":
+            if self.oauth_provider == "imap":
+                return self._execute_imap(action, params, context)
+            elif self.oauth_provider == "microsoft":
                 return self._execute_outlook(action, params, context)
             else:
                 return self._execute_gmail(action, params, context)
@@ -1386,6 +1444,485 @@ Same as above but saves to drafts instead of sending.
             message=f"Message marked as {'read' if read else 'unread'}",
             data={"message_id": message_id},
         )
+
+    # -------------------------------------------------------------------------
+    # IMAP Implementation
+    # -------------------------------------------------------------------------
+
+    def _execute_imap(
+        self, action: str, params: dict, context: ActionContext
+    ) -> ActionResult:
+        """Execute action via IMAP/SMTP."""
+        if not self._imap_source:
+            return ActionResult(
+                success=False, message="", error="IMAP source not initialized"
+            )
+
+        if action == "draft_new":
+            return self._imap_draft_new(params)
+        elif action == "draft_reply":
+            return self._imap_draft_reply(params, context)
+        elif action == "draft_forward":
+            return self._imap_draft_forward(params, context)
+        elif action == "send_new":
+            return self._imap_send_new(params)
+        elif action == "send_reply":
+            return self._imap_send_reply(params, context)
+        elif action == "send_forward":
+            return self._imap_send_forward(params, context)
+        elif action == "archive":
+            return self._imap_archive(params, context)
+        elif action == "mark_read":
+            return self._imap_mark_read(params, context, read=True)
+        elif action == "mark_unread":
+            return self._imap_mark_read(params, context, read=False)
+        elif action == "label":
+            # IMAP doesn't have labels/categories - use folders instead
+            return ActionResult(
+                success=False,
+                message="",
+                error="IMAP does not support labels. Use archive to move to folders.",
+            )
+        else:
+            return ActionResult(
+                success=False, message="", error=f"Unknown action: {action}"
+            )
+
+    def _imap_draft_new(self, params: dict) -> ActionResult:
+        """Create a new email draft via IMAP."""
+        to = self._normalize_recipients(params.get("to", []))
+        cc = self._normalize_recipients(params.get("cc", []))
+        bcc = self._normalize_recipients(params.get("bcc", []))
+        subject = params.get("subject", "")
+        body = params.get("body", "")
+
+        result = self._imap_source.create_draft(
+            to=to,
+            subject=subject,
+            body=body,
+            cc=cc if cc else None,
+            bcc=bcc if bcc else None,
+        )
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=result.get("message", "Draft created"),
+                data={"to": to, "subject": subject},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get("error", "Failed to create draft"),
+        )
+
+    def _imap_draft_reply(self, params: dict, context: ActionContext) -> ActionResult:
+        """Create a reply draft via IMAP."""
+        message_id = params.get("message_id")
+        body = params.get("body", "")
+
+        if not message_id:
+            message_id = self._lookup_imap_message(params, context)
+            if not message_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error="Could not find message - provide message_id or subject_hint",
+                )
+
+        # For IMAP, we need to fetch the original message to build a proper reply
+        # message_id format is "folder/uid"
+        folder, uid = self._parse_imap_message_id(message_id)
+
+        # Fetch original email for reply headers
+        fetch_result = self._imap_source.fetch(
+            {
+                "action": "read",
+                "message_id": uid,
+                "folder": folder,
+            }
+        )
+
+        if not fetch_result.success:
+            return ActionResult(
+                success=False,
+                message="",
+                error=f"Could not fetch original message: {fetch_result.error}",
+            )
+
+        orig = fetch_result.data
+        orig_message_id = orig.get("message_id", "")
+        orig_from = orig.get("from", "")
+        orig_subject = orig.get("subject", "")
+
+        # Build reply subject
+        subject = orig_subject
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+
+        result = self._imap_source.create_draft(
+            to=[orig_from],
+            subject=subject,
+            body=body,
+            in_reply_to=orig_message_id,
+        )
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=result.get("message", "Reply draft created"),
+                data={"to": [orig_from], "subject": subject},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get("error", "Failed to create reply draft"),
+        )
+
+    def _imap_draft_forward(self, params: dict, context: ActionContext) -> ActionResult:
+        """Create a forward draft via IMAP."""
+        message_id = params.get("message_id")
+        to = self._normalize_recipients(params.get("to", []))
+        body = params.get("body", "")
+
+        if not message_id:
+            message_id = self._lookup_imap_message(params, context)
+            if not message_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error="Could not find message - provide message_id or subject_hint",
+                )
+
+        folder, uid = self._parse_imap_message_id(message_id)
+
+        # Fetch original email
+        fetch_result = self._imap_source.fetch(
+            {
+                "action": "read",
+                "message_id": uid,
+                "folder": folder,
+            }
+        )
+
+        if not fetch_result.success:
+            return ActionResult(
+                success=False,
+                message="",
+                error=f"Could not fetch original message: {fetch_result.error}",
+            )
+
+        orig = fetch_result.data
+        orig_subject = orig.get("subject", "")
+        orig_from = orig.get("from", "")
+        orig_date = orig.get("date", "")
+        orig_to = orig.get("to", "")
+        orig_body = orig.get("body", "")
+
+        # Build forward subject and body
+        subject = orig_subject
+        if not subject.lower().startswith("fwd:"):
+            subject = f"Fwd: {subject}"
+
+        forward_header = (
+            f"---------- Forwarded message ----------\n"
+            f"From: {orig_from}\n"
+            f"Date: {orig_date}\n"
+            f"Subject: {orig_subject}\n"
+            f"To: {orig_to}\n\n"
+        )
+
+        if body:
+            combined_body = f"{body}\n\n{forward_header}{orig_body}"
+        else:
+            combined_body = f"{forward_header}{orig_body}"
+
+        result = self._imap_source.create_draft(
+            to=to,
+            subject=subject,
+            body=combined_body,
+        )
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=result.get("message", "Forward draft created"),
+                data={"to": to, "subject": subject},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get("error", "Failed to create forward draft"),
+        )
+
+    def _imap_send_new(self, params: dict) -> ActionResult:
+        """Send a new email via SMTP."""
+        to = self._normalize_recipients(params.get("to", []))
+        cc = self._normalize_recipients(params.get("cc", []))
+        subject = params.get("subject", "")
+        body = params.get("body", "")
+
+        result = self._imap_source.send_email(
+            to=to,
+            subject=subject,
+            body=body,
+            cc=cc if cc else None,
+        )
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=result.get("message", "Email sent"),
+                data={"to": to, "subject": subject},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get("error", "Failed to send email"),
+        )
+
+    def _imap_send_reply(self, params: dict, context: ActionContext) -> ActionResult:
+        """Send a reply via SMTP."""
+        message_id = params.get("message_id")
+        body = params.get("body", "")
+
+        if not message_id:
+            message_id = self._lookup_imap_message(params, context)
+            if not message_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error="Could not find message - provide message_id or subject_hint",
+                )
+
+        folder, uid = self._parse_imap_message_id(message_id)
+
+        # Fetch original email for reply headers
+        fetch_result = self._imap_source.fetch(
+            {
+                "action": "read",
+                "message_id": uid,
+                "folder": folder,
+            }
+        )
+
+        if not fetch_result.success:
+            return ActionResult(
+                success=False,
+                message="",
+                error=f"Could not fetch original message: {fetch_result.error}",
+            )
+
+        orig = fetch_result.data
+        orig_message_id = orig.get("message_id", "")
+        orig_from = orig.get("from", "")
+        orig_subject = orig.get("subject", "")
+
+        # Build reply subject
+        subject = orig_subject
+        if not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+
+        result = self._imap_source.send_email(
+            to=[orig_from],
+            subject=subject,
+            body=body,
+            in_reply_to=orig_message_id,
+        )
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=result.get("message", "Reply sent"),
+                data={"to": [orig_from], "subject": subject},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get("error", "Failed to send reply"),
+        )
+
+    def _imap_send_forward(self, params: dict, context: ActionContext) -> ActionResult:
+        """Send a forward via SMTP."""
+        message_id = params.get("message_id")
+        to = self._normalize_recipients(params.get("to", []))
+        body = params.get("body", "")
+
+        if not message_id:
+            message_id = self._lookup_imap_message(params, context)
+            if not message_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error="Could not find message - provide message_id or subject_hint",
+                )
+
+        folder, uid = self._parse_imap_message_id(message_id)
+
+        # Fetch original email
+        fetch_result = self._imap_source.fetch(
+            {
+                "action": "read",
+                "message_id": uid,
+                "folder": folder,
+            }
+        )
+
+        if not fetch_result.success:
+            return ActionResult(
+                success=False,
+                message="",
+                error=f"Could not fetch original message: {fetch_result.error}",
+            )
+
+        orig = fetch_result.data
+        orig_subject = orig.get("subject", "")
+        orig_from = orig.get("from", "")
+        orig_date = orig.get("date", "")
+        orig_to = orig.get("to", "")
+        orig_body = orig.get("body", "")
+
+        # Build forward subject and body
+        subject = orig_subject
+        if not subject.lower().startswith("fwd:"):
+            subject = f"Fwd: {subject}"
+
+        forward_header = (
+            f"---------- Forwarded message ----------\n"
+            f"From: {orig_from}\n"
+            f"Date: {orig_date}\n"
+            f"Subject: {orig_subject}\n"
+            f"To: {orig_to}\n\n"
+        )
+
+        if body:
+            combined_body = f"{body}\n\n{forward_header}{orig_body}"
+        else:
+            combined_body = f"{forward_header}{orig_body}"
+
+        result = self._imap_source.send_email(
+            to=to,
+            subject=subject,
+            body=combined_body,
+        )
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=result.get("message", "Forward sent"),
+                data={"to": to, "subject": subject},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get("error", "Failed to send forward"),
+        )
+
+    def _imap_archive(self, params: dict, context: ActionContext) -> ActionResult:
+        """Archive an email via IMAP."""
+        message_id = params.get("message_id")
+
+        if not message_id:
+            message_id = self._lookup_imap_message(params, context)
+            if not message_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error="Could not find message - provide message_id or subject_hint",
+                )
+
+        folder, uid = self._parse_imap_message_id(message_id)
+
+        result = self._imap_source.archive_email(folder, uid)
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=result.get("message", "Message archived"),
+                data={"message_id": message_id},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get("error", "Failed to archive message"),
+        )
+
+    def _imap_mark_read(
+        self, params: dict, context: ActionContext, read: bool = True
+    ) -> ActionResult:
+        """Mark an email as read or unread via IMAP."""
+        message_id = params.get("message_id")
+
+        if not message_id:
+            message_id = self._lookup_imap_message(params, context)
+            if not message_id:
+                return ActionResult(
+                    success=False,
+                    message="",
+                    error="Could not find message - provide message_id or subject_hint",
+                )
+
+        folder, uid = self._parse_imap_message_id(message_id)
+
+        if read:
+            result = self._imap_source.mark_read(folder, uid)
+        else:
+            result = self._imap_source.mark_unread(folder, uid)
+
+        if result.get("success"):
+            return ActionResult(
+                success=True,
+                message=f"Message marked as {'read' if read else 'unread'}",
+                data={"message_id": message_id},
+            )
+        return ActionResult(
+            success=False,
+            message="",
+            error=result.get(
+                "error", f"Failed to mark as {'read' if read else 'unread'}"
+            ),
+        )
+
+    def _parse_imap_message_id(self, message_id: str) -> tuple[str, str]:
+        """Parse IMAP message ID format (folder/uid) into folder and uid."""
+        if "/" in message_id:
+            parts = message_id.rsplit("/", 1)
+            return parts[0], parts[1]
+        # Default to INBOX if no folder specified
+        return "INBOX", message_id
+
+    def _lookup_imap_message(
+        self, params: dict, context: ActionContext
+    ) -> Optional[str]:
+        """Look up IMAP message by subject hint."""
+        subject_hint = params.get("subject_hint") or params.get("subject", "")
+
+        if not subject_hint:
+            return None
+
+        # Search IMAP for the message
+        search_result = self._imap_source.fetch(
+            {
+                "action": "search",
+                "query": f'SUBJECT "{subject_hint}"',
+                "folder": "INBOX",
+                "max_results": 1,
+            }
+        )
+
+        if search_result.success and search_result.data:
+            emails = search_result.data
+            if emails and len(emails) > 0:
+                # Return folder/uid format
+                email = emails[0]
+                folder = email.get("folder", "INBOX")
+                uid = email.get("uid")
+                if uid:
+                    logger.info(f"IMAP search found message: {folder}/{uid}")
+                    return f"{folder}/{uid}"
+
+        logger.warning(f"IMAP search returned no results for: {subject_hint}")
+        return None
 
     # -------------------------------------------------------------------------
     # Outlook Implementation

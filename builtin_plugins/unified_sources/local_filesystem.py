@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Optional
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.unified_source import (
@@ -45,6 +45,7 @@ class LocalFilesystemUnifiedSource(PluginUnifiedSource):
     description = "Index files from local directories with full document lookup"
     category = "storage"
     icon = "📁"
+    content_category = ContentCategory.FILES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["local"]

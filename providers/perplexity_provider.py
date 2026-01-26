@@ -30,6 +30,8 @@ class PerplexityProvider(OpenAICompatibleProvider):
     """
 
     name = "perplexity"
+    display_name = "Perplexity"
+    icon = "🟣"  # Perplexity purple
     base_url = "https://api.perplexity.ai"
     api_key_env = "PERPLEXITY_API_KEY"
     has_custom_cost_calculation = (

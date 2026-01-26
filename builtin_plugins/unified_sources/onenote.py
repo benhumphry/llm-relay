@@ -23,7 +23,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.oauth import MicrosoftOAuthMixin
@@ -52,6 +52,7 @@ class OneNoteUnifiedSource(MicrosoftOAuthMixin, PluginUnifiedSource):
     description = "OneNote notebooks with historical search (RAG) and real-time queries"
     category = "microsoft"
     icon = "📓"
+    content_category = ContentCategory.FILES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["mcp:onenote"]

@@ -805,30 +805,10 @@ block content %}
                         @change="onSourceTypeChange()"
                         class="select select-bordered"
                     >
-                        <option value="local">Local Filesystem</option>
-                        <optgroup label="Google">
+                        <optgroup label="Files & Documents">
+                            <option value="local">Local Filesystem</option>
                             <option value="mcp:gdrive">Google Drive</option>
-                            <option value="mcp:gmail">Gmail</option>
-                            <option value="mcp:gcalendar">
-                                Google Calendar
-                            </option>
-                            <option value="mcp:gtasks">Google Tasks</option>
-                            <option value="mcp:gcontacts">
-                                Google Contacts
-                            </option>
-                            <!-- Google Keep disabled - requires domain-wide delegation, not standard OAuth
-                            <option value="mcp:gkeep">
-                                Google Keep (Workspace)
-                            </option>
-                            -->
-                        </optgroup>
-                        <optgroup label="Microsoft">
                             <option value="mcp:onedrive">OneDrive</option>
-                            <option value="mcp:outlook">Outlook Mail</option>
-                            <option value="mcp:onenote">OneNote</option>
-                            <option value="mcp:teams">Teams</option>
-                        </optgroup>
-                        <optgroup label="Document Management">
                             <option
                                 value="paperless"
                                 x-show="documentSources.paperless?.configured"
@@ -847,31 +827,51 @@ block content %}
                             >
                                 Nextcloud
                             </option>
-                        </optgroup>
-                        <optgroup label="Web">
-                            <option value="website">Website (crawled)</option>
-                            <option value="websearch">
-                                Web Search (scheduled)
-                            </option>
-                        </optgroup>
-                        <optgroup label="Other Integrations">
+                            <option value="mcp:onenote">OneNote</option>
                             <option
                                 value="mcp:github"
                                 x-show="documentSources.github?.configured"
                             >
                                 GitHub
                             </option>
+                        </optgroup>
+                        <optgroup label="Email">
+                            <option value="mcp:gmail">Gmail</option>
+                            <option value="mcp:outlook">Outlook Mail</option>
+                            <option value="imap">IMAP Email</option>
+                        </optgroup>
+                        <optgroup label="Calendar">
+                            <option value="mcp:gcalendar">
+                                Google Calendar
+                            </option>
+                        </optgroup>
+                        <optgroup label="Tasks">
+                            <option value="mcp:gtasks">Google Tasks</option>
+                            <option
+                                value="todoist"
+                                x-show="documentSources.todoist?.configured"
+                            >
+                                Todoist
+                            </option>
+                        </optgroup>
+                        <optgroup label="Contacts">
+                            <option value="mcp:gcontacts">
+                                Google Contacts
+                            </option>
+                        </optgroup>
+                        <optgroup label="Messages">
                             <option
                                 value="slack"
                                 x-show="documentSources.slack?.configured"
                             >
                                 Slack
                             </option>
-                            <option
-                                value="todoist"
-                                x-show="documentSources.todoist?.configured"
-                            >
-                                Todoist
+                            <option value="mcp:teams">Teams</option>
+                        </optgroup>
+                        <optgroup label="Web">
+                            <option value="website">Website (crawled)</option>
+                            <option value="websearch">
+                                Web Search (scheduled)
                             </option>
                         </optgroup>
                     </select>
@@ -1949,6 +1949,214 @@ block content %}
                                 >Todoist Settings &gt; Integrations &gt;
                                 Developer</a
                             >.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IMAP Email Configuration -->
+                <div
+                    class="mt-4 space-y-4"
+                    x-show="form.source_type === 'imap'"
+                >
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">IMAP Host</span>
+                            </label>
+                            <input
+                                type="text"
+                                x-model="form.imap_host"
+                                class="input input-bordered"
+                                placeholder="imap.example.com"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Leave empty to use IMAP_HOST env var</span
+                                >
+                            </label>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">IMAP Port</span>
+                            </label>
+                            <input
+                                type="number"
+                                x-model="form.imap_port"
+                                class="input input-bordered"
+                                placeholder="993"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >993 for SSL, 143 for STARTTLS</span
+                                >
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">Username/Email</span>
+                            </label>
+                            <input
+                                type="text"
+                                x-model="form.imap_username"
+                                class="input input-bordered"
+                                placeholder="user@example.com"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Leave empty to use IMAP_USERNAME env
+                                    var</span
+                                >
+                            </label>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text"
+                                    >Password/App Password</span
+                                >
+                            </label>
+                            <input
+                                type="password"
+                                x-model="form.imap_password"
+                                class="input input-bordered"
+                                placeholder="Leave empty to use env var"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Leave empty to use IMAP_PASSWORD env
+                                    var</span
+                                >
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="form.imap_use_ssl"
+                                class="checkbox checkbox-sm"
+                            />
+                            <span class="label-text">Use SSL/TLS</span>
+                        </label>
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Enable for port 993, disable for STARTTLS on
+                                port 143</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label cursor-pointer justify-start gap-3">
+                            <input
+                                type="checkbox"
+                                x-model="form.imap_allow_insecure"
+                                class="checkbox checkbox-sm"
+                            />
+                            <span class="label-text">Allow Insecure Connection</span>
+                        </label>
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Skip SSL certificate verification (for self-signed certs or ProtonMail Bridge)</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Folders to Index</span>
+                        </label>
+                        <input
+                            type="text"
+                            x-model="form.imap_folders"
+                            class="input input-bordered"
+                            placeholder="INBOX,Sent,Archive"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >Comma-separated folder names</span
+                            >
+                        </label>
+                    </div>
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">Days to Index</span>
+                        </label>
+                        <input
+                            type="number"
+                            x-model="form.imap_index_days"
+                            class="input input-bordered"
+                            placeholder="90"
+                            min="1"
+                            max="365"
+                        />
+                        <label class="label">
+                            <span class="label-text-alt"
+                                >How many days of email history to index (max
+                                365)</span
+                            >
+                        </label>
+                    </div>
+                    <div class="divider text-sm">
+                        SMTP Settings (for sending)
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">SMTP Host</span>
+                            </label>
+                            <input
+                                type="text"
+                                x-model="form.smtp_host"
+                                class="input input-bordered"
+                                placeholder="smtp.example.com"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >Leave empty to use SMTP_HOST env var</span
+                                >
+                            </label>
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">SMTP Port</span>
+                            </label>
+                            <input
+                                type="number"
+                                x-model="form.smtp_port"
+                                class="input input-bordered"
+                                placeholder="587"
+                            />
+                            <label class="label">
+                                <span class="label-text-alt"
+                                    >587 for STARTTLS, 465 for SSL</span
+                                >
+                            </label>
+                        </div>
+                    </div>
+                    <div class="alert alert-info">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            class="stroke-current shrink-0 h-6 w-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
+                        </svg>
+                        <div class="text-sm">
+                            Works with any IMAP-compatible email provider
+                            (Gmail, Outlook, Fastmail, self-hosted, etc.). For
+                            Gmail/Outlook with 2FA, use an
+                            <a
+                                href="https://support.google.com/accounts/answer/185833"
+                                target="_blank"
+                                class="link"
+                                >app password</a
+                            >. SMTP is only required if you want to send emails.
                         </div>
                     </div>
                 </div>
@@ -3720,7 +3928,7 @@ block content %}
             expandedRows: [],
 
             // Content category mapping for source types
-            // Matches LEGACY_SOURCE_TYPE_CATEGORIES in plugin_base/common.py
+            // Content categories - plugins define their own content_category
             contentCategories: {
                 // Files (documents, notes, etc.)
                 local: "files",
@@ -4001,6 +4209,16 @@ block content %}
                 todoist_project_name: "",
                 todoist_filter: "",
                 todoist_include_completed: false,
+                imap_host: "",
+                imap_port: 993,
+                imap_username: "",
+                imap_password: "",
+                imap_use_ssl: true,
+                imap_allow_insecure: false,
+                imap_folders: "INBOX",
+                imap_index_days: 90,
+                smtp_host: "",
+                smtp_port: 587,
                 websearch_query: "",
                 websearch_max_results: 10,
                 websearch_pages_to_scrape: 5,
@@ -5453,6 +5671,16 @@ block content %}
                     todoist_project_name: "",
                     todoist_filter: "",
                     todoist_include_completed: false,
+                    imap_host: "",
+                    imap_port: 993,
+                    imap_username: "",
+                    imap_password: "",
+                    imap_use_ssl: true,
+                imap_allow_insecure: false,
+                    imap_folders: "INBOX",
+                    imap_index_days: 90,
+                    smtp_host: "",
+                    smtp_port: 587,
                     websearch_query: "",
                     websearch_max_results: 10,
                     websearch_pages_to_scrape: 5,
@@ -5570,6 +5798,16 @@ block content %}
                     todoist_filter: store.todoist_filter || "",
                     todoist_include_completed:
                         store.todoist_include_completed || false,
+                    imap_host: store.imap_host || "",
+                    imap_port: store.imap_port || 993,
+                    imap_username: store.imap_username || "",
+                    imap_password: store.imap_password || "",
+                    imap_use_ssl: store.imap_use_ssl !== false,
+                    imap_allow_insecure: store.imap_allow_insecure || false,
+                    imap_folders: store.imap_folders || "INBOX",
+                    imap_index_days: store.imap_index_days || 90,
+                    smtp_host: store.smtp_host || "",
+                    smtp_port: store.smtp_port || 587,
                     mcp_name: store.mcp_server_config?.name || "",
                     mcp_transport:
                         store.mcp_server_config?.transport || "stdio",
@@ -5861,6 +6099,14 @@ block content %}
                         body.todoist_filter = this.form.todoist_filter || null;
                         body.todoist_include_completed =
                             this.form.todoist_include_completed || false;
+                    } else if (this.form.source_type === "imap") {
+                        body.source_type = "imap";
+                        body.imap_host = this.form.imap_host;
+                        body.imap_port = parseInt(this.form.imap_port) || 993;
+                        body.imap_username = this.form.imap_username;
+                        body.imap_password = this.form.imap_password;
+                        body.imap_folders = this.form.imap_folders || "INBOX";
+                        body.imap_allow_insecure = this.form.imap_allow_insecure || false;
                     } else if (
                         [
                             "mcp:gdrive",

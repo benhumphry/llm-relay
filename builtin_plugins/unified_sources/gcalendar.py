@@ -25,7 +25,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.oauth import OAuthMixin
@@ -54,6 +54,7 @@ class GCalendarUnifiedSource(OAuthMixin, PluginUnifiedSource):
     description = "Google Calendar with historical search (RAG) and real-time queries"
     category = "google"
     icon = "📅"
+    content_category = ContentCategory.CALENDARS
 
     # Document store types this unified source handles
     handles_doc_source_types = ["mcp:gcalendar"]
@@ -71,6 +72,31 @@ class GCalendarUnifiedSource(OAuthMixin, PluginUnifiedSource):
     default_days_forward = 30
 
     _abstract = False
+
+    @classmethod
+    def get_account_info(cls, store) -> dict | None:
+        """Extract account info for action handlers."""
+        if not store.google_account_id:
+            return None
+
+        # Get email from OAuth token
+        try:
+            from db.oauth_tokens import get_oauth_token_info
+
+            token_info = get_oauth_token_info(store.google_account_id)
+            email = token_info.get("account_email", "") if token_info else ""
+        except Exception:
+            email = ""
+
+        return {
+            "provider": "google",
+            "email": email,
+            "name": store.display_name or store.name,
+            "store_id": store.id,
+            "oauth_account_id": store.google_account_id,
+            # Calendar-specific fields
+            "calendar_id": store.gcalendar_calendar_id or "primary",
+        }
 
     @classmethod
     def get_designator_hint(cls) -> str:

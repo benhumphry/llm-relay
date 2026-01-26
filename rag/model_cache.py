@@ -87,7 +87,7 @@ class GPUModelCache:
         self._cache: dict[str, CachedModel] = {}
         self._cache_lock = threading.Lock()
         self._cleanup_thread: Optional[threading.Thread] = None
-        self._shutdown = False
+        self._shutdown_event = threading.Event()
         self._initialized = True
 
         # Start cleanup thread
@@ -101,7 +101,7 @@ class GPUModelCache:
         if self._cleanup_thread is not None and self._cleanup_thread.is_alive():
             return
 
-        self._shutdown = False
+        self._shutdown_event.clear()
         self._cleanup_thread = threading.Thread(
             target=self._cleanup_loop,
             daemon=True,
@@ -112,17 +112,15 @@ class GPUModelCache:
 
     def _cleanup_loop(self):
         """Background loop that checks for and unloads expired models."""
-        while not self._shutdown:
+        while not self._shutdown_event.is_set():
             try:
                 self._cleanup_expired()
             except Exception as e:
                 logger.error(f"Error in cleanup loop: {e}")
 
-            # Sleep in small intervals to allow quick shutdown
-            for _ in range(CLEANUP_INTERVAL_SECONDS):
-                if self._shutdown:
-                    break
-                time.sleep(1)
+            # Wait for cleanup interval or until shutdown is signaled
+            # This is much more efficient than polling every second
+            self._shutdown_event.wait(timeout=CLEANUP_INTERVAL_SECONDS)
 
     def _cleanup_expired(self):
         """Check for and unload expired models."""
@@ -250,7 +248,7 @@ class GPUModelCache:
 
     def shutdown(self):
         """Shutdown the cache manager and cleanup thread."""
-        self._shutdown = True
+        self._shutdown_event.set()
         if self._cleanup_thread and self._cleanup_thread.is_alive():
             self._cleanup_thread.join(timeout=5)
         self.clear()

@@ -33,6 +33,8 @@ class GeminiProvider(OpenAICompatibleProvider):
     """
 
     name = "gemini"
+    display_name = "Google Gemini"
+    icon = "🔵"  # Google blue
     base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
     api_key_env = "GOOGLE_API_KEY"
     has_custom_cost_calculation = (

@@ -1,0 +1,153 @@
+# Date keyword mappings
+# Keys are canonical values, values are lists of synonyms
+# Used by live sources to parse natural language date references
+
+name: dates
+description: Date and time keyword synonyms
+
+# Today
+today:
+    - today
+    - now
+    - tonight
+    - this evening
+
+# Tomorrow
+tomorrow:
+    - tomorrow
+    - next day
+    - the next day
+
+# Yesterday
+yesterday:
+    - yesterday
+    - the day before
+
+# Weekend
+weekend:
+    - weekend
+    - this weekend
+    - the weekend
+    - sat and sun
+    - saturday and sunday
+
+# Individual days
+monday:
+    - monday
+    - this monday
+    - mon
+
+tuesday:
+    - tuesday
+    - this tuesday
+    - tue
+    - tues
+
+wednesday:
+    - wednesday
+    - this wednesday
+    - wed
+
+thursday:
+    - thursday
+    - this thursday
+    - thu
+    - thur
+    - thurs
+
+friday:
+    - friday
+    - this friday
+    - fri
+
+saturday:
+    - saturday
+    - this saturday
+    - sat
+
+sunday:
+    - sunday
+    - this sunday
+    - sun
+
+# Next week variants
+next_week:
+    - next week
+    - following week
+    - the following week
+
+next_monday:
+    - next monday
+
+next_tuesday:
+    - next tuesday
+
+next_wednesday:
+    - next wednesday
+
+next_thursday:
+    - next thursday
+
+next_friday:
+    - next friday
+
+next_saturday:
+    - next saturday
+
+next_sunday:
+    - next sunday
+
+# Last week
+last_week:
+    - last week
+    - previous week
+    - the previous week
+
+# Month references
+this_month:
+    - this month
+
+next_month:
+    - next month
+
+last_month:
+    - last month
+
+# Pattern-based matches (regex)
+# handler name maps to a function in the calling code
+patterns:
+    # "in X days" -> relative_days handler
+    - pattern: "in (\\d+) days?"
+      handler: relative_days
+
+    # "X days ago" -> days_ago handler
+    - pattern: "(\\d+) days? ago"
+      handler: days_ago
+
+    # ISO date format
+    - pattern: "(\\d{4}-\\d{2}-\\d{2})"
+      handler: iso_date
+
+    # "next monday", "next friday" etc (already covered above but as fallback)
+    - pattern: "next (monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+      handler: next_weekday
+
+    # "last monday", "last friday" etc
+    - pattern: "last (monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+      handler: last_weekday
+
+    # "this monday", "this friday" etc (already covered above but as fallback)
+    - pattern: "this (monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+      handler: this_weekday
+
+    # Month day format: "January 15", "Jan 15"
+    - pattern: "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+(\\d{1,2})(?:st|nd|rd|th)?"
+      handler: month_day
+
+    # "in X weeks"
+    - pattern: "in (\\d+) weeks?"
+      handler: relative_weeks
+
+    # "X weeks ago"
+    - pattern: "(\\d+) weeks? ago"
+      handler: weeks_ago

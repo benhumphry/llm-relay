@@ -100,6 +100,9 @@ def _create_provider(provider_name: str, config: dict) -> LLMProvider | None:
             models=models,
         )
         provider.enabled = is_enabled
+        # Set display_name from config if available
+        if config.get("display_name"):
+            provider.display_name = config["display_name"]
         return provider
 
     logger.error(f"Unknown provider type '{provider_type}' for '{provider_name}'")

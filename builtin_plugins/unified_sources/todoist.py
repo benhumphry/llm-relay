@@ -26,7 +26,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.unified_source import (
@@ -54,6 +54,7 @@ class TodoistUnifiedSource(PluginUnifiedSource):
     description = "Todoist with historical search (RAG) and real-time queries"
     category = "productivity"
     icon = "✅"
+    content_category = ContentCategory.TASKS
 
     # Document store types this unified source handles
     handles_doc_source_types = ["todoist"]
@@ -66,6 +67,29 @@ class TodoistUnifiedSource(PluginUnifiedSource):
     default_cache_ttl = 300  # 5 minutes for live results
 
     _abstract = False
+
+    @classmethod
+    def get_account_info(cls, store) -> dict | None:
+        """Extract account info for action handlers."""
+        # Todoist uses API key auth, not OAuth
+        # Check if API key is configured
+        api_token = os.environ.get("TODOIST_API_TOKEN") or os.environ.get(
+            "TODOIST_API_KEY", ""
+        )
+        if not api_token:
+            return None
+
+        return {
+            "provider": "todoist",
+            "email": "",  # Todoist doesn't expose email via API key
+            "name": store.display_name or store.name,
+            "store_id": store.id,
+            "oauth_account_id": None,  # No OAuth for Todoist (API key)
+            # Todoist-specific fields
+            "project_id": store.todoist_project_id
+            if hasattr(store, "todoist_project_id")
+            else None,
+        }
 
     @classmethod
     def get_designator_hint(cls) -> str:
@@ -104,10 +128,11 @@ class TodoistUnifiedSource(PluginUnifiedSource):
         return [
             FieldDefinition(
                 name="api_token",
-                label="API Token",
+                label="Todoist API Token",
                 field_type=FieldType.PASSWORD,
-                required=True,
-                help_text="From Todoist Settings > Integrations > Developer > API token",
+                required=False,
+                help_text="From Todoist Settings > Integrations > Developer (leave empty to use env var)",
+                env_var="TODOIST_API_KEY",
             ),
             FieldDefinition(
                 name="index_project_ids",

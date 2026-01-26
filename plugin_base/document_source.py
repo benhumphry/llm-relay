@@ -63,8 +63,8 @@ class DocumentContent:
     Content returned from read_document().
 
     For text documents, content is the raw text.
-    For binary documents (PDF, DOCX), content may be base64 or bytes,
-    and the indexer will process it through Docling.
+    For binary documents (PDF, DOCX), content should be bytes,
+    and the indexer will process it through Docling/pypdf.
     """
 
     content: str | bytes
@@ -74,13 +74,48 @@ class DocumentContent:
     # For binary content that needs vision processing
     needs_vision: bool = False
 
-    # Compatibility property for indexer (expects legacy field name)
+    def _is_text_mime_type(self) -> bool:
+        """Check if mime type indicates text content."""
+        if not self.mime_type:
+            return False
+        text_types = [
+            "text/",
+            "application/json",
+            "application/xml",
+            "application/javascript",
+            "application/x-yaml",
+        ]
+        return any(self.mime_type.startswith(t) or self.mime_type.endswith(t) 
+                   for t in text_types)
+
     @property
-    def text(self) -> str:
-        """Alias for content (legacy compatibility)."""
+    def text(self) -> str | None:
+        """
+        Get text content, or None if content is binary.
+        
+        Returns string content directly, or decodes bytes only for text mime types.
+        For binary files (PDF, DOCX, images), returns None so indexer uses binary path.
+        """
+        if isinstance(self.content, str):
+            return self.content
+        # For bytes, only decode if it's a text mime type
+        if isinstance(self.content, bytes) and self._is_text_mime_type():
+            try:
+                return self.content.decode("utf-8", errors="replace")
+            except Exception:
+                return None
+        return None
+
+    @property
+    def binary(self) -> bytes | None:
+        """
+        Get binary content for PDF/Office/image processing.
+        
+        Returns bytes directly, or None if content is text string.
+        """
         if isinstance(self.content, bytes):
-            return self.content.decode("utf-8", errors="replace")
-        return self.content
+            return self.content
+        return None
 
 
 class PluginDocumentSource(ABC):
@@ -114,7 +149,6 @@ class PluginDocumentSource(ABC):
     supports_incremental: bool = True  # Can detect changed documents
 
     # Content category for admin UI filtering and action handler grouping
-    # Defaults to lookup from LEGACY_SOURCE_TYPE_CATEGORIES if not set
     content_category: ContentCategory | None = None
 
     # Mark as abstract to prevent direct registration

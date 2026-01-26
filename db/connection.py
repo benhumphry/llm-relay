@@ -1244,6 +1244,78 @@ def _run_migrations(engine) -> None:
                 )
             )
 
+        # v2.1: IMAP/SMTP configuration
+        if "imap_host" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_host",
+                    "ALTER TABLE document_stores ADD COLUMN imap_host VARCHAR(255)",
+                )
+            )
+        if "imap_port" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_port",
+                    "ALTER TABLE document_stores ADD COLUMN imap_port INTEGER DEFAULT 993",
+                )
+            )
+        if "imap_username" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_username",
+                    "ALTER TABLE document_stores ADD COLUMN imap_username VARCHAR(255)",
+                )
+            )
+        if "imap_password" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_password",
+                    "ALTER TABLE document_stores ADD COLUMN imap_password VARCHAR(255)",
+                )
+            )
+        if "imap_use_ssl" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_use_ssl",
+                    "ALTER TABLE document_stores ADD COLUMN imap_use_ssl BOOLEAN DEFAULT TRUE",
+                )
+            )
+        if "imap_folders" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_folders",
+                    "ALTER TABLE document_stores ADD COLUMN imap_folders VARCHAR(500)",
+                )
+            )
+        if "imap_index_days" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_index_days",
+                    "ALTER TABLE document_stores ADD COLUMN imap_index_days INTEGER DEFAULT 90",
+                )
+            )
+        if "smtp_host" not in existing_columns:
+            migrations.append(
+                (
+                    "smtp_host",
+                    "ALTER TABLE document_stores ADD COLUMN smtp_host VARCHAR(255)",
+                )
+            )
+        if "imap_allow_insecure" not in existing_columns:
+            migrations.append(
+                (
+                    "imap_allow_insecure",
+                    "ALTER TABLE document_stores ADD COLUMN imap_allow_insecure BOOLEAN DEFAULT FALSE",
+                )
+            )
+        if "smtp_port" not in existing_columns:
+            migrations.append(
+                (
+                    "smtp_port",
+                    "ALTER TABLE document_stores ADD COLUMN smtp_port INTEGER DEFAULT 587",
+                )
+            )
+
         if migrations:
             logger.info(
                 f"Running {len(migrations)} migration(s) for document_stores table"
@@ -1962,6 +2034,77 @@ def _run_migrations(engine) -> None:
                 conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
             conn.commit()
         logger.info("Legacy tables dropped successfully")
+
+    # Migration: Add config_json column to document_stores (v2.1 - Plugin Cleanup)
+    # This column stores all source-specific configuration as JSON, replacing 50+ legacy columns
+    if "document_stores" in inspector.get_table_names():
+        ds_columns = {col["name"] for col in inspector.get_columns("document_stores")}
+        if "config_json" not in ds_columns:
+            logger.info(
+                "Adding config_json column to document_stores table (v2.1 - Plugin Cleanup)"
+            )
+            with engine.connect() as conn:
+                conn.execute(
+                    text("ALTER TABLE document_stores ADD COLUMN config_json TEXT")
+                )
+                conn.commit()
+
+            # Populate config_json from legacy columns for existing rows
+            logger.info("Populating config_json from legacy columns...")
+            _migrate_document_store_configs(engine)
+
+
+def _migrate_document_store_configs(engine) -> None:
+    """
+    Migrate existing document stores to use config_json.
+
+    Reads legacy columns and populates config_json for each existing row.
+    This is a one-time migration that runs when config_json column is added.
+    """
+    import json
+
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        # Get all document stores
+        result = conn.execute(text("SELECT id FROM document_stores"))
+        store_ids = [row[0] for row in result]
+
+        if not store_ids:
+            logger.info("No document stores to migrate")
+            return
+
+        logger.info(f"Migrating {len(store_ids)} document store(s) to config_json...")
+
+        # For each store, use the model's _build_config_from_legacy_columns method
+        # We need to import and use SQLAlchemy session for this
+        from db.models import DocumentStore
+
+        Session = sessionmaker(bind=engine)
+        session = Session()
+
+        try:
+            for store_id in store_ids:
+                store = session.query(DocumentStore).filter_by(id=store_id).first()
+                if store:
+                    # Build config from legacy columns
+                    config = store._build_config_from_legacy_columns()
+                    if config:
+                        store.config_json = json.dumps(config)
+                        logger.debug(
+                            f"Migrated store '{store.name}' (ID: {store_id}) with {len(config)} config keys"
+                        )
+
+            session.commit()
+            logger.info(
+                f"Successfully migrated {len(store_ids)} document store(s) to config_json"
+            )
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to migrate document store configs: {e}")
+            raise
+        finally:
+            session.close()
 
 
 def init_db(drop_all: bool = False) -> None:

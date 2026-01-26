@@ -24,6 +24,9 @@ class UsageTracker:
     to avoid impacting request latency.
     """
 
+    # Queue timeout in seconds - higher values reduce CPU usage when idle
+    QUEUE_TIMEOUT_SECONDS = 5
+
     def __init__(self):
         self._queue: queue.Queue = queue.Queue()
         self._worker_thread: Optional[threading.Thread] = None
@@ -170,7 +173,7 @@ class UsageTracker:
         """Background worker that processes the log queue."""
         while self._running:
             try:
-                entry = self._queue.get(timeout=1)
+                entry = self._queue.get(timeout=self.QUEUE_TIMEOUT_SECONDS)
                 if entry is None:  # Poison pill
                     break
 

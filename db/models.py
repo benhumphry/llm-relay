@@ -980,6 +980,12 @@ class DocumentStore(Base):
         Integer, ForeignKey("plugin_configs.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Unified configuration JSON (v2.1 - Plugin Cleanup)
+    # Stores all source-specific configuration as JSON, replacing 50+ legacy columns.
+    # Legacy columns are kept for backwards compatibility during migration period.
+    # When config_json is set, it takes precedence over legacy columns.
+    config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Local source (Docker-mapped folder)
     source_path: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
@@ -1182,6 +1188,34 @@ class DocumentStore(Base):
         String(50), nullable=True
     )  # Search category: news, general, etc.
 
+    # IMAP/SMTP configuration (for source_type="imap")
+    imap_host: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # IMAP server hostname
+    imap_port: Mapped[int] = mapped_column(
+        Integer, default=993
+    )  # IMAP port (993 for SSL, 143 for STARTTLS)
+    imap_username: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Email/username for authentication
+    imap_password: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # Password (consider using env var instead)
+    imap_use_ssl: Mapped[bool] = mapped_column(Boolean, default=True)  # Use SSL/TLS
+    imap_allow_insecure: Mapped[bool] = mapped_column(Boolean, default=False)  # Skip cert verification
+    imap_folders: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # Comma-separated folders to index (e.g., "INBOX,Sent")
+    imap_index_days: Mapped[int] = mapped_column(
+        Integer, default=90
+    )  # Days of email history to index
+    smtp_host: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )  # SMTP server for sending
+    smtp_port: Mapped[int] = mapped_column(
+        Integer, default=587
+    )  # SMTP port (587 for STARTTLS, 465 for SSL)
+
     # Embedding configuration
     embedding_provider: Mapped[str] = mapped_column(String(100), default="local")
     embedding_model: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
@@ -1268,6 +1302,176 @@ class DocumentStore(Base):
         """Set themes from a list."""
         self.themes_json = json.dumps(value) if value else None
 
+    @property
+    def config(self) -> dict:
+        """
+        Get unified configuration dict.
+
+        If config_json is set, returns that. Otherwise, builds config from
+        legacy columns for backwards compatibility.
+        """
+        if self.config_json:
+            try:
+                return json.loads(self.config_json)
+            except json.JSONDecodeError:
+                pass
+
+        # Build from legacy columns
+        return self._build_config_from_legacy_columns()
+
+    @config.setter
+    def config(self, value: dict | None):
+        """Set unified configuration from a dict."""
+        self.config_json = json.dumps(value) if value else None
+
+    def _build_config_from_legacy_columns(self) -> dict:
+        """Build config dict from legacy source-specific columns."""
+        config = {}
+
+        # Local source
+        if self.source_path:
+            config["source_path"] = self.source_path
+
+        # MCP config
+        if self.mcp_server_config_json:
+            config["mcp_server_config"] = self.mcp_server_config
+
+        # Google OAuth
+        if self.google_account_id:
+            config["google_account_id"] = self.google_account_id
+        if self.gdrive_folder_id:
+            config["gdrive_folder_id"] = self.gdrive_folder_id
+            config["gdrive_folder_name"] = self.gdrive_folder_name
+        if self.gmail_label_id:
+            config["gmail_label_id"] = self.gmail_label_id
+            config["gmail_label_name"] = self.gmail_label_name
+        if self.gcalendar_calendar_id:
+            config["gcalendar_calendar_id"] = self.gcalendar_calendar_id
+            config["gcalendar_calendar_name"] = self.gcalendar_calendar_name
+        if self.gtasks_tasklist_id:
+            config["gtasks_tasklist_id"] = self.gtasks_tasklist_id
+            config["gtasks_tasklist_name"] = self.gtasks_tasklist_name
+        if self.gcontacts_group_id:
+            config["gcontacts_group_id"] = self.gcontacts_group_id
+            config["gcontacts_group_name"] = self.gcontacts_group_name
+
+        # Microsoft OAuth
+        if self.microsoft_account_id:
+            config["microsoft_account_id"] = self.microsoft_account_id
+        if self.onedrive_folder_id:
+            config["onedrive_folder_id"] = self.onedrive_folder_id
+            config["onedrive_folder_name"] = self.onedrive_folder_name
+        if self.outlook_folder_id:
+            config["outlook_folder_id"] = self.outlook_folder_id
+            config["outlook_folder_name"] = self.outlook_folder_name
+        if self.outlook_days_back and self.outlook_days_back != 90:
+            config["outlook_days_back"] = self.outlook_days_back
+        if self.onenote_notebook_id:
+            config["onenote_notebook_id"] = self.onenote_notebook_id
+            config["onenote_notebook_name"] = self.onenote_notebook_name
+        if self.teams_team_id:
+            config["teams_team_id"] = self.teams_team_id
+            config["teams_team_name"] = self.teams_team_name
+        if self.teams_channel_id:
+            config["teams_channel_id"] = self.teams_channel_id
+            config["teams_channel_name"] = self.teams_channel_name
+        if self.teams_days_back and self.teams_days_back != 90:
+            config["teams_days_back"] = self.teams_days_back
+
+        # Paperless
+        if self.paperless_url:
+            config["paperless_url"] = self.paperless_url
+        if self.paperless_token:
+            config["paperless_token"] = self.paperless_token
+        if self.paperless_tag_id:
+            config["paperless_tag_id"] = self.paperless_tag_id
+            config["paperless_tag_name"] = self.paperless_tag_name
+
+        # GitHub
+        if self.github_repo:
+            config["github_repo"] = self.github_repo
+        if self.github_branch:
+            config["github_branch"] = self.github_branch
+        if self.github_path:
+            config["github_path"] = self.github_path
+
+        # Notion
+        if self.notion_database_id:
+            config["notion_database_id"] = self.notion_database_id
+        if self.notion_page_id:
+            config["notion_page_id"] = self.notion_page_id
+        if self.notion_is_task_database:
+            config["notion_is_task_database"] = self.notion_is_task_database
+
+        # Nextcloud
+        if self.nextcloud_folder:
+            config["nextcloud_folder"] = self.nextcloud_folder
+
+        # Website
+        if self.website_url:
+            config["website_url"] = self.website_url
+        if self.website_crawl_depth and self.website_crawl_depth != 1:
+            config["website_crawl_depth"] = self.website_crawl_depth
+        if self.website_max_pages and self.website_max_pages != 50:
+            config["website_max_pages"] = self.website_max_pages
+        if self.website_include_pattern:
+            config["website_include_pattern"] = self.website_include_pattern
+        if self.website_exclude_pattern:
+            config["website_exclude_pattern"] = self.website_exclude_pattern
+        if self.website_crawler_override:
+            config["website_crawler_override"] = self.website_crawler_override
+
+        # Slack
+        if self.slack_channel_id:
+            config["slack_channel_id"] = self.slack_channel_id
+        if self.slack_channel_types and self.slack_channel_types != "public_channel":
+            config["slack_channel_types"] = self.slack_channel_types
+        if self.slack_days_back and self.slack_days_back != 90:
+            config["slack_days_back"] = self.slack_days_back
+
+        # Todoist
+        if self.todoist_project_id:
+            config["todoist_project_id"] = self.todoist_project_id
+            config["todoist_project_name"] = self.todoist_project_name
+        if self.todoist_filter:
+            config["todoist_filter"] = self.todoist_filter
+        if self.todoist_include_completed:
+            config["todoist_include_completed"] = self.todoist_include_completed
+
+        # WebSearch
+        if self.websearch_query:
+            config["websearch_query"] = self.websearch_query
+        if self.websearch_max_results and self.websearch_max_results != 10:
+            config["websearch_max_results"] = self.websearch_max_results
+        if self.websearch_pages_to_scrape and self.websearch_pages_to_scrape != 5:
+            config["websearch_pages_to_scrape"] = self.websearch_pages_to_scrape
+        if self.websearch_time_range:
+            config["websearch_time_range"] = self.websearch_time_range
+        if self.websearch_category:
+            config["websearch_category"] = self.websearch_category
+
+        # IMAP/SMTP
+        if self.imap_host:
+            config["imap_host"] = self.imap_host
+        if self.imap_port and self.imap_port != 993:
+            config["imap_port"] = self.imap_port
+        if self.imap_username:
+            config["imap_username"] = self.imap_username
+        if self.imap_password:
+            config["imap_password"] = self.imap_password
+        if not self.imap_use_ssl:
+            config["imap_use_ssl"] = self.imap_use_ssl
+        if self.imap_folders:
+            config["imap_folders"] = self.imap_folders
+        if self.imap_index_days and self.imap_index_days != 90:
+            config["imap_index_days"] = self.imap_index_days
+        if self.smtp_host:
+            config["smtp_host"] = self.smtp_host
+        if self.smtp_port and self.smtp_port != 587:
+            config["smtp_port"] = self.smtp_port
+
+        return config
+
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
         return {
@@ -1276,6 +1480,7 @@ class DocumentStore(Base):
             "display_name": self.display_name,
             "source_type": self.source_type,
             "plugin_config_id": self.plugin_config_id,
+            "config": self.config,  # Unified config dict
             "source_path": self.source_path,
             "mcp_server_config": self.mcp_server_config,
             "google_account_id": self.google_account_id,
@@ -1326,6 +1531,15 @@ class DocumentStore(Base):
             "slack_channel_id": self.slack_channel_id,
             "slack_channel_types": self.slack_channel_types,
             "slack_days_back": self.slack_days_back,
+            # IMAP fields
+            "imap_host": self.imap_host,
+            "imap_port": self.imap_port,
+            "imap_username": self.imap_username,
+            "imap_password": self.imap_password,
+            "imap_use_ssl": self.imap_use_ssl,
+            "imap_allow_insecure": self.imap_allow_insecure,
+            "imap_folders": self.imap_folders,
+            "imap_index_days": self.imap_index_days,
             "websearch_query": self.websearch_query,
             "websearch_max_results": self.websearch_max_results,
             "websearch_pages_to_scrape": self.websearch_pages_to_scrape,

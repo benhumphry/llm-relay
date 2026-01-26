@@ -1,17 +1,13 @@
 """
-MCP (Model Context Protocol) integration for document sources.
+MCP (Model Context Protocol) client functionality.
 
-Provides client functionality to connect to MCP servers and retrieve
-resources for use in Smart RAG document indexing.
+Provides client functionality to connect to MCP servers.
+This module is retained for potential future use with generic MCP servers.
 """
 
 from .client import MCPClient, MCPServerConfig
-from .sources import DocumentSource, LocalDocumentSource, MCPDocumentSource
 
 __all__ = [
     "MCPClient",
     "MCPServerConfig",
-    "DocumentSource",
-    "LocalDocumentSource",
-    "MCPDocumentSource",
 ]

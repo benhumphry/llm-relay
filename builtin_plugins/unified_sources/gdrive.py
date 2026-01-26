@@ -25,7 +25,7 @@ from typing import Any, Iterator, Optional
 
 import httpx
 
-from plugin_base.common import FieldDefinition, FieldType
+from plugin_base.common import ContentCategory, FieldDefinition, FieldType
 from plugin_base.document_source import DocumentContent, DocumentInfo
 from plugin_base.live_source import LiveDataResult, ParamDefinition
 from plugin_base.oauth import OAuthMixin
@@ -54,6 +54,7 @@ class GDriveUnifiedSource(OAuthMixin, PluginUnifiedSource):
     description = "Google Drive with content search (RAG) and real-time file queries"
     category = "google"
     icon = "📁"
+    content_category = ContentCategory.FILES
 
     # Document store types this unified source handles
     handles_doc_source_types = ["mcp:gdrive"]

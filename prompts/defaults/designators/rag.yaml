@@ -1,0 +1,68 @@
+# RAG Designator Prompt
+# Selects document stores and allocates token budgets for retrieval
+
+name: rag
+description: Document store selector and token budget allocator
+
+system_prompt: |
+  You are a document retrieval expert. Allocate token budgets across document stores
+  based on relevance to the query.
+
+user_template: |
+  Allocate {{ total_budget | format_number }} tokens across document stores for this query.
+  {% if user_context %}
+
+  USER CONTEXT:
+  {{ user_context }}
+  {% endif %}
+
+  DOCUMENT STORES:
+  {% for store in stores %}
+  - store_{{ store.id }}: {{ store.name }}{% if store.markers %} [{{ store.markers | join(', ') }}]{% endif %}
+
+  {% if store.description %}  Description: {{ store.description }}
+  {% endif %}
+  {% if store.themes %}  Themes: {{ store.themes }}
+  {% endif %}
+  {% if store.sample %}  Sample: {{ store.sample | truncate(200) }}
+  {% endif %}
+  {% endfor %}
+
+  USER QUERY: {{ query }}
+
+  Respond with JSON only: {"store_ID": tokens, ...}
+
+  RULES:
+  - Only include stores relevant to the query
+  - Allocate 0 to irrelevant stores (or omit them)
+  - For "list my notes", "what notes do I have", etc.: allocate 0 to USER'S NOTES store (live query handles it)
+  - Stores marked "LIVE QUERY AVAILABLE" can enumerate their contents directly - prefer 0 allocation for listing queries
+  - Total should use most of {{ total_budget | format_number }} for semantic search queries
+
+response_format:
+  type: json
+  description: |
+    JSON object mapping store IDs to token allocations.
+    Example: {"store_1": 2000, "store_3": 1500}
+
+variables:
+  - name: total_budget
+    type: int
+    description: Total tokens available for RAG context
+  - name: user_context
+    type: string
+    optional: true
+    description: User memory context
+  - name: stores
+    type: list[dict]
+    description: |
+      Available document stores with:
+      - id: Store ID
+      - name: Store name
+      - description: Optional description
+      - themes: Optional themes/topics
+      - sample: Optional preview sample
+      - markers: Optional list of markers like "USER'S NOTES", "LIVE QUERY AVAILABLE"
+  - name: query
+    type: string
+    description: User's query
